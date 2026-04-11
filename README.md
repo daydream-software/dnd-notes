@@ -61,12 +61,21 @@ The first real note contract is intentionally small:
 ## API
 
 - `GET /health`
+- `GET /api/campaigns`
+- `POST /api/campaigns`
+- `GET /api/campaigns/:campaignId`
+- `PUT /api/campaigns/:campaignId`
+- `GET /api/campaigns/:campaignId/memberships`
 - `GET /api/overview`
 - `GET /api/notes`
 - `GET /api/notes/:noteId`
 - `POST /api/notes`
 - `PUT /api/notes/:noteId`
 - `DELETE /api/notes/:noteId`
+
+`GET /api/overview` and `GET /api/notes` accept an optional `campaignId` query
+parameter to scope the response to a specific campaign. `POST /api/notes` also
+accepts an optional `campaignId` in the payload.
 
 ## What works now
 

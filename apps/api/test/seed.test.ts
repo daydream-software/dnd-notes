@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { defaultCampaignId } from '../src/campaign.js'
 import { createNoteStore } from '../src/note-store.js'
 import {
   resetStarterNotes,
@@ -43,6 +44,11 @@ test('seed workflow populates an empty database with starter notes', async (t) =
     notes.map((note) => note.title),
     starterNotes.map((note) => note.title),
   )
+  assert.deepEqual(
+    notes.map((note) => note.campaignId),
+    Array(starterNotes.length).fill(defaultCampaignId),
+  )
+  assert.equal(noteStore.listCampaigns()[0]?.id, defaultCampaignId)
 })
 
 test('seed workflow skips existing data and reset replaces it with starter notes', async (t) => {

@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
+import { defaultCampaignId } from '../src/campaign.js'
 import { createNoteStore } from '../src/note-store.js'
 
 async function createTestApp() {
@@ -76,6 +77,80 @@ test('note CRUD endpoints support the main workflow', async (t) => {
   const finalListResponse = await request(app).get('/api/notes')
 
   assert.equal(finalListResponse.body.notes.length, 0)
+})
+
+test('campaign endpoints support creation, update, membership, and scoped notes', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const initialCampaignsResponse = await request(app).get('/api/campaigns')
+
+  assert.equal(initialCampaignsResponse.status, 200)
+  assert.equal(initialCampaignsResponse.body.campaigns.length, 1)
+  assert.equal(initialCampaignsResponse.body.campaigns[0].id, defaultCampaignId)
+
+  const createCampaignResponse = await request(app).post('/api/campaigns').send({
+    name: 'Emberfall Accord',
+    tagline: 'Track alliances, betrayals, and faction leverage across the city.',
+    system: 'Dungeons & Dragons 2024',
+    setting: 'Emberfall',
+    nextSession: '2026-05-01T19:30:00.000Z',
+  })
+
+  assert.equal(createCampaignResponse.status, 201)
+  assert.equal(createCampaignResponse.body.campaign.name, 'Emberfall Accord')
+
+  const campaignId = createCampaignResponse.body.campaign.id as string
+
+  const membershipsResponse = await request(app).get(
+    `/api/campaigns/${campaignId}/memberships`,
+  )
+
+  assert.equal(membershipsResponse.status, 200)
+  assert.equal(membershipsResponse.body.memberships.length, 1)
+  assert.equal(membershipsResponse.body.memberships[0].role, 'owner')
+
+  const createNoteResponse = await request(app).post('/api/notes').send({
+    campaignId,
+    title: 'Glass market informant',
+    body: 'The broker in the lower market wants proof before naming the buyer.',
+    tags: ['market', 'informant'],
+    status: 'active',
+    sessionName: 'Session 2',
+  })
+
+  assert.equal(createNoteResponse.status, 201)
+  assert.equal(createNoteResponse.body.note.campaignId, campaignId)
+
+  const scopedNotesResponse = await request(app)
+    .get('/api/notes')
+    .query({ campaignId })
+
+  assert.equal(scopedNotesResponse.status, 200)
+  assert.equal(scopedNotesResponse.body.notes.length, 1)
+  assert.equal(scopedNotesResponse.body.notes[0].title, 'Glass market informant')
+
+  const scopedOverviewResponse = await request(app)
+    .get('/api/overview')
+    .query({ campaignId })
+
+  assert.equal(scopedOverviewResponse.status, 200)
+  assert.equal(scopedOverviewResponse.body.campaign.id, campaignId)
+  assert.equal(scopedOverviewResponse.body.stats.totalNotes, 1)
+
+  const updateCampaignResponse = await request(app)
+    .put(`/api/campaigns/${campaignId}`)
+    .send({
+      name: 'Emberfall Accord Revised',
+      tagline: 'Track alliances, betrayals, and leverage inside Emberfall.',
+      system: 'Dungeons & Dragons 2024',
+      setting: 'Emberfall',
+      nextSession: null,
+    })
+
+  assert.equal(updateCampaignResponse.status, 200)
+  assert.equal(updateCampaignResponse.body.campaign.name, 'Emberfall Accord Revised')
+  assert.equal(updateCampaignResponse.body.campaign.nextSession, null)
 })
 
 test('invalid note payloads return explicit errors', async (t) => {
