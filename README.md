@@ -22,7 +22,7 @@ npm run dev
 ## Workspace layout
 
 - `apps/web` — React + Vite + Material UI dashboard shell
-- `apps/api` — Express API with starter campaign and note data
+- `apps/api` — Express + TypeScript API with starter campaign and note data
 
 ## Starter API
 

@@ -1,4 +1,6 @@
-export const overview = {
+import type { CampaignOverview } from './types.js'
+
+export const overview: CampaignOverview = {
   campaign: {
     name: 'Moonshae Ledger',
     tagline:
