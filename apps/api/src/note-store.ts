@@ -16,6 +16,8 @@ import {
 } from './campaign.js'
 import type {
   CampaignInput,
+  CampaignShareLink,
+  CampaignShareLinkInput,
   CampaignMembership,
   CampaignSummary,
   Note,
@@ -69,6 +71,19 @@ interface OwnerAccountRow {
   updated_at: string
 }
 
+interface CampaignShareLinkRow {
+  id: string
+  campaign_id: string
+  token_hash: string
+  label: string | null
+  access_level: CampaignShareLink['accessLevel']
+  frame_ancestors: string | null
+  expires_at: string | null
+  revoked_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 interface CreateNoteStoreOptions {
   dbPath?: string
 }
@@ -87,12 +102,29 @@ export interface NoteStore {
     ownerUserId?: string,
   ): CampaignSummary | null
   listCampaignMemberships(campaignId: string): CampaignMembership[]
+  listCampaignShareLinks(campaignId: string): CampaignShareLink[]
   userOwnsCampaign(ownerUserId: string, campaignId: string): boolean
   createOwnerAccount(input: OwnerRegistrationInput): OwnerAccount | null
   authenticateOwner(email: string, password: string): OwnerAccount | null
   getOwnerBySessionToken(token: string): OwnerAccount | null
   createOwnerSession(ownerUserId: string): string
   deleteOwnerSession(token: string): void
+  createCampaignShareLink(
+    campaignId: string,
+    input: CampaignShareLinkInput,
+    ownerUserId: string,
+  ): { shareLink: CampaignShareLink; token: string } | null
+  revokeCampaignShareLink(
+    campaignId: string,
+    shareLinkId: string,
+    ownerUserId: string,
+  ): boolean
+  getCampaignShareLinkByToken(token: string): CampaignShareLink | null
+  createGuestMembership(
+    campaignId: string,
+    displayName: string,
+  ): { membership: CampaignMembership; guestToken: string }
+  getGuestMembershipByToken(token: string): CampaignMembership | null
   listNotes(campaignId?: string): Note[]
   listRecentNotes(limit: number, campaignId?: string): Note[]
   getNote(noteId: string): Note | null
@@ -196,6 +228,20 @@ function mapOwnerAccountRow(row: OwnerAccountRow): OwnerAccount {
   }
 }
 
+function mapCampaignShareLinkRow(row: CampaignShareLinkRow): CampaignShareLink {
+  return {
+    id: row.id,
+    campaignId: row.campaign_id,
+    label: row.label,
+    accessLevel: row.access_level,
+    frameAncestors: row.frame_ancestors,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 export function createNoteStore(
   options: CreateNoteStoreOptions = {},
 ): NoteStore {
@@ -257,6 +303,26 @@ export function createNoteStore(
 
     CREATE INDEX IF NOT EXISTS idx_campaign_memberships_user_id
     ON campaign_memberships(user_id);
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_campaign_memberships_guest_token_id
+    ON campaign_memberships(guest_token_id)
+    WHERE guest_token_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS campaign_share_links (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+      token_hash TEXT NOT NULL UNIQUE,
+      label TEXT,
+      access_level TEXT NOT NULL,
+      frame_ancestors TEXT,
+      expires_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_campaign_share_links_campaign_id
+    ON campaign_share_links(campaign_id);
 
     CREATE TABLE IF NOT EXISTS notes (
       id TEXT PRIMARY KEY,
@@ -421,6 +487,20 @@ export function createNoteStore(
     WHERE campaign_id = ? AND user_id = ? AND role = 'owner'
   `)
 
+  const selectGuestMembershipByTokenHash = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      role,
+      display_name,
+      user_id,
+      guest_token_id,
+      created_at,
+      updated_at
+    FROM campaign_memberships
+    WHERE guest_token_id = ? AND role = 'guest'
+  `)
+
   const insertMembership = database.prepare(`
     INSERT INTO campaign_memberships (
       id,
@@ -541,6 +621,79 @@ export function createNoteStore(
   const deleteExpiredOwnerSessions = database.prepare(`
     DELETE FROM owner_sessions
     WHERE expires_at <= ?
+  `)
+
+  const selectActiveShareLinksByCampaignId = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      token_hash,
+      label,
+      access_level,
+      frame_ancestors,
+      expires_at,
+      revoked_at,
+      created_at,
+      updated_at
+    FROM campaign_share_links
+    WHERE
+      campaign_id = ?
+      AND revoked_at IS NULL
+      AND (expires_at IS NULL OR expires_at > ?)
+    ORDER BY created_at DESC
+  `)
+
+  const selectActiveShareLinkByTokenHash = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      token_hash,
+      label,
+      access_level,
+      frame_ancestors,
+      expires_at,
+      revoked_at,
+      created_at,
+      updated_at
+    FROM campaign_share_links
+    WHERE
+      token_hash = ?
+      AND revoked_at IS NULL
+      AND (expires_at IS NULL OR expires_at > ?)
+  `)
+
+  const insertShareLink = database.prepare(`
+    INSERT INTO campaign_share_links (
+      id,
+      campaign_id,
+      token_hash,
+      label,
+      access_level,
+      frame_ancestors,
+      expires_at,
+      revoked_at,
+      created_at,
+      updated_at
+    ) VALUES (
+      @id,
+      @campaign_id,
+      @token_hash,
+      @label,
+      @access_level,
+      @frame_ancestors,
+      @expires_at,
+      @revoked_at,
+      @created_at,
+      @updated_at
+    )
+  `)
+
+  const revokeShareLinkStatement = database.prepare(`
+    UPDATE campaign_share_links
+    SET
+      revoked_at = @revoked_at,
+      updated_at = @updated_at
+    WHERE id = @id AND campaign_id = @campaign_id
   `)
 
   const selectNotesByCampaignId = database.prepare(`
@@ -774,6 +927,85 @@ export function createNoteStore(
     },
   )
 
+  const createCampaignShareLinkTransaction = database.transaction(
+    (campaignId: string, input: CampaignShareLinkInput, ownerUserId: string) => {
+      const campaign = selectCampaignById.get(campaignId) as CampaignRow | undefined
+
+      if (!campaign || campaign.archived_at !== null) {
+        return null
+      }
+
+      if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+        return null
+      }
+
+      const token = createSessionToken()
+      const timestamp = new Date().toISOString()
+      const shareLink: CampaignShareLink = {
+        id: randomUUID(),
+        campaignId,
+        label: input.label,
+        accessLevel: input.accessLevel,
+        frameAncestors: input.frameAncestors,
+        expiresAt: input.expiresAt ?? null,
+        revokedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+
+      insertShareLink.run({
+        id: shareLink.id,
+        campaign_id: shareLink.campaignId,
+        token_hash: hashSessionToken(token),
+        label: shareLink.label,
+        access_level: shareLink.accessLevel,
+        frame_ancestors: shareLink.frameAncestors,
+        expires_at: shareLink.expiresAt,
+        revoked_at: shareLink.revokedAt,
+        created_at: shareLink.createdAt,
+        updated_at: shareLink.updatedAt,
+      })
+
+      return { shareLink, token }
+    },
+  )
+
+  const createGuestMembershipTransaction = database.transaction(
+    (campaignId: string, displayName: string) => {
+      const campaign = selectCampaignById.get(campaignId) as CampaignRow | undefined
+
+      if (!campaign || campaign.archived_at !== null) {
+        throw new Error(`Campaign "${campaignId}" was not found.`)
+      }
+
+      const guestToken = createSessionToken()
+      const timestamp = new Date().toISOString()
+      const membership: CampaignMembership = {
+        id: randomUUID(),
+        campaignId,
+        role: 'guest',
+        displayName,
+        userId: null,
+        guestTokenId: hashSessionToken(guestToken),
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+
+      insertMembership.run({
+        id: membership.id,
+        campaign_id: membership.campaignId,
+        role: membership.role,
+        display_name: membership.displayName,
+        user_id: membership.userId,
+        guest_token_id: membership.guestTokenId,
+        created_at: membership.createdAt,
+        updated_at: membership.updatedAt,
+      })
+
+      return { membership, guestToken }
+    },
+  )
+
   const listCampaigns = () =>
     (selectAllCampaigns.all() as CampaignRow[]).map((row) => mapCampaignRow(row))
 
@@ -891,6 +1123,13 @@ export function createNoteStore(
         selectMembershipsByCampaignId.all(campaignId) as CampaignMembershipRow[]
       ).map((row) => mapMembershipRow(row))
     },
+    listCampaignShareLinks(campaignId) {
+      requireCampaign(campaignId)
+      return (
+        selectActiveShareLinksByCampaignId.all(campaignId, new Date().toISOString()) as
+          CampaignShareLinkRow[]
+      ).map((row) => mapCampaignShareLinkRow(row))
+    },
     userOwnsCampaign(ownerUserId, campaignId) {
       return Boolean(selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))
     },
@@ -938,6 +1177,41 @@ export function createNoteStore(
     },
     deleteOwnerSession(token) {
       deleteOwnerSessionByTokenHash.run(hashSessionToken(token))
+    },
+    createCampaignShareLink(campaignId, input, ownerUserId) {
+      return createCampaignShareLinkTransaction(campaignId, input, ownerUserId)
+    },
+    revokeCampaignShareLink(campaignId, shareLinkId, ownerUserId) {
+      if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+        return false
+      }
+
+      const result = revokeShareLinkStatement.run({
+        id: shareLinkId,
+        campaign_id: campaignId,
+        revoked_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+
+      return result.changes > 0
+    },
+    getCampaignShareLinkByToken(token) {
+      const row = selectActiveShareLinkByTokenHash.get(
+        hashSessionToken(token),
+        new Date().toISOString(),
+      ) as CampaignShareLinkRow | undefined
+
+      return row ? mapCampaignShareLinkRow(row) : null
+    },
+    createGuestMembership(campaignId, displayName) {
+      return createGuestMembershipTransaction(campaignId, displayName)
+    },
+    getGuestMembershipByToken(token) {
+      const row = selectGuestMembershipByTokenHash.get(
+        hashSessionToken(token),
+      ) as CampaignMembershipRow | undefined
+
+      return row ? mapMembershipRow(row) : null
     },
     listNotes,
     listRecentNotes(limit, campaignId) {

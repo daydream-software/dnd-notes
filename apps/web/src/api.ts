@@ -2,16 +2,22 @@ import type {
   AuthSessionResponse,
   CampaignInput,
   CampaignMembershipsResponse,
+  CampaignShareLinkCreateResponse,
+  CampaignShareLinkInput,
+  CampaignShareLinksResponse,
   CampaignResponse,
   CampaignsResponse,
   CurrentOwnerResponse,
   ErrorResponse,
+  GuestJoinInput,
   NoteInput,
   NoteResponse,
   NotesOverview,
   NotesResponse,
   OwnerLoginInput,
   OwnerRegistrationInput,
+  SharedJoinResponse,
+  SharedSessionResponse,
 } from './types'
 
 const apiBaseUrl =
@@ -26,6 +32,20 @@ function createHeaders(authToken?: string, includeJson = false) {
 
   if (authToken) {
     headers.set('Authorization', `Bearer ${authToken}`)
+  }
+
+  return headers
+}
+
+function createGuestHeaders(guestToken?: string, includeJson = false) {
+  const headers = new Headers()
+
+  if (includeJson) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  if (guestToken) {
+    headers.set('X-Guest-Token', guestToken)
   }
 
   return headers
@@ -125,6 +145,57 @@ export async function fetchCampaignMemberships(
   return readJson<CampaignMembershipsResponse>(response)
 }
 
+export async function fetchCampaignShareLinks(
+  authToken: string,
+  campaignId: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/api/campaigns/${campaignId}/share-links`,
+    {
+      headers: createHeaders(authToken),
+      signal,
+    },
+  )
+
+  return readJson<CampaignShareLinksResponse>(response)
+}
+
+export async function createCampaignShareLink(
+  authToken: string,
+  campaignId: string,
+  input: CampaignShareLinkInput,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/api/campaigns/${campaignId}/share-links`,
+    {
+      method: 'POST',
+      headers: createHeaders(authToken, true),
+      body: JSON.stringify(input),
+    },
+  )
+
+  return readJson<CampaignShareLinkCreateResponse>(response)
+}
+
+export async function revokeCampaignShareLink(
+  authToken: string,
+  campaignId: string,
+  shareLinkId: string,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/api/campaigns/${campaignId}/share-links/${shareLinkId}`,
+    {
+      method: 'DELETE',
+      headers: createHeaders(authToken),
+    },
+  )
+
+  if (!response.ok) {
+    await readJson(response)
+  }
+}
+
 export async function createCampaign(authToken: string, input: CampaignInput) {
   const response = await fetch(`${apiBaseUrl}/api/campaigns`, {
     method: 'POST',
@@ -207,6 +278,104 @@ export async function deleteNote(authToken: string, noteId: string) {
   const response = await fetch(`${apiBaseUrl}/api/notes/${noteId}`, {
     method: 'DELETE',
     headers: createHeaders(authToken),
+  })
+
+  if (!response.ok) {
+    await readJson(response)
+  }
+}
+
+export async function fetchSharedSession(
+  shareToken: string,
+  guestToken?: string | null,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/session`, {
+    headers: createGuestHeaders(guestToken ?? undefined),
+    signal,
+  })
+
+  return readJson<SharedSessionResponse>(response)
+}
+
+export async function joinSharedCampaign(
+  shareToken: string,
+  input: GuestJoinInput,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/join`, {
+    method: 'POST',
+    headers: createGuestHeaders(undefined, true),
+    body: JSON.stringify(input),
+  })
+
+  return readJson<SharedJoinResponse>(response)
+}
+
+export async function fetchSharedOverview(
+  shareToken: string,
+  guestToken: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/overview`, {
+    headers: createGuestHeaders(guestToken),
+    signal,
+  })
+
+  return readJson<NotesOverview>(response)
+}
+
+export async function fetchSharedNotes(
+  shareToken: string,
+  guestToken: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes`, {
+    headers: createGuestHeaders(guestToken),
+    signal,
+  })
+
+  return readJson<NotesResponse>(response)
+}
+
+export async function createSharedNote(
+  shareToken: string,
+  guestToken: string,
+  note: NoteInput,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes`, {
+    method: 'POST',
+    headers: createGuestHeaders(guestToken, true),
+    body: JSON.stringify(note),
+  })
+
+  const data = await readJson<NoteResponse>(response)
+  return data.note
+}
+
+export async function updateSharedNote(
+  shareToken: string,
+  guestToken: string,
+  noteId: string,
+  note: NoteInput,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes/${noteId}`, {
+    method: 'PUT',
+    headers: createGuestHeaders(guestToken, true),
+    body: JSON.stringify(note),
+  })
+
+  const data = await readJson<NoteResponse>(response)
+  return data.note
+}
+
+export async function deleteSharedNote(
+  shareToken: string,
+  guestToken: string,
+  noteId: string,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes/${noteId}`, {
+    method: 'DELETE',
+    headers: createGuestHeaders(guestToken),
   })
 
   if (!response.ok) {

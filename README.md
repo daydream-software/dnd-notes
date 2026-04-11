@@ -53,6 +53,7 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 
 - every note belongs to a campaign
 - owners authenticate before using campaign, overview, and note endpoints
+- guests join a shared campaign with a campaign-scoped display name and guest token
 - notes can optionally reference a session by name
 - the editable fields are `title`, `body`, `tags`, `status`, and `sessionName`
 - note timestamps are managed by the API as `createdAt` and `updatedAt`
@@ -69,12 +70,22 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 - `GET /api/campaigns/:campaignId`
 - `PUT /api/campaigns/:campaignId`
 - `GET /api/campaigns/:campaignId/memberships`
+- `GET /api/campaigns/:campaignId/share-links`
+- `POST /api/campaigns/:campaignId/share-links`
+- `DELETE /api/campaigns/:campaignId/share-links/:shareLinkId`
 - `GET /api/overview`
 - `GET /api/notes`
 - `GET /api/notes/:noteId`
 - `POST /api/notes`
 - `PUT /api/notes/:noteId`
 - `DELETE /api/notes/:noteId`
+- `GET /api/shared/:shareToken/session`
+- `POST /api/shared/:shareToken/join`
+- `GET /api/shared/:shareToken/overview`
+- `GET /api/shared/:shareToken/notes`
+- `POST /api/shared/:shareToken/notes`
+- `PUT /api/shared/:shareToken/notes/:noteId`
+- `DELETE /api/shared/:shareToken/notes/:noteId`
 
 All `/api/campaigns`, `/api/overview`, and `/api/notes` routes require an
 `Authorization: Bearer <token>` header from the owner auth endpoints.
@@ -84,10 +95,18 @@ parameter to scope the response to a specific owned campaign. `POST /api/notes`
 accepts an optional `campaignId` in the payload and defaults to the owner's
 primary campaign when one is not provided.
 
+The `/api/shared/:shareToken/*` routes use `X-Guest-Token: <token>` after a
+guest joins the shared campaign. Share links are campaign-scoped, support
+viewer/editor access levels, and can carry owner-configured `frame-ancestors`
+policy for the dedicated `/share/:shareToken` web route.
+
 ## What works now
 
 - notes persist across API restarts
 - owners can register, sign in, and resume an existing session
-- owners can create campaigns, edit campaign settings, and view memberships
+- owners can create campaigns, edit campaign settings, view memberships, and manage shared links
+- guests can open a shared campaign route, choose a display name, and re-enter with the saved guest token
+- only the `/share/:shareToken` route is intended for embedding; the main app stays denied by default in the web server layer
 - the web app can create, edit, view, and delete notes inside the selected campaign
+- shared links can expose the same notes workspace to guests with viewer or editor permissions
 - the notes workspace uses the real API instead of static placeholder content
