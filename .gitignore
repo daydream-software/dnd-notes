@@ -20,3 +20,13 @@ npm-debug.log*
 apps/*/.env
 apps/*/.env.local
 apps/*/.env.*.local
+
+# Local app data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Local app data
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal

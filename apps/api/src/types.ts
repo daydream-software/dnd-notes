@@ -1,31 +1,48 @@
-export interface Note {
+export const noteStatuses = ['draft', 'active', 'archived'] as const
+
+export type NoteStatus = (typeof noteStatuses)[number]
+
+export interface CampaignSummary {
   id: string
-  title: string
-  category: string
-  summary: string
-  updatedAt: string
-  tags: string[]
-  status: string
+  name: string
+  tagline: string
+  system: string
+  setting: string
+  nextSession: string | null
 }
 
-export interface CampaignOverview {
-  campaign: {
-    name: string
-    tagline: string
-    system: string
-    setting: string
-    nextSession: string
-    focusAreas: string[]
-  }
-  stats: {
-    totalNotes: number
-    characters: number
-    locations: number
-    openThreads: number
-  }
-  party: string[]
-  factions: string[]
-  notes: Note[]
+export interface Note {
+  id: string
+  campaignId: string
+  title: string
+  body: string
+  tags: string[]
+  status: NoteStatus
+  sessionName: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface NoteInput {
+  title: string
+  body: string
+  tags: string[]
+  status: NoteStatus
+  sessionName: string | null
+}
+
+export interface NoteStats {
+  totalNotes: number
+  draftNotes: number
+  activeNotes: number
+  archivedNotes: number
+  sessionLinkedNotes: number
+}
+
+export interface NotesOverview {
+  campaign: CampaignSummary
+  stats: NoteStats
+  recentNotes: Note[]
 }
 
 export interface HealthResponse {
@@ -43,4 +60,5 @@ export interface NoteResponse {
 
 export interface ErrorResponse {
   error: string
+  details?: string[]
 }

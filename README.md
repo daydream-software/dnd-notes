@@ -1,6 +1,6 @@
 # dnd-notes
 
-A full-stack starter for a D&D note-taking app, built as an npm workspace with a React + Material UI frontend and a small Node API.
+A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript + SQLite API.
 
 ## Getting started
 
@@ -21,16 +21,40 @@ npm run dev
 
 ## Workspace layout
 
-- `apps/web` — React + Vite + Material UI dashboard shell
-- `apps/api` — Express + TypeScript API with starter campaign and note data
+- `apps/web` — React + Vite + Material UI notes workspace
+- `apps/api` — Express + TypeScript API with SQLite persistence
 
-## Starter API
+## Local persistence
+
+The API stores notes in a local SQLite database at:
+
+```text
+apps/api/data/dnd-notes.sqlite
+```
+
+You can override that path with `NOTES_DB_PATH`.
+
+## MVP note model
+
+The first real note contract is intentionally small:
+
+- every note belongs to the single MVP campaign, `moonshae-ledger`
+- notes can optionally reference a session by name
+- the editable fields are `title`, `body`, `tags`, `status`, and `sessionName`
+- note timestamps are managed by the API as `createdAt` and `updatedAt`
+
+## API
 
 - `GET /health`
 - `GET /api/overview`
 - `GET /api/notes`
 - `GET /api/notes/:noteId`
+- `POST /api/notes`
+- `PUT /api/notes/:noteId`
+- `DELETE /api/notes/:noteId`
 
-## Next building blocks
+## What works now
 
-The starter already wires a dashboard to live API data. Good next features are structured note editors, persistence, auth, and campaign-level filtering.
+- notes persist across API restarts
+- the web app can create, edit, view, and delete notes
+- the notes workspace uses the real API instead of static placeholder content
