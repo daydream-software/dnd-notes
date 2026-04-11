@@ -1,0 +1,33 @@
+{
+  "name": "dnd-notes",
+  "private": true,
+  "version": "0.1.0",
+  "description": "D&D note-taking app starter with React, Material UI, and Node.js",
+  "workspaces": [
+    "apps/web",
+    "apps/api"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "npm run dev --workspace apps/api",
+    "dev:web": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/daydream-software/dnd-notes.git"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/daydream-software/dnd-notes/issues"
+  },
+  "homepage": "https://github.com/daydream-software/dnd-notes#readme",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}
