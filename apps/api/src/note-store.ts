@@ -29,6 +29,7 @@ export interface NoteStore {
   createNote(input: NoteInput): Note
   updateNote(noteId: string, input: NoteInput): Note | null
   deleteNote(noteId: string): boolean
+  resetNotes(inputs: NoteInput[]): Note[]
   getStats(): NoteStats
   close(): void
 }
@@ -36,6 +37,12 @@ export interface NoteStore {
 const defaultDbPath = fileURLToPath(
   new URL('../data/dnd-notes.sqlite', import.meta.url),
 )
+
+export function resolveNoteDbPath(
+  options: CreateNoteStoreOptions = {},
+): string {
+  return options.dbPath ?? process.env.NOTES_DB_PATH ?? defaultDbPath
+}
 
 function mapRow(row: NoteRow): Note {
   return {
@@ -54,7 +61,7 @@ function mapRow(row: NoteRow): Note {
 export function createNoteStore(
   options: CreateNoteStoreOptions = {},
 ): NoteStore {
-  const dbPath = options.dbPath ?? process.env.NOTES_DB_PATH ?? defaultDbPath
+  const dbPath = resolveNoteDbPath(options)
 
   if (dbPath !== ':memory:') {
     mkdirSync(dirname(dbPath), { recursive: true })
@@ -150,8 +157,50 @@ export function createNoteStore(
     WHERE id = ?
   `)
 
+  const deleteAllNotesStatement = database.prepare(`
+    DELETE FROM notes
+  `)
+
   const listNotes = () =>
     (selectAllNotes.all() as NoteRow[]).map((row) => mapRow(row))
+
+  const insertPersistedNote = (note: Note) => {
+    insertNote.run({
+      id: note.id,
+      campaign_id: note.campaignId,
+      title: note.title,
+      body: note.body,
+      status: note.status,
+      tags_json: JSON.stringify(note.tags),
+      session_name: note.sessionName,
+      created_at: note.createdAt,
+      updated_at: note.updatedAt,
+    })
+  }
+
+  const resetNotesTransaction = database.transaction((inputs: NoteInput[]) => {
+    deleteAllNotesStatement.run()
+
+    const baseTimestamp = Date.now()
+
+    return inputs.map((input, index) => {
+      const timestamp = new Date(baseTimestamp - index).toISOString()
+      const note: Note = {
+        id: randomUUID(),
+        campaignId: defaultCampaign.id,
+        title: input.title,
+        body: input.body,
+        tags: input.tags,
+        status: input.status,
+        sessionName: input.sessionName,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+
+      insertPersistedNote(note)
+      return note
+    })
+  })
 
   return {
     listNotes,
@@ -176,17 +225,7 @@ export function createNoteStore(
         updatedAt: timestamp,
       }
 
-      insertNote.run({
-        id: note.id,
-        campaign_id: note.campaignId,
-        title: note.title,
-        body: note.body,
-        status: note.status,
-        tags_json: JSON.stringify(note.tags),
-        session_name: note.sessionName,
-        created_at: note.createdAt,
-        updated_at: note.updatedAt,
-      })
+      insertPersistedNote(note)
 
       return note
     },
@@ -222,6 +261,9 @@ export function createNoteStore(
     deleteNote(noteId) {
       const result = deleteNoteStatement.run(noteId)
       return result.changes > 0
+    },
+    resetNotes(inputs) {
+      return resetNotesTransaction(inputs)
     },
     getStats() {
       const notes = listNotes()

@@ -6,6 +6,7 @@ A full-stack D&D notes MVP built as an npm workspace with a React + Material UI 
 
 ```bash
 npm install
+npm run seed:data
 npm run dev
 ```
 
@@ -33,6 +34,20 @@ apps/api/data/dnd-notes.sqlite
 ```
 
 You can override that path with `NOTES_DB_PATH`.
+
+To load the starter notes into an empty local database:
+
+```bash
+npm run seed:data
+```
+
+To replace whatever is currently in the local database with the starter notes:
+
+```bash
+npm run reset:data
+```
+
+Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an alternate database file without changing code.
 
 ## MVP note model
 
