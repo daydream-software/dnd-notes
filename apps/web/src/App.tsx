@@ -104,6 +104,11 @@ function excerpt(body: string) {
   return `${body.slice(0, 109)}...`
 }
 
+const heroCardRadius = '32px'
+const surfaceRadius = '24px'
+const noteItemRadius = '20px'
+const statPillRadius = '999px'
+
 function App() {
   const [overview, setOverview] = useState<NotesOverview | null>(null)
   const [notes, setNotes] = useState<Note[]>([])
@@ -185,25 +190,21 @@ function App() {
       {
         label: 'Total notes',
         value: overview.stats.totalNotes,
-        detail: 'The current note count for the single-campaign MVP.',
         icon: <StickyNote2RoundedIcon color="primary" />,
       },
       {
         label: 'Draft notes',
         value: overview.stats.draftNotes,
-        detail: 'Ideas and prep work that still need refinement.',
         icon: <EditNoteRoundedIcon color="primary" />,
       },
       {
         label: 'Active notes',
         value: overview.stats.activeNotes,
-        detail: 'Notes ready to use during or between sessions.',
         icon: <PlaylistAddCheckCircleRoundedIcon color="primary" />,
       },
       {
         label: 'Session-linked notes',
         value: overview.stats.sessionLinkedNotes,
-        detail: 'Entries already tied back to a named session.',
         icon: <EventRoundedIcon color="primary" />,
       },
     ]
@@ -297,9 +298,11 @@ function App() {
         <Stack spacing={3}>
           <Card
             sx={{
-              borderRadius: 6,
+              borderRadius: heroCardRadius,
+              overflow: 'hidden',
               background:
                 'linear-gradient(140deg, rgba(124, 58, 237, 0.9), rgba(30, 41, 59, 0.96))',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
             }}
           >
             <CardContent sx={{ p: { xs: 3, md: 4 } }}>
@@ -335,7 +338,7 @@ function App() {
                     spacing={1.5}
                     sx={{
                       minWidth: { md: 260 },
-                      borderRadius: 4,
+                      borderRadius: surfaceRadius,
                       p: 2.5,
                       bgcolor: 'rgba(15, 23, 42, 0.36)',
                       backdropFilter: 'blur(12px)',
@@ -369,35 +372,78 @@ function App() {
           </Card>
 
           {error ? (
-            <Alert severity="error" sx={{ borderRadius: 4 }}>
+            <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
               {error}
             </Alert>
           ) : null}
 
           <Box
+            component="ul"
+            aria-label="Campaign stats"
             sx={{
               display: 'grid',
               gap: 3,
+              listStyle: 'none',
+              p: 0,
+              m: 0,
               gridTemplateColumns: {
-                xs: '1fr',
-                sm: 'repeat(2, minmax(0, 1fr))',
-                xl: 'repeat(4, minmax(0, 1fr))',
+                xs: 'repeat(2, minmax(0, 1fr))',
+                md: 'repeat(4, minmax(0, 1fr))',
               },
             }}
           >
             {statCards.map((card) => (
-              <Card key={card.label} sx={{ borderRadius: 5 }}>
-                <CardContent sx={{ p: 3 }}>
-                  <Stack spacing={1.5}>
+              <Box key={card.label} component="li">
+                <Box
+                  aria-label={`${card.label}: ${card.value}`}
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1.5,
+                    minWidth: 0,
+                    borderRadius: statPillRadius,
+                    px: { xs: 1.75, sm: 2.25 },
+                    py: { xs: 1.25, sm: 1.5 },
+                    bgcolor: 'rgba(15, 23, 42, 0.88)',
+                    border: '1px solid',
+                    borderColor: 'rgba(167, 139, 250, 0.18)',
+                    boxShadow: '0 20px 40px rgba(15, 23, 42, 0.24)',
+                  }}
+                >
+                  <Box
+                    sx={{
+                      display: 'grid',
+                      placeItems: 'center',
+                      width: 40,
+                      height: 40,
+                      flexShrink: 0,
+                      borderRadius: '50%',
+                      bgcolor: 'rgba(167, 139, 250, 0.16)',
+                    }}
+                  >
                     {card.icon}
-                    <Typography color="text.secondary" variant="body2">
+                  </Box>
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography
+                      color="text.secondary"
+                      variant="body2"
+                      sx={{ lineHeight: 1.2 }}
+                    >
                       {card.label}
                     </Typography>
-                    <Typography variant="h3">{card.value}</Typography>
-                    <Typography color="text.secondary">{card.detail}</Typography>
-                  </Stack>
-                </CardContent>
-              </Card>
+                    <Typography
+                      variant="h5"
+                      sx={{
+                        mt: 0.25,
+                        fontSize: { xs: '1.35rem', sm: '1.55rem' },
+                        lineHeight: 1.1,
+                      }}
+                    >
+                      {card.value}
+                    </Typography>
+                  </Box>
+                </Box>
+              </Box>
             ))}
           </Box>
 
@@ -408,7 +454,7 @@ function App() {
               gridTemplateColumns: { xs: '1fr', lg: '1.2fr 1fr' },
             }}
           >
-            <Card sx={{ borderRadius: 5 }}>
+            <Card sx={{ borderRadius: surfaceRadius }}>
               <CardContent sx={{ p: 3 }}>
                 <Stack spacing={3}>
                   <Stack
@@ -433,7 +479,7 @@ function App() {
                   </Stack>
 
                   {notes.length === 0 ? (
-                    <Alert severity="info" sx={{ borderRadius: 4 }}>
+                    <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
                       No notes yet. Create the first one to start using the MVP.
                     </Alert>
                   ) : (
@@ -444,7 +490,7 @@ function App() {
                           selected={selectedNoteId === note.id && !isCreating}
                           onClick={() => handleSelectNote(note)}
                           sx={{
-                            borderRadius: 3,
+                            borderRadius: noteItemRadius,
                             border: '1px solid',
                             borderColor:
                               selectedNoteId === note.id && !isCreating
@@ -506,7 +552,7 @@ function App() {
             </Card>
 
             <Stack spacing={3}>
-              <Card sx={{ borderRadius: 5 }}>
+              <Card sx={{ borderRadius: surfaceRadius }}>
                 <CardContent sx={{ p: 3 }}>
                   <Stack spacing={2.5}>
                     <Box>
@@ -606,7 +652,7 @@ function App() {
                 </CardContent>
               </Card>
 
-              <Card sx={{ borderRadius: 5 }}>
+              <Card sx={{ borderRadius: surfaceRadius }}>
                 <CardContent sx={{ p: 3 }}>
                   <Stack spacing={2}>
                     <Typography variant="h5">Recent activity</Typography>

@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import {
   afterEach,
@@ -214,4 +214,16 @@ describe('App', () => {
       ).toBeNull()
     })
   }, 10000)
+
+  it('renders the overview stats as four campaign pills', async () => {
+    render(<App />)
+
+    const statsList = await screen.findByRole('list', { name: 'Campaign stats' })
+
+    expect(within(statsList).getAllByRole('listitem')).toHaveLength(4)
+    expect(within(statsList).getByText('Total notes')).toBeTruthy()
+    expect(within(statsList).getByText('Draft notes')).toBeTruthy()
+    expect(within(statsList).getByText('Active notes')).toBeTruthy()
+    expect(within(statsList).getByText('Session-linked notes')).toBeTruthy()
+  })
 })
