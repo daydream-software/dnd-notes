@@ -1,5 +1,30 @@
 import { z } from 'zod'
-import { noteStatuses, type NoteInput } from './types.js'
+import {
+  noteStatuses,
+  type CampaignInput,
+  type NoteInput,
+} from './types.js'
+
+const nullableTrimmedString = (field: string, maxLength: number) =>
+  z
+    .union([
+      z
+        .string()
+        .trim()
+        .min(1, `${field} cannot be empty.`)
+        .max(maxLength, `${field} must be ${maxLength} characters or fewer.`),
+      z.literal(''),
+      z.null(),
+    ])
+    .optional()
+    .transform((value) => {
+      if (value === undefined || value === null) {
+        return null
+      }
+
+      const trimmed = value.trim()
+      return trimmed.length > 0 ? trimmed : null
+    })
 
 const notePayloadSchema = z.object({
   title: z
@@ -24,32 +49,39 @@ const notePayloadSchema = z.object({
     .max(8, 'Use at most 8 tags.')
     .default([])
     .transform((tags) => [...new Set(tags.map((tag) => tag.toLowerCase()))]),
-  sessionName: z
-    .union([
-      z
-        .string()
-        .trim()
-        .min(1, 'Session name cannot be empty.')
-        .max(120, 'Session name must be 120 characters or fewer.'),
-      z.literal(''),
-      z.null(),
-    ])
-    .optional()
-    .transform((value) => {
-      if (value === undefined || value === null) {
-        return null
-      }
-
-      const trimmed = value.trim()
-      return trimmed.length > 0 ? trimmed : null
-    }),
+  sessionName: nullableTrimmedString('Session name', 120),
+  campaignId: nullableTrimmedString('Campaign id', 120),
 })
 
-export function validateNoteInput(
-  input: unknown,
-): { success: true; data: NoteInput } | { success: false; errors: string[] } {
-  const result = notePayloadSchema.safeParse(input)
+const campaignPayloadSchema = z.object({
+  name: z
+    .string()
+    .trim()
+    .min(1, 'Campaign name is required.')
+    .max(120, 'Campaign name must be 120 characters or fewer.'),
+  tagline: z
+    .string()
+    .trim()
+    .min(1, 'Tagline is required.')
+    .max(240, 'Tagline must be 240 characters or fewer.'),
+  system: z
+    .string()
+    .trim()
+    .min(1, 'System is required.')
+    .max(120, 'System must be 120 characters or fewer.'),
+  setting: z
+    .string()
+    .trim()
+    .min(1, 'Setting is required.')
+    .max(120, 'Setting must be 120 characters or fewer.'),
+  nextSession: nullableTrimmedString('Next session', 120),
+})
 
+function mapValidationResult<T>(
+  result:
+    | { success: true; data: T }
+    | { success: false; error: z.ZodError<T> },
+): { success: true; data: T } | { success: false; errors: string[] } {
   if (!result.success) {
     return {
       success: false,
@@ -61,4 +93,18 @@ export function validateNoteInput(
     success: true,
     data: result.data,
   }
+}
+
+export function validateNoteInput(
+  input: unknown,
+): { success: true; data: NoteInput } | { success: false; errors: string[] } {
+  return mapValidationResult(notePayloadSchema.safeParse(input))
+}
+
+export function validateCampaignInput(
+  input: unknown,
+):
+  | { success: true; data: CampaignInput }
+  | { success: false; errors: string[] } {
+  return mapValidationResult(campaignPayloadSchema.safeParse(input))
 }

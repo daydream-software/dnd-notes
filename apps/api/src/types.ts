@@ -1,6 +1,8 @@
 export const noteStatuses = ['draft', 'active', 'archived'] as const
 
 export type NoteStatus = (typeof noteStatuses)[number]
+export const campaignMembershipRoles = ['owner', 'guest'] as const
+export type CampaignMembershipRole = (typeof campaignMembershipRoles)[number]
 
 export interface CampaignSummary {
   id: string
@@ -9,6 +11,28 @@ export interface CampaignSummary {
   system: string
   setting: string
   nextSession: string | null
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CampaignInput {
+  name: string
+  tagline: string
+  system: string
+  setting: string
+  nextSession: string | null
+}
+
+export interface CampaignMembership {
+  id: string
+  campaignId: string
+  role: CampaignMembershipRole
+  displayName: string
+  userId: string | null
+  guestTokenId: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 export interface Note {
@@ -29,6 +53,7 @@ export interface NoteInput {
   tags: string[]
   status: NoteStatus
   sessionName: string | null
+  campaignId?: string | null
 }
 
 export interface NoteStats {
@@ -48,6 +73,18 @@ export interface NotesOverview {
 export interface HealthResponse {
   status: 'ok'
   service: 'dnd-notes-api'
+}
+
+export interface CampaignsResponse {
+  campaigns: CampaignSummary[]
+}
+
+export interface CampaignResponse {
+  campaign: CampaignSummary
+}
+
+export interface CampaignMembershipsResponse {
+  memberships: CampaignMembership[]
 }
 
 export interface NotesResponse {

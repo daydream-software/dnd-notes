@@ -1,7 +1,10 @@
-import type { CampaignSummary } from './types.js'
+import type { CampaignInput } from './types.js'
 
-export const defaultCampaign: CampaignSummary = {
-  id: 'moonshae-ledger',
+export const defaultCampaignId = 'moonshae-ledger'
+export const defaultOwnerDisplayName = 'Campaign owner'
+
+export const defaultCampaign: CampaignInput & { id: string } = {
+  id: defaultCampaignId,
   name: 'Moonshae Ledger',
   tagline:
     'Capture the clues, fallout, and character beats that matter between sessions.',
