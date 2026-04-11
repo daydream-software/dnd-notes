@@ -2,9 +2,12 @@ import { z } from 'zod'
 import {
   noteStatuses,
   type CampaignInput,
+  type CampaignShareLinkInput,
+  type GuestJoinInput,
   type OwnerLoginInput,
   type OwnerRegistrationInput,
   type NoteInput,
+  shareAccessLevels,
 } from './types.js'
 
 const nullableTrimmedString = (field: string, maxLength: number) =>
@@ -112,6 +115,61 @@ const ownerLoginSchema = z.object({
     .max(200, 'Password must be 200 characters or fewer.'),
 })
 
+function isValidFrameAncestorsPolicy(value: string) {
+  const directives = value
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+
+  if (directives.length === 0) {
+    return false
+  }
+
+  if (directives.includes("'none'")) {
+    return directives.length === 1
+  }
+
+  return directives.every((directive) => {
+    if (directive === "'self'") {
+      return true
+    }
+
+    try {
+      const url = new URL(directive)
+      return url.origin === directive
+    } catch {
+      return false
+    }
+  })
+}
+
+const shareLinkSchema = z.object({
+  label: nullableTrimmedString('Link label', 120),
+  accessLevel: z.enum(shareAccessLevels),
+  frameAncestors: nullableTrimmedString('Frame ancestors', 500).refine(
+    (value) => value === null || isValidFrameAncestorsPolicy(value),
+    "Frame ancestors must be null, 'self', 'none', or space-separated origins.",
+  ),
+  expiresAt: z
+    .union([z.string().datetime({ offset: true }), z.literal(''), z.null()])
+    .optional()
+    .transform((value) => {
+      if (value === undefined || value === null || value === '') {
+        return null
+      }
+
+      return value
+    }),
+})
+
+const guestJoinSchema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .min(1, 'Display name is required.')
+    .max(80, 'Display name must be 80 characters or fewer.'),
+})
+
 function mapValidationResult<T>(
   result:
     | { success: true; data: T }
@@ -158,4 +216,20 @@ export function validateOwnerLoginInput(
   | { success: true; data: OwnerLoginInput }
   | { success: false; errors: string[] } {
   return mapValidationResult(ownerLoginSchema.safeParse(input))
+}
+
+export function validateCampaignShareLinkInput(
+  input: unknown,
+):
+  | { success: true; data: CampaignShareLinkInput }
+  | { success: false; errors: string[] } {
+  return mapValidationResult(shareLinkSchema.safeParse(input))
+}
+
+export function validateGuestJoinInput(
+  input: unknown,
+):
+  | { success: true; data: GuestJoinInput }
+  | { success: false; errors: string[] } {
+  return mapValidationResult(guestJoinSchema.safeParse(input))
 }

@@ -4,6 +4,8 @@ import type { NoteStore } from './note-store.js'
 import type {
   AuthSessionResponse,
   CampaignMembershipsResponse,
+  CampaignShareLinkCreateResponse,
+  CampaignShareLinksResponse,
   CampaignResponse,
   CampaignsResponse,
   CurrentOwnerResponse,
@@ -13,9 +15,13 @@ import type {
   NotesOverview,
   NotesResponse,
   OwnerAccount,
+  SharedJoinResponse,
+  SharedSessionResponse,
 } from './types.js'
 import {
   validateCampaignInput,
+  validateCampaignShareLinkInput,
+  validateGuestJoinInput,
   validateNoteInput,
   validateOwnerLoginInput,
   validateOwnerRegistrationInput,
@@ -27,6 +33,18 @@ interface NoteParams extends Record<string, string> {
 
 interface CampaignParams extends Record<string, string> {
   campaignId: string
+}
+
+interface ShareParams extends Record<string, string> {
+  shareToken: string
+}
+
+interface ShareLinkParams extends CampaignParams {
+  shareLinkId: string
+}
+
+interface SharedNoteParams extends ShareParams {
+  noteId: string
 }
 
 interface CreateAppOptions {
@@ -47,6 +65,17 @@ function parseAuthorizationToken(request: Request) {
   }
 
   return token
+}
+
+function parseGuestToken(request: Request) {
+  const guestToken = request.header('x-guest-token')
+
+  if (!guestToken) {
+    return null
+  }
+
+  const trimmed = guestToken.trim()
+  return trimmed.length > 0 ? trimmed : null
 }
 
 function readRequestedCampaignId(request: Request) {
@@ -123,6 +152,96 @@ function resolveOwnedCampaign(
   }
 
   return campaign
+}
+
+function resolveSharedLink(
+  noteStore: NoteStore,
+  shareToken: string,
+  response: Response<ErrorResponse>,
+) {
+  const shareLink = noteStore.getCampaignShareLinkByToken(shareToken)
+
+  if (!shareLink) {
+    response.status(404).json({ error: 'Shared link was not found or has been revoked.' })
+    return null
+  }
+
+  const campaign = noteStore.getCampaign(shareLink.campaignId)
+
+  if (!campaign || campaign.archivedAt !== null) {
+    response.status(404).json({ error: 'Campaign was not found for this shared link.' })
+    return null
+  }
+
+  return { shareLink, campaign }
+}
+
+function applySharedLinkPolicy(
+  response: Response,
+  frameAncestors: string | null,
+) {
+  response.set(
+    'Content-Security-Policy',
+    `frame-ancestors ${frameAncestors?.trim() || "'none'"}`,
+  )
+}
+
+function readSharedMembership(
+  noteStore: NoteStore,
+  request: Request,
+  campaignId: string,
+) {
+  const guestToken = parseGuestToken(request)
+
+  if (!guestToken) {
+    return null
+  }
+
+  const membership = noteStore.getGuestMembershipByToken(guestToken)
+
+  if (!membership || membership.campaignId !== campaignId) {
+    return null
+  }
+
+  return membership
+}
+
+function requireSharedMembership(
+  noteStore: NoteStore,
+  request: Request,
+  campaignId: string,
+  response: Response<ErrorResponse>,
+) {
+  const membership = readSharedMembership(noteStore, request, campaignId)
+
+  if (!membership) {
+    response.status(401).json({ error: 'Guest authentication is required for this shared campaign.' })
+    return null
+  }
+
+  return membership
+}
+
+function requireEditorAccess(
+  accessLevel: 'viewer' | 'editor',
+  response: Response<ErrorResponse>,
+) {
+  if (accessLevel !== 'editor') {
+    response.status(403).json({ error: 'This shared link does not allow editing.' })
+    return false
+  }
+
+  return true
+}
+
+function buildSharedUrl(request: Request, shareToken: string) {
+  const origin = request.header('origin')?.replace(/\/$/, '')
+
+  if (origin) {
+    return `${origin}/share/${shareToken}`
+  }
+
+  return `${request.protocol}://${request.get('host')}/share/${shareToken}`
 }
 
 export function createApp({ noteStore }: CreateAppOptions): Express {
@@ -378,6 +497,125 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
   )
 
   app.get(
+    '/api/campaigns/:campaignId/share-links',
+    (
+      request: Request<CampaignParams>,
+      response: Response<CampaignShareLinksResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveOwnedCampaign(
+        noteStore,
+        owner,
+        request.params.campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      response.json({
+        shareLinks: noteStore.listCampaignShareLinks(campaign.id),
+      })
+    },
+  )
+
+  app.post(
+    '/api/campaigns/:campaignId/share-links',
+    (
+      request: Request<CampaignParams>,
+      response: Response<CampaignShareLinkCreateResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveOwnedCampaign(
+        noteStore,
+        owner,
+        request.params.campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      const validation = validateCampaignShareLinkInput(request.body)
+
+      if (!validation.success) {
+        response.status(400).json({
+          error: 'Share link payload is invalid.',
+          details: validation.errors,
+        })
+        return
+      }
+
+      const created = noteStore.createCampaignShareLink(
+        campaign.id,
+        validation.data,
+        owner.id,
+      )
+
+      if (!created) {
+        response.status(403).json({ error: 'You do not have access to this campaign.' })
+        return
+      }
+
+      response.status(201).json({
+        shareLink: created.shareLink,
+        token: created.token,
+        url: buildSharedUrl(request, created.token),
+      })
+    },
+  )
+
+  app.delete(
+    '/api/campaigns/:campaignId/share-links/:shareLinkId',
+    (
+      request: Request<ShareLinkParams>,
+      response: Response<undefined | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveOwnedCampaign(
+        noteStore,
+        owner,
+        request.params.campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      const revoked = noteStore.revokeCampaignShareLink(
+        campaign.id,
+        request.params.shareLinkId,
+        owner.id,
+      )
+
+      if (!revoked) {
+        response.status(404).json({ error: 'Shared link was not found.' })
+        return
+      }
+
+      response.status(204).send()
+    },
+  )
+
+  app.get(
     '/api/overview',
     (
       request: Request,
@@ -578,6 +816,261 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
 
       if (!noteStore.userOwnsCampaign(owner.id, note.campaignId)) {
         response.status(403).json({ error: 'You do not have access to this note.' })
+        return
+      }
+
+      noteStore.deleteNote(request.params.noteId)
+      response.status(204).send()
+    },
+  )
+
+  app.get(
+    '/api/shared/:shareToken/session',
+    (
+      request: Request<ShareParams>,
+      response: Response<SharedSessionResponse | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      response.json({
+        campaign: shared.campaign,
+        shareLink: shared.shareLink,
+        membership: readSharedMembership(noteStore, request, shared.campaign.id),
+      })
+    },
+  )
+
+  app.post(
+    '/api/shared/:shareToken/join',
+    (
+      request: Request<ShareParams>,
+      response: Response<SharedJoinResponse | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const validation = validateGuestJoinInput(request.body)
+
+      if (!validation.success) {
+        response.status(400).json({
+          error: 'Guest join payload is invalid.',
+          details: validation.errors,
+        })
+        return
+      }
+
+      const guestSession = noteStore.createGuestMembership(
+        shared.campaign.id,
+        validation.data.displayName,
+      )
+
+      response.status(201).json({
+        campaign: shared.campaign,
+        shareLink: shared.shareLink,
+        membership: guestSession.membership,
+        guestToken: guestSession.guestToken,
+      })
+    },
+  )
+
+  app.get(
+    '/api/shared/:shareToken/overview',
+    (
+      request: Request<ShareParams>,
+      response: Response<NotesOverview | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const membership = requireSharedMembership(
+        noteStore,
+        request,
+        shared.campaign.id,
+        response,
+      )
+
+      if (!membership) {
+        return
+      }
+
+      response.json(buildOverview(noteStore, shared.campaign.id))
+    },
+  )
+
+  app.get(
+    '/api/shared/:shareToken/notes',
+    (
+      request: Request<ShareParams>,
+      response: Response<NotesResponse | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const membership = requireSharedMembership(
+        noteStore,
+        request,
+        shared.campaign.id,
+        response,
+      )
+
+      if (!membership) {
+        return
+      }
+
+      response.json({ notes: noteStore.listNotes(shared.campaign.id) })
+    },
+  )
+
+  app.post(
+    '/api/shared/:shareToken/notes',
+    (
+      request: Request<ShareParams>,
+      response: Response<NoteResponse | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const membership = requireSharedMembership(
+        noteStore,
+        request,
+        shared.campaign.id,
+        response,
+      )
+
+      if (!membership || !requireEditorAccess(shared.shareLink.accessLevel, response)) {
+        return
+      }
+
+      const validation = validateNoteInput(request.body)
+
+      if (!validation.success) {
+        response.status(400).json({
+          error: 'Note payload is invalid.',
+          details: validation.errors,
+        })
+        return
+      }
+
+      const note = noteStore.createNote({
+        ...validation.data,
+        campaignId: shared.campaign.id,
+      })
+
+      response.status(201).json({ note })
+    },
+  )
+
+  app.put(
+    '/api/shared/:shareToken/notes/:noteId',
+    (
+      request: Request<SharedNoteParams>,
+      response: Response<NoteResponse | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const membership = requireSharedMembership(
+        noteStore,
+        request,
+        shared.campaign.id,
+        response,
+      )
+
+      if (!membership || !requireEditorAccess(shared.shareLink.accessLevel, response)) {
+        return
+      }
+
+      const existingNote = noteStore.getNote(request.params.noteId)
+
+      if (!existingNote || existingNote.campaignId !== shared.campaign.id) {
+        response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
+        return
+      }
+
+      const validation = validateNoteInput(request.body)
+
+      if (!validation.success) {
+        response.status(400).json({
+          error: 'Note payload is invalid.',
+          details: validation.errors,
+        })
+        return
+      }
+
+      const note = noteStore.updateNote(request.params.noteId, {
+        ...validation.data,
+        campaignId: shared.campaign.id,
+      })
+
+      if (!note) {
+        response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
+        return
+      }
+
+      response.json({ note })
+    },
+  )
+
+  app.delete(
+    '/api/shared/:shareToken/notes/:noteId',
+    (
+      request: Request<SharedNoteParams>,
+      response: Response<undefined | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const membership = requireSharedMembership(
+        noteStore,
+        request,
+        shared.campaign.id,
+        response,
+      )
+
+      if (!membership || !requireEditorAccess(shared.shareLink.accessLevel, response)) {
+        return
+      }
+
+      const note = noteStore.getNote(request.params.noteId)
+
+      if (!note || note.campaignId !== shared.campaign.id) {
+        response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
         return
       }
 

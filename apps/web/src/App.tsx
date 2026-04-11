@@ -24,7 +24,9 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createCampaign,
+  createCampaignShareLink,
   createNote,
+  fetchCampaignShareLinks,
   deleteNote,
   fetchCampaignMemberships,
   fetchCampaigns,
@@ -34,20 +36,25 @@ import {
   loginOwner,
   logoutOwner,
   registerOwner,
+  revokeCampaignShareLink,
   updateCampaign,
   updateNote,
 } from './api'
 import type {
   CampaignInput,
   CampaignMembership,
+  CampaignShareLink,
+  CampaignShareLinkInput,
   CampaignSummary,
   Note,
   NoteInput,
   NoteStatus,
   NotesOverview,
   OwnerAccount,
+  ShareAccessLevel,
 } from './types'
 import { noteStatuses } from './types'
+import SharedCampaignRoute from './SharedCampaignRoute'
 
 interface NoteDraft {
   title: string
@@ -76,10 +83,21 @@ interface OwnerLoginDraft {
   password: string
 }
 
+interface ShareLinkDraft {
+  label: string
+  accessLevel: ShareAccessLevel
+  frameAncestors: string
+}
+
 type CampaignFormMode = 'closed' | 'create' | 'edit'
 
 const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
+
+function getShareTokenFromPath(pathname: string) {
+  const match = pathname.match(/^\/share\/([^/]+)\/?$/)
+  return match ? decodeURIComponent(match[1]) : null
+}
 
 function createEmptyDraft(): NoteDraft {
   return {
@@ -148,6 +166,22 @@ function createCampaignPayload(draft: CampaignDraft): CampaignInput {
   }
 }
 
+function createShareLinkDraft(): ShareLinkDraft {
+  return {
+    label: '',
+    accessLevel: 'editor',
+    frameAncestors: '',
+  }
+}
+
+function createShareLinkPayload(draft: ShareLinkDraft): CampaignShareLinkInput {
+  return {
+    label: draft.label.trim() || null,
+    accessLevel: draft.accessLevel,
+    frameAncestors: draft.frameAncestors.trim() || null,
+  }
+}
+
 function formatTimestamp(value: string) {
   const date = new Date(value)
 
@@ -175,17 +209,26 @@ const noteItemRadius = '20px'
 const statPillRadius = '999px'
 
 function App() {
+  const shareToken = useMemo(
+    () =>
+      typeof window === 'undefined'
+        ? null
+        : getShareTokenFromPath(window.location.pathname),
+    [],
+  )
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [owner, setOwner] = useState<OwnerAccount | null>(null)
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [memberships, setMemberships] = useState<CampaignMembership[]>([])
+  const [shareLinks, setShareLinks] = useState<CampaignShareLink[]>([])
   const [overview, setOverview] = useState<NotesOverview | null>(null)
   const [notes, setNotes] = useState<Note[]>([])
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
     createCampaignDraft,
   )
+  const [shareLinkDraft, setShareLinkDraft] = useState<ShareLinkDraft>(createShareLinkDraft)
   const [registerDraft, setRegisterDraft] = useState<OwnerRegistrationDraft>({
     displayName: '',
     email: '',
@@ -203,9 +246,11 @@ function App() {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [isSavingCampaign, setIsSavingCampaign] = useState(false)
+  const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
   const [isRegisterMode, setIsRegisterMode] = useState(true)
   const [campaignFormMode, setCampaignFormMode] =
     useState<CampaignFormMode>('closed')
+  const [lastCreatedShareUrl, setLastCreatedShareUrl] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const selectedNoteIdRef = useRef<string | null>(null)
 
@@ -271,12 +316,15 @@ function App() {
     setCampaigns([])
     setSelectedCampaignId(null)
     setMemberships([])
+    setShareLinks([])
     setOverview(null)
     setNotes([])
     setSelectedNoteId(null)
     setDraft(createEmptyDraft())
     setCampaignDraft(createCampaignDraft())
+    setShareLinkDraft(createShareLinkDraft())
     setCampaignFormMode('closed')
+    setLastCreatedShareUrl(null)
   }, [])
 
   const loadWorkspace = useCallback(
@@ -364,6 +412,7 @@ function App() {
         setNotes([])
         setSelectedNoteId(null)
         setMemberships([])
+        setShareLinks([])
         setCampaignDraft(createCampaignDraft())
         setCampaignFormMode(campaignsResponse.campaigns.length === 0 ? 'create' : 'closed')
         setError(null)
@@ -417,6 +466,7 @@ function App() {
   useEffect(() => {
     if (!authToken || campaignFormMode !== 'edit' || !selectedCampaignId) {
       setMemberships([])
+      setShareLinks([])
       return
     }
 
@@ -424,10 +474,14 @@ function App() {
 
     const loadMemberships = async () => {
       try {
-        const response = await fetchCampaignMemberships(authToken, selectedCampaignId)
+        const [membershipsResponse, shareLinksResponse] = await Promise.all([
+          fetchCampaignMemberships(authToken, selectedCampaignId),
+          fetchCampaignShareLinks(authToken, selectedCampaignId),
+        ])
 
         if (!cancelled) {
-          setMemberships(response.memberships)
+          setMemberships(membershipsResponse.memberships)
+          setShareLinks(shareLinksResponse.shareLinks)
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -462,6 +516,16 @@ function App() {
     value: CampaignDraft[Field],
   ) => {
     setCampaignDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }))
+  }
+
+  const handleShareLinkDraftChange = <Field extends keyof ShareLinkDraft>(
+    field: Field,
+    value: ShareLinkDraft[Field],
+  ) => {
+    setShareLinkDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
     }))
@@ -583,12 +647,17 @@ function App() {
   const handleOpenCampaignCreate = () => {
     setCampaignDraft(createCampaignDraft())
     setMemberships([])
+    setShareLinks([])
+    setShareLinkDraft(createShareLinkDraft())
+    setLastCreatedShareUrl(null)
     setCampaignFormMode('create')
     setError(null)
   }
 
   const handleOpenCampaignSettings = () => {
     setCampaignDraft(createCampaignDraft(selectedCampaign))
+    setShareLinkDraft(createShareLinkDraft())
+    setLastCreatedShareUrl(null)
     setCampaignFormMode('edit')
     setError(null)
   }
@@ -596,6 +665,8 @@ function App() {
   const handleCancelCampaignForm = () => {
     setCampaignDraft(createCampaignDraft(selectedCampaign))
     setCampaignFormMode(campaigns.length === 0 ? 'create' : 'closed')
+    setShareLinkDraft(createShareLinkDraft())
+    setLastCreatedShareUrl(null)
     setError(null)
   }
 
@@ -634,6 +705,56 @@ function App() {
     }
   }
 
+  const handleCreateShareLink = async () => {
+    if (!authToken || !selectedCampaignId) {
+      return
+    }
+
+    setError(null)
+    setIsCreatingShareLink(true)
+
+    try {
+      const created = await createCampaignShareLink(
+        authToken,
+        selectedCampaignId,
+        createShareLinkPayload(shareLinkDraft),
+      )
+
+      setShareLinks((currentLinks) => [created.shareLink, ...currentLinks])
+      setShareLinkDraft(createShareLinkDraft())
+      setLastCreatedShareUrl(created.url)
+    } catch (shareLinkError) {
+      setError(
+        shareLinkError instanceof Error
+          ? shareLinkError.message
+          : 'Could not create the share link.',
+      )
+    } finally {
+      setIsCreatingShareLink(false)
+    }
+  }
+
+  const handleRevokeShareLink = async (shareLinkId: string) => {
+    if (!authToken || !selectedCampaignId) {
+      return
+    }
+
+    setError(null)
+
+    try {
+      await revokeCampaignShareLink(authToken, selectedCampaignId, shareLinkId)
+      setShareLinks((currentLinks) =>
+        currentLinks.filter((shareLink) => shareLink.id !== shareLinkId),
+      )
+    } catch (shareLinkError) {
+      setError(
+        shareLinkError instanceof Error
+          ? shareLinkError.message
+          : 'Could not revoke the share link.',
+      )
+    }
+  }
+
   const handleSelectCampaign = async (campaignId: string) => {
     if (!authToken) {
       return
@@ -641,7 +762,13 @@ function App() {
 
     setCampaignFormMode('closed')
     setMemberships([])
+    setShareLinks([])
+    setLastCreatedShareUrl(null)
     await loadWorkspace(authToken, campaignId)
+  }
+
+  if (shareToken) {
+    return <SharedCampaignRoute shareToken={shareToken} />
   }
 
   if (isBootstrapping) {
@@ -1031,23 +1158,136 @@ function App() {
                   />
 
                   {campaignFormMode === 'edit' ? (
-                    <Box>
-                      <Typography variant="subtitle1">Current memberships</Typography>
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        useFlexGap
-                        sx={{ mt: 1, flexWrap: 'wrap' }}
-                      >
-                        {currentCampaignMemberships.map((membership) => (
-                          <Chip
-                            key={membership.id}
-                            label={`${membership.displayName} (${membership.role})`}
-                            color={membership.role === 'owner' ? 'secondary' : 'default'}
-                          />
-                        ))}
+                    <Stack spacing={2.5}>
+                      <Box>
+                        <Typography variant="subtitle1">Current memberships</Typography>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          useFlexGap
+                          sx={{ mt: 1, flexWrap: 'wrap' }}
+                        >
+                          {currentCampaignMemberships.map((membership) => (
+                            <Chip
+                              key={membership.id}
+                              label={`${membership.displayName} (${membership.role})`}
+                              color={membership.role === 'owner' ? 'secondary' : 'default'}
+                            />
+                          ))}
+                        </Stack>
+                      </Box>
+
+                      <Box>
+                        <Typography variant="subtitle1">Shared links</Typography>
+                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                          Only the shared route can be embedded. Use frame ancestors to allow
+                          specific VTT hosts or leave it blank to block embedding.
+                        </Typography>
+                      </Box>
+
+                      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                        <TextField
+                          fullWidth
+                          label="Link label"
+                          value={shareLinkDraft.label}
+                          onChange={(event) =>
+                            handleShareLinkDraftChange('label', event.target.value)
+                          }
+                          helperText="Optional. Use this to remember where the link is shared."
+                        />
+                        <TextField
+                          select
+                          label="Access"
+                          value={shareLinkDraft.accessLevel}
+                          onChange={(event) =>
+                            handleShareLinkDraftChange(
+                              'accessLevel',
+                              event.target.value as ShareAccessLevel,
+                            )
+                          }
+                          sx={{ minWidth: { md: 180 } }}
+                        >
+                          <MenuItem value="editor">Editor</MenuItem>
+                          <MenuItem value="viewer">Viewer</MenuItem>
+                        </TextField>
                       </Stack>
-                    </Box>
+
+                      <TextField
+                        label="Allowed frame ancestors"
+                        value={shareLinkDraft.frameAncestors}
+                        onChange={(event) =>
+                          handleShareLinkDraftChange('frameAncestors', event.target.value)
+                        }
+                        helperText="Optional. Use 'self', 'none', or space-separated origins such as https://app.roll20.net."
+                      />
+
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                        <Button
+                          variant="outlined"
+                          onClick={handleCreateShareLink}
+                          disabled={isCreatingShareLink}
+                        >
+                          {isCreatingShareLink ? 'Creating link...' : 'Create shared link'}
+                        </Button>
+                      </Stack>
+
+                      {lastCreatedShareUrl ? (
+                        <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+                          Shared link ready: {lastCreatedShareUrl}
+                        </Alert>
+                      ) : null}
+
+                      {shareLinks.length === 0 ? (
+                        <Typography color="text.secondary">
+                          No active shared links yet.
+                        </Typography>
+                      ) : (
+                        <Stack spacing={1.5}>
+                          {shareLinks.map((shareLink) => (
+                            <Box
+                              key={shareLink.id}
+                              sx={{
+                                border: '1px solid',
+                                borderColor: 'divider',
+                                borderRadius: noteItemRadius,
+                                px: 2,
+                                py: 1.75,
+                              }}
+                            >
+                              <Stack
+                                direction={{ xs: 'column', md: 'row' }}
+                                spacing={1.5}
+                                sx={{ justifyContent: 'space-between' }}
+                              >
+                                <Box>
+                                  <Typography variant="subtitle1">
+                                    {shareLink.label || 'Untitled shared link'}
+                                  </Typography>
+                                  <Typography color="text.secondary" variant="body2">
+                                    {shareLink.accessLevel === 'editor'
+                                      ? 'Editors can view and update notes.'
+                                      : 'Viewers can open the shared route without editing.'}
+                                  </Typography>
+                                  <Typography color="text.secondary" variant="body2" sx={{ mt: 0.5 }}>
+                                    Frame ancestors:{' '}
+                                    {shareLink.frameAncestors ?? 'Not embeddable'}
+                                  </Typography>
+                                </Box>
+                                <Box>
+                                  <Button
+                                    color="error"
+                                    variant="text"
+                                    onClick={() => void handleRevokeShareLink(shareLink.id)}
+                                  >
+                                    Revoke link
+                                  </Button>
+                                </Box>
+                              </Stack>
+                            </Box>
+                          ))}
+                        </Stack>
+                      )}
+                    </Stack>
                   ) : null}
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>

@@ -1,4 +1,5 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
+import { StrictMode } from 'react'
 import userEvent from '@testing-library/user-event'
 import {
   afterEach,
@@ -33,6 +34,20 @@ interface CampaignMembershipFixture {
   guestTokenId: string | null
   createdAt: string
   updatedAt: string
+}
+
+interface CampaignShareLinkFixture {
+  id: string
+  campaignId: string
+  label: string | null
+  accessLevel: 'viewer' | 'editor'
+  frameAncestors: string | null
+  expiresAt: string | null
+  revokedAt: string | null
+  createdAt: string
+  updatedAt: string
+  token: string
+  url: string
 }
 
 interface NoteFixture {
@@ -103,7 +118,11 @@ describe('App', () => {
   let activeToken: string | null
   let campaigns: CampaignFixture[]
   let membershipsByCampaign: Record<string, CampaignMembershipFixture[]>
+  let shareLinksByCampaign: Record<string, CampaignShareLinkFixture[]>
+  let guestMembershipByToken: Record<string, CampaignMembershipFixture>
   let notesByCampaign: Record<string, NoteFixture[]>
+  let sharedSessionRequestCount: number
+  let sharedSessionResponseDelaysMs: number[]
 
   beforeEach(() => {
     owner = null
@@ -137,6 +156,10 @@ describe('App', () => {
         },
       ],
     }
+    shareLinksByCampaign = {
+      [defaultCampaignId]: [],
+    }
+    guestMembershipByToken = {}
     notesByCampaign = {
       [defaultCampaignId]: [
         {
@@ -152,8 +175,11 @@ describe('App', () => {
         },
       ],
     }
+    sharedSessionRequestCount = 0
+    sharedSessionResponseDelaysMs = []
 
     localStorage.clear()
+    window.history.replaceState({}, '', '/')
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url =
@@ -166,6 +192,7 @@ describe('App', () => {
       const path = parsedUrl.pathname
       const method = init?.method?.toUpperCase() ?? 'GET'
       const token = readHeader(init?.headers, 'Authorization')?.replace('Bearer ', '') ?? null
+      const guestToken = readHeader(init?.headers, 'X-Guest-Token')
 
       const requireOwner = () => {
         if (!token || token !== activeToken || !owner) {
@@ -210,6 +237,56 @@ describe('App', () => {
         }
 
         return null
+      }
+
+      const resolveShareLink = (shareTokenValue: string) => {
+        const shareLink = Object.values(shareLinksByCampaign)
+          .flat()
+          .find((candidateShareLink) => candidateShareLink.token === shareTokenValue)
+
+        if (!shareLink) {
+          return null
+        }
+
+        const campaign = campaigns.find(
+          (candidateCampaign) => candidateCampaign.id === shareLink.campaignId,
+        )
+
+        if (!campaign) {
+          return null
+        }
+
+        return { shareLink, campaign }
+      }
+
+      const requireGuestMembership = (campaignId: string) => {
+        if (!guestToken) {
+          return new Response(
+            JSON.stringify({ error: 'Guest authentication is required for this shared campaign.' }),
+            {
+              status: 401,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const membership = guestMembershipByToken[guestToken]
+
+        if (!membership || membership.campaignId !== campaignId) {
+          return new Response(
+            JSON.stringify({ error: 'Guest authentication is required for this shared campaign.' }),
+            {
+              status: 401,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        return membership
       }
 
       if (path === '/api/auth/register' && method === 'POST') {
@@ -440,6 +517,448 @@ describe('App', () => {
         )
       }
 
+      const shareLinksMatch = path.match(/^\/api\/campaigns\/([^/]+)\/share-links$/)
+      if (shareLinksMatch && method === 'GET') {
+        const campaignId = shareLinksMatch[1]
+        const ownershipFailure = ensureOwnerCampaign(campaignId)
+        if (ownershipFailure) {
+          return ownershipFailure
+        }
+
+        return new Response(
+          JSON.stringify({ shareLinks: shareLinksByCampaign[campaignId] ?? [] }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      if (shareLinksMatch && method === 'POST') {
+        const campaignId = shareLinksMatch[1]
+        const ownershipFailure = ensureOwnerCampaign(campaignId)
+        if (ownershipFailure) {
+          return ownershipFailure
+        }
+
+        const payload = JSON.parse(String(init?.body)) as {
+          label: string | null
+          accessLevel: 'viewer' | 'editor'
+          frameAncestors: string | null
+        }
+
+        const createdShareLink: CampaignShareLinkFixture = {
+          id: `share-link-${(shareLinksByCampaign[campaignId] ?? []).length + 1}`,
+          campaignId,
+          label: payload.label,
+          accessLevel: payload.accessLevel,
+          frameAncestors: payload.frameAncestors,
+          expiresAt: null,
+          revokedAt: null,
+          createdAt: '2026-04-12T01:30:00.000Z',
+          updatedAt: '2026-04-12T01:30:00.000Z',
+          token: `share-token-${campaignId}-${(shareLinksByCampaign[campaignId] ?? []).length + 1}`,
+          url: `http://localhost/share/share-token-${campaignId}-${(shareLinksByCampaign[campaignId] ?? []).length + 1}`,
+        }
+
+        shareLinksByCampaign[campaignId] = [
+          createdShareLink,
+          ...(shareLinksByCampaign[campaignId] ?? []),
+        ]
+
+        return new Response(
+          JSON.stringify({
+            shareLink: { ...createdShareLink, token: undefined, url: undefined },
+            token: createdShareLink.token,
+            url: createdShareLink.url,
+          }),
+          {
+            status: 201,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      const shareLinkDeleteMatch = path.match(
+        /^\/api\/campaigns\/([^/]+)\/share-links\/([^/]+)$/,
+      )
+      if (shareLinkDeleteMatch && method === 'DELETE') {
+        const campaignId = shareLinkDeleteMatch[1]
+        const shareLinkId = shareLinkDeleteMatch[2]
+        const ownershipFailure = ensureOwnerCampaign(campaignId)
+        if (ownershipFailure) {
+          return ownershipFailure
+        }
+
+        shareLinksByCampaign[campaignId] = (shareLinksByCampaign[campaignId] ?? []).filter(
+          (shareLink) => shareLink.id !== shareLinkId,
+        )
+
+        return new Response(null, { status: 204 })
+      }
+
+      const sharedSessionMatch = path.match(/^\/api\/shared\/([^/]+)\/session$/)
+      if (sharedSessionMatch && method === 'GET') {
+        sharedSessionRequestCount += 1
+        const delayMs = sharedSessionResponseDelaysMs.shift()
+
+        if (delayMs) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+        }
+
+        const resolved = resolveShareLink(sharedSessionMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const membership =
+          guestToken && guestMembershipByToken[guestToken]?.campaignId === resolved.campaign.id
+            ? guestMembershipByToken[guestToken]
+            : null
+
+        return new Response(
+          JSON.stringify({
+            campaign: resolved.campaign,
+            shareLink: {
+              id: resolved.shareLink.id,
+              campaignId: resolved.shareLink.campaignId,
+              label: resolved.shareLink.label,
+              accessLevel: resolved.shareLink.accessLevel,
+              frameAncestors: resolved.shareLink.frameAncestors,
+              expiresAt: resolved.shareLink.expiresAt,
+              revokedAt: resolved.shareLink.revokedAt,
+              createdAt: resolved.shareLink.createdAt,
+              updatedAt: resolved.shareLink.updatedAt,
+            },
+            membership,
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      const sharedJoinMatch = path.match(/^\/api\/shared\/([^/]+)\/join$/)
+      if (sharedJoinMatch && method === 'POST') {
+        const resolved = resolveShareLink(sharedJoinMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const payload = JSON.parse(String(init?.body)) as { displayName: string }
+        const newGuestToken = `guest-token-${Object.keys(guestMembershipByToken).length + 1}`
+        const membership: CampaignMembershipFixture = {
+          id: `membership-${resolved.campaign.id}-guest-${Object.keys(guestMembershipByToken).length + 1}`,
+          campaignId: resolved.campaign.id,
+          role: 'guest',
+          displayName: payload.displayName,
+          userId: null,
+          guestTokenId: `hashed-${newGuestToken}`,
+          createdAt: '2026-04-12T02:30:00.000Z',
+          updatedAt: '2026-04-12T02:30:00.000Z',
+        }
+
+        guestMembershipByToken[newGuestToken] = membership
+        membershipsByCampaign[resolved.campaign.id] = [
+          ...(membershipsByCampaign[resolved.campaign.id] ?? []),
+          membership,
+        ]
+
+        return new Response(
+          JSON.stringify({
+            campaign: resolved.campaign,
+            shareLink: {
+              id: resolved.shareLink.id,
+              campaignId: resolved.shareLink.campaignId,
+              label: resolved.shareLink.label,
+              accessLevel: resolved.shareLink.accessLevel,
+              frameAncestors: resolved.shareLink.frameAncestors,
+              expiresAt: resolved.shareLink.expiresAt,
+              revokedAt: resolved.shareLink.revokedAt,
+              createdAt: resolved.shareLink.createdAt,
+              updatedAt: resolved.shareLink.updatedAt,
+            },
+            membership,
+            guestToken: newGuestToken,
+          }),
+          {
+            status: 201,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      const sharedOverviewMatch = path.match(/^\/api\/shared\/([^/]+)\/overview$/)
+      if (sharedOverviewMatch && method === 'GET') {
+        const resolved = resolveShareLink(sharedOverviewMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const membership = requireGuestMembership(resolved.campaign.id)
+        if (membership instanceof Response) {
+          return membership
+        }
+
+        return new Response(
+          JSON.stringify(
+            buildOverview(
+              resolved.campaign,
+              notesByCampaign[resolved.campaign.id] ?? [],
+            ),
+          ),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      const sharedNotesMatch = path.match(/^\/api\/shared\/([^/]+)\/notes$/)
+      if (sharedNotesMatch && method === 'GET') {
+        const resolved = resolveShareLink(sharedNotesMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const membership = requireGuestMembership(resolved.campaign.id)
+        if (membership instanceof Response) {
+          return membership
+        }
+
+        return new Response(
+          JSON.stringify({ notes: notesByCampaign[resolved.campaign.id] ?? [] }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      if (sharedNotesMatch && method === 'POST') {
+        const resolved = resolveShareLink(sharedNotesMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const membership = requireGuestMembership(resolved.campaign.id)
+        if (membership instanceof Response) {
+          return membership
+        }
+
+        if (resolved.shareLink.accessLevel !== 'editor') {
+          return new Response(
+            JSON.stringify({ error: 'This shared link does not allow editing.' }),
+            {
+              status: 403,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const payload = JSON.parse(String(init?.body)) as {
+          title: string
+          body: string
+          tags: string[]
+          status: NoteStatus
+          sessionName: string | null
+        }
+
+        const createdNote: NoteFixture = {
+          id: `shared-note-${(notesByCampaign[resolved.campaign.id] ?? []).length + 1}`,
+          campaignId: resolved.campaign.id,
+          title: payload.title,
+          body: payload.body,
+          tags: payload.tags,
+          status: payload.status,
+          sessionName: payload.sessionName,
+          createdAt: '2026-04-12T03:00:00.000Z',
+          updatedAt: '2026-04-12T03:00:00.000Z',
+        }
+
+        notesByCampaign[resolved.campaign.id] = [
+          createdNote,
+          ...(notesByCampaign[resolved.campaign.id] ?? []),
+        ]
+
+        return new Response(JSON.stringify({ note: createdNote }), {
+          status: 201,
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        })
+      }
+
+      const sharedNoteMatch = path.match(/^\/api\/shared\/([^/]+)\/notes\/([^/]+)$/)
+      if (sharedNoteMatch && method === 'PUT') {
+        const resolved = resolveShareLink(sharedNoteMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const membership = requireGuestMembership(resolved.campaign.id)
+        if (membership instanceof Response) {
+          return membership
+        }
+
+        if (resolved.shareLink.accessLevel !== 'editor') {
+          return new Response(
+            JSON.stringify({ error: 'This shared link does not allow editing.' }),
+            {
+              status: 403,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const noteId = sharedNoteMatch[2]
+        const payload = JSON.parse(String(init?.body)) as {
+          title: string
+          body: string
+          tags: string[]
+          status: NoteStatus
+          sessionName: string | null
+        }
+
+        notesByCampaign[resolved.campaign.id] = (notesByCampaign[resolved.campaign.id] ?? []).map(
+          (note) =>
+            note.id === noteId
+              ? {
+                  ...note,
+                  title: payload.title,
+                  body: payload.body,
+                  tags: payload.tags,
+                  status: payload.status,
+                  sessionName: payload.sessionName,
+                  updatedAt: '2026-04-12T03:30:00.000Z',
+                }
+              : note,
+        )
+
+        return new Response(
+          JSON.stringify({
+            note: (notesByCampaign[resolved.campaign.id] ?? []).find((note) => note.id === noteId),
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      if (sharedNoteMatch && method === 'DELETE') {
+        const resolved = resolveShareLink(sharedNoteMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const membership = requireGuestMembership(resolved.campaign.id)
+        if (membership instanceof Response) {
+          return membership
+        }
+
+        if (resolved.shareLink.accessLevel !== 'editor') {
+          return new Response(
+            JSON.stringify({ error: 'This shared link does not allow editing.' }),
+            {
+              status: 403,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const noteId = sharedNoteMatch[2]
+        notesByCampaign[resolved.campaign.id] = (notesByCampaign[resolved.campaign.id] ?? []).filter(
+          (note) => note.id !== noteId,
+        )
+
+        return new Response(null, { status: 204 })
+      }
+
       if (path === '/api/overview' && method === 'GET') {
         const campaignId = readCampaignId()
         const ownershipFailure = ensureOwnerCampaign(campaignId)
@@ -596,8 +1115,10 @@ describe('App', () => {
   })
 
   afterEach(() => {
+    cleanup()
     vi.restoreAllMocks()
     localStorage.clear()
+    window.history.replaceState({}, '', '/')
   })
 
   it('supports owner onboarding, campaign settings, and the note workflow', async () => {
@@ -622,6 +1143,17 @@ describe('App', () => {
       screen.getByLabelText('Tagline'),
       'Track the shifting alliances and secrets between sessions.',
     )
+    await user.type(screen.getByLabelText('Link label'), 'VTT table')
+    await user.type(
+      screen.getByLabelText('Allowed frame ancestors'),
+      'https://owlbear.app',
+    )
+    await user.click(screen.getByRole('button', { name: 'Create shared link' }))
+
+    expect(await screen.findByText(/Shared link ready:/)).toBeTruthy()
+    expect(screen.getByText('VTT table')).toBeTruthy()
+    expect(screen.getByText(/Frame ancestors: https:\/\/owlbear.app/)).toBeTruthy()
+
     await user.click(screen.getByRole('button', { name: 'Save campaign settings' }))
 
     expect(
@@ -660,7 +1192,7 @@ describe('App', () => {
         screen.queryByDisplayValue('Harper safe house secured'),
       ).toBeNull()
     })
-  }, 15000)
+  }, 25000)
 
   it('supports creating a second campaign and scoping the workspace to it', async () => {
     const user = userEvent.setup()
@@ -706,4 +1238,130 @@ describe('App', () => {
     expect(within(statsList).getByText('Total notes')).toBeTruthy()
     expect(within(statsList).getByText('Draft notes')).toBeTruthy()
   }, 15000)
+
+  it('supports the guest join flow on a shared campaign route', async () => {
+    shareLinksByCampaign[defaultCampaignId] = [
+      {
+        id: 'share-link-default',
+        campaignId: defaultCampaignId,
+        label: 'Player table',
+        accessLevel: 'editor',
+        frameAncestors: 'https://owlbear.app',
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: '2026-04-12T01:30:00.000Z',
+        updatedAt: '2026-04-12T01:30:00.000Z',
+        token: 'share-token-moonshae-ledger-1',
+        url: 'http://localhost/share/share-token-moonshae-ledger-1',
+      },
+    ]
+
+    window.history.replaceState({}, '', '/share/share-token-moonshae-ledger-1')
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findByText('Join Moonshae Ledger')).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Display name'), 'Nox')
+    await user.click(screen.getByRole('button', { name: 'Join campaign' }))
+
+    expect(await screen.findByText(/Joined as Nox/)).toBeTruthy()
+    expect((await screen.findAllByText('Cipher fragment recovered')).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Total notes/)).toBeTruthy()
+  }, 20000)
+
+  it('does not let a stale shared-session response clear a new guest join', async () => {
+    shareLinksByCampaign[defaultCampaignId] = [
+      {
+        id: 'share-link-default',
+        campaignId: defaultCampaignId,
+        label: 'Player table',
+        accessLevel: 'editor',
+        frameAncestors: 'https://owlbear.app',
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: '2026-04-12T01:30:00.000Z',
+        updatedAt: '2026-04-12T01:30:00.000Z',
+        token: 'share-token-moonshae-ledger-1',
+        url: 'http://localhost/share/share-token-moonshae-ledger-1',
+      },
+    ]
+    sharedSessionResponseDelaysMs = [75]
+
+    window.history.replaceState({}, '', '/share/share-token-moonshae-ledger-1')
+
+    const user = userEvent.setup()
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    )
+
+    expect(await screen.findByText('Join Moonshae Ledger')).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Display name'), 'Nox')
+    await user.click(screen.getByRole('button', { name: 'Join campaign' }))
+
+    expect(await screen.findByText(/Joined as Nox/)).toBeTruthy()
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    expect(screen.getByText(/Joined as Nox/)).toBeTruthy()
+    expect(
+      localStorage.getItem('dnd-notes:guest-token:share-token-moonshae-ledger-1'),
+    ).toBe('guest-token-1')
+  }, 20000)
+
+  it('restores a saved guest session on refresh without looping the loading screen', async () => {
+    shareLinksByCampaign[defaultCampaignId] = [
+      {
+        id: 'share-link-default',
+        campaignId: defaultCampaignId,
+        label: 'Player table',
+        accessLevel: 'editor',
+        frameAncestors: 'https://owlbear.app',
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: '2026-04-12T01:30:00.000Z',
+        updatedAt: '2026-04-12T01:30:00.000Z',
+        token: 'share-token-moonshae-ledger-1',
+        url: 'http://localhost/share/share-token-moonshae-ledger-1',
+      },
+    ]
+
+    const restoredMembership: CampaignMembershipFixture = {
+      id: 'membership-moonshae-ledger-guest-restore',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Nox',
+      userId: null,
+      guestTokenId: 'hashed-guest-token-restore',
+      createdAt: '2026-04-12T02:30:00.000Z',
+      updatedAt: '2026-04-12T02:30:00.000Z',
+    }
+
+    guestMembershipByToken['guest-token-restore'] = restoredMembership
+    membershipsByCampaign[defaultCampaignId] = [
+      ...(membershipsByCampaign[defaultCampaignId] ?? []),
+      restoredMembership,
+    ]
+    localStorage.setItem(
+      'dnd-notes:guest-token:share-token-moonshae-ledger-1',
+      'guest-token-restore',
+    )
+    window.history.replaceState({}, '', '/share/share-token-moonshae-ledger-1')
+
+    render(
+      <StrictMode>
+        <App />
+      </StrictMode>,
+    )
+
+    expect(await screen.findByText(/Joined as Nox/)).toBeTruthy()
+    expect((await screen.findAllByText('Cipher fragment recovered')).length).toBeGreaterThan(0)
+    await waitFor(() => expect(sharedSessionRequestCount).toBe(2))
+    await new Promise((resolve) => setTimeout(resolve, 75))
+    expect(sharedSessionRequestCount).toBe(2)
+    expect(screen.queryByText('Loading shared campaign...')).toBeNull()
+  }, 20000)
 })

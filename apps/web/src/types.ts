@@ -3,6 +3,8 @@ export const noteStatuses = ['draft', 'active', 'archived'] as const
 export type NoteStatus = (typeof noteStatuses)[number]
 export const campaignMembershipRoles = ['owner', 'guest'] as const
 export type CampaignMembershipRole = (typeof campaignMembershipRoles)[number]
+export const shareAccessLevels = ['viewer', 'editor'] as const
+export type ShareAccessLevel = (typeof shareAccessLevels)[number]
 
 export interface CampaignSummary {
   id: string
@@ -33,6 +35,29 @@ export interface CampaignMembership {
   guestTokenId: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface CampaignShareLink {
+  id: string
+  campaignId: string
+  label: string | null
+  accessLevel: ShareAccessLevel
+  frameAncestors: string | null
+  expiresAt: string | null
+  revokedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface CampaignShareLinkInput {
+  label: string | null
+  accessLevel: ShareAccessLevel
+  frameAncestors: string | null
+  expiresAt?: string | null
+}
+
+export interface GuestJoinInput {
+  displayName: string
 }
 
 export interface OwnerAccount {
@@ -110,12 +135,39 @@ export interface CampaignMembershipsResponse {
   memberships: CampaignMembership[]
 }
 
+export interface CampaignShareLinksResponse {
+  shareLinks: CampaignShareLink[]
+}
+
+export interface CampaignShareLinkResponse {
+  shareLink: CampaignShareLink
+}
+
+export interface CampaignShareLinkCreateResponse {
+  shareLink: CampaignShareLink
+  token: string
+  url: string
+}
+
 export interface NotesResponse {
   notes: Note[]
 }
 
 export interface NoteResponse {
   note: Note
+}
+
+export interface SharedSessionResponse {
+  campaign: CampaignSummary
+  shareLink: CampaignShareLink
+  membership: CampaignMembership | null
+}
+
+export interface SharedJoinResponse {
+  campaign: CampaignSummary
+  shareLink: CampaignShareLink
+  membership: CampaignMembership
+  guestToken: string
 }
 
 export interface ErrorResponse {

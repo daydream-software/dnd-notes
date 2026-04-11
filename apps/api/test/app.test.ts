@@ -71,6 +71,23 @@ function withAuth(app: SuperTest<Test>, token: string) {
   }
 }
 
+function withGuest(app: SuperTest<Test>, token: string) {
+  return {
+    get(path: string) {
+      return app.get(path).set('X-Guest-Token', token)
+    },
+    post(path: string) {
+      return app.post(path).set('X-Guest-Token', token)
+    },
+    put(path: string) {
+      return app.put(path).set('X-Guest-Token', token)
+    },
+    delete(path: string) {
+      return app.delete(path).set('X-Guest-Token', token)
+    },
+  }
+}
+
 test('GET /health returns service metadata', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
@@ -110,6 +127,18 @@ test('owner auth and campaign endpoints support the management workflow', async 
   assert.equal(membershipsResponse.body.memberships[0].userId, owner.id)
   assert.equal(membershipsResponse.body.memberships[0].displayName, payload.displayName)
 
+  const createDefaultShareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'VTT link',
+      accessLevel: 'editor',
+      frameAncestors: 'https://owlbear.app https://roll20.net',
+    })
+  assert.equal(createDefaultShareLinkResponse.status, 201)
+  assert.equal(createDefaultShareLinkResponse.body.shareLink.label, 'VTT link')
+  assert.equal(createDefaultShareLinkResponse.body.shareLink.accessLevel, 'editor')
+  assert.match(createDefaultShareLinkResponse.body.url, /\/share\//)
+
   const createCampaignResponse = await authed.post('/api/campaigns').send({
     name: 'Emberfall Accord',
     tagline: 'Track alliances, betrayals, and faction leverage across the city.',
@@ -142,6 +171,31 @@ test('owner auth and campaign endpoints support the management workflow', async 
   )
   assert.equal(createdCampaignMembershipsResponse.status, 200)
   assert.equal(createdCampaignMembershipsResponse.body.memberships[0].userId, owner.id)
+
+  const createShareLinkResponse = await authed
+    .post(`/api/campaigns/${campaignId}/share-links`)
+    .send({
+      label: 'Read-only table view',
+      accessLevel: 'viewer',
+      frameAncestors: "'self'",
+    })
+  assert.equal(createShareLinkResponse.status, 201)
+
+  const shareLinksResponse = await authed.get(`/api/campaigns/${campaignId}/share-links`)
+  assert.equal(shareLinksResponse.status, 200)
+  assert.equal(shareLinksResponse.body.shareLinks.length, 1)
+  assert.equal(shareLinksResponse.body.shareLinks[0].label, 'Read-only table view')
+
+  const revokeShareLinkResponse = await authed.delete(
+    `/api/campaigns/${campaignId}/share-links/${createShareLinkResponse.body.shareLink.id}`,
+  )
+  assert.equal(revokeShareLinkResponse.status, 204)
+
+  const shareLinksAfterRevokeResponse = await authed.get(
+    `/api/campaigns/${campaignId}/share-links`,
+  )
+  assert.equal(shareLinksAfterRevokeResponse.status, 200)
+  assert.equal(shareLinksAfterRevokeResponse.body.shareLinks.length, 0)
 
   const logoutResponse = await authed.post('/api/auth/logout')
   assert.equal(logoutResponse.status, 204)
@@ -201,6 +255,122 @@ test('authenticated owners can run the note CRUD workflow in a selected campaign
     .get('/api/notes')
     .query({ campaignId: defaultCampaignId })
   assert.equal(finalListResponse.body.notes.length, 0)
+})
+
+test('shared links support guest join, scoped access, and editor note workflow', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const shareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'Player notes',
+      accessLevel: 'editor',
+      frameAncestors: 'https://vtt.example',
+    })
+
+  assert.equal(shareLinkResponse.status, 201)
+  const shareToken = shareLinkResponse.body.token as string
+
+  const sessionResponse = await request(app).get(`/api/shared/${shareToken}/session`)
+  assert.equal(sessionResponse.status, 200)
+  assert.equal(sessionResponse.body.campaign.id, defaultCampaignId)
+  assert.equal(sessionResponse.body.membership, null)
+  assert.equal(
+    sessionResponse.headers['content-security-policy'],
+    'frame-ancestors https://vtt.example',
+  )
+
+  const unauthorizedNotesResponse = await request(app).get(
+    `/api/shared/${shareToken}/notes`,
+  )
+  assert.equal(unauthorizedNotesResponse.status, 401)
+
+  const joinResponse = await request(app).post(`/api/shared/${shareToken}/join`).send({
+    displayName: 'Mira',
+  })
+  assert.equal(joinResponse.status, 201)
+  assert.equal(joinResponse.body.membership.role, 'guest')
+  assert.equal(joinResponse.body.membership.displayName, 'Mira')
+
+  const guestToken = joinResponse.body.guestToken as string
+  const guest = withGuest(request(app), guestToken)
+
+  const restoredSessionResponse = await guest.get(`/api/shared/${shareToken}/session`)
+  assert.equal(restoredSessionResponse.status, 200)
+  assert.equal(restoredSessionResponse.body.membership.displayName, 'Mira')
+
+  const createNoteResponse = await guest.post(`/api/shared/${shareToken}/notes`).send({
+    title: 'Portal sequence',
+    body: 'Mirror shards resonate when the lantern is turned to the harbor.',
+    tags: ['clue', 'harbor'],
+    status: 'draft',
+    sessionName: 'Session 15',
+  })
+  assert.equal(createNoteResponse.status, 201)
+  assert.equal(createNoteResponse.body.note.campaignId, defaultCampaignId)
+
+  const noteId = createNoteResponse.body.note.id as string
+
+  const updateNoteResponse = await guest.put(`/api/shared/${shareToken}/notes/${noteId}`).send({
+    title: 'Portal sequence',
+    body: 'Mirror shards resonate when the lantern is turned toward the drowned gate.',
+    tags: ['clue'],
+    status: 'active',
+    sessionName: null,
+  })
+  assert.equal(updateNoteResponse.status, 200)
+  assert.equal(updateNoteResponse.body.note.status, 'active')
+
+  const sharedOverviewResponse = await guest.get(`/api/shared/${shareToken}/overview`)
+  assert.equal(sharedOverviewResponse.status, 200)
+  assert.equal(sharedOverviewResponse.body.stats.totalNotes, 1)
+
+  const sharedNotesResponse = await guest.get(`/api/shared/${shareToken}/notes`)
+  assert.equal(sharedNotesResponse.status, 200)
+  assert.equal(sharedNotesResponse.body.notes.length, 1)
+
+  const deleteNoteResponse = await guest.delete(`/api/shared/${shareToken}/notes/${noteId}`)
+  assert.equal(deleteNoteResponse.status, 204)
+
+  const readOnlyShareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'Viewer table',
+      accessLevel: 'viewer',
+      frameAncestors: null,
+    })
+  assert.equal(readOnlyShareLinkResponse.status, 201)
+
+  const readOnlyJoinResponse = await request(app)
+    .post(`/api/shared/${readOnlyShareLinkResponse.body.token}/join`)
+    .send({
+      displayName: 'Bran',
+    })
+  assert.equal(readOnlyJoinResponse.status, 201)
+
+  const viewer = withGuest(request(app), readOnlyJoinResponse.body.guestToken as string)
+  const readOnlyCreateResponse = await viewer
+    .post(`/api/shared/${readOnlyShareLinkResponse.body.token}/notes`)
+    .send({
+      title: 'Should fail',
+      body: 'Viewer links should not write notes.',
+      tags: [],
+      status: 'draft',
+      sessionName: null,
+    })
+  assert.equal(readOnlyCreateResponse.status, 403)
+
+  const revokeShareLinkResponse = await authed.delete(
+    `/api/campaigns/${defaultCampaignId}/share-links/${shareLinkResponse.body.shareLink.id}`,
+  )
+  assert.equal(revokeShareLinkResponse.status, 204)
+
+  const revokedSessionResponse = await guest.get(`/api/shared/${shareToken}/session`)
+  assert.equal(revokedSessionResponse.status, 404)
 })
 
 test('invalid note payloads return explicit errors for an authenticated owner', async (t) => {
