@@ -23,13 +23,30 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  createCampaign,
   createNote,
   deleteNote,
+  fetchCampaignMemberships,
+  fetchCampaigns,
   fetchNotes,
   fetchOverview,
+  fetchOwnerSession,
+  loginOwner,
+  logoutOwner,
+  registerOwner,
+  updateCampaign,
   updateNote,
 } from './api'
-import type { Note, NoteInput, NoteStatus, NotesOverview } from './types'
+import type {
+  CampaignInput,
+  CampaignMembership,
+  CampaignSummary,
+  Note,
+  NoteInput,
+  NoteStatus,
+  NotesOverview,
+  OwnerAccount,
+} from './types'
 import { noteStatuses } from './types'
 
 interface NoteDraft {
@@ -39,6 +56,30 @@ interface NoteDraft {
   status: NoteStatus
   sessionName: string
 }
+
+interface CampaignDraft {
+  name: string
+  tagline: string
+  system: string
+  setting: string
+  nextSession: string
+}
+
+interface OwnerRegistrationDraft {
+  displayName: string
+  email: string
+  password: string
+}
+
+interface OwnerLoginDraft {
+  email: string
+  password: string
+}
+
+type CampaignFormMode = 'closed' | 'create' | 'edit'
+
+const authTokenStorageKey = 'dnd-notes:owner-auth-token'
+const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
 
 function createEmptyDraft(): NoteDraft {
   return {
@@ -60,7 +101,10 @@ function createDraftFromNote(note: Note): NoteDraft {
   }
 }
 
-function createNotePayload(draft: NoteDraft): NoteInput {
+function createNotePayload(
+  draft: NoteDraft,
+  campaignId: string | null,
+): NoteInput {
   return {
     title: draft.title,
     body: draft.body,
@@ -70,17 +114,38 @@ function createNotePayload(draft: NoteDraft): NoteInput {
       .map((tag) => tag.trim())
       .filter(Boolean),
     sessionName: draft.sessionName.trim() || null,
+    campaignId,
   }
 }
 
-function formatSessionDate(value: string) {
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return value
+function createCampaignDraft(campaign?: CampaignSummary | null): CampaignDraft {
+  if (!campaign) {
+    return {
+      name: '',
+      tagline: '',
+      system: '',
+      setting: '',
+      nextSession: '',
+    }
   }
 
-  return new Intl.DateTimeFormat('en', { dateStyle: 'full' }).format(date)
+  return {
+    name: campaign.name,
+    tagline: campaign.tagline,
+    system: campaign.system,
+    setting: campaign.setting,
+    nextSession: campaign.nextSession ?? '',
+  }
+}
+
+function createCampaignPayload(draft: CampaignDraft): CampaignInput {
+  return {
+    name: draft.name,
+    tagline: draft.tagline,
+    system: draft.system,
+    setting: draft.setting,
+    nextSession: draft.nextSession.trim() || null,
+  }
 }
 
 function formatTimestamp(value: string) {
@@ -110,14 +175,37 @@ const noteItemRadius = '20px'
 const statPillRadius = '999px'
 
 function App() {
+  const [authToken, setAuthToken] = useState<string | null>(null)
+  const [owner, setOwner] = useState<OwnerAccount | null>(null)
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
+  const [memberships, setMemberships] = useState<CampaignMembership[]>([])
   const [overview, setOverview] = useState<NotesOverview | null>(null)
   const [notes, setNotes] = useState<Note[]>([])
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
+  const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
+    createCampaignDraft,
+  )
+  const [registerDraft, setRegisterDraft] = useState<OwnerRegistrationDraft>({
+    displayName: '',
+    email: '',
+    password: '',
+  })
+  const [loginDraft, setLoginDraft] = useState<OwnerLoginDraft>({
+    email: '',
+    password: '',
+  })
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
-  const [isLoading, setIsLoading] = useState(true)
+  const [isBootstrapping, setIsBootstrapping] = useState(true)
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
+  const [isSavingCampaign, setIsSavingCampaign] = useState(false)
+  const [isRegisterMode, setIsRegisterMode] = useState(true)
+  const [campaignFormMode, setCampaignFormMode] =
+    useState<CampaignFormMode>('closed')
   const [error, setError] = useState<string | null>(null)
   const selectedNoteIdRef = useRef<string | null>(null)
 
@@ -130,56 +218,21 @@ function App() {
     [notes, selectedNoteId],
   )
 
-  const loadWorkspace = useCallback(async (preferredNoteId?: string | null) => {
-    try {
-      const [nextOverview, notesResponse] = await Promise.all([
-        fetchOverview(),
-        fetchNotes(),
-      ])
+  const selectedCampaign = useMemo(
+    () =>
+      campaigns.find((campaign) => campaign.id === selectedCampaignId) ??
+      overview?.campaign ??
+      null,
+    [campaigns, overview, selectedCampaignId],
+  )
 
-      setOverview(nextOverview)
-      setNotes(notesResponse.notes)
-
-      const fallbackNoteId = notesResponse.notes[0]?.id ?? null
-      const currentSelection = selectedNoteIdRef.current
-      const nextSelectedId =
-        preferredNoteId !== undefined
-          ? preferredNoteId
-          : currentSelection &&
-              notesResponse.notes.some((note) => note.id === currentSelection)
-            ? currentSelection
-            : fallbackNoteId
-
-      const activeNote =
-        nextSelectedId !== null
-          ? notesResponse.notes.find((note) => note.id === nextSelectedId) ?? null
-          : null
-
-      if (activeNote) {
-        setSelectedNoteId(activeNote.id)
-        setIsCreating(false)
-        setDraft(createDraftFromNote(activeNote))
-      } else {
-        setSelectedNoteId(null)
-        setIsCreating(true)
-        setDraft(createEmptyDraft())
-      }
-
-      setError(null)
-    } catch (loadError) {
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : 'Could not load the notes workspace.',
-      )
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadWorkspace()
-  }, [loadWorkspace])
+  const currentCampaignMemberships = useMemo(
+    () =>
+      memberships.filter(
+        (membership) => membership.campaignId === selectedCampaignId,
+      ),
+    [memberships, selectedCampaignId],
+  )
 
   const statCards = useMemo(() => {
     if (!overview) {
@@ -210,11 +263,205 @@ function App() {
     ]
   }, [overview])
 
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(authTokenStorageKey)
+    localStorage.removeItem(selectedCampaignStorageKey)
+    setAuthToken(null)
+    setOwner(null)
+    setCampaigns([])
+    setSelectedCampaignId(null)
+    setMemberships([])
+    setOverview(null)
+    setNotes([])
+    setSelectedNoteId(null)
+    setDraft(createEmptyDraft())
+    setCampaignDraft(createCampaignDraft())
+    setCampaignFormMode('closed')
+  }, [])
+
+  const loadWorkspace = useCallback(
+    async (
+      sessionToken: string,
+      campaignId: string,
+      preferredNoteId?: string | null,
+    ) => {
+      setIsLoadingWorkspace(true)
+
+      try {
+        const [nextOverview, notesResponse] = await Promise.all([
+          fetchOverview(sessionToken, campaignId),
+          fetchNotes(sessionToken, campaignId),
+        ])
+
+        setSelectedCampaignId(campaignId)
+        localStorage.setItem(selectedCampaignStorageKey, campaignId)
+        setOverview(nextOverview)
+        setNotes(notesResponse.notes)
+        setCampaignDraft(createCampaignDraft(nextOverview.campaign))
+
+        const fallbackNoteId = notesResponse.notes[0]?.id ?? null
+        const currentSelection = selectedNoteIdRef.current
+        const nextSelectedId =
+          preferredNoteId !== undefined
+            ? preferredNoteId
+            : currentSelection &&
+                notesResponse.notes.some((note) => note.id === currentSelection)
+              ? currentSelection
+              : fallbackNoteId
+
+        const activeNote =
+          nextSelectedId !== null
+            ? notesResponse.notes.find((note) => note.id === nextSelectedId) ?? null
+            : null
+
+        if (activeNote) {
+          setSelectedNoteId(activeNote.id)
+          setIsCreating(false)
+          setDraft(createDraftFromNote(activeNote))
+        } else {
+          setSelectedNoteId(null)
+          setIsCreating(true)
+          setDraft(createEmptyDraft())
+        }
+
+        setError(null)
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Could not load the campaign workspace.',
+        )
+      } finally {
+        setIsLoadingWorkspace(false)
+      }
+    },
+    [],
+  )
+
+  const loadCampaigns = useCallback(
+    async (
+      sessionToken: string,
+      preferredCampaignId?: string | null,
+      preferredNoteId?: string | null,
+    ) => {
+      const campaignsResponse = await fetchCampaigns(sessionToken)
+      setCampaigns(campaignsResponse.campaigns)
+
+      const storedCampaignId = localStorage.getItem(selectedCampaignStorageKey)
+      const candidateCampaignId =
+        preferredCampaignId ?? storedCampaignId ?? campaignsResponse.campaigns[0]?.id ?? null
+
+      const nextCampaign =
+        candidateCampaignId !== null
+          ? campaignsResponse.campaigns.find(
+              (campaign) => campaign.id === candidateCampaignId,
+            ) ?? campaignsResponse.campaigns[0] ?? null
+          : null
+
+      if (!nextCampaign) {
+        setSelectedCampaignId(null)
+        setOverview(null)
+        setNotes([])
+        setSelectedNoteId(null)
+        setMemberships([])
+        setCampaignDraft(createCampaignDraft())
+        setCampaignFormMode(campaignsResponse.campaigns.length === 0 ? 'create' : 'closed')
+        setError(null)
+        return
+      }
+
+      await loadWorkspace(sessionToken, nextCampaign.id, preferredNoteId)
+    },
+    [loadWorkspace],
+  )
+
+  useEffect(() => {
+    const storedToken = localStorage.getItem(authTokenStorageKey)
+
+    if (!storedToken) {
+      setIsBootstrapping(false)
+      return
+    }
+
+    let cancelled = false
+
+    const bootstrap = async () => {
+      try {
+        const session = await fetchOwnerSession(storedToken)
+
+        if (cancelled) {
+          return
+        }
+
+        setAuthToken(storedToken)
+        setOwner(session.owner)
+        await loadCampaigns(storedToken)
+      } catch {
+        if (!cancelled) {
+          clearSession()
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapping(false)
+        }
+      }
+    }
+
+    void bootstrap()
+
+    return () => {
+      cancelled = true
+    }
+  }, [clearSession, loadCampaigns])
+
+  useEffect(() => {
+    if (!authToken || campaignFormMode !== 'edit' || !selectedCampaignId) {
+      setMemberships([])
+      return
+    }
+
+    let cancelled = false
+
+    const loadMemberships = async () => {
+      try {
+        const response = await fetchCampaignMemberships(authToken, selectedCampaignId)
+
+        if (!cancelled) {
+          setMemberships(response.memberships)
+        }
+      } catch (loadError) {
+        if (!cancelled) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : 'Could not load campaign memberships.',
+          )
+        }
+      }
+    }
+
+    void loadMemberships()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authToken, campaignFormMode, selectedCampaignId])
+
   const handleDraftChange = <Field extends keyof NoteDraft>(
     field: Field,
     value: NoteDraft[Field],
   ) => {
     setDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+    }))
+  }
+
+  const handleCampaignDraftChange = <Field extends keyof CampaignDraft>(
+    field: Field,
+    value: CampaignDraft[Field],
+  ) => {
+    setCampaignDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
     }))
@@ -235,18 +482,22 @@ function App() {
   }
 
   const handleSaveNote = async () => {
+    if (!authToken || !selectedCampaignId) {
+      return
+    }
+
     setError(null)
     setIsSaving(true)
 
     try {
-      const payload = createNotePayload(draft)
+      const payload = createNotePayload(draft, selectedCampaignId)
 
       if (isCreating || !selectedNoteId) {
-        const createdNote = await createNote(payload)
-        await loadWorkspace(createdNote.id)
+        const createdNote = await createNote(authToken, payload)
+        await loadWorkspace(authToken, selectedCampaignId, createdNote.id)
       } else {
-        const updatedNote = await updateNote(selectedNoteId, payload)
-        await loadWorkspace(updatedNote.id)
+        const updatedNote = await updateNote(authToken, selectedNoteId, payload)
+        await loadWorkspace(authToken, selectedCampaignId, updatedNote.id)
       }
     } catch (saveError) {
       setError(
@@ -260,7 +511,7 @@ function App() {
   }
 
   const handleDeleteNote = async () => {
-    if (!selectedNoteId) {
+    if (!authToken || !selectedCampaignId || !selectedNoteId) {
       return
     }
 
@@ -268,8 +519,8 @@ function App() {
     setIsDeleting(true)
 
     try {
-      await deleteNote(selectedNoteId)
-      await loadWorkspace(null)
+      await deleteNote(authToken, selectedNoteId)
+      await loadWorkspace(authToken, selectedCampaignId, null)
     } catch (deleteError) {
       setError(
         deleteError instanceof Error
@@ -281,12 +532,341 @@ function App() {
     }
   }
 
-  if (isLoading || !overview) {
+  const completeAuthentication = useCallback(
+    async (token: string, nextOwner: OwnerAccount) => {
+      localStorage.setItem(authTokenStorageKey, token)
+      setAuthToken(token)
+      setOwner(nextOwner)
+      await loadCampaigns(token)
+    },
+    [loadCampaigns],
+  )
+
+  const handleSubmitAuth = async () => {
+    setError(null)
+    setIsSubmittingAuth(true)
+
+    try {
+      if (isRegisterMode) {
+        const session = await registerOwner(registerDraft)
+        await completeAuthentication(session.token, session.owner)
+      } else {
+        const session = await loginOwner(loginDraft)
+        await completeAuthentication(session.token, session.owner)
+      }
+    } catch (authError) {
+      setError(
+        authError instanceof Error
+          ? authError.message
+          : 'Could not complete owner authentication.',
+      )
+    } finally {
+      setIsSubmittingAuth(false)
+      setIsBootstrapping(false)
+    }
+  }
+
+  const handleLogout = async () => {
+    if (authToken) {
+      try {
+        await logoutOwner(authToken)
+      } catch {
+        // Intentionally ignore logout failures because local sign-out should still work.
+      }
+    }
+
+    clearSession()
+    setError(null)
+    setIsRegisterMode(false)
+  }
+
+  const handleOpenCampaignCreate = () => {
+    setCampaignDraft(createCampaignDraft())
+    setMemberships([])
+    setCampaignFormMode('create')
+    setError(null)
+  }
+
+  const handleOpenCampaignSettings = () => {
+    setCampaignDraft(createCampaignDraft(selectedCampaign))
+    setCampaignFormMode('edit')
+    setError(null)
+  }
+
+  const handleCancelCampaignForm = () => {
+    setCampaignDraft(createCampaignDraft(selectedCampaign))
+    setCampaignFormMode(campaigns.length === 0 ? 'create' : 'closed')
+    setError(null)
+  }
+
+  const handleSaveCampaign = async () => {
+    if (!authToken) {
+      return
+    }
+
+    setError(null)
+    setIsSavingCampaign(true)
+
+    try {
+      const payload = createCampaignPayload(campaignDraft)
+
+      if (campaignFormMode === 'create') {
+        const createdCampaign = await createCampaign(authToken, payload)
+        await loadCampaigns(authToken, createdCampaign.id)
+      } else if (campaignFormMode === 'edit' && selectedCampaignId) {
+        const updatedCampaign = await updateCampaign(
+          authToken,
+          selectedCampaignId,
+          payload,
+        )
+        await loadCampaigns(authToken, updatedCampaign.id)
+      }
+
+      setCampaignFormMode('closed')
+    } catch (campaignError) {
+      setError(
+        campaignError instanceof Error
+          ? campaignError.message
+          : 'Could not save the campaign.',
+      )
+    } finally {
+      setIsSavingCampaign(false)
+    }
+  }
+
+  const handleSelectCampaign = async (campaignId: string) => {
+    if (!authToken) {
+      return
+    }
+
+    setCampaignFormMode('closed')
+    setMemberships([])
+    await loadWorkspace(authToken, campaignId)
+  }
+
+  if (isBootstrapping) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
         <Stack spacing={2} sx={{ alignItems: 'center' }}>
           <CircularProgress />
-          <Typography color="text.secondary">Loading notes workspace...</Typography>
+          <Typography color="text.secondary">Loading owner workspace...</Typography>
+        </Stack>
+      </Box>
+    )
+  }
+
+  if (!owner || !authToken) {
+    return (
+      <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: 3 }}>
+        <Container maxWidth="sm">
+          <Stack spacing={3}>
+            <Card sx={{ borderRadius: heroCardRadius }}>
+              <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                <Stack spacing={3}>
+                  <Box>
+                    <Typography
+                      variant="overline"
+                      sx={{ color: 'text.secondary', letterSpacing: '0.18em' }}
+                    >
+                      Campaign owner access
+                    </Typography>
+                    <Typography variant="h3" sx={{ mt: 1 }}>
+                      {isRegisterMode ? 'Create your owner account' : 'Sign in to your campaigns'}
+                    </Typography>
+                    <Typography color="text.secondary" sx={{ mt: 2 }}>
+                      Finish setting up campaigns, manage campaign details, and keep note
+                      workflows scoped to the right table.
+                    </Typography>
+                  </Box>
+
+                  {error ? (
+                    <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
+                      {error}
+                    </Alert>
+                  ) : null}
+
+                  {isRegisterMode ? (
+                    <TextField
+                      label="Owner display name"
+                      value={registerDraft.displayName}
+                      onChange={(event) =>
+                        setRegisterDraft((currentDraft) => ({
+                          ...currentDraft,
+                          displayName: event.target.value,
+                        }))
+                      }
+                    />
+                  ) : null}
+
+                  <TextField
+                    label="Email"
+                    type="email"
+                    value={isRegisterMode ? registerDraft.email : loginDraft.email}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      if (isRegisterMode) {
+                        setRegisterDraft((currentDraft) => ({
+                          ...currentDraft,
+                          email: value,
+                        }))
+                      } else {
+                        setLoginDraft((currentDraft) => ({
+                          ...currentDraft,
+                          email: value,
+                        }))
+                      }
+                    }}
+                  />
+
+                  <TextField
+                    label="Password"
+                    type="password"
+                    value={isRegisterMode ? registerDraft.password : loginDraft.password}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      if (isRegisterMode) {
+                        setRegisterDraft((currentDraft) => ({
+                          ...currentDraft,
+                          password: value,
+                        }))
+                      } else {
+                        setLoginDraft((currentDraft) => ({
+                          ...currentDraft,
+                          password: value,
+                        }))
+                      }
+                    }}
+                  />
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      onClick={handleSubmitAuth}
+                      disabled={isSubmittingAuth}
+                    >
+                      {isSubmittingAuth
+                        ? isRegisterMode
+                          ? 'Creating account...'
+                          : 'Signing in...'
+                        : isRegisterMode
+                          ? 'Create owner account'
+                          : 'Sign in'}
+                    </Button>
+                    <Button
+                      variant="text"
+                      onClick={() => {
+                        setError(null)
+                        setIsRegisterMode((current) => !current)
+                      }}
+                    >
+                      {isRegisterMode
+                        ? 'Already have an account? Sign in'
+                        : 'Need an account? Create one'}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Stack>
+        </Container>
+      </Box>
+    )
+  }
+
+  if (campaigns.length === 0 || (!selectedCampaignId && campaignFormMode === 'create')) {
+    return (
+      <Box component="main" sx={{ minHeight: '100vh', py: { xs: 4, md: 6 } }}>
+        <Container maxWidth="md">
+          <Stack spacing={3}>
+            <Card sx={{ borderRadius: heroCardRadius }}>
+              <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                <Stack spacing={3}>
+                  <Box>
+                    <Typography
+                      variant="overline"
+                      sx={{ color: 'text.secondary', letterSpacing: '0.18em' }}
+                    >
+                      Owner setup
+                    </Typography>
+                    <Typography variant="h3" sx={{ mt: 1 }}>
+                      Create your first campaign
+                    </Typography>
+                    <Typography color="text.secondary" sx={{ mt: 2 }}>
+                      Start with the campaign shell first, then you can manage notes,
+                      settings, and invite flows from the same workspace.
+                    </Typography>
+                  </Box>
+
+                  {error ? (
+                    <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
+                      {error}
+                    </Alert>
+                  ) : null}
+
+                  <TextField
+                    label="Campaign name"
+                    value={campaignDraft.name}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('name', event.target.value)
+                    }
+                  />
+                  <TextField
+                    label="Tagline"
+                    value={campaignDraft.tagline}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('tagline', event.target.value)
+                    }
+                  />
+                  <TextField
+                    label="System"
+                    value={campaignDraft.system}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('system', event.target.value)
+                    }
+                  />
+                  <TextField
+                    label="Setting"
+                    value={campaignDraft.setting}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('setting', event.target.value)
+                    }
+                  />
+                  <TextField
+                    label="Next session"
+                    value={campaignDraft.nextSession}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('nextSession', event.target.value)
+                    }
+                    helperText="Optional. Use an ISO timestamp or plain text date."
+                  />
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      onClick={handleSaveCampaign}
+                      disabled={isSavingCampaign}
+                    >
+                      {isSavingCampaign ? 'Creating campaign...' : 'Create campaign'}
+                    </Button>
+                    <Button variant="text" onClick={handleLogout}>
+                      Sign out
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Stack>
+        </Container>
+      </Box>
+    )
+  }
+
+  if (isLoadingWorkspace || !overview || !selectedCampaign) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
+        <Stack spacing={2} sx={{ alignItems: 'center' }}>
+          <CircularProgress />
+          <Typography color="text.secondary">Loading campaign workspace...</Typography>
         </Stack>
       </Box>
     )
@@ -317,7 +897,7 @@ function App() {
                       variant="overline"
                       sx={{ color: 'rgba(255, 255, 255, 0.72)', letterSpacing: '0.18em' }}
                     >
-                      Notes MVP
+                      Campaign workspace
                     </Typography>
                     <Typography
                       variant="h2"
@@ -329,42 +909,57 @@ function App() {
                       {overview.campaign.tagline}
                     </Typography>
                     <Typography sx={{ mt: 2, color: 'rgba(255, 255, 255, 0.65)' }}>
-                      One campaign, one note type, local-only persistence, and a real
-                      create-edit-delete workflow.
+                      Signed in as {owner.displayName}. Campaigns, settings, and notes all
+                      stay scoped to the owner-selected campaign.
                     </Typography>
                   </Box>
 
                   <Stack
                     spacing={1.5}
                     sx={{
-                      minWidth: { md: 260 },
+                      minWidth: { md: 300 },
                       borderRadius: surfaceRadius,
                       p: 2.5,
                       bgcolor: 'rgba(15, 23, 42, 0.36)',
                       backdropFilter: 'blur(12px)',
                     }}
                   >
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                      <EventRoundedIcon color="inherit" />
-                      <Typography sx={{ fontWeight: 700 }}>Next session</Typography>
-                    </Stack>
-                    <Typography variant="h6">
-                      {overview.campaign.nextSession
-                        ? formatSessionDate(overview.campaign.nextSession)
-                        : 'Not scheduled'}
-                    </Typography>
+                    <TextField
+                      select
+                      label="Campaign"
+                      value={selectedCampaignId}
+                      onChange={(event) => void handleSelectCampaign(event.target.value)}
+                    >
+                      {campaigns.map((campaign) => (
+                        <MenuItem key={campaign.id} value={campaign.id}>
+                          {campaign.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
                     <Typography color="rgba(255, 255, 255, 0.72)">
                       {overview.campaign.setting} • {overview.campaign.system}
                     </Typography>
-                    <Button
-                      variant="contained"
-                      color="secondary"
-                      startIcon={<AddRoundedIcon />}
-                      onClick={handleStartNote}
-                      sx={{ mt: 1, alignSelf: 'flex-start' }}
-                    >
-                      New note
-                    </Button>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                      <Button variant="contained" onClick={handleOpenCampaignCreate}>
+                        New campaign
+                      </Button>
+                      <Button variant="outlined" color="inherit" onClick={handleOpenCampaignSettings}>
+                        Campaign settings
+                      </Button>
+                    </Stack>
+                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                      <Button
+                        variant="contained"
+                        color="secondary"
+                        startIcon={<AddRoundedIcon />}
+                        onClick={handleStartNote}
+                      >
+                        New note
+                      </Button>
+                      <Button variant="text" color="inherit" onClick={handleLogout}>
+                        Sign out
+                      </Button>
+                    </Stack>
                   </Stack>
                 </Stack>
               </Stack>
@@ -375,6 +970,108 @@ function App() {
             <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
               {error}
             </Alert>
+          ) : null}
+
+          {campaignFormMode !== 'closed' ? (
+            <Card sx={{ borderRadius: surfaceRadius }}>
+              <CardContent sx={{ p: 3 }}>
+                <Stack spacing={2.5}>
+                  <Box>
+                    <Typography variant="h5">
+                      {campaignFormMode === 'create'
+                        ? 'Create campaign'
+                        : 'Edit campaign settings'}
+                    </Typography>
+                    <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                      {campaignFormMode === 'create'
+                        ? 'Set up a campaign shell before you invite anyone else in.'
+                        : 'Update campaign metadata and review the owner-side membership list.'}
+                    </Typography>
+                  </Box>
+
+                  <TextField
+                    label="Campaign name"
+                    value={campaignDraft.name}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('name', event.target.value)
+                    }
+                  />
+                  <TextField
+                    label="Tagline"
+                    value={campaignDraft.tagline}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('tagline', event.target.value)
+                    }
+                  />
+                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
+                    <TextField
+                      fullWidth
+                      label="System"
+                      value={campaignDraft.system}
+                      onChange={(event) =>
+                        handleCampaignDraftChange('system', event.target.value)
+                      }
+                    />
+                    <TextField
+                      fullWidth
+                      label="Setting"
+                      value={campaignDraft.setting}
+                      onChange={(event) =>
+                        handleCampaignDraftChange('setting', event.target.value)
+                      }
+                    />
+                  </Stack>
+                  <TextField
+                    label="Next session"
+                    value={campaignDraft.nextSession}
+                    onChange={(event) =>
+                      handleCampaignDraftChange('nextSession', event.target.value)
+                    }
+                    helperText="Optional. Use an ISO timestamp or plain text date."
+                  />
+
+                  {campaignFormMode === 'edit' ? (
+                    <Box>
+                      <Typography variant="subtitle1">Current memberships</Typography>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        useFlexGap
+                        sx={{ mt: 1, flexWrap: 'wrap' }}
+                      >
+                        {currentCampaignMemberships.map((membership) => (
+                          <Chip
+                            key={membership.id}
+                            label={`${membership.displayName} (${membership.role})`}
+                            color={membership.role === 'owner' ? 'secondary' : 'default'}
+                          />
+                        ))}
+                      </Stack>
+                    </Box>
+                  ) : null}
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      startIcon={<SaveRoundedIcon />}
+                      onClick={handleSaveCampaign}
+                      disabled={isSavingCampaign}
+                    >
+                      {isSavingCampaign
+                        ? campaignFormMode === 'create'
+                          ? 'Creating campaign...'
+                          : 'Saving settings...'
+                        : campaignFormMode === 'create'
+                          ? 'Create campaign'
+                          : 'Save campaign settings'}
+                    </Button>
+                    <Button variant="text" onClick={handleCancelCampaignForm}>
+                      Cancel
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
           ) : null}
 
           <Box
@@ -465,8 +1162,7 @@ function App() {
                     <Box>
                       <Typography variant="h5">Notes</Typography>
                       <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                        This is the working note list backed by the real API and SQLite
-                        persistence.
+                        The note workflow now runs inside the selected owner campaign.
                       </Typography>
                     </Box>
                     <Button
@@ -480,7 +1176,8 @@ function App() {
 
                   {notes.length === 0 ? (
                     <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                      No notes yet. Create the first one to start using the MVP.
+                      No notes yet in this campaign. Create the first one to start using the
+                      workspace.
                     </Alert>
                   ) : (
                     <List disablePadding sx={{ display: 'grid', gap: 1.5 }}>
@@ -560,8 +1257,8 @@ function App() {
                         {isCreating ? 'Create note' : 'Edit note'}
                       </Typography>
                       <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                        The MVP note contract is title, body, tags, status, and an
-                        optional session name.
+                        Every save is scoped to {overview.campaign.name}, so each campaign can
+                        keep its own note trail.
                       </Typography>
                     </Box>
 
@@ -624,7 +1321,7 @@ function App() {
                       <Typography color="text.secondary" variant="body2">
                         {selectedNote && !isCreating
                           ? `Last updated ${formatTimestamp(selectedNote.updatedAt)}`
-                          : 'New notes are saved straight to local SQLite storage.'}
+                          : 'New notes are saved straight to the selected campaign.'}
                       </Typography>
 
                       <Stack direction="row" spacing={1}>
@@ -657,8 +1354,8 @@ function App() {
                   <Stack spacing={2}>
                     <Typography variant="h5">Recent activity</Typography>
                     <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                      The API contract is now stable enough for real CRUD work and test
-                      coverage.
+                      The most recently updated notes for {overview.campaign.name} show up
+                      here.
                     </Typography>
                     {overview.recentNotes.length === 0 ? (
                       <Typography color="text.secondary">
