@@ -2,6 +2,8 @@ import { z } from 'zod'
 import {
   noteStatuses,
   type CampaignInput,
+  type OwnerLoginInput,
+  type OwnerRegistrationInput,
   type NoteInput,
 } from './types.js'
 
@@ -77,6 +79,39 @@ const campaignPayloadSchema = z.object({
   nextSession: nullableTrimmedString('Next session', 120),
 })
 
+const ownerRegistrationSchema = z.object({
+  displayName: z
+    .string()
+    .trim()
+    .min(1, 'Display name is required.')
+    .max(80, 'Display name must be 80 characters or fewer.'),
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Email is required.')
+    .email('Email must be valid.')
+    .max(320, 'Email must be 320 characters or fewer.')
+    .transform((value) => value.toLowerCase()),
+  password: z
+    .string()
+    .min(10, 'Password must be at least 10 characters long.')
+    .max(200, 'Password must be 200 characters or fewer.'),
+})
+
+const ownerLoginSchema = z.object({
+  email: z
+    .string()
+    .trim()
+    .min(1, 'Email is required.')
+    .email('Email must be valid.')
+    .max(320, 'Email must be 320 characters or fewer.')
+    .transform((value) => value.toLowerCase()),
+  password: z
+    .string()
+    .min(1, 'Password is required.')
+    .max(200, 'Password must be 200 characters or fewer.'),
+})
+
 function mapValidationResult<T>(
   result:
     | { success: true; data: T }
@@ -107,4 +142,20 @@ export function validateCampaignInput(
   | { success: true; data: CampaignInput }
   | { success: false; errors: string[] } {
   return mapValidationResult(campaignPayloadSchema.safeParse(input))
+}
+
+export function validateOwnerRegistrationInput(
+  input: unknown,
+):
+  | { success: true; data: OwnerRegistrationInput }
+  | { success: false; errors: string[] } {
+  return mapValidationResult(ownerRegistrationSchema.safeParse(input))
+}
+
+export function validateOwnerLoginInput(
+  input: unknown,
+):
+  | { success: true; data: OwnerLoginInput }
+  | { success: false; errors: string[] } {
+  return mapValidationResult(ownerLoginSchema.safeParse(input))
 }

@@ -1,5 +1,11 @@
 import Database from 'better-sqlite3'
-import { randomUUID } from 'node:crypto'
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  scryptSync,
+  timingSafeEqual,
+} from 'node:crypto'
 import { mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -15,6 +21,8 @@ import type {
   Note,
   NoteInput,
   NoteStats,
+  OwnerAccount,
+  OwnerRegistrationInput,
 } from './types.js'
 
 interface CampaignRow {
@@ -52,17 +60,39 @@ interface NoteRow {
   updated_at: string
 }
 
+interface OwnerAccountRow {
+  id: string
+  email: string
+  display_name: string
+  password_hash: string
+  created_at: string
+  updated_at: string
+}
+
 interface CreateNoteStoreOptions {
   dbPath?: string
 }
 
+const sessionTtlMs = 1000 * 60 * 60 * 24 * 30
+
 export interface NoteStore {
   listCampaigns(): CampaignSummary[]
-  getPrimaryCampaign(): CampaignSummary
+  listOwnedCampaigns(ownerUserId: string): CampaignSummary[]
+  getPrimaryCampaign(ownerUserId?: string): CampaignSummary
   getCampaign(campaignId: string): CampaignSummary | null
-  createCampaign(input: CampaignInput): CampaignSummary
-  updateCampaign(campaignId: string, input: CampaignInput): CampaignSummary | null
+  createCampaign(input: CampaignInput, owner: OwnerAccount): CampaignSummary
+  updateCampaign(
+    campaignId: string,
+    input: CampaignInput,
+    ownerUserId?: string,
+  ): CampaignSummary | null
   listCampaignMemberships(campaignId: string): CampaignMembership[]
+  userOwnsCampaign(ownerUserId: string, campaignId: string): boolean
+  createOwnerAccount(input: OwnerRegistrationInput): OwnerAccount | null
+  authenticateOwner(email: string, password: string): OwnerAccount | null
+  getOwnerBySessionToken(token: string): OwnerAccount | null
+  createOwnerSession(ownerUserId: string): string
+  deleteOwnerSession(token: string): void
   listNotes(campaignId?: string): Note[]
   listRecentNotes(limit: number, campaignId?: string): Note[]
   getNote(noteId: string): Note | null
@@ -82,6 +112,37 @@ export function resolveNoteDbPath(
   options: CreateNoteStoreOptions = {},
 ): string {
   return options.dbPath ?? process.env.NOTES_DB_PATH ?? defaultDbPath
+}
+
+function createPasswordHash(password: string) {
+  const salt = randomBytes(16).toString('hex')
+  const derivedKey = scryptSync(password, salt, 64).toString('hex')
+  return `${salt}:${derivedKey}`
+}
+
+function verifyPassword(password: string, storedHash: string) {
+  const [salt, expectedHex] = storedHash.split(':')
+
+  if (!salt || !expectedHex) {
+    return false
+  }
+
+  const provided = Buffer.from(scryptSync(password, salt, 64))
+  const expected = Buffer.from(expectedHex, 'hex')
+
+  if (provided.length !== expected.length) {
+    return false
+  }
+
+  return timingSafeEqual(provided, expected)
+}
+
+function createSessionToken() {
+  return randomBytes(24).toString('hex')
+}
+
+function hashSessionToken(token: string) {
+  return createHash('sha256').update(token).digest('hex')
 }
 
 function mapCampaignRow(row: CampaignRow): CampaignSummary {
@@ -125,6 +186,16 @@ function mapNoteRow(row: NoteRow): Note {
   }
 }
 
+function mapOwnerAccountRow(row: OwnerAccountRow): OwnerAccount {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
 export function createNoteStore(
   options: CreateNoteStoreOptions = {},
 ): NoteStore {
@@ -138,6 +209,26 @@ export function createNoteStore(
   database.pragma('foreign_keys = ON')
 
   database.exec(`
+    CREATE TABLE IF NOT EXISTS owner_accounts (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS owner_sessions (
+      id TEXT PRIMARY KEY,
+      owner_user_id TEXT NOT NULL REFERENCES owner_accounts(id),
+      token_hash TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_owner_sessions_owner_user_id
+    ON owner_sessions(owner_user_id);
+
     CREATE TABLE IF NOT EXISTS campaigns (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -155,7 +246,7 @@ export function createNoteStore(
       campaign_id TEXT NOT NULL REFERENCES campaigns(id),
       role TEXT NOT NULL,
       display_name TEXT NOT NULL,
-      user_id TEXT,
+      user_id TEXT REFERENCES owner_accounts(id),
       guest_token_id TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
@@ -164,9 +255,12 @@ export function createNoteStore(
     CREATE INDEX IF NOT EXISTS idx_campaign_memberships_campaign_id
     ON campaign_memberships(campaign_id);
 
+    CREATE INDEX IF NOT EXISTS idx_campaign_memberships_user_id
+    ON campaign_memberships(user_id);
+
     CREATE TABLE IF NOT EXISTS notes (
       id TEXT PRIMARY KEY,
-      campaign_id TEXT NOT NULL,
+      campaign_id TEXT NOT NULL REFERENCES campaigns(id),
       title TEXT NOT NULL,
       body TEXT NOT NULL,
       status TEXT NOT NULL,
@@ -178,6 +272,21 @@ export function createNoteStore(
 
     CREATE INDEX IF NOT EXISTS idx_notes_campaign_updated_at
     ON notes(campaign_id, updated_at DESC);
+  `)
+
+  const selectCampaignById = database.prepare(`
+    SELECT
+      id,
+      name,
+      tagline,
+      system,
+      setting,
+      next_session,
+      archived_at,
+      created_at,
+      updated_at
+    FROM campaigns
+    WHERE id = ?
   `)
 
   const selectAllCampaigns = database.prepare(`
@@ -198,37 +307,50 @@ export function createNoteStore(
       created_at ASC
   `)
 
-  const selectCampaignById = database.prepare(`
+  const selectOwnedCampaigns = database.prepare(`
     SELECT
-      id,
-      name,
-      tagline,
-      system,
-      setting,
-      next_session,
-      archived_at,
-      created_at,
-      updated_at
+      campaigns.id,
+      campaigns.name,
+      campaigns.tagline,
+      campaigns.system,
+      campaigns.setting,
+      campaigns.next_session,
+      campaigns.archived_at,
+      campaigns.created_at,
+      campaigns.updated_at
     FROM campaigns
-    WHERE id = ?
+    INNER JOIN campaign_memberships
+      ON campaign_memberships.campaign_id = campaigns.id
+    WHERE
+      campaigns.archived_at IS NULL
+      AND campaign_memberships.user_id = ?
+      AND campaign_memberships.role = 'owner'
+    ORDER BY
+      CASE WHEN campaigns.id = '${defaultCampaignId}' THEN 0 ELSE 1 END,
+      campaigns.created_at ASC
   `)
 
-  const selectPrimaryCampaign = database.prepare(`
+  const selectPrimaryOwnedCampaign = database.prepare(`
     SELECT
-      id,
-      name,
-      tagline,
-      system,
-      setting,
-      next_session,
-      archived_at,
-      created_at,
-      updated_at
+      campaigns.id,
+      campaigns.name,
+      campaigns.tagline,
+      campaigns.system,
+      campaigns.setting,
+      campaigns.next_session,
+      campaigns.archived_at,
+      campaigns.created_at,
+      campaigns.updated_at
     FROM campaigns
-    WHERE archived_at IS NULL
+    INNER JOIN campaign_memberships
+      ON campaign_memberships.campaign_id = campaigns.id
+    WHERE
+      campaigns.archived_at IS NULL
+      AND campaign_memberships.user_id = ?
+      AND campaign_memberships.role = 'owner'
     ORDER BY
-      CASE WHEN id = '${defaultCampaignId}' THEN 0 ELSE 1 END,
-      created_at ASC
+      CASE WHEN campaigns.id = '${defaultCampaignId}' THEN 0 ELSE 1 END,
+      campaigns.created_at ASC
     LIMIT 1
   `)
 
@@ -285,6 +407,20 @@ export function createNoteStore(
       created_at ASC
   `)
 
+  const selectOwnerMembershipByCampaignAndUser = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      role,
+      display_name,
+      user_id,
+      guest_token_id,
+      created_at,
+      updated_at
+    FROM campaign_memberships
+    WHERE campaign_id = ? AND user_id = ? AND role = 'owner'
+  `)
+
   const insertMembership = database.prepare(`
     INSERT INTO campaign_memberships (
       id,
@@ -307,10 +443,104 @@ export function createNoteStore(
     )
   `)
 
+  const updateUnclaimedDefaultMembership = database.prepare(`
+    UPDATE campaign_memberships
+    SET
+      user_id = @user_id,
+      display_name = @display_name,
+      updated_at = @updated_at
+    WHERE
+      campaign_id = @campaign_id
+      AND role = 'owner'
+      AND user_id IS NULL
+  `)
+
   const countOwnerMemberships = database.prepare(`
     SELECT COUNT(*) AS count
     FROM campaign_memberships
     WHERE campaign_id = ? AND role = 'owner'
+  `)
+
+  const selectOwnerAccountById = database.prepare(`
+    SELECT
+      id,
+      email,
+      display_name,
+      password_hash,
+      created_at,
+      updated_at
+    FROM owner_accounts
+    WHERE id = ?
+  `)
+
+  const selectOwnerAccountByEmail = database.prepare(`
+    SELECT
+      id,
+      email,
+      display_name,
+      password_hash,
+      created_at,
+      updated_at
+    FROM owner_accounts
+    WHERE email = ?
+  `)
+
+  const insertOwnerAccount = database.prepare(`
+    INSERT INTO owner_accounts (
+      id,
+      email,
+      display_name,
+      password_hash,
+      created_at,
+      updated_at
+    ) VALUES (
+      @id,
+      @email,
+      @display_name,
+      @password_hash,
+      @created_at,
+      @updated_at
+    )
+  `)
+
+  const insertOwnerSession = database.prepare(`
+    INSERT INTO owner_sessions (
+      id,
+      owner_user_id,
+      token_hash,
+      created_at,
+      expires_at
+    ) VALUES (
+      @id,
+      @owner_user_id,
+      @token_hash,
+      @created_at,
+      @expires_at
+    )
+  `)
+
+  const selectOwnerBySessionToken = database.prepare(`
+    SELECT
+      owner_accounts.id,
+      owner_accounts.email,
+      owner_accounts.display_name,
+      owner_accounts.password_hash,
+      owner_accounts.created_at,
+      owner_accounts.updated_at
+    FROM owner_sessions
+    INNER JOIN owner_accounts
+      ON owner_accounts.id = owner_sessions.owner_user_id
+    WHERE owner_sessions.token_hash = ? AND owner_sessions.expires_at > ?
+  `)
+
+  const deleteOwnerSessionByTokenHash = database.prepare(`
+    DELETE FROM owner_sessions
+    WHERE token_hash = ?
+  `)
+
+  const deleteExpiredOwnerSessions = database.prepare(`
+    DELETE FROM owner_sessions
+    WHERE expires_at <= ?
   `)
 
   const selectNotesByCampaignId = database.prepare(`
@@ -427,51 +657,96 @@ export function createNoteStore(
     }
   })
 
-  const createCampaignTransaction = database.transaction((input: CampaignInput) => {
-    const timestamp = new Date().toISOString()
-    const campaign: CampaignSummary = {
-      id: randomUUID(),
-      name: input.name,
-      tagline: input.tagline,
-      system: input.system,
-      setting: input.setting,
-      nextSession: input.nextSession,
-      archivedAt: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }
+  const createOwnerAccountTransaction = database.transaction(
+    (input: OwnerRegistrationInput) => {
+      const existing = selectOwnerAccountByEmail.get(input.email) as
+        | OwnerAccountRow
+        | undefined
 
-    insertCampaign.run({
-      id: campaign.id,
-      name: campaign.name,
-      tagline: campaign.tagline,
-      system: campaign.system,
-      setting: campaign.setting,
-      next_session: campaign.nextSession,
-      archived_at: campaign.archivedAt,
-      created_at: campaign.createdAt,
-      updated_at: campaign.updatedAt,
-    })
+      if (existing) {
+        return null
+      }
 
-    insertMembership.run({
-      id: randomUUID(),
-      campaign_id: campaign.id,
-      role: 'owner',
-      display_name: defaultOwnerDisplayName,
-      user_id: null,
-      guest_token_id: null,
-      created_at: timestamp,
-      updated_at: timestamp,
-    })
+      const timestamp = new Date().toISOString()
+      const owner: OwnerAccount = {
+        id: randomUUID(),
+        email: input.email,
+        displayName: input.displayName,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
 
-    return campaign
-  })
+      insertOwnerAccount.run({
+        id: owner.id,
+        email: owner.email,
+        display_name: owner.displayName,
+        password_hash: createPasswordHash(input.password),
+        created_at: owner.createdAt,
+        updated_at: owner.updatedAt,
+      })
+
+      updateUnclaimedDefaultMembership.run({
+        user_id: owner.id,
+        display_name: owner.displayName,
+        updated_at: timestamp,
+        campaign_id: defaultCampaign.id,
+      })
+
+      return owner
+    },
+  )
+
+  const createCampaignTransaction = database.transaction(
+    (input: CampaignInput, owner: OwnerAccount) => {
+      const timestamp = new Date().toISOString()
+      const campaign: CampaignSummary = {
+        id: randomUUID(),
+        name: input.name,
+        tagline: input.tagline,
+        system: input.system,
+        setting: input.setting,
+        nextSession: input.nextSession,
+        archivedAt: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+
+      insertCampaign.run({
+        id: campaign.id,
+        name: campaign.name,
+        tagline: campaign.tagline,
+        system: campaign.system,
+        setting: campaign.setting,
+        next_session: campaign.nextSession,
+        archived_at: campaign.archivedAt,
+        created_at: campaign.createdAt,
+        updated_at: campaign.updatedAt,
+      })
+
+      insertMembership.run({
+        id: randomUUID(),
+        campaign_id: campaign.id,
+        role: 'owner',
+        display_name: owner.displayName,
+        user_id: owner.id,
+        guest_token_id: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      })
+
+      return campaign
+    },
+  )
 
   const updateCampaignTransaction = database.transaction(
-    (campaignId: string, input: CampaignInput) => {
+    (campaignId: string, input: CampaignInput, ownerUserId?: string) => {
       const existing = selectCampaignById.get(campaignId) as CampaignRow | undefined
 
       if (!existing || existing.archived_at !== null) {
+        return null
+      }
+
+      if (ownerUserId && !selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
         return null
       }
 
@@ -502,19 +777,37 @@ export function createNoteStore(
   const listCampaigns = () =>
     (selectAllCampaigns.all() as CampaignRow[]).map((row) => mapCampaignRow(row))
 
+  const listOwnedCampaigns = (ownerUserId: string) =>
+    (selectOwnedCampaigns.all(ownerUserId) as CampaignRow[]).map((row) =>
+      mapCampaignRow(row),
+    )
+
   const getCampaign = (campaignId: string) => {
     const row = selectCampaignById.get(campaignId) as CampaignRow | undefined
     return row ? mapCampaignRow(row) : null
   }
 
-  const getPrimaryCampaign = () => {
-    const row = selectPrimaryCampaign.get() as CampaignRow | undefined
+  const getPrimaryCampaign = (ownerUserId?: string) => {
+    if (ownerUserId) {
+      const row = selectPrimaryOwnedCampaign.get(ownerUserId) as
+        | CampaignRow
+        | undefined
 
-    if (!row) {
+      if (!row) {
+        throw new Error('No owned campaigns are available.')
+      }
+
+      return mapCampaignRow(row)
+    }
+
+    const campaigns = listCampaigns()
+    const primaryCampaign = campaigns[0]
+
+    if (!primaryCampaign) {
       throw new Error('No active campaigns are available.')
     }
 
-    return mapCampaignRow(row)
+    return primaryCampaign
   }
 
   const requireCampaign = (campaignId?: string | null) => {
@@ -583,19 +876,68 @@ export function createNoteStore(
 
   return {
     listCampaigns,
+    listOwnedCampaigns,
     getPrimaryCampaign,
     getCampaign,
-    createCampaign(input) {
-      return createCampaignTransaction(input)
+    createCampaign(input, owner) {
+      return createCampaignTransaction(input, owner)
     },
-    updateCampaign(campaignId, input) {
-      return updateCampaignTransaction(campaignId, input)
+    updateCampaign(campaignId, input, ownerUserId) {
+      return updateCampaignTransaction(campaignId, input, ownerUserId)
     },
     listCampaignMemberships(campaignId) {
       requireCampaign(campaignId)
       return (
         selectMembershipsByCampaignId.all(campaignId) as CampaignMembershipRow[]
       ).map((row) => mapMembershipRow(row))
+    },
+    userOwnsCampaign(ownerUserId, campaignId) {
+      return Boolean(selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))
+    },
+    createOwnerAccount(input) {
+      return createOwnerAccountTransaction(input)
+    },
+    authenticateOwner(email, password) {
+      const row = selectOwnerAccountByEmail.get(email) as OwnerAccountRow | undefined
+
+      if (!row || !verifyPassword(password, row.password_hash)) {
+        return null
+      }
+
+      return mapOwnerAccountRow(row)
+    },
+    getOwnerBySessionToken(token) {
+      deleteExpiredOwnerSessions.run(new Date().toISOString())
+      const row = selectOwnerBySessionToken.get(
+        hashSessionToken(token),
+        new Date().toISOString(),
+      ) as OwnerAccountRow | undefined
+
+      return row ? mapOwnerAccountRow(row) : null
+    },
+    createOwnerSession(ownerUserId) {
+      const owner = selectOwnerAccountById.get(ownerUserId) as OwnerAccountRow | undefined
+
+      if (!owner) {
+        throw new Error(`Owner "${ownerUserId}" was not found.`)
+      }
+
+      const token = createSessionToken()
+      const createdAt = new Date().toISOString()
+      const expiresAt = new Date(Date.now() + sessionTtlMs).toISOString()
+
+      insertOwnerSession.run({
+        id: randomUUID(),
+        owner_user_id: owner.id,
+        token_hash: hashSessionToken(token),
+        created_at: createdAt,
+        expires_at: expiresAt,
+      })
+
+      return token
+    },
+    deleteOwnerSession(token) {
+      deleteOwnerSessionByTokenHash.run(hashSessionToken(token))
     },
     listNotes,
     listRecentNotes(limit, campaignId) {

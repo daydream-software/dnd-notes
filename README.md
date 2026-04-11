@@ -49,11 +49,10 @@ npm run reset:data
 
 Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an alternate database file without changing code.
 
-## MVP note model
+## Current note model
 
-The first real note contract is intentionally small:
-
-- every note belongs to the single MVP campaign, `moonshae-ledger`
+- every note belongs to a campaign
+- owners authenticate before using campaign, overview, and note endpoints
 - notes can optionally reference a session by name
 - the editable fields are `title`, `body`, `tags`, `status`, and `sessionName`
 - note timestamps are managed by the API as `createdAt` and `updatedAt`
@@ -61,6 +60,10 @@ The first real note contract is intentionally small:
 ## API
 
 - `GET /health`
+- `POST /api/auth/register`
+- `POST /api/auth/login`
+- `GET /api/auth/session`
+- `POST /api/auth/logout`
 - `GET /api/campaigns`
 - `POST /api/campaigns`
 - `GET /api/campaigns/:campaignId`
@@ -73,12 +76,18 @@ The first real note contract is intentionally small:
 - `PUT /api/notes/:noteId`
 - `DELETE /api/notes/:noteId`
 
+All `/api/campaigns`, `/api/overview`, and `/api/notes` routes require an
+`Authorization: Bearer <token>` header from the owner auth endpoints.
+
 `GET /api/overview` and `GET /api/notes` accept an optional `campaignId` query
-parameter to scope the response to a specific campaign. `POST /api/notes` also
-accepts an optional `campaignId` in the payload.
+parameter to scope the response to a specific owned campaign. `POST /api/notes`
+accepts an optional `campaignId` in the payload and defaults to the owner's
+primary campaign when one is not provided.
 
 ## What works now
 
 - notes persist across API restarts
-- the web app can create, edit, view, and delete notes
+- owners can register, sign in, and resume an existing session
+- owners can create campaigns, edit campaign settings, and view memberships
+- the web app can create, edit, view, and delete notes inside the selected campaign
 - the notes workspace uses the real API instead of static placeholder content

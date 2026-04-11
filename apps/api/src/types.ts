@@ -35,6 +35,25 @@ export interface CampaignMembership {
   updatedAt: string
 }
 
+export interface OwnerAccount {
+  id: string
+  email: string
+  displayName: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OwnerRegistrationInput {
+  displayName: string
+  email: string
+  password: string
+}
+
+export interface OwnerLoginInput {
+  email: string
+  password: string
+}
+
 export interface Note {
   id: string
   campaignId: string
@@ -73,6 +92,15 @@ export interface NotesOverview {
 export interface HealthResponse {
   status: 'ok'
   service: 'dnd-notes-api'
+}
+
+export interface AuthSessionResponse {
+  token: string
+  owner: OwnerAccount
+}
+
+export interface CurrentOwnerResponse {
+  owner: OwnerAccount
 }
 
 export interface CampaignsResponse {
