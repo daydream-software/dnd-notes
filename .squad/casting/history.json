@@ -1,0 +1,22 @@
+{
+  "universe_usage_history": [
+    {
+      "universe": "The Goonies",
+      "assignment_id": "dnd-notes-2026-04-11-initial-team",
+      "used_at": "2026-04-11T19:00:21.594Z"
+    }
+  ],
+  "assignment_cast_snapshots": {
+    "dnd-notes-2026-04-11-initial-team": {
+      "universe": "The Goonies",
+      "agents": {
+        "lead": "Mikey",
+        "frontend": "Stef",
+        "backend": "Data",
+        "tester": "Chunk",
+        "platform": "Brand"
+      },
+      "created_at": "2026-04-11T19:00:21.594Z"
+    }
+  }
+}
