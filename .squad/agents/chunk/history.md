@@ -92,3 +92,18 @@ Chunk initialized as Tester for the initial project squad.
 - ✅ Regression coverage: owner + guest activity, collaborator summaries, membership filter, foreign-membership rejection, claimed-collaborator access all tested
 - Minor coverage gaps (non-blocking): no explicit test for `limit` param; legacy/null-attribution notes not tested in response
 - Frontend/UI slice can be picked up independently against stable `NoteActivityResponse` contract
+
+## 2026-04-12: Issue #28 Frontend Slice Review — APPROVED
+
+- **Verdict:** APPROVED. Stef's tag facets & autocomplete frontend slice meets all acceptance criteria for a thin first slice.
+- Tag facets derived from campaign-scoped `notes` array via `sortTagFacets()` — no cross-campaign scope bleed possible because `notes` state is already campaign-scoped.
+- Issue #27 regression pattern (workspace reload on mode toggle) does NOT apply: `selectedTag` is NOT in `loadWorkspace` deps, and the tag panel is only rendered when `noteBrowseMode === 'notes'`, so tag clicks never trigger a mode switch from sessions→notes that would cascade through `loadWorkspace→loadCampaigns→bootstrap`.
+- Autocomplete uses MUI `Autocomplete` with `freeSolo` + `multiple` + `filterSelectedOptions`; `commitTagInput` on blur prevents lost partial input; `normalizeTagValues` handles comma splitting and case-insensitive dedup.
+- Three clear empty states: no tags ("Tags become quick campaign shelves"), filtered tag with no notes ("No notes use the X tag yet"), and no notes at all.
+- Self-healing: `useEffect` at line 766 auto-clears `selectedTag` when the tag disappears from facets (e.g., after editing/deleting the last note with that tag).
+- Selected note auto-adjusts when tag filter changes the visible list (lines 771–792), avoiding stale editor state.
+- Tag filter cleared on campaign switch (`loadCampaigns` line 660), on "All notes" click, and on session browse click. Survives note saves intentionally.
+- Regression test covers tag list rendering, tag click filtering, autocomplete reuse, count update after save. Existing tests adapted for new Autocomplete chip model (tag display values → chip text).
+- 3 pre-existing test timeouts (onboarding, second campaign, starter pack) confirmed NOT caused by #28 — same tests fail on the commit before Stef's changes.
+- Lint, build both green. New test passes consistently.
+- Non-blocking gaps for later: case-sensitive tag matching (facets/filter use exact match; mixed-case legacy data could surface separate entries), `handleStartNote` doesn't clear `selectedTag` (minor UX papercut), no multi-tag AND filter yet (deferred to search foundation work).
