@@ -157,6 +157,62 @@ Users need to convert guest campaign participation into persistent account membe
 - `apps/web/src/api.ts`
 - `apps/web/src/App.test.tsx`
 
+### 2026-04-12: Issue #27 v1 Architecture APPROVED but Implementation REJECTED
+**By:** Mikey (Lead), Chunk (Lead Reviewer)
+
+**What:**
+Session-based note browsing v1 slice (thinnest architecture):
+- Backend: `listSessionNames()` and `getSessionNotes()` methods on NoteStore
+- API: `GET /api/notes/sessions` (list sessions with counts) and `GET /api/notes/sessions/:sessionId` (fetch session notes)
+- Types synced across workspaces
+- No new schema; reuses existing nullable `session_name` field
+
+**The Verdict: APPROVED for concept, but REJECTED for shipped implementation.**
+
+Chunk identified four critical backend regressions that make endpoints unusable:
+1. Route shadowing: `/api/notes/sessions` consumed as `/api/notes/:noteId=sessions` → returns 404 instead of session list
+2. Double percent-decode: Session detail param manually decoded with `decodeURIComponent()` after Express already decoded it → crashes on session names containing `%` (e.g., "50% done") with URIError 500
+3. Auth regression: Session endpoints use owner-only `resolveOwnedCampaign()` instead of membership-aware auth → blocks claimed collaborators who can access `/api/notes` but fail on `/api/notes/sessions/:sessionId` with 403
+4. Missing regression coverage: No API or web tests added for the new endpoints; UI still renders flat note list
+
+**Why:**
+The concept of lightweight session discovery without schema migration is sound and aligns with the product roadmap (search and filtering before graph relationships). However, the shipped implementation bypassed established auth patterns and introduced integration regressions that must be fixed before merge.
+
+**Revision Owner:** Data (backend fixes)
+**Follow-on UI Work:** Stef (if needed, after backend fixes)
+
+**Status:** REQUIRES REVISION — concept approved, implementation rejected
+
+### 2026-04-12: Issue #23 — Membership Consolidation (Attribution-Only with Preview + Confirm)
+**By:** Data
+
+**What:**
+Membership consolidation is strictly attribution-only:
+- Backend: `POST /api/campaigns/:campaignId/memberships/consolidations` (owner-only)
+- Sending `sourceMembershipId` + `targetMembershipId` without `confirm` returns a **preview** of affected note counts and warnings
+- Sending the same payload with `confirm: true` applies the change by moving `notes.created_by_membership_id` and `notes.last_edited_by_membership_id` from source to target
+- Consolidation does **NOT:** delete notes, rewrite note bodies, change timestamps, merge memberships, move linked accounts, or rotate guest tokens
+- Role-mismatch consolidations (e.g., owner → guest) require explicit `confirmRoleMismatch: true` flag
+
+**Why:**
+Preview+confirm pattern provides clear frontend confirmation UI while keeping the backend scope tight. Ownership-cleanup is solved without making unscoped account/session merge decisions. Explicit role-mismatch confirmation blocks accidental historical-role rewrites.
+
+**Status:** Implementation completed, under Chunk review for integration and regression coverage.
+
+### 2026-04-12: Issue #32 — Campaign Starter Templates (Client-Side, Creation-Only Scope)
+**By:** Stef
+
+**What:**
+Campaign starter templates are:
+- **Built-in templates, client-side:** Reuse existing `createCampaign()` and `createNote()` calls instead of waiting on a new backend template API contract
+- **Campaign-creation scope only:** Template UI limited to campaign creation entry point; templates do not appear in campaign settings (which is Issue #22's domain)
+- **Optional scaffolds:** Blank campaign stays the default; every seeded note is a normal editable note after creation
+
+**Why:**
+Keeping templates client-side and campaign-creation-scoped avoids touching the campaign-settings surface that Issue #22 is actively using. This slice ships independently and does not block search/filter work.
+
+**Status:** Implementation completed, under Chunk review for acceptance criteria coverage.
+
 ## Governance
 
 - All meaningful changes require team consensus
