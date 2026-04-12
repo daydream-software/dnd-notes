@@ -27,6 +27,7 @@ import type {
   NoteStats,
   OwnerAccount,
   OwnerRegistrationInput,
+  SessionSummary,
 } from './types.js'
 
 interface CampaignRow {
@@ -156,6 +157,7 @@ export interface NoteStore {
   getUserMembershipForCampaign(userId: string, campaignId: string): CampaignMembership | null
   getOwnerMembershipForCampaign(ownerUserId: string, campaignId: string): CampaignMembership | null
   listNotes(campaignId?: string): Note[]
+  listSessionNames(campaignId?: string): SessionSummary[]
   listRecentNotes(limit: number, campaignId?: string): Note[]
   getNote(noteId: string): Note | null
   createNote(input: NoteInput, membershipId?: string): Note
@@ -1577,6 +1579,44 @@ export function createNoteStore(
       return row ? mapMembershipRow(row) : null
     },
     listNotes,
+    listSessionNames(campaignId) {
+      const notes = listNotes(campaignId)
+      const sessionMap = new Map<string, { noteCount: number; latestActivity: string }>()
+
+      for (const note of notes) {
+        if (note.sessionName === null) {
+          continue
+        }
+
+        const existing = sessionMap.get(note.sessionName)
+
+        if (existing) {
+          existing.noteCount += 1
+          if (note.updatedAt > existing.latestActivity) {
+            existing.latestActivity = note.updatedAt
+          }
+        } else {
+          sessionMap.set(note.sessionName, {
+            noteCount: 1,
+            latestActivity: note.updatedAt,
+          })
+        }
+      }
+
+      const sessions: SessionSummary[] = []
+
+      for (const [sessionName, data] of sessionMap) {
+        sessions.push({
+          sessionName,
+          noteCount: data.noteCount,
+          latestActivity: data.latestActivity,
+        })
+      }
+
+      sessions.sort((a, b) => b.latestActivity.localeCompare(a.latestActivity))
+
+      return sessions
+    },
     listRecentNotes(limit, campaignId) {
       return listNotes(campaignId).slice(0, limit)
     },
