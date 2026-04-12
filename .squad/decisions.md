@@ -381,8 +381,8 @@ Chunk's acceptance strategy prevents scope creep and common traps (campaign-scop
 
 **Files affected:**
 - `.squad/decisions/inbox/chunk-issue-28.md` (detailed acceptance, regression matrix, UX traps, sign-off checklist)
-### 2026-04-12: Issue #33 Backend Slice — Activity Endpoint (IMPLEMENTATION READY)
-**By:** Data (Backend Dev)
+### 2026-04-12: Issue #33 Backend Slice — Activity Endpoint (APPROVED)
+**By:** Data (Backend Dev), Chunk (Tester)
 
 **What:**
 Data implemented the activity endpoint for issue #33: `GET /api/notes/activity` scoped through `resolveAccessibleCampaign()` so owners and linked collaborators can read the same campaign activity feed. Endpoint returns one latest-state activity row per note (either created or edited state), plus collaborator summaries derived from membership attribution. Supports optional query params: `campaignId`, `membershipId`, `limit`. Non-audit-log design: no new persistence tables, no per-edit history table, just the latest practical note activity needed for UI awareness.
@@ -390,8 +390,29 @@ Data implemented the activity endpoint for issue #33: `GET /api/notes/activity` 
 **Why:**
 Aligns with Chunk's acceptance criteria (auth matches /api/notes pattern, no scope creep to audit log). Thin slice preserves existing data model, no schema migration required. Uses membership attribution from PR #21 to track collaborator actions. Matches issue #27 pattern (membership-aware auth, accessible to claimed collaborators).
 
-**Verdict:** IMPLEMENTATION READY  
-**Status:** Backend slice complete. Ready for Chunk's regression test validation. Awaits frontend UI work to consume the endpoint.
+**Chunk's Review (2026-04-12):**
+Chunk reviewed Data's backend implementation and issued **APPROVED** verdict:
+- ✅ **Membership-aware access** — uses `resolveAccessibleCampaign()`, linked collaborators included
+- ✅ **Collaborator-safe behavior** — route ordering prevents shadowing (issue #27 pattern), summaries derived from full activity
+- ✅ **Reliable edit classification** — `createTimestampAfter()` guarantees `updatedAt` always moves forward, `updatedAt !== createdAt` never misclassifies edits
+- ✅ **Null-attribution handling** — legacy null actors skipped in summaries, optional chaining applied
+- ✅ **Regression coverage** — owner + guest activity, collaborator summaries, membership filter, foreign-membership rejection, claimed-collaborator access all tested
+
+**Non-blocking gaps (future coverage pass):**
+- No explicit test for `limit` query param (default, clamp, invalid → 400)
+- No test exercises legacy/null-attribution notes in activity response
+
+**Verdict:** APPROVED  
+**Status:** Backend slice ship-safe. Ready for merge. Frontend/UI slice can be picked up independently against stable API.
+
+**Interface Contract (Stable):**
+```
+NoteActivityResponse {
+  campaign: ...,
+  collaborators: [...],
+  activity: [...]
+}
+```
 
 **Files affected:**
 - `apps/api/src/app.ts` (GET /api/notes/activity endpoint)

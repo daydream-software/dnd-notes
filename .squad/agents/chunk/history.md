@@ -63,3 +63,32 @@ Chunk initialized as Tester for the initial project squad.
 - Scope creep risk: the word "activity" is broad. Must define: no full diffs, no per-field audit, no separate event table. MVP is "recent notes with who created/edited them."
 - Draft acceptance & regression targets written to `.squad/decisions/inbox/chunk-issue-33.md` with 7+ test cases, auth/scope warnings, and open questions for FFMikha (collaborator-filter privacy, guest access, pagination).
 - Key files: `apps/api/src/note-store.ts` stores `created_by_membership_id`, `last_edited_by_membership_id`, plus snapshotted display names; `apps/api/src/app.ts` has the auth/routing pattern to reuse; `apps/api/test/app.test.ts` has legacy bootstrap template.
+
+## 2026-04-12: Issue #33 Backend Slice Review — APPROVED
+
+- **Verdict:** APPROVED. Data's backend slice for `GET /api/notes/activity` meets all acceptance criteria.
+- Auth uses `resolveAccessibleCampaign()` (membership-aware, not owner-only) — avoids the issue #27 regression pattern.
+- Route ordering is correct: `/api/notes/activity` (line 1094) is registered before `/api/notes/:noteId` (line 1150), avoiding the shadowing bug from issue #27.
+- `buildNoteActivity()` derives one activity entry per note from current state; no separate event table needed. Classification uses `updatedAt !== createdAt` which is reliable because `createTimestampAfter()` guarantees monotonic timestamp advancement.
+- `buildActivityCollaborators()` aggregates from the full unfiltered activity list (line 1144), so membership filtering narrows activity entries but keeps the complete collaborator sidebar — correct design.
+- Null/legacy actor handled gracefully: `buildActivityCollaborators` skips null actors; membership filter uses optional chaining.
+- Foreign-membership rejection tested (line 441-444, returns 404).
+- Claimed collaborator access tested (line 694-752, proves post-claim activity access with correct attribution).
+- `limit` defaults to 20, caps at 50, rejects invalid values with 400. No explicit `limit` test exists, but the parameter parsing is straightforward and type-safe.
+- README updated with full query parameter documentation.
+- `npm run lint && npm run test && npm run build` all passed (21/21 tests green).
+- Minor coverage gap (non-blocking): no test exercises the `limit` param directly or legacy/null attribution notes in the activity list. These are nice-to-haves for a future pass.
+- What remains for UI slice: the response contract (`NoteActivityResponse`) is stable and ready for frontend consumption. UI work needs to handle the collaborator sidebar, membership-filter interactions, and empty-state when a campaign has no notes.
+
+## 2026-04-12T22:43:51Z: Issue #33 Backend Slice Review Complete
+
+📌 Review verdict (Chunk): **APPROVED** — Data's issue #33 backend slice is ship-safe.
+
+- ✅ Auth model correct: uses `resolveAccessibleCampaign()` (membership-aware), linked collaborators have access
+- ✅ Route ordering safe: `/api/notes/activity` registered before `/api/notes/:noteId`, avoiding issue #27 shadowing
+- ✅ Activity classification reliable: `createTimestampAfter()` guarantees `updatedAt` always moves forward
+- ✅ Collaborator summaries correct: derived from full (unfiltered) activity, sidebar stays complete
+- ✅ Legacy null attribution handled: null actors skipped in summaries, optional chaining in filter
+- ✅ Regression coverage: owner + guest activity, collaborator summaries, membership filter, foreign-membership rejection, claimed-collaborator access all tested
+- Minor coverage gaps (non-blocking): no explicit test for `limit` param; legacy/null-attribution notes not tested in response
+- Frontend/UI slice can be picked up independently against stable `NoteActivityResponse` contract
