@@ -34,6 +34,23 @@ Organization security policy prohibits floating action tags. Pinning to immutabl
 - squad-heartbeat.yml maintained across 4 locations — source template updated, synced via `squad upgrade`
 - This is a mandatory enforcement rule, not optional
 
+### 2026-04-12: PR #21 Review: Note Authorship Attribution (APPROVED)
+**By:** Mikey (Lead)
+
+**What:**
+PR #21 introduces membership-based note attribution using `campaign_memberships` as the stable actor identity. The feature adds nullable FK columns (`created_by_membership_id`, `last_edited_by_membership_id`) on the `notes` table to track who created and last edited each note. API shape is `NoteAttribution` (membershipId, displayName, role). Both `createdBy` and `lastEditedBy` fields are nullable to preserve backward compatibility with legacy notes.
+
+**Why:**
+Membership provides the correct collaboration boundary — it avoids coupling to auth-layer user IDs and keeps the owner/guest model uniform. Nullable FKs ensure no migration is needed for existing data. LEFT JOINs inline attribution into queries without N+1 lookups.
+
+**Verdict:** APPROVE  
+**Status:** Ready to move from draft toward merge. No revisions required.
+
+**Notes:**
+- Tests cover owner attribution, guest attribution, and legacy null handling
+- TypeScript type definitions in sync across api and web workspaces
+- Schema design is backward-compatible and well-tested
+
 ## Governance
 
 - All meaningful changes require team consensus
