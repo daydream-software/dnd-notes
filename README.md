@@ -75,6 +75,7 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 - `GET /api/campaigns/:campaignId/memberships`
 - `GET /api/campaigns/:campaignId/share-links`
 - `POST /api/campaigns/:campaignId/share-links`
+- `GET /api/campaigns/:campaignId/share-links/:shareLinkId`
 - `DELETE /api/campaigns/:campaignId/share-links/:shareLinkId`
 - `GET /api/overview`
 - `GET /api/notes`
@@ -101,7 +102,11 @@ primary campaign when one is not provided.
 The `/api/shared/:shareToken/*` routes use `X-Guest-Token: <token>` after a
 guest joins the shared campaign. Share links are campaign-scoped, support
 viewer/editor access levels, and can carry owner-configured `frame-ancestors`
-policy for the dedicated `/share/:shareToken` web route.
+policy for the dedicated `/share/:shareToken` web route. Owner share-link list
+responses stay metadata-only; raw `{ token, url }` values come back on creation
+and from the owner-only reveal endpoint for that specific share link. Legacy
+links created before reveal support return an explicit regeneration-needed
+error because only their token hash was stored.
 
 ## What works now
 

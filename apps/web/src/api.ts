@@ -4,6 +4,7 @@ import type {
   CampaignMembershipsResponse,
   CampaignShareLinkCreateResponse,
   CampaignShareLinkInput,
+  CampaignShareLinkRevealResponse,
   CampaignShareLinksResponse,
   CampaignResponse,
   CampaignsResponse,
@@ -176,6 +177,21 @@ export async function createCampaignShareLink(
   )
 
   return readJson<CampaignShareLinkCreateResponse>(response)
+}
+
+export async function revealCampaignShareLink(
+  authToken: string,
+  campaignId: string,
+  shareLinkId: string,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/api/campaigns/${campaignId}/share-links/${shareLinkId}`,
+    {
+      headers: createHeaders(authToken),
+    },
+  )
+
+  return readJson<CampaignShareLinkRevealResponse>(response)
 }
 
 export async function revokeCampaignShareLink(

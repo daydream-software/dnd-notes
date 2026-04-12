@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -140,6 +141,16 @@ test('owner auth and campaign endpoints support the management workflow', async 
   assert.equal(createDefaultShareLinkResponse.body.shareLink.accessLevel, 'editor')
   assert.match(createDefaultShareLinkResponse.body.url, /\/share\//)
 
+  const revealDefaultShareLinkResponse = await authed.get(
+    `/api/campaigns/${defaultCampaignId}/share-links/${createDefaultShareLinkResponse.body.shareLink.id}`,
+  )
+  assert.equal(revealDefaultShareLinkResponse.status, 200)
+  assert.equal(revealDefaultShareLinkResponse.body.token, createDefaultShareLinkResponse.body.token)
+  assert.match(
+    revealDefaultShareLinkResponse.body.url,
+    new RegExp(`/share/${createDefaultShareLinkResponse.body.token}$`),
+  )
+
   const createCampaignResponse = await authed.post('/api/campaigns').send({
     name: 'Emberfall Accord',
     tagline: 'Track alliances, betrayals, and faction leverage across the city.',
@@ -186,6 +197,8 @@ test('owner auth and campaign endpoints support the management workflow', async 
   assert.equal(shareLinksResponse.status, 200)
   assert.equal(shareLinksResponse.body.shareLinks.length, 1)
   assert.equal(shareLinksResponse.body.shareLinks[0].label, 'Read-only table view')
+  assert.equal(shareLinksResponse.body.shareLinks[0].token, undefined)
+  assert.equal(shareLinksResponse.body.shareLinks[0].url, undefined)
 
   const revokeShareLinkResponse = await authed.delete(
     `/api/campaigns/${campaignId}/share-links/${createShareLinkResponse.body.shareLink.id}`,
@@ -521,6 +534,103 @@ test('legacy note databases are upgraded in place for membership attribution col
 
   assert.ok(migratedColumns.includes('created_by_membership_id'))
   assert.ok(migratedColumns.includes('last_edited_by_membership_id'))
+})
+
+test('legacy share links without stored plaintext tokens return an explicit regeneration error', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-share-link-legacy-'))
+  const dbPath = join(directory, 'notes.sqlite')
+
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  const legacyDatabase = new Database(dbPath)
+  legacyDatabase.exec(`
+    CREATE TABLE campaign_share_links (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      label TEXT,
+      access_level TEXT NOT NULL,
+      frame_ancestors TEXT,
+      expires_at TEXT,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  legacyDatabase.close()
+
+  const noteStore = createNoteStore({ dbPath })
+  t.after(() => {
+    noteStore.close()
+  })
+
+  const app = createApp({ noteStore })
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const shareLinkId = 'legacy-share-link'
+  const legacyShareToken = 'legacy-share-token'
+  const timestamp = '2026-04-12T00:00:00.000Z'
+  const writableDatabase = new Database(dbPath)
+  writableDatabase
+    .prepare(`
+      INSERT INTO campaign_share_links (
+        id,
+        campaign_id,
+        token_hash,
+        label,
+        access_level,
+        frame_ancestors,
+        expires_at,
+        revoked_at,
+        created_at,
+        updated_at
+      ) VALUES (
+        @id,
+        @campaign_id,
+        @token_hash,
+        @label,
+        @access_level,
+        @frame_ancestors,
+        @expires_at,
+        @revoked_at,
+        @created_at,
+        @updated_at
+      )
+    `)
+    .run({
+      id: shareLinkId,
+      campaign_id: defaultCampaignId,
+      token_hash: createHash('sha256').update(legacyShareToken).digest('hex'),
+      label: 'Legacy link',
+      access_level: 'viewer',
+      frame_ancestors: null,
+      expires_at: null,
+      revoked_at: null,
+      created_at: timestamp,
+      updated_at: timestamp,
+    })
+  writableDatabase.close()
+
+  const revealResponse = await authed.get(
+    `/api/campaigns/${defaultCampaignId}/share-links/${shareLinkId}`,
+  )
+  assert.equal(revealResponse.status, 409)
+  assert.equal(revealResponse.body.error, 'This shared link can no longer be revealed.')
+  assert.ok(Array.isArray(revealResponse.body.details))
+  assert.match(revealResponse.body.details[0], /Revoke it and create a new share link/)
+
+  const migratedDatabase = new Database(dbPath, { readonly: true })
+  const migratedColumns = (
+    migratedDatabase.prepare(`PRAGMA table_info(campaign_share_links)`).all() as Array<{
+      name: string
+    }>
+  ).map((column) => column.name)
+  migratedDatabase.close()
+
+  assert.ok(migratedColumns.includes('token_plaintext'))
 })
 
 test('owner note creation and editing attributes notes to campaign membership', async (t) => {

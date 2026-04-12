@@ -83,6 +83,7 @@ interface CampaignShareLinkRow {
   id: string
   campaign_id: string
   token_hash: string
+  token_plaintext?: string | null
   label: string | null
   access_level: CampaignShareLink['accessLevel']
   frame_ancestors: string | null
@@ -91,6 +92,10 @@ interface CampaignShareLinkRow {
   created_at: string
   updated_at: string
 }
+
+type CampaignShareLinkRevealResult =
+  | { status: 'available'; token: string }
+  | { status: 'legacy-unavailable' }
 
 interface CreateNoteStoreOptions {
   dbPath?: string
@@ -127,6 +132,11 @@ export interface NoteStore {
     shareLinkId: string,
     ownerUserId: string,
   ): boolean
+  getCampaignShareLinkReveal(
+    campaignId: string,
+    shareLinkId: string,
+    ownerUserId: string,
+  ): CampaignShareLinkRevealResult | null
   getCampaignShareLinkByToken(token: string): CampaignShareLink | null
   createGuestMembership(
     campaignId: string,
@@ -343,6 +353,7 @@ export function createNoteStore(
       id TEXT PRIMARY KEY,
       campaign_id TEXT NOT NULL REFERENCES campaigns(id),
       token_hash TEXT NOT NULL UNIQUE,
+      token_plaintext TEXT,
       label TEXT,
       access_level TEXT NOT NULL,
       frame_ancestors TEXT,
@@ -409,7 +420,37 @@ export function createNoteStore(
     }
   })
 
+  const ensureShareLinkRevealTokens = database.transaction(() => {
+    const shareLinksTableExists = database
+      .prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'campaign_share_links'
+      `)
+      .get()
+
+    if (!shareLinksTableExists) {
+      return
+    }
+
+    const shareLinkColumns = new Set(
+      (
+        database.prepare(`
+          PRAGMA table_info(campaign_share_links)
+        `).all() as Array<{ name: string }>
+      ).map((column) => column.name),
+    )
+
+    if (!shareLinkColumns.has('token_plaintext')) {
+      database.exec(`
+        ALTER TABLE campaign_share_links
+        ADD COLUMN token_plaintext TEXT
+      `)
+    }
+  })
+
   ensureNotesAttributionColumns()
+  ensureShareLinkRevealTokens()
 
   const selectCampaignById = database.prepare(`
     SELECT
@@ -747,11 +788,22 @@ export function createNoteStore(
       AND (expires_at IS NULL OR expires_at > ?)
   `)
 
+  const selectShareLinkRevealById = database.prepare(`
+    SELECT token_plaintext
+    FROM campaign_share_links
+    WHERE
+      id = ?
+      AND campaign_id = ?
+      AND revoked_at IS NULL
+      AND (expires_at IS NULL OR expires_at > ?)
+  `)
+
   const insertShareLink = database.prepare(`
     INSERT INTO campaign_share_links (
       id,
       campaign_id,
       token_hash,
+      token_plaintext,
       label,
       access_level,
       frame_ancestors,
@@ -763,6 +815,7 @@ export function createNoteStore(
       @id,
       @campaign_id,
       @token_hash,
+      @token_plaintext,
       @label,
       @access_level,
       @frame_ancestors,
@@ -1067,6 +1120,7 @@ export function createNoteStore(
         id: shareLink.id,
         campaign_id: shareLink.campaignId,
         token_hash: hashSessionToken(token),
+        token_plaintext: token,
         label: shareLink.label,
         access_level: shareLink.accessLevel,
         frame_ancestors: shareLink.frameAncestors,
@@ -1308,6 +1362,30 @@ export function createNoteStore(
       })
 
       return result.changes > 0
+    },
+    getCampaignShareLinkReveal(campaignId, shareLinkId, ownerUserId) {
+      if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+        return null
+      }
+
+      const row = selectShareLinkRevealById.get(
+        shareLinkId,
+        campaignId,
+        new Date().toISOString(),
+      ) as Pick<CampaignShareLinkRow, 'token_plaintext'> | undefined
+
+      if (!row) {
+        return null
+      }
+
+      if (!row.token_plaintext) {
+        return { status: 'legacy-unavailable' }
+      }
+
+      return {
+        status: 'available',
+        token: row.token_plaintext,
+      }
     },
     getCampaignShareLinkByToken(token) {
       const row = selectActiveShareLinkByTokenHash.get(

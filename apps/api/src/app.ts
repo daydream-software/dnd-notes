@@ -5,6 +5,7 @@ import type {
   AuthSessionResponse,
   CampaignMembershipsResponse,
   CampaignShareLinkCreateResponse,
+  CampaignShareLinkRevealResponse,
   CampaignShareLinksResponse,
   CampaignResponse,
   CampaignsResponse,
@@ -573,6 +574,57 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         shareLink: created.shareLink,
         token: created.token,
         url: buildSharedUrl(request, created.token),
+      })
+    },
+  )
+
+  app.get(
+    '/api/campaigns/:campaignId/share-links/:shareLinkId',
+    (
+      request: Request<ShareLinkParams>,
+      response: Response<CampaignShareLinkRevealResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveOwnedCampaign(
+        noteStore,
+        owner,
+        request.params.campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      const reveal = noteStore.getCampaignShareLinkReveal(
+        campaign.id,
+        request.params.shareLinkId,
+        owner.id,
+      )
+
+      if (!reveal) {
+        response.status(404).json({ error: 'Shared link was not found.' })
+        return
+      }
+
+      if (reveal.status === 'legacy-unavailable') {
+        response.status(409).json({
+          error: 'This shared link can no longer be revealed.',
+          details: [
+            'This link was created before reveal support was added, so the original token was not stored. Revoke it and create a new share link to get a revealable URL.',
+          ],
+        })
+        return
+      }
+
+      response.json({
+        token: reveal.token,
+        url: buildSharedUrl(request, reveal.token),
       })
     },
   )

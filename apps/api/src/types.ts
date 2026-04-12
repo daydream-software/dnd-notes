@@ -162,6 +162,11 @@ export interface CampaignShareLinkCreateResponse {
   url: string
 }
 
+export interface CampaignShareLinkRevealResponse {
+  token: string
+  url: string
+}
+
 export interface NotesResponse {
   notes: Note[]
 }
