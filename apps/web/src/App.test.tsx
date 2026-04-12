@@ -1642,7 +1642,7 @@ describe('App', () => {
     expect(
       (await screen.findAllByRole('heading', { name: 'Emberfall Accord' }))[0],
     ).toBeTruthy()
-    expect(screen.getByText('Guest collaborator')).toBeTruthy()
+    expect(screen.getByText('Linked collaborator')).toBeTruthy()
     expect(screen.getByText(/Share links and campaign settings stay with the campaign owner/)).toBeTruthy()
     expect(
       (screen.getByRole('button', { name: 'Campaign settings' }) as HTMLButtonElement).disabled,
