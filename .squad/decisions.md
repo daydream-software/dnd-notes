@@ -19,6 +19,29 @@ Aligns team around sustainable feature velocity. Search and mobile UX unlock imm
 **Files affected:**
 - `.squad/log/2026-04-12T16:15:00Z-product-direction-review.md` (detailed breakdown)
 
+### 2026-04-12: GitHub issues created for product backlog and roadmap
+**By:** Coordinator
+
+**What:**
+Coordinator created 12 issues in daydream-software/dnd-notes aligned with product direction consensus:
+1. Linked collaborator UX — Visual differentiation for linked vs. unlinked guest memberships in member list
+2. Membership consolidation — Owners consolidate note authorship from duplicate members without rewriting history
+3. Search infrastructure — Global full-text search across notes and campaigns
+4. Mobile layout — Responsive note list/detail layout using screen space efficiently
+5. Rich text editing — Friendly formatting (bold, italic, lists, links) with proper rendering
+6. Session browsing — Enhanced session navigation and context preservation for collaborators
+7. Tag browsing — Flexible tag discovery and filtering UI
+8. Graph-tag spike — Research spike for graph-style tag relationships and implementation approach
+9. Note links — Cross-note references and backlink discovery
+10. Quick capture — Streamlined rapid note entry UI
+11. Note templates — Reusable templates for session and note creation
+12. Activity views — User activity log and recent change tracking
+
+**Why:**
+Captures agreed-upon feature roadmap as tracked issues for sprint planning and assignment. Coordinator mapped each product direction request to specific GitHub issue for transparency and progress tracking.
+
+**Status:** BACKLOG — issues ready for estimation, design, and sprint assignment
+
 ### 2026-04-12: @copilot is enabled as a coding agent with auto-assignment
 **By:** FFMikha (via Copilot)
 
