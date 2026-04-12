@@ -1,6 +1,6 @@
 # Current Focus
 
-- **Updated:** 2026-04-11T19:18:46.150Z
+- **Updated:** 2026-04-12T12:41:57.074Z
 - **Requested by:** FFMikha
-- **Focus:** GitHub Actions workflows pinned to commit SHAs for org compatibility
-- **Next likely task:** Project structure and app bootstrap
+- **Focus:** Add @copilot to the squad with automatic pickup for `squad:copilot` issues
+- **Next likely task:** Route a good-fit issue to @copilot or keep building the app backlog
