@@ -40,9 +40,9 @@ const notePayloadSchema = z.object({
   body: z
     .string()
     .trim()
-    .min(1, 'Body is required.')
-    .max(10_000, 'Body must be 10,000 characters or fewer.'),
-  status: z.enum(noteStatuses),
+    .max(10_000, 'Body must be 10,000 characters or fewer.')
+    .default(''),
+  status: z.enum(noteStatuses).default('draft'),
   tags: z
     .array(
       z

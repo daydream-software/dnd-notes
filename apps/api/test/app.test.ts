@@ -271,6 +271,40 @@ test('authenticated owners can run the note CRUD workflow in a selected campaign
   assert.equal(finalListResponse.body.notes.length, 0)
 })
 
+test('quick capture creates a note with only a title using server defaults', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const createResponse = await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Strange runes near the harbor',
+  })
+
+  assert.equal(createResponse.status, 201)
+  assert.equal(createResponse.body.note.title, 'Strange runes near the harbor')
+  assert.equal(createResponse.body.note.body, '')
+  assert.equal(createResponse.body.note.status, 'draft')
+  assert.deepEqual(createResponse.body.note.tags, [])
+  assert.equal(createResponse.body.note.sessionName, null)
+
+  const updateResponse = await authed.put(`/api/notes/${createResponse.body.note.id}`).send({
+    title: 'Strange runes near the harbor',
+    body: 'The runes glow faintly at dusk and match the cipher fragment from Candlekeep.',
+    tags: ['clue', 'harbor'],
+    status: 'active',
+    sessionName: 'Session 14',
+  })
+
+  assert.equal(updateResponse.status, 200)
+  assert.equal(updateResponse.body.note.body, 'The runes glow faintly at dusk and match the cipher fragment from Candlekeep.')
+  assert.equal(updateResponse.body.note.status, 'active')
+  assert.deepEqual(updateResponse.body.note.tags, ['clue', 'harbor'])
+  assert.equal(updateResponse.body.note.sessionName, 'Session 14')
+})
+
 test('shared links support guest join, scoped access, and editor note workflow', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
