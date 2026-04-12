@@ -41,3 +41,7 @@ Mikey initialized as Lead for the initial project squad.
 - **Listing endpoint:** `GET /api/campaigns/:campaignId/share-links` returns metadata only (label, access level, frame ancestors, dates). No token or URL.
 - **Key file paths:** Schema in `apps/api/src/note-store.ts:342-353`, share link creation at `:1040-1081`, token hashing at `:181-187`, UI share card at `apps/web/src/App.tsx:1246-1287`.
 - **Architecture decision:** Recommended storing tokens reversibly (plaintext or encrypted) alongside existing hash. Same link, no second mechanism. Two-slice plan: backend token storage + retrieval endpoint, then frontend blur/reveal UX. The consolidated outcome now lives in `.squad/decisions.md`.
+
+## 2026-04-12: Issue #27 Review Outcome
+
+📌 Team update (2026-04-12T16:45:23Z): Issue #27 implementation rejected by Chunk for route shadowing, percent-decode double-decode, auth scope regression (blocks claimed collaborators), and missing regression coverage. Concept approved; revision ownership → Data. Follow-on UI work → Stef (if needed).
