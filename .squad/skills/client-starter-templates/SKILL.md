@@ -19,6 +19,7 @@ Use this when product needs lighter-weight templates, starter packs, or scaffold
 - Reuse existing create endpoints to seed starter records after the parent object is created.
 - Keep template UI out of unrelated management surfaces when scope needs to stay narrow.
 - Seed normal editable records, not locked structures, so the starter never becomes rigid.
+- If campaign seeding stays client-side, treat it as best-effort scaffolding and surface a clear fallback message instead of pretending it is transactional.
 
 ## Examples
 - `apps/web/src/templates.ts` centralizes built-in note templates and campaign starter packs as plain-text scaffolds.
@@ -29,3 +30,4 @@ Use this when product needs lighter-weight templates, starter packs, or scaffold
 - Adding a template picker to edit flows where it can overwrite existing work unexpectedly.
 - Blocking the feature on a new backend template API when existing create endpoints already cover the needed records.
 - Making starter templates mandatory or hard to remove after creation.
+- Assuming a client-side loop that posts several starter notes is atomic; if partial seeding becomes unacceptable, move that responsibility behind a server-side contract.

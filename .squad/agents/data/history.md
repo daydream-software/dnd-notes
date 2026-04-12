@@ -18,6 +18,8 @@ Data initialized as Backend Dev for the initial project squad.
 
 📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
 
+📌 Team update (2026-04-12T17:35:41Z): Issue #27 session browsing backend revision approved by Chunk; all four critical regressions fixed; endpoints ship-ready for frontend session-browsing UI work — decided by Data (implementer), Chunk (reviewer)
+
 ## Learnings
 
 - Initial squad setup complete.
@@ -31,7 +33,11 @@ Data initialized as Backend Dev for the initial project squad.
 - Issue #23 backend contract uses `POST /api/campaigns/:campaignId/memberships/consolidations` as an owner-only preview/apply flow: send source/target IDs for a preview, then repeat with `confirm: true` to apply.
 - `apps/api/src/note-store.ts` keeps membership consolidation note-attribution-only by reassigning `notes.created_by_membership_id` and `notes.last_edited_by_membership_id` without rewriting note bodies, note timestamps, membership rows, linked accounts, or guest tokens.
 - Regression coverage for membership consolidation lives in `apps/api/test/app.test.ts`, covering guest-to-guest reassignment counts plus explicit confirmation before role-changing owner-to-guest moves.
+- Session-browsing auth should mirror `/api/notes`: keep `GET /api/notes/sessions*` in `apps/api/src/app.ts` behind `resolveAccessibleCampaign()` so linked collaborators keep access, not `resolveOwnedCampaign()`.
+- Express already decodes `request.params.sessionId`; frontend callers should use `encodeURIComponent(sessionName)` once, and regressions for route ordering plus `%` session names live in `apps/api/test/app.test.ts`.
 
-## 2026-04-12: Issue #27 Revision Assignment
+## 2026-04-12: Issue #27 Revision Assignment & Completion
 
 📌 Team update (2026-04-12T16:45:23Z): Issue #27 session-browsing v1 implementation rejected by Chunk for 4 regressions: route shadowing (/:sessions consumed as /:noteId), double percent-decode crash on session names with %, auth regression blocking collaborators, missing regression tests. Concept approved; you are assigned to fix backend. See `.squad/decisions.md` for full rejection details. Stef will own UI work after backend fixes land.
+
+📌 Team update (2026-04-12T21:22:46Z): Issue #27 backend revision complete and approved. All four regressions fixed: (1) route ordering corrected, (2) double-decode removed, (3) auth switched to resolveAccessibleCampaign() for linked collaborators, (4) contracts aligned with existing types. Lint, test, build all pass. Ship-safe. Stef can now start thin session-browsing UI slice. See `.squad/decisions.md` Issue #27 entry for full details — decided by Data, Chunk
