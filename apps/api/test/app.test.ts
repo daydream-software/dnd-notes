@@ -875,3 +875,137 @@ test('notes without membership attribution return null for createdBy and lastEdi
   assert.equal(listResponse.body.notes[0].createdBy, null)
   assert.equal(listResponse.body.notes[0].lastEditedBy, null)
 })
+
+test('session listing endpoint returns unique session names grouped from notes', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const emptySessionsResponse = await authed.get(
+    `/api/campaigns/${defaultCampaignId}/sessions`,
+  )
+  assert.equal(emptySessionsResponse.status, 200)
+  assert.equal(emptySessionsResponse.body.sessions.length, 0)
+
+  await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Ambush at the bridge',
+    body: 'Bandits attacked during the river crossing.',
+    tags: ['combat'],
+    status: 'active',
+    sessionName: 'Session 5',
+  })
+
+  await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Loot found in bandit camp',
+    body: 'A mysterious amulet was recovered from the camp leader.',
+    tags: ['loot'],
+    status: 'active',
+    sessionName: 'Session 5',
+  })
+
+  await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Meeting with the baron',
+    body: 'The baron offered a quest to clear the mines.',
+    tags: ['quest'],
+    status: 'draft',
+    sessionName: 'Session 6',
+  })
+
+  await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'General campaign thoughts',
+    body: 'Need to figure out the factions.',
+    tags: [],
+    status: 'draft',
+    sessionName: null,
+  })
+
+  const sessionsResponse = await authed.get(
+    `/api/campaigns/${defaultCampaignId}/sessions`,
+  )
+  assert.equal(sessionsResponse.status, 200)
+  assert.equal(sessionsResponse.body.sessions.length, 2)
+
+  const sessionNames = sessionsResponse.body.sessions.map(
+    (s: { sessionName: string }) => s.sessionName,
+  )
+  assert.ok(sessionNames.includes('Session 5'))
+  assert.ok(sessionNames.includes('Session 6'))
+
+  const session5 = sessionsResponse.body.sessions.find(
+    (s: { sessionName: string }) => s.sessionName === 'Session 5',
+  )
+  assert.equal(session5.noteCount, 2)
+
+  const session6 = sessionsResponse.body.sessions.find(
+    (s: { sessionName: string }) => s.sessionName === 'Session 6',
+  )
+  assert.equal(session6.noteCount, 1)
+})
+
+test('session listing requires authentication and campaign access', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const unauthenticatedResponse = await request(app).get(
+    `/api/campaigns/${defaultCampaignId}/sessions`,
+  )
+  assert.equal(unauthenticatedResponse.status, 401)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const nonExistentResponse = await authed.get(
+    '/api/campaigns/non-existent-campaign/sessions',
+  )
+  assert.equal(nonExistentResponse.status, 404)
+})
+
+test('shared session listing endpoint returns sessions for guest members', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const shareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'Session browse test',
+      accessLevel: 'editor',
+      frameAncestors: null,
+    })
+  assert.equal(shareLinkResponse.status, 201)
+  const shareToken = shareLinkResponse.body.token as string
+
+  const joinResponse = await request(app).post(`/api/shared/${shareToken}/join`).send({
+    displayName: 'Theron',
+  })
+  assert.equal(joinResponse.status, 201)
+  const guestToken = joinResponse.body.guestToken as string
+  const guest = withGuest(request(app), guestToken)
+
+  await guest.post(`/api/shared/${shareToken}/notes`).send({
+    title: 'Dragon sighting',
+    body: 'Red dragon spotted near the northern cliffs.',
+    tags: ['encounter'],
+    status: 'active',
+    sessionName: 'Session 8',
+  })
+
+  const sessionsResponse = await guest.get(`/api/shared/${shareToken}/sessions`)
+  assert.equal(sessionsResponse.status, 200)
+  assert.equal(sessionsResponse.body.sessions.length, 1)
+  assert.equal(sessionsResponse.body.sessions[0].sessionName, 'Session 8')
+  assert.equal(sessionsResponse.body.sessions[0].noteCount, 1)
+
+  const unauthenticatedResponse = await request(app).get(
+    `/api/shared/${shareToken}/sessions`,
+  )
+  assert.equal(unauthenticatedResponse.status, 401)
+})
