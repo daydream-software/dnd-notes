@@ -75,6 +75,15 @@ When backend schema changes add backward-compatible nullable columns to SQLite t
 - `apps/api/test/app.test.ts`
 - `README.md`
 
+### 2026-04-12: Campaign share links stay reusable with owner re-reveal (consolidated)
+**By:** FFMikha (via Copilot), Mikey (Lead), Data, Stef, Chunk
+
+**What:**
+Campaign share links stay as the same reusable link per share-link record; this flow does not introduce per-person links. Owners can intentionally re-reveal a specific link on demand while the normal share-link list remains metadata-only. New links persist the existing `token_hash` plus a nullable plaintext token so `GET /api/campaigns/:campaignId/share-links/:shareLinkId` can return `{ token, url }` for owners, and the campaign settings UI reveals and re-copies that URL per card behind a blur/show affordance. Legacy hash-only links remain valid for guest access but return an explicit `409` regeneration-needed response when an owner tries to reveal them again. The combined backend/frontend worktree was reviewed and approved, with `npm run lint`, `npm run test`, and `npm run build` passing.
+
+**Why:**
+The user asked to re-reveal the same reusable share link later, not replace it with per-person links, and to keep reveal behind an intentional UX step. Keeping the main list metadata-only avoids bulk exposure of active secrets, while storing a recoverable token for new rows is the smallest change that supports owner re-reveal without changing guest access semantics. The explicit legacy-link warning documents the migration and security trade-off: older hash-only links cannot be reconstructed and must be revoked/recreated if owners need a revealable URL.
+
 ## Governance
 
 - All meaningful changes require team consensus
