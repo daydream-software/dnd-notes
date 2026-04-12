@@ -83,6 +83,8 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 - `POST /api/notes`
 - `PUT /api/notes/:noteId`
 - `DELETE /api/notes/:noteId`
+- `GET /api/notes/sessions`
+- `GET /api/notes/sessions/:sessionId`
 - `GET /api/shared/:shareToken/session`
 - `POST /api/shared/:shareToken/join`
 - `POST /api/shared/:shareToken/membership/claim`
@@ -129,4 +131,4 @@ actor.
 - only the `/share/:shareToken` route is intended for embedding; the main app stays denied by default in the web server layer
 - the web app can create, edit, view, and delete notes inside the selected campaign
 - shared links can expose the same notes workspace to guests with viewer or editor permissions
-- the notes workspace uses the real API instead of static placeholder content
+- owners can browse notes grouped by session and discover "what happened in this session?" through session browsing endpoints
