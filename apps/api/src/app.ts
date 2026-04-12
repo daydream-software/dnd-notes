@@ -40,6 +40,10 @@ interface CampaignParams extends Record<string, string> {
   campaignId: string
 }
 
+interface SessionParams extends Record<string, string> {
+  sessionId: string
+}
+
 interface ShareParams extends Record<string, string> {
   shareToken: string
 }
@@ -961,6 +965,68 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
 
       noteStore.deleteNote(request.params.noteId)
       response.status(204).send()
+    },
+  )
+
+  app.get(
+    '/api/notes/sessions',
+    (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaignId = readRequestedCampaignId(request)
+      const campaign = resolveOwnedCampaign(
+        noteStore,
+        owner,
+        campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      const sessionNames = noteStore.listSessionNames(campaign.id)
+      const sessions = sessionNames.map((sessionName) => ({
+        sessionName,
+        noteCount: noteStore.getSessionNotes(campaign.id, sessionName).length,
+      }))
+
+      response.json({ sessions })
+    },
+  )
+
+  app.get(
+    '/api/notes/sessions/:sessionId',
+    (
+      request: Request<SessionParams>,
+      response: Response<NotesResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaignId = readRequestedCampaignId(request)
+      const campaign = resolveOwnedCampaign(
+        noteStore,
+        owner,
+        campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      const sessionName = decodeURIComponent(request.params.sessionId)
+      const notes = noteStore.getSessionNotes(campaign.id, sessionName)
+
+      response.json({ notes })
     },
   )
 

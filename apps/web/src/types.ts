@@ -181,6 +181,15 @@ export interface NoteResponse {
   note: Note
 }
 
+export interface SessionSummary {
+  sessionName: string
+  noteCount: number
+}
+
+export interface SessionsResponse {
+  sessions: SessionSummary[]
+}
+
 export interface SharedSessionResponse {
   campaign: CampaignSummary
   shareLink: CampaignShareLink

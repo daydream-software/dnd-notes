@@ -159,6 +159,8 @@ export interface NoteStore {
   listNotes(campaignId?: string): Note[]
   listSessionNames(campaignId?: string): SessionSummary[]
   listRecentNotes(limit: number, campaignId?: string): Note[]
+  listSessionNames(campaignId: string): string[]
+  getSessionNotes(campaignId: string, sessionName: string): Note[]
   getNote(noteId: string): Note | null
   createNote(input: NoteInput, membershipId?: string): Note
   updateNote(noteId: string, input: NoteInput, membershipId?: string): Note | null
@@ -969,6 +971,40 @@ export function createNoteStore(
     WHERE notes.id = ?
   `)
 
+  const selectDistinctSessionNames = database.prepare(`
+    SELECT DISTINCT session_name
+    FROM notes
+    WHERE campaign_id = ? AND session_name IS NOT NULL
+    ORDER BY session_name ASC
+  `)
+
+  const selectNotesBySessionName = database.prepare(`
+    SELECT
+      notes.id,
+      notes.campaign_id,
+      notes.title,
+      notes.body,
+      notes.status,
+      notes.tags_json,
+      notes.session_name,
+      notes.created_by_membership_id,
+      notes.last_edited_by_membership_id,
+      cb.display_name AS created_by_display_name,
+      cb.role AS created_by_role,
+      eb.display_name AS last_edited_by_display_name,
+      eb.role AS last_edited_by_role,
+      notes.created_at,
+      notes.updated_at
+    FROM notes
+    LEFT JOIN campaign_memberships cb
+      ON cb.id = notes.created_by_membership_id
+    LEFT JOIN campaign_memberships eb
+      ON eb.id = notes.last_edited_by_membership_id
+    WHERE notes.campaign_id = ? AND notes.session_name = ?
+    ORDER BY notes.created_at ASC
+  `)
+
+
   const insertNote = database.prepare(`
     INSERT INTO notes (
       id,
@@ -1619,6 +1655,19 @@ export function createNoteStore(
     },
     listRecentNotes(limit, campaignId) {
       return listNotes(campaignId).slice(0, limit)
+    },
+    listSessionNames(campaignId) {
+      const rows = selectDistinctSessionNames.all(campaignId) as Array<{
+        session_name: string
+      }>
+      return rows.map((row) => row.session_name)
+    },
+    getSessionNotes(campaignId, sessionName) {
+      const rows = selectNotesBySessionName.all(
+        campaignId,
+        sessionName,
+      ) as NoteRow[]
+      return rows.map(mapNoteRow)
     },
     getNote(noteId) {
       const row = selectNoteById.get(noteId) as NoteRow | undefined
