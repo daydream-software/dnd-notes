@@ -387,6 +387,119 @@ test('shared links support guest join, scoped access, and editor note workflow',
   assert.equal(revokedSessionResponse.status, 404)
 })
 
+test('guests can claim an existing membership with a real account without losing attribution', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const shareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'Claimable editor link',
+      accessLevel: 'editor',
+      frameAncestors: null,
+    })
+  assert.equal(shareLinkResponse.status, 201)
+
+  const shareToken = shareLinkResponse.body.token as string
+  const joinResponse = await request(app).post(`/api/shared/${shareToken}/join`).send({
+    displayName: 'Mira',
+  })
+  assert.equal(joinResponse.status, 201)
+  assert.equal(joinResponse.body.membership.userId, null)
+
+  const guestToken = joinResponse.body.guestToken as string
+  const guest = withGuest(request(app), guestToken)
+
+  const createNoteResponse = await guest.post(`/api/shared/${shareToken}/notes`).send({
+    title: 'Claimed under the same actor',
+    body: 'The moonwell sigil was mapped before the account upgrade.',
+    tags: ['moonwell'],
+    status: 'draft',
+    sessionName: 'Session 18',
+  })
+  assert.equal(createNoteResponse.status, 201)
+  assert.equal(createNoteResponse.body.note.createdBy.displayName, 'Mira')
+
+  const noteId = createNoteResponse.body.note.id as string
+  const membershipId = createNoteResponse.body.note.createdBy.membershipId as string
+
+  const claimant = await registerOwner(request(app), {
+    displayName: 'Mira Vale',
+    email: 'mira@example.com',
+    password: 'mira-claims-history',
+  })
+
+  const claimResponse = await request(app)
+    .post(`/api/shared/${shareToken}/membership/claim`)
+    .set('Authorization', `Bearer ${claimant.token}`)
+    .set('X-Guest-Token', guestToken)
+  assert.equal(claimResponse.status, 200)
+  assert.equal(claimResponse.body.membership.id, joinResponse.body.membership.id)
+  assert.equal(claimResponse.body.membership.userId, claimant.owner.id)
+  assert.equal(claimResponse.body.membership.displayName, 'Mira')
+  assert.equal(typeof claimResponse.body.guestToken, 'string')
+  assert.notEqual(claimResponse.body.guestToken, guestToken)
+
+  const claimedAuthed = withAuth(request(app), claimant.token)
+  const claimedCampaignsResponse = await claimedAuthed.get('/api/campaigns')
+  assert.equal(claimedCampaignsResponse.status, 200)
+  assert.equal(claimedCampaignsResponse.body.campaigns.length, 1)
+  assert.equal(claimedCampaignsResponse.body.campaigns[0].id, defaultCampaignId)
+
+  const claimedCampaignResponse = await claimedAuthed.get(`/api/campaigns/${defaultCampaignId}`)
+  assert.equal(claimedCampaignResponse.status, 200)
+  assert.equal(claimedCampaignResponse.body.campaign.id, defaultCampaignId)
+
+  const claimedOverviewResponse = await claimedAuthed.get('/api/overview')
+  assert.equal(claimedOverviewResponse.status, 200)
+  assert.equal(claimedOverviewResponse.body.campaign.id, defaultCampaignId)
+  assert.equal(claimedOverviewResponse.body.membership.id, membershipId)
+  assert.equal(claimedOverviewResponse.body.membership.role, 'guest')
+
+  const claimedCreateNoteResponse = await claimedAuthed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Follow-up under the linked account',
+    body: 'Creating from the authenticated app should keep the guest membership actor.',
+    tags: ['claim', 'follow-up'],
+    status: 'active',
+    sessionName: null,
+  })
+  assert.equal(claimedCreateNoteResponse.status, 201)
+  assert.equal(claimedCreateNoteResponse.body.note.createdBy.membershipId, membershipId)
+  assert.equal(claimedCreateNoteResponse.body.note.createdBy.role, 'guest')
+  assert.equal(claimedCreateNoteResponse.body.note.createdBy.displayName, 'Mira')
+
+  const staleSessionResponse = await guest.get(`/api/shared/${shareToken}/session`)
+  assert.equal(staleSessionResponse.status, 200)
+  assert.equal(staleSessionResponse.body.membership, null)
+  const staleOverviewResponse = await guest.get(`/api/shared/${shareToken}/overview`)
+  assert.equal(staleOverviewResponse.status, 401)
+
+  const renewedGuestToken = claimResponse.body.guestToken as string
+  const renewedGuest = withGuest(request(app), renewedGuestToken)
+  const restoredSessionResponse = await renewedGuest.get(`/api/shared/${shareToken}/session`)
+  assert.equal(restoredSessionResponse.status, 200)
+  assert.equal(restoredSessionResponse.body.membership.userId, claimant.owner.id)
+
+  const updateNoteResponse = await renewedGuest
+    .put(`/api/shared/${shareToken}/notes/${noteId}`)
+    .send({
+      title: 'Claimed under the same actor',
+      body: 'The moonwell sigil stayed on the same membership after linking the account.',
+      tags: ['moonwell', 'claim'],
+      status: 'active',
+      sessionName: null,
+    })
+  assert.equal(updateNoteResponse.status, 200)
+  assert.equal(updateNoteResponse.body.note.createdBy.membershipId, membershipId)
+  assert.equal(updateNoteResponse.body.note.createdBy.displayName, 'Mira')
+  assert.equal(updateNoteResponse.body.note.lastEditedBy.membershipId, membershipId)
+  assert.equal(updateNoteResponse.body.note.lastEditedBy.displayName, 'Mira')
+})
+
 test('invalid note payloads return explicit errors for an authenticated owner', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)

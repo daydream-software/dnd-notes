@@ -63,10 +63,17 @@ interface NoteFixture {
 }
 
 const defaultCampaignId = 'moonshae-ledger'
+const authTokenStorageKey = 'dnd-notes:owner-auth-token'
+const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
 
-function buildOverview(campaign: CampaignFixture, notes: NoteFixture[]) {
+function buildOverview(
+  campaign: CampaignFixture,
+  notes: NoteFixture[],
+  membership: CampaignMembershipFixture | null,
+) {
   return {
     campaign,
+    membership,
     stats: {
       totalNotes: notes.length,
       draftNotes: notes.filter((note) => note.status === 'draft').length,
@@ -241,6 +248,11 @@ describe('App', () => {
       const readCampaignId = () =>
         parsedUrl.searchParams.get('campaignId') ?? defaultCampaignId
 
+      const findCampaignMembership = (campaignId: string) =>
+        membershipsByCampaign[campaignId]?.find(
+          (campaignMembership) => campaignMembership.userId === owner?.id,
+        ) ?? null
+
       const ensureOwnerCampaign = (campaignId: string) => {
         const authFailure = requireOwner()
         if (authFailure) {
@@ -253,6 +265,27 @@ describe('App', () => {
         )
 
         if (!membership) {
+          return new Response(
+            JSON.stringify({ error: 'You do not have access to this campaign.' }),
+            {
+              status: 403,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        return null
+      }
+
+      const ensureCampaignAccess = (campaignId: string) => {
+        const authFailure = requireOwner()
+        if (authFailure) {
+          return authFailure
+        }
+
+        if (!findCampaignMembership(campaignId)) {
           return new Response(
             JSON.stringify({ error: 'You do not have access to this campaign.' }),
             {
@@ -336,10 +369,14 @@ describe('App', () => {
         membershipsByCampaign[defaultCampaignId] = membershipsByCampaign[
           defaultCampaignId
         ].map((membership) => ({
-          ...membership,
-          displayName: payload.displayName,
-          userId: owner?.id ?? null,
-          updatedAt: '2026-04-11T20:00:00.000Z',
+          ...(membership.role === 'owner' && membership.userId === null
+            ? {
+                ...membership,
+                displayName: payload.displayName,
+                userId: owner?.id ?? null,
+                updatedAt: '2026-04-11T20:00:00.000Z',
+              }
+            : membership),
         }))
 
         return new Response(
@@ -419,14 +456,13 @@ describe('App', () => {
           return authFailure
         }
 
-        const ownedCampaigns = campaigns.filter((campaign) =>
+        const accessibleCampaigns = campaigns.filter((campaign) =>
           membershipsByCampaign[campaign.id]?.some(
-            (membership) =>
-              membership.role === 'owner' && membership.userId === owner?.id,
+            (membership) => membership.userId === owner?.id,
           ),
         )
 
-        return new Response(JSON.stringify({ campaigns: ownedCampaigns }), {
+        return new Response(JSON.stringify({ campaigns: accessibleCampaigns }), {
           status: 200,
           headers: {
             'Content-Type': 'application/json',
@@ -799,6 +835,108 @@ describe('App', () => {
         )
       }
 
+      const sharedClaimMatch = path.match(/^\/api\/shared\/([^/]+)\/membership\/claim$/)
+      if (sharedClaimMatch && method === 'POST') {
+        const resolved = resolveShareLink(sharedClaimMatch[1])
+
+        if (!resolved) {
+          return new Response(
+            JSON.stringify({ error: 'Shared link was not found or has been revoked.' }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const authFailure = requireOwner()
+        if (authFailure) {
+          return authFailure
+        }
+
+        const membership = requireGuestMembership(resolved.campaign.id)
+        if (membership instanceof Response) {
+          return membership
+        }
+
+        if (membership.userId && membership.userId !== owner?.id) {
+          return new Response(
+            JSON.stringify({
+              error: 'This guest membership is already linked to another account.',
+              details: [
+                'Use the same browser session that originally claimed this membership or ask the campaign owner to share a fresh link.',
+              ],
+            }),
+            {
+              status: 409,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const existingMembership = (membershipsByCampaign[resolved.campaign.id] ?? []).find(
+          (campaignMembership) =>
+            campaignMembership.userId === owner?.id && campaignMembership.id !== membership.id,
+        )
+
+        if (!membership.userId && existingMembership) {
+          return new Response(
+            JSON.stringify({
+              error: 'This account already has a membership in this campaign.',
+              details: [
+                'Keep using the membership that is already attached to this account for this campaign.',
+              ],
+            }),
+            {
+              status: 409,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const refreshedGuestToken =
+          membership.userId === owner?.id || !guestToken ? null : `${guestToken}-claimed`
+        const claimedMembership =
+          membership.userId === owner?.id
+            ? membership
+            : {
+                ...membership,
+                userId: owner?.id ?? null,
+                guestTokenId: refreshedGuestToken ? `hashed-${refreshedGuestToken}` : null,
+                updatedAt: '2026-04-12T02:45:00.000Z',
+              }
+
+        if (guestToken && refreshedGuestToken) {
+          delete guestMembershipByToken[guestToken]
+          guestMembershipByToken[refreshedGuestToken] = claimedMembership
+        }
+
+        membershipsByCampaign[resolved.campaign.id] = (membershipsByCampaign[
+          resolved.campaign.id
+        ] ?? []).map((campaignMembership) =>
+          campaignMembership.id === claimedMembership.id ? claimedMembership : campaignMembership,
+        )
+
+        return new Response(
+          JSON.stringify({
+            membership: claimedMembership,
+            guestToken: refreshedGuestToken,
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
       const sharedOverviewMatch = path.match(/^\/api\/shared\/([^/]+)\/overview$/)
       if (sharedOverviewMatch && method === 'GET') {
         const resolved = resolveShareLink(sharedOverviewMatch[1])
@@ -825,6 +963,7 @@ describe('App', () => {
             buildOverview(
               resolved.campaign,
               notesByCampaign[resolved.campaign.id] ?? [],
+              membership,
             ),
           ),
           {
@@ -1045,15 +1184,18 @@ describe('App', () => {
 
       if (path === '/api/overview' && method === 'GET') {
         const campaignId = readCampaignId()
-        const ownershipFailure = ensureOwnerCampaign(campaignId)
-        if (ownershipFailure) {
-          return ownershipFailure
+        const accessFailure = ensureCampaignAccess(campaignId)
+        if (accessFailure) {
+          return accessFailure
         }
 
         const campaign = campaigns.find((candidateCampaign) => candidateCampaign.id === campaignId)
+        const membership = findCampaignMembership(campaignId)
 
         return new Response(
-          JSON.stringify(buildOverview(campaign!, notesByCampaign[campaignId] ?? [])),
+          JSON.stringify(
+            buildOverview(campaign!, notesByCampaign[campaignId] ?? [], membership),
+          ),
           {
             status: 200,
             headers: {
@@ -1065,9 +1207,9 @@ describe('App', () => {
 
       if (path === '/api/notes' && method === 'GET') {
         const campaignId = readCampaignId()
-        const ownershipFailure = ensureOwnerCampaign(campaignId)
-        if (ownershipFailure) {
-          return ownershipFailure
+        const accessFailure = ensureCampaignAccess(campaignId)
+        if (accessFailure) {
+          return accessFailure
         }
 
         return new Response(
@@ -1091,9 +1233,9 @@ describe('App', () => {
           sessionName: string | null
         }
 
-        const ownershipFailure = ensureOwnerCampaign(payload.campaignId)
-        if (ownershipFailure) {
-          return ownershipFailure
+        const accessFailure = ensureCampaignAccess(payload.campaignId)
+        if (accessFailure) {
+          return accessFailure
         }
 
         const createdNote: NoteFixture = {
@@ -1130,9 +1272,9 @@ describe('App', () => {
             (notesByCampaign[campaignId] ?? []).some((note) => note.id === noteId),
           ) ?? defaultCampaignId
 
-        const ownershipFailure = ensureOwnerCampaign(targetCampaignId)
-        if (ownershipFailure) {
-          return ownershipFailure
+        const accessFailure = ensureCampaignAccess(targetCampaignId)
+        if (accessFailure) {
+          return accessFailure
         }
 
         const payload = JSON.parse(String(init?.body)) as {
@@ -1177,9 +1319,9 @@ describe('App', () => {
             (notesByCampaign[campaignId] ?? []).some((note) => note.id === noteId),
           ) ?? defaultCampaignId
 
-        const ownershipFailure = ensureOwnerCampaign(targetCampaignId)
-        if (ownershipFailure) {
-          return ownershipFailure
+        const accessFailure = ensureCampaignAccess(targetCampaignId)
+        if (accessFailure) {
+          return accessFailure
         }
 
         notesByCampaign[targetCampaignId] = (notesByCampaign[targetCampaignId] ?? []).filter(
@@ -1419,6 +1561,92 @@ describe('App', () => {
     expect(await screen.findByText(/Joined as Nox/)).toBeTruthy()
     expect((await screen.findAllByText('Cipher fragment recovered')).length).toBeGreaterThan(0)
     expect(screen.getByText(/Total notes/)).toBeTruthy()
+  }, 20000)
+
+  it('lets a guest create and link a real account from the shared route', async () => {
+    const sharedCampaignId = 'emberfall-accord'
+    campaigns = [
+      ...campaigns,
+      {
+        id: sharedCampaignId,
+        name: 'Emberfall Accord',
+        tagline: 'Track alliances and betrayals across the city.',
+        system: 'Dungeons & Dragons 2024',
+        setting: 'Emberfall',
+        nextSession: null,
+        archivedAt: null,
+        createdAt: '2026-04-12T02:00:00.000Z',
+        updatedAt: '2026-04-12T02:00:00.000Z',
+      },
+    ]
+    membershipsByCampaign[sharedCampaignId] = []
+    notesByCampaign[sharedCampaignId] = [
+      {
+        id: 'emberfall-note-1',
+        campaignId: sharedCampaignId,
+        title: 'Accord watch list',
+        body: 'Keep tabs on who is leaning toward the harbor guild this week.',
+        tags: ['faction'],
+        status: 'active',
+        sessionName: null,
+        createdAt: '2026-04-12T02:15:00.000Z',
+        updatedAt: '2026-04-12T02:15:00.000Z',
+      },
+    ]
+    shareLinksByCampaign[sharedCampaignId] = [
+      {
+        id: 'share-link-default',
+        campaignId: sharedCampaignId,
+        label: 'Player table',
+        accessLevel: 'editor',
+        frameAncestors: 'https://owlbear.app',
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: '2026-04-12T01:30:00.000Z',
+        updatedAt: '2026-04-12T01:30:00.000Z',
+        token: 'share-token-emberfall-accord-1',
+        url: 'http://localhost/share/share-token-emberfall-accord-1',
+      },
+    ]
+
+    window.history.replaceState({}, '', '/share/share-token-emberfall-accord-1')
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    expect(await screen.findByText('Join Emberfall Accord')).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Display name'), 'Nox')
+    await user.click(screen.getByRole('button', { name: 'Join campaign' }))
+
+    expect(await screen.findByText(/Joined as Nox/)).toBeTruthy()
+    expect(await screen.findByText('Link this guest membership')).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Account display name'), 'Nox Real')
+    await user.type(screen.getByLabelText('Email'), 'nox@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create and link account' }))
+
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Nox Real/)
+    expect(localStorage.getItem(authTokenStorageKey)).toBe('owner-token-1')
+    expect(
+      localStorage.getItem('dnd-notes:guest-token:share-token-emberfall-accord-1'),
+    ).toBe('guest-token-1-claimed')
+    expect(localStorage.getItem(selectedCampaignStorageKey)).toBe(sharedCampaignId)
+    expect((await screen.findAllByText('Accord watch list')).length).toBeGreaterThan(0)
+
+    cleanup()
+    window.history.replaceState({}, '', '/')
+    render(<App />)
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Emberfall Accord' }))[0],
+    ).toBeTruthy()
+    expect(screen.getByText('Guest collaborator')).toBeTruthy()
+    expect(screen.getByText(/Share links and campaign settings stay with the campaign owner/)).toBeTruthy()
+    expect(
+      (screen.getByRole('button', { name: 'Campaign settings' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
   }, 20000)
 
   it('does not let a stale shared-session response clear a new guest join', async () => {

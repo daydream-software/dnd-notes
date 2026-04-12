@@ -97,6 +97,12 @@ type CampaignShareLinkRevealResult =
   | { status: 'available'; token: string }
   | { status: 'legacy-unavailable' }
 
+type ClaimGuestMembershipResult =
+  | { status: 'claimed'; membership: CampaignMembership; guestToken: string }
+  | { status: 'already-linked'; membership: CampaignMembership }
+  | { status: 'account-already-member'; membership: CampaignMembership }
+  | { status: 'not-found' }
+
 interface CreateNoteStoreOptions {
   dbPath?: string
 }
@@ -105,7 +111,9 @@ const sessionTtlMs = 1000 * 60 * 60 * 24 * 30
 
 export interface NoteStore {
   listCampaigns(): CampaignSummary[]
+  listUserCampaigns(userId: string): CampaignSummary[]
   listOwnedCampaigns(ownerUserId: string): CampaignSummary[]
+  getPrimaryCampaignForUser(userId: string): CampaignSummary
   getPrimaryCampaign(ownerUserId?: string): CampaignSummary
   getCampaign(campaignId: string): CampaignSummary | null
   createCampaign(input: CampaignInput, owner: OwnerAccount): CampaignSummary
@@ -116,6 +124,7 @@ export interface NoteStore {
   ): CampaignSummary | null
   listCampaignMemberships(campaignId: string): CampaignMembership[]
   listCampaignShareLinks(campaignId: string): CampaignShareLink[]
+  userHasCampaignAccess(userId: string, campaignId: string): boolean
   userOwnsCampaign(ownerUserId: string, campaignId: string): boolean
   createOwnerAccount(input: OwnerRegistrationInput): OwnerAccount | null
   authenticateOwner(email: string, password: string): OwnerAccount | null
@@ -143,6 +152,8 @@ export interface NoteStore {
     displayName: string,
   ): { membership: CampaignMembership; guestToken: string }
   getGuestMembershipByToken(token: string): CampaignMembership | null
+  claimGuestMembership(membershipId: string, ownerUserId: string): ClaimGuestMembershipResult
+  getUserMembershipForCampaign(userId: string, campaignId: string): CampaignMembership | null
   getOwnerMembershipForCampaign(ownerUserId: string, campaignId: string): CampaignMembership | null
   listNotes(campaignId?: string): Note[]
   listRecentNotes(limit: number, campaignId?: string): Note[]
@@ -485,6 +496,28 @@ export function createNoteStore(
       created_at ASC
   `)
 
+  const selectUserCampaigns = database.prepare(`
+    SELECT
+      campaigns.id,
+      campaigns.name,
+      campaigns.tagline,
+      campaigns.system,
+      campaigns.setting,
+      campaigns.next_session,
+      campaigns.archived_at,
+      campaigns.created_at,
+      campaigns.updated_at
+    FROM campaigns
+    INNER JOIN campaign_memberships
+      ON campaign_memberships.campaign_id = campaigns.id
+    WHERE
+      campaigns.archived_at IS NULL
+      AND campaign_memberships.user_id = ?
+    ORDER BY
+      CASE WHEN campaigns.id = '${defaultCampaignId}' THEN 0 ELSE 1 END,
+      campaigns.created_at ASC
+  `)
+
   const selectOwnedCampaigns = database.prepare(`
     SELECT
       campaigns.id,
@@ -506,6 +539,29 @@ export function createNoteStore(
     ORDER BY
       CASE WHEN campaigns.id = '${defaultCampaignId}' THEN 0 ELSE 1 END,
       campaigns.created_at ASC
+  `)
+
+  const selectPrimaryUserCampaign = database.prepare(`
+    SELECT
+      campaigns.id,
+      campaigns.name,
+      campaigns.tagline,
+      campaigns.system,
+      campaigns.setting,
+      campaigns.next_session,
+      campaigns.archived_at,
+      campaigns.created_at,
+      campaigns.updated_at
+    FROM campaigns
+    INNER JOIN campaign_memberships
+      ON campaign_memberships.campaign_id = campaigns.id
+    WHERE
+      campaigns.archived_at IS NULL
+      AND campaign_memberships.user_id = ?
+    ORDER BY
+      CASE WHEN campaigns.id = '${defaultCampaignId}' THEN 0 ELSE 1 END,
+      campaigns.created_at ASC
+    LIMIT 1
   `)
 
   const selectPrimaryOwnedCampaign = database.prepare(`
@@ -599,6 +655,21 @@ export function createNoteStore(
     WHERE campaign_id = ? AND user_id = ? AND role = 'owner'
   `)
 
+  const selectMembershipByCampaignAndUser = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      role,
+      display_name,
+      user_id,
+      guest_token_id,
+      created_at,
+      updated_at
+    FROM campaign_memberships
+    WHERE campaign_id = ? AND user_id = ?
+    LIMIT 1
+  `)
+
   const selectGuestMembershipByTokenHash = database.prepare(`
     SELECT
       id,
@@ -659,6 +730,17 @@ export function createNoteStore(
       campaign_id = @campaign_id
       AND role = 'owner'
       AND user_id IS NULL
+  `)
+
+  const claimGuestMembershipStatement = database.prepare(`
+    UPDATE campaign_memberships
+    SET
+      user_id = @user_id,
+      guest_token_id = @guest_token_id,
+      updated_at = @updated_at
+    WHERE
+      id = @id
+      AND role = 'guest'
   `)
 
   const countOwnerMemberships = database.prepare(`
@@ -1170,8 +1252,63 @@ export function createNoteStore(
     },
   )
 
+  const claimGuestMembershipTransaction = database.transaction(
+    (membershipId: string, ownerUserId: string): ClaimGuestMembershipResult => {
+      const membershipRow = selectMembershipById.get(membershipId) as
+        | CampaignMembershipRow
+        | undefined
+
+      if (!membershipRow || membershipRow.role !== 'guest') {
+        return { status: 'not-found' }
+      }
+
+      const membership = mapMembershipRow(membershipRow)
+
+      if (membership.userId !== null) {
+        return { status: 'already-linked', membership }
+      }
+
+      const existingMembership = selectMembershipByCampaignAndUser.get(
+        membership.campaignId,
+        ownerUserId,
+      ) as CampaignMembershipRow | undefined
+
+      if (existingMembership) {
+        return {
+          status: 'account-already-member',
+          membership: mapMembershipRow(existingMembership),
+        }
+      }
+
+      const updatedAt = new Date().toISOString()
+      const guestToken = createSessionToken()
+      const guestTokenId = hashSessionToken(guestToken)
+
+      claimGuestMembershipStatement.run({
+        id: membership.id,
+        user_id: ownerUserId,
+        guest_token_id: guestTokenId,
+        updated_at: updatedAt,
+      })
+
+      return {
+        status: 'claimed',
+        membership: {
+          ...membership,
+          userId: ownerUserId,
+          guestTokenId,
+          updatedAt,
+        },
+        guestToken,
+      }
+    },
+  )
+
   const listCampaigns = () =>
     (selectAllCampaigns.all() as CampaignRow[]).map((row) => mapCampaignRow(row))
+
+  const listUserCampaigns = (userId: string) =>
+    (selectUserCampaigns.all(userId) as CampaignRow[]).map((row) => mapCampaignRow(row))
 
   const listOwnedCampaigns = (ownerUserId: string) =>
     (selectOwnedCampaigns.all(ownerUserId) as CampaignRow[]).map((row) =>
@@ -1204,6 +1341,16 @@ export function createNoteStore(
     }
 
     return primaryCampaign
+  }
+
+  const getPrimaryCampaignForUser = (userId: string) => {
+    const row = selectPrimaryUserCampaign.get(userId) as CampaignRow | undefined
+
+    if (!row) {
+      throw new Error('No campaigns are available.')
+    }
+
+    return mapCampaignRow(row)
   }
 
   const requireCampaign = (campaignId?: string | null) => {
@@ -1276,7 +1423,9 @@ export function createNoteStore(
 
   return {
     listCampaigns,
+    listUserCampaigns,
     listOwnedCampaigns,
+    getPrimaryCampaignForUser,
     getPrimaryCampaign,
     getCampaign,
     createCampaign(input, owner) {
@@ -1297,6 +1446,9 @@ export function createNoteStore(
         selectActiveShareLinksByCampaignId.all(campaignId, new Date().toISOString()) as
           CampaignShareLinkRow[]
       ).map((row) => mapCampaignShareLinkRow(row))
+    },
+    userHasCampaignAccess(userId, campaignId) {
+      return Boolean(selectMembershipByCampaignAndUser.get(campaignId, userId))
     },
     userOwnsCampaign(ownerUserId, campaignId) {
       return Boolean(selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))
@@ -1401,6 +1553,17 @@ export function createNoteStore(
     getGuestMembershipByToken(token) {
       const row = selectGuestMembershipByTokenHash.get(
         hashSessionToken(token),
+      ) as CampaignMembershipRow | undefined
+
+      return row ? mapMembershipRow(row) : null
+    },
+    claimGuestMembership(membershipId, ownerUserId) {
+      return claimGuestMembershipTransaction(membershipId, ownerUserId)
+    },
+    getUserMembershipForCampaign(userId, campaignId) {
+      const row = selectMembershipByCampaignAndUser.get(
+        campaignId,
+        userId,
       ) as CampaignMembershipRow | undefined
 
       return row ? mapMembershipRow(row) : null

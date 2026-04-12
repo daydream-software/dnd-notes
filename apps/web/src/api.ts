@@ -18,6 +18,7 @@ import type {
   OwnerLoginInput,
   OwnerRegistrationInput,
   SharedJoinResponse,
+  SharedMembershipClaimResponse,
   SharedSessionResponse,
 } from './types'
 
@@ -325,6 +326,22 @@ export async function joinSharedCampaign(
   })
 
   return readJson<SharedJoinResponse>(response)
+}
+
+export async function claimSharedMembership(
+  shareToken: string,
+  authToken: string,
+  guestToken: string,
+) {
+  const headers = createGuestHeaders(guestToken)
+  headers.set('Authorization', `Bearer ${authToken}`)
+
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/membership/claim`, {
+    method: 'POST',
+    headers,
+  })
+
+  return readJson<SharedMembershipClaimResponse>(response)
 }
 
 export async function fetchSharedOverview(

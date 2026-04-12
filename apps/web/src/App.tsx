@@ -327,6 +327,8 @@ function App() {
       ),
     [memberships, selectedCampaignId],
   )
+  const activeMembership = overview?.membership ?? null
+  const canManageSelectedCampaign = activeMembership?.role === 'owner'
 
   const statCards = useMemo(() => {
     if (!overview) {
@@ -521,7 +523,12 @@ function App() {
   }, [clearSession, loadCampaigns])
 
   useEffect(() => {
-    if (!authToken || campaignFormMode !== 'edit' || !selectedCampaignId) {
+    if (
+      !authToken ||
+      campaignFormMode !== 'edit' ||
+      !selectedCampaignId ||
+      !canManageSelectedCampaign
+    ) {
       setMemberships([])
       setShareLinks([])
       resetShareLinkInteractionState()
@@ -557,7 +564,13 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [authToken, campaignFormMode, resetShareLinkInteractionState, selectedCampaignId])
+  }, [
+    authToken,
+    canManageSelectedCampaign,
+    campaignFormMode,
+    resetShareLinkInteractionState,
+    selectedCampaignId,
+  ])
 
   const handleDraftChange = <Field extends keyof NoteDraft>(
     field: Field,
@@ -713,6 +726,11 @@ function App() {
   }
 
   const handleOpenCampaignSettings = () => {
+    if (!canManageSelectedCampaign) {
+      setError('Campaign settings are only available to campaign owners.')
+      return
+    }
+
     setCampaignDraft(createCampaignDraft(selectedCampaign))
     setShareLinkDraft(createShareLinkDraft())
     resetShareLinkInteractionState()
@@ -1196,9 +1214,22 @@ function App() {
                       {overview.campaign.tagline}
                     </Typography>
                     <Typography sx={{ mt: 2, color: 'rgba(255, 255, 255, 0.65)' }}>
-                      Signed in as {owner.displayName}. Campaigns, settings, and notes all
-                      stay scoped to the owner-selected campaign.
+                      Signed in as {owner.displayName}. Notes stay scoped to the selected
+                      campaign, and owner-only settings stay tucked away when you are
+                      collaborating.
                     </Typography>
+                    {activeMembership ? (
+                      <Chip
+                        label={
+                          activeMembership.role === 'owner'
+                            ? 'Campaign owner'
+                            : 'Guest collaborator'
+                        }
+                        color={canManageSelectedCampaign ? 'secondary' : 'default'}
+                        size="small"
+                        sx={{ mt: 2, bgcolor: 'rgba(255, 255, 255, 0.14)', color: 'white' }}
+                      />
+                    ) : null}
                   </Box>
 
                   <Stack
@@ -1230,10 +1261,20 @@ function App() {
                       <Button variant="contained" onClick={handleOpenCampaignCreate}>
                         New campaign
                       </Button>
-                      <Button variant="outlined" color="inherit" onClick={handleOpenCampaignSettings}>
+                      <Button
+                        variant="outlined"
+                        color="inherit"
+                        onClick={handleOpenCampaignSettings}
+                        disabled={!canManageSelectedCampaign}
+                      >
                         Campaign settings
                       </Button>
                     </Stack>
+                    {!canManageSelectedCampaign ? (
+                      <Typography color="rgba(255, 255, 255, 0.72)" variant="body2">
+                        Share links and campaign settings stay with the campaign owner.
+                      </Typography>
+                    ) : null}
                     <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                       <Button
                         variant="contained"

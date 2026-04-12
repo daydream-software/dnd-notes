@@ -3,6 +3,7 @@ import express, { type Express, type Request, type Response } from 'express'
 import type { NoteStore } from './note-store.js'
 import type {
   AuthSessionResponse,
+  CampaignMembership,
   CampaignMembershipsResponse,
   CampaignShareLinkCreateResponse,
   CampaignShareLinkRevealResponse,
@@ -17,6 +18,7 @@ import type {
   NotesResponse,
   OwnerAccount,
   SharedJoinResponse,
+  SharedMembershipClaimResponse,
   SharedSessionResponse,
 } from './types.js'
 import {
@@ -89,7 +91,11 @@ function readRequestedCampaignId(request: Request) {
   return trimmed.length > 0 ? trimmed : null
 }
 
-function buildOverview(noteStore: NoteStore, campaignId: string): NotesOverview {
+function buildOverview(
+  noteStore: NoteStore,
+  campaignId: string,
+  membership: CampaignMembership | null,
+): NotesOverview {
   const campaign = noteStore.getCampaign(campaignId)
 
   if (!campaign || campaign.archivedAt !== null) {
@@ -98,6 +104,7 @@ function buildOverview(noteStore: NoteStore, campaignId: string): NotesOverview 
 
   return {
     campaign,
+    membership,
     stats: noteStore.getStats(campaign.id),
     recentNotes: noteStore.listRecentNotes(3, campaign.id),
   }
@@ -148,6 +155,36 @@ function resolveOwnedCampaign(
   }
 
   if (!noteStore.userOwnsCampaign(owner.id, campaignId)) {
+    response.status(403).json({ error: 'You do not have access to this campaign.' })
+    return null
+  }
+
+  return campaign
+}
+
+function resolveAccessibleCampaign(
+  noteStore: NoteStore,
+  owner: OwnerAccount,
+  campaignId: string | null | undefined,
+  response: Response<ErrorResponse>,
+) {
+  if (!campaignId) {
+    try {
+      return noteStore.getPrimaryCampaignForUser(owner.id)
+    } catch {
+      response.status(404).json({ error: 'No campaigns are available.' })
+      return null
+    }
+  }
+
+  const campaign = noteStore.getCampaign(campaignId)
+
+  if (!campaign || campaign.archivedAt !== null) {
+    response.status(404).json({ error: `Campaign "${campaignId}" was not found.` })
+    return null
+  }
+
+  if (!noteStore.userHasCampaignAccess(owner.id, campaignId)) {
     response.status(403).json({ error: 'You do not have access to this campaign.' })
     return null
   }
@@ -362,7 +399,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      response.json({ campaigns: noteStore.listOwnedCampaigns(owner.id) })
+      response.json({ campaigns: noteStore.listUserCampaigns(owner.id) })
     },
   )
 
@@ -405,7 +442,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = resolveAccessibleCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -679,7 +716,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = resolveAccessibleCampaign(
         noteStore,
         owner,
         readRequestedCampaignId(request),
@@ -690,7 +727,13 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      response.json(buildOverview(noteStore, campaign.id))
+      response.json(
+        buildOverview(
+          noteStore,
+          campaign.id,
+          noteStore.getUserMembershipForCampaign(owner.id, campaign.id),
+        ),
+      )
     },
   )
 
@@ -706,7 +749,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = resolveAccessibleCampaign(
         noteStore,
         owner,
         readRequestedCampaignId(request),
@@ -742,7 +785,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      if (!noteStore.userOwnsCampaign(owner.id, note.campaignId)) {
+      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
         response.status(403).json({ error: 'You do not have access to this note.' })
         return
       }
@@ -773,7 +816,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = resolveAccessibleCampaign(
         noteStore,
         owner,
         validation.data.campaignId,
@@ -784,12 +827,19 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
+      const membership = noteStore.getUserMembershipForCampaign(owner.id, campaign.id)
+
+      if (!membership) {
+        response.status(403).json({ error: 'You do not have access to this campaign.' })
+        return
+      }
+
       const note = noteStore.createNote(
         {
           ...validation.data,
           campaignId: campaign.id,
         },
-        noteStore.getOwnerMembershipForCampaign(owner.id, campaign.id)?.id,
+        membership.id,
       )
 
       response.status(201).json({ note })
@@ -817,7 +867,9 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      if (!noteStore.userOwnsCampaign(owner.id, existingNote.campaignId)) {
+      const membership = noteStore.getUserMembershipForCampaign(owner.id, existingNote.campaignId)
+
+      if (!membership) {
         response.status(403).json({ error: 'You do not have access to this note.' })
         return
       }
@@ -838,7 +890,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
           ...validation.data,
           campaignId: existingNote.campaignId,
         },
-        noteStore.getOwnerMembershipForCampaign(owner.id, existingNote.campaignId)?.id,
+        membership.id,
       )
 
       if (!note) {
@@ -873,7 +925,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      if (!noteStore.userOwnsCampaign(owner.id, note.campaignId)) {
+      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
         response.status(403).json({ error: 'You do not have access to this note.' })
         return
       }
@@ -943,6 +995,74 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
     },
   )
 
+  app.post(
+    '/api/shared/:shareToken/membership/claim',
+    (
+      request: Request<ShareParams>,
+      response: Response<SharedMembershipClaimResponse | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const membership = requireSharedMembership(
+        noteStore,
+        request,
+        shared.campaign.id,
+        response,
+      )
+
+      if (!membership) {
+        return
+      }
+
+      const claimedMembership = noteStore.claimGuestMembership(membership.id, owner.id)
+
+      if (claimedMembership.status === 'not-found') {
+        response.status(404).json({ error: 'Guest membership was not found.' })
+        return
+      }
+
+      if (claimedMembership.status === 'account-already-member') {
+        response.status(409).json({
+          error: 'This account already has a membership in this campaign.',
+          details: [
+            'Keep using the membership that is already attached to this account for this campaign.',
+          ],
+        })
+        return
+      }
+
+      if (
+        claimedMembership.status === 'already-linked' &&
+        claimedMembership.membership.userId !== owner.id
+      ) {
+        response.status(409).json({
+          error: 'This guest membership is already linked to another account.',
+          details: [
+            'Use the same browser session that originally claimed this membership or ask the campaign owner to share a fresh link.',
+          ],
+        })
+        return
+      }
+
+      response.json({
+        membership: claimedMembership.membership,
+        guestToken: claimedMembership.status === 'claimed' ? claimedMembership.guestToken : null,
+      })
+    },
+  )
+
   app.get(
     '/api/shared/:shareToken/overview',
     (
@@ -968,7 +1088,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      response.json(buildOverview(noteStore, shared.campaign.id))
+      response.json(buildOverview(noteStore, shared.campaign.id, membership))
     },
   )
 
