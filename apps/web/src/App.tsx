@@ -35,6 +35,7 @@ import {
   fetchOwnerSession,
   loginOwner,
   logoutOwner,
+  revealCampaignShareLink,
   registerOwner,
   revokeCampaignShareLink,
   updateCampaign,
@@ -87,6 +88,11 @@ interface ShareLinkDraft {
   label: string
   accessLevel: ShareAccessLevel
   frameAncestors: string
+}
+
+interface RevealedShareLink {
+  url: string
+  isVisible: boolean
 }
 
 type CampaignFormMode = 'closed' | 'create' | 'edit'
@@ -182,6 +188,39 @@ function createShareLinkPayload(draft: ShareLinkDraft): CampaignShareLinkInput {
   }
 }
 
+function deleteRecordKey<Value>(record: Record<string, Value>, key: string) {
+  const nextRecord = { ...record }
+  delete nextRecord[key]
+  return nextRecord
+}
+
+async function copyTextToClipboard(value: string) {
+  if (typeof window !== 'undefined' && window.navigator.clipboard?.writeText) {
+    await window.navigator.clipboard.writeText(value)
+    return
+  }
+
+  if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
+    const textarea = document.createElement('textarea')
+    textarea.value = value
+    textarea.setAttribute('readonly', '')
+    textarea.style.position = 'absolute'
+    textarea.style.left = '-9999px'
+    document.body.append(textarea)
+    textarea.select()
+
+    try {
+      if (document.execCommand('copy')) {
+        return
+      }
+    } finally {
+      document.body.removeChild(textarea)
+    }
+  }
+
+  throw new Error('Clipboard access is unavailable. Reveal the link and copy it manually.')
+}
+
 function formatTimestamp(value: string) {
   const date = new Date(value)
 
@@ -250,7 +289,17 @@ function App() {
   const [isRegisterMode, setIsRegisterMode] = useState(true)
   const [campaignFormMode, setCampaignFormMode] =
     useState<CampaignFormMode>('closed')
-  const [lastCreatedShareUrl, setLastCreatedShareUrl] = useState<string | null>(null)
+  const [shareLinkNotice, setShareLinkNotice] = useState<string | null>(null)
+  const [revealedShareLinks, setRevealedShareLinks] = useState<
+    Record<string, RevealedShareLink>
+  >({})
+  const [shareLinkActionErrors, setShareLinkActionErrors] = useState<
+    Record<string, string>
+  >({})
+  const [revealingShareLinkId, setRevealingShareLinkId] = useState<string | null>(
+    null,
+  )
+  const [copiedShareLinkId, setCopiedShareLinkId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const selectedNoteIdRef = useRef<string | null>(null)
 
@@ -308,6 +357,14 @@ function App() {
     ]
   }, [overview])
 
+  const resetShareLinkInteractionState = useCallback(() => {
+    setShareLinkNotice(null)
+    setRevealedShareLinks({})
+    setShareLinkActionErrors({})
+    setRevealingShareLinkId(null)
+    setCopiedShareLinkId(null)
+  }, [])
+
   const clearSession = useCallback(() => {
     localStorage.removeItem(authTokenStorageKey)
     localStorage.removeItem(selectedCampaignStorageKey)
@@ -324,8 +381,8 @@ function App() {
     setCampaignDraft(createCampaignDraft())
     setShareLinkDraft(createShareLinkDraft())
     setCampaignFormMode('closed')
-    setLastCreatedShareUrl(null)
-  }, [])
+    resetShareLinkInteractionState()
+  }, [resetShareLinkInteractionState])
 
   const loadWorkspace = useCallback(
     async (
@@ -467,6 +524,7 @@ function App() {
     if (!authToken || campaignFormMode !== 'edit' || !selectedCampaignId) {
       setMemberships([])
       setShareLinks([])
+      resetShareLinkInteractionState()
       return
     }
 
@@ -499,7 +557,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [authToken, campaignFormMode, selectedCampaignId])
+  }, [authToken, campaignFormMode, resetShareLinkInteractionState, selectedCampaignId])
 
   const handleDraftChange = <Field extends keyof NoteDraft>(
     field: Field,
@@ -649,7 +707,7 @@ function App() {
     setMemberships([])
     setShareLinks([])
     setShareLinkDraft(createShareLinkDraft())
-    setLastCreatedShareUrl(null)
+    resetShareLinkInteractionState()
     setCampaignFormMode('create')
     setError(null)
   }
@@ -657,7 +715,7 @@ function App() {
   const handleOpenCampaignSettings = () => {
     setCampaignDraft(createCampaignDraft(selectedCampaign))
     setShareLinkDraft(createShareLinkDraft())
-    setLastCreatedShareUrl(null)
+    resetShareLinkInteractionState()
     setCampaignFormMode('edit')
     setError(null)
   }
@@ -666,7 +724,7 @@ function App() {
     setCampaignDraft(createCampaignDraft(selectedCampaign))
     setCampaignFormMode(campaigns.length === 0 ? 'create' : 'closed')
     setShareLinkDraft(createShareLinkDraft())
-    setLastCreatedShareUrl(null)
+    resetShareLinkInteractionState()
     setError(null)
   }
 
@@ -722,7 +780,10 @@ function App() {
 
       setShareLinks((currentLinks) => [created.shareLink, ...currentLinks])
       setShareLinkDraft(createShareLinkDraft())
-      setLastCreatedShareUrl(created.url)
+      resetShareLinkInteractionState()
+      setShareLinkNotice(
+        'Shared link created. Reveal it on the card when you need to copy it again.',
+      )
     } catch (shareLinkError) {
       setError(
         shareLinkError instanceof Error
@@ -731,6 +792,95 @@ function App() {
       )
     } finally {
       setIsCreatingShareLink(false)
+    }
+  }
+
+  const handleRevealShareLink = async (shareLinkId: string) => {
+    if (!authToken || !selectedCampaignId) {
+      return
+    }
+
+    setError(null)
+    setShareLinkNotice(null)
+    setCopiedShareLinkId((currentId) =>
+      currentId === shareLinkId ? null : currentId,
+    )
+    setShareLinkActionErrors((currentErrors) =>
+      deleteRecordKey(currentErrors, shareLinkId),
+    )
+    setRevealingShareLinkId(shareLinkId)
+
+    try {
+      const revealed = await revealCampaignShareLink(
+        authToken,
+        selectedCampaignId,
+        shareLinkId,
+      )
+
+      setRevealedShareLinks((currentLinks) => ({
+        ...currentLinks,
+        [shareLinkId]: {
+          url: revealed.url,
+          isVisible: false,
+        },
+      }))
+    } catch (shareLinkError) {
+      setShareLinkActionErrors((currentErrors) => ({
+        ...currentErrors,
+        [shareLinkId]:
+          shareLinkError instanceof Error
+            ? shareLinkError.message
+            : 'Could not reveal the shared link.',
+      }))
+    } finally {
+      setRevealingShareLinkId((currentId) =>
+        currentId === shareLinkId ? null : currentId,
+      )
+    }
+  }
+
+  const handleToggleShareLinkVisibility = (shareLinkId: string) => {
+    setRevealedShareLinks((currentLinks) => {
+      const revealedShareLink = currentLinks[shareLinkId]
+
+      if (!revealedShareLink) {
+        return currentLinks
+      }
+
+      return {
+        ...currentLinks,
+        [shareLinkId]: {
+          ...revealedShareLink,
+          isVisible: !revealedShareLink.isVisible,
+        },
+      }
+    })
+  }
+
+  const handleCopyShareLink = async (shareLinkId: string) => {
+    const revealedShareLink = revealedShareLinks[shareLinkId]
+
+    if (!revealedShareLink) {
+      return
+    }
+
+    setError(null)
+    setShareLinkNotice(null)
+
+    try {
+      await copyTextToClipboard(revealedShareLink.url)
+      setShareLinkActionErrors((currentErrors) =>
+        deleteRecordKey(currentErrors, shareLinkId),
+      )
+      setCopiedShareLinkId(shareLinkId)
+    } catch (shareLinkError) {
+      setShareLinkActionErrors((currentErrors) => ({
+        ...currentErrors,
+        [shareLinkId]:
+          shareLinkError instanceof Error
+            ? shareLinkError.message
+            : 'Could not copy the shared link.',
+      }))
     }
   }
 
@@ -746,6 +896,16 @@ function App() {
       setShareLinks((currentLinks) =>
         currentLinks.filter((shareLink) => shareLink.id !== shareLinkId),
       )
+      setRevealedShareLinks((currentLinks) =>
+        deleteRecordKey(currentLinks, shareLinkId),
+      )
+      setShareLinkActionErrors((currentErrors) =>
+        deleteRecordKey(currentErrors, shareLinkId),
+      )
+      setCopiedShareLinkId((currentId) =>
+        currentId === shareLinkId ? null : currentId,
+      )
+      setShareLinkNotice(null)
     } catch (shareLinkError) {
       setError(
         shareLinkError instanceof Error
@@ -763,7 +923,7 @@ function App() {
     setCampaignFormMode('closed')
     setMemberships([])
     setShareLinks([])
-    setLastCreatedShareUrl(null)
+    resetShareLinkInteractionState()
     await loadWorkspace(authToken, campaignId)
   }
 
@@ -1231,9 +1391,9 @@ function App() {
                         </Button>
                       </Stack>
 
-                      {lastCreatedShareUrl ? (
+                      {shareLinkNotice ? (
                         <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
-                          Shared link ready: {lastCreatedShareUrl}
+                          {shareLinkNotice}
                         </Alert>
                       ) : null}
 
@@ -1243,48 +1403,154 @@ function App() {
                         </Typography>
                       ) : (
                         <Stack spacing={1.5}>
-                          {shareLinks.map((shareLink) => (
-                            <Box
-                              key={shareLink.id}
-                              sx={{
-                                border: '1px solid',
-                                borderColor: 'divider',
-                                borderRadius: noteItemRadius,
-                                px: 2,
-                                py: 1.75,
-                              }}
-                            >
-                              <Stack
-                                direction={{ xs: 'column', md: 'row' }}
-                                spacing={1.5}
-                                sx={{ justifyContent: 'space-between' }}
+                          {shareLinks.map((shareLink) => {
+                            const revealedShareLink = revealedShareLinks[shareLink.id]
+                            const shareLinkError = shareLinkActionErrors[shareLink.id]
+                            const isRevealingShareLink =
+                              revealingShareLinkId === shareLink.id
+
+                            return (
+                              <Box
+                                component="section"
+                                key={shareLink.id}
+                                aria-label={`${
+                                  shareLink.label || 'Untitled shared link'
+                                } shared link`}
+                                sx={{
+                                  border: '1px solid',
+                                  borderColor: 'divider',
+                                  borderRadius: noteItemRadius,
+                                  px: 2,
+                                  py: 1.75,
+                                }}
                               >
-                                <Box>
-                                  <Typography variant="subtitle1">
-                                    {shareLink.label || 'Untitled shared link'}
-                                  </Typography>
-                                  <Typography color="text.secondary" variant="body2">
-                                    {shareLink.accessLevel === 'editor'
-                                      ? 'Editors can view and update notes.'
-                                      : 'Viewers can open the shared route without editing.'}
-                                  </Typography>
-                                  <Typography color="text.secondary" variant="body2" sx={{ mt: 0.5 }}>
-                                    Frame ancestors:{' '}
-                                    {shareLink.frameAncestors ?? 'Not embeddable'}
-                                  </Typography>
-                                </Box>
-                                <Box>
-                                  <Button
-                                    color="error"
-                                    variant="text"
-                                    onClick={() => void handleRevokeShareLink(shareLink.id)}
+                                <Stack
+                                  direction={{ xs: 'column', md: 'row' }}
+                                  spacing={2}
+                                  sx={{ justifyContent: 'space-between' }}
+                                >
+                                  <Stack spacing={1.25} sx={{ flexGrow: 1 }}>
+                                    <Box>
+                                      <Typography variant="subtitle1">
+                                        {shareLink.label || 'Untitled shared link'}
+                                      </Typography>
+                                      <Typography color="text.secondary" variant="body2">
+                                        {shareLink.accessLevel === 'editor'
+                                          ? 'Editors can view and update notes.'
+                                          : 'Viewers can open the shared route without editing.'}
+                                      </Typography>
+                                      <Typography
+                                        color="text.secondary"
+                                        variant="body2"
+                                        sx={{ mt: 0.5 }}
+                                      >
+                                        Frame ancestors:{' '}
+                                        {shareLink.frameAncestors ?? 'Not embeddable'}
+                                      </Typography>
+                                    </Box>
+
+                                    {revealedShareLink ? (
+                                      <Box
+                                        sx={{
+                                          border: '1px solid',
+                                          borderColor: 'divider',
+                                          borderRadius: 2,
+                                          px: 1.5,
+                                          py: 1.25,
+                                          backgroundColor: 'background.default',
+                                        }}
+                                      >
+                                        <Typography color="text.secondary" variant="caption">
+                                          Reusable share URL
+                                        </Typography>
+                                        <Typography
+                                          component="p"
+                                          variant="body2"
+                                          sx={{
+                                            mt: 0.75,
+                                            fontFamily: 'monospace',
+                                            wordBreak: 'break-all',
+                                            filter: revealedShareLink.isVisible
+                                              ? 'none'
+                                              : 'blur(6px)',
+                                            transition: 'filter 120ms ease',
+                                            userSelect: revealedShareLink.isVisible
+                                              ? 'text'
+                                              : 'none',
+                                          }}
+                                        >
+                                          {revealedShareLink.url}
+                                        </Typography>
+                                      </Box>
+                                    ) : (
+                                      <Typography color="text.secondary" variant="body2">
+                                        URL hidden until you reveal it on this card.
+                                      </Typography>
+                                    )}
+
+                                    {shareLinkError ? (
+                                      <Alert
+                                        severity="warning"
+                                        sx={{ borderRadius: surfaceRadius }}
+                                      >
+                                        {shareLinkError}
+                                      </Alert>
+                                    ) : null}
+                                  </Stack>
+
+                                  <Stack
+                                    direction={{ xs: 'column', sm: 'row', md: 'column' }}
+                                    spacing={1}
+                                    sx={{ alignItems: { md: 'flex-end' } }}
                                   >
-                                    Revoke link
-                                  </Button>
-                                </Box>
-                              </Stack>
-                            </Box>
-                          ))}
+                                    {revealedShareLink ? (
+                                      <>
+                                        <Button
+                                          variant="outlined"
+                                          onClick={() =>
+                                            handleToggleShareLinkVisibility(shareLink.id)
+                                          }
+                                        >
+                                          {revealedShareLink.isVisible
+                                            ? 'Hide link'
+                                            : 'Show link'}
+                                        </Button>
+                                        <Button
+                                          variant="outlined"
+                                          onClick={() =>
+                                            void handleCopyShareLink(shareLink.id)
+                                          }
+                                        >
+                                          {copiedShareLinkId === shareLink.id
+                                            ? 'Copied'
+                                            : 'Copy link'}
+                                        </Button>
+                                      </>
+                                    ) : (
+                                      <Button
+                                        variant="outlined"
+                                        onClick={() =>
+                                          void handleRevealShareLink(shareLink.id)
+                                        }
+                                        disabled={isRevealingShareLink}
+                                      >
+                                        {isRevealingShareLink
+                                          ? 'Revealing link...'
+                                          : 'Reveal link'}
+                                      </Button>
+                                    )}
+                                    <Button
+                                      color="error"
+                                      variant="text"
+                                      onClick={() => void handleRevokeShareLink(shareLink.id)}
+                                    >
+                                      Revoke link
+                                    </Button>
+                                  </Stack>
+                                </Stack>
+                              </Box>
+                            )
+                          })}
                         </Stack>
                       )}
                     </Stack>

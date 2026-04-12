@@ -46,8 +46,8 @@ interface CampaignShareLinkFixture {
   revokedAt: string | null
   createdAt: string
   updatedAt: string
-  token: string
-  url: string
+  token?: string | null
+  url?: string | null
 }
 
 interface NoteFixture {
@@ -75,6 +75,20 @@ function buildOverview(campaign: CampaignFixture, notes: NoteFixture[]) {
       sessionLinkedNotes: notes.filter((note) => note.sessionName !== null).length,
     },
     recentNotes: notes.slice(0, 3),
+  }
+}
+
+function serializeShareLink(shareLink: CampaignShareLinkFixture) {
+  return {
+    id: shareLink.id,
+    campaignId: shareLink.campaignId,
+    label: shareLink.label,
+    accessLevel: shareLink.accessLevel,
+    frameAncestors: shareLink.frameAncestors,
+    expiresAt: shareLink.expiresAt,
+    revokedAt: shareLink.revokedAt,
+    createdAt: shareLink.createdAt,
+    updatedAt: shareLink.updatedAt,
   }
 }
 
@@ -123,6 +137,8 @@ describe('App', () => {
   let notesByCampaign: Record<string, NoteFixture[]>
   let sharedSessionRequestCount: number
   let sharedSessionResponseDelaysMs: number[]
+  let writeTextMock: ReturnType<typeof vi.fn>
+  let execCommandMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
     owner = null
@@ -180,6 +196,18 @@ describe('App', () => {
 
     localStorage.clear()
     window.history.replaceState({}, '', '/')
+    writeTextMock = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(window.navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: writeTextMock,
+      },
+    })
+    execCommandMock = vi.fn().mockReturnValue(true)
+    Object.defineProperty(document, 'execCommand', {
+      configurable: true,
+      value: execCommandMock,
+    })
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url =
@@ -526,7 +554,11 @@ describe('App', () => {
         }
 
         return new Response(
-          JSON.stringify({ shareLinks: shareLinksByCampaign[campaignId] ?? [] }),
+          JSON.stringify({
+            shareLinks: (shareLinksByCampaign[campaignId] ?? []).map((shareLink) =>
+              serializeShareLink(shareLink),
+            ),
+          }),
           {
             status: 200,
             headers: {
@@ -570,7 +602,7 @@ describe('App', () => {
 
         return new Response(
           JSON.stringify({
-            shareLink: { ...createdShareLink, token: undefined, url: undefined },
+            shareLink: serializeShareLink(createdShareLink),
             token: createdShareLink.token,
             url: createdShareLink.url,
           }),
@@ -583,12 +615,64 @@ describe('App', () => {
         )
       }
 
-      const shareLinkDeleteMatch = path.match(
+      const shareLinkDetailMatch = path.match(
         /^\/api\/campaigns\/([^/]+)\/share-links\/([^/]+)$/,
       )
-      if (shareLinkDeleteMatch && method === 'DELETE') {
-        const campaignId = shareLinkDeleteMatch[1]
-        const shareLinkId = shareLinkDeleteMatch[2]
+      if (shareLinkDetailMatch && method === 'GET') {
+        const campaignId = shareLinkDetailMatch[1]
+        const shareLinkId = shareLinkDetailMatch[2]
+        const ownershipFailure = ensureOwnerCampaign(campaignId)
+        if (ownershipFailure) {
+          return ownershipFailure
+        }
+
+        const shareLink = (shareLinksByCampaign[campaignId] ?? []).find(
+          (candidateShareLink) => candidateShareLink.id === shareLinkId,
+        )
+
+        if (!shareLink) {
+          return new Response(JSON.stringify({ error: 'Shared link was not found.' }), {
+            status: 404,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          })
+        }
+
+        if (!shareLink.token || !shareLink.url) {
+          return new Response(
+            JSON.stringify({
+              error: 'This shared link can no longer be revealed.',
+              details: [
+                'This link was created before reveal support was added, so the original token was not stored. Revoke it and create a new share link to get a revealable URL.',
+              ],
+            }),
+            {
+              status: 409,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        return new Response(
+          JSON.stringify({
+            token: shareLink.token,
+            url: shareLink.url,
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      if (shareLinkDetailMatch && method === 'DELETE') {
+        const campaignId = shareLinkDetailMatch[1]
+        const shareLinkId = shareLinkDetailMatch[2]
         const ownershipFailure = ensureOwnerCampaign(campaignId)
         if (ownershipFailure) {
           return ownershipFailure
@@ -1121,7 +1205,7 @@ describe('App', () => {
     window.history.replaceState({}, '', '/')
   })
 
-  it('supports owner onboarding, campaign settings, and the note workflow', async () => {
+  it('supports owner onboarding, share-link reveal, and the note workflow', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -1150,9 +1234,32 @@ describe('App', () => {
     )
     await user.click(screen.getByRole('button', { name: 'Create shared link' }))
 
-    expect(await screen.findByText(/Shared link ready:/)).toBeTruthy()
-    expect(screen.getByText('VTT table')).toBeTruthy()
-    expect(screen.getByText(/Frame ancestors: https:\/\/owlbear.app/)).toBeTruthy()
+    expect(
+      await screen.findByText(
+        'Shared link created. Reveal it on the card when you need to copy it again.',
+      ),
+    ).toBeTruthy()
+
+    const shareLinkCard = screen.getByRole('region', { name: 'VTT table shared link' })
+    expect(within(shareLinkCard).queryByText(/http:\/\/localhost\/share\//)).toBeNull()
+    expect(
+      within(shareLinkCard).getByText('URL hidden until you reveal it on this card.'),
+    ).toBeTruthy()
+    expect(within(shareLinkCard).getByText('VTT table')).toBeTruthy()
+    expect(within(shareLinkCard).getByText(/Frame ancestors: https:\/\/owlbear.app/)).toBeTruthy()
+
+    await user.click(within(shareLinkCard).getByRole('button', { name: 'Reveal link' }))
+
+    expect(
+      await within(shareLinkCard).findByText(
+        'http://localhost/share/share-token-moonshae-ledger-1',
+      ),
+    ).toBeTruthy()
+    expect(within(shareLinkCard).getByRole('button', { name: 'Show link' })).toBeTruthy()
+
+    await user.click(within(shareLinkCard).getByRole('button', { name: 'Copy link' }))
+
+    expect(await within(shareLinkCard).findByRole('button', { name: 'Copied' })).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Save campaign settings' }))
 
@@ -1193,6 +1300,49 @@ describe('App', () => {
       ).toBeNull()
     })
   }, 25000)
+
+  it('surfaces when an older shared link can no longer be revealed', async () => {
+    shareLinksByCampaign[defaultCampaignId] = [
+      {
+        id: 'legacy-share-link',
+        campaignId: defaultCampaignId,
+        label: 'Legacy table',
+        accessLevel: 'viewer',
+        frameAncestors: null,
+        expiresAt: null,
+        revokedAt: null,
+        createdAt: '2026-04-12T01:30:00.000Z',
+        updatedAt: '2026-04-12T01:30:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Campaign settings' }))
+
+    const shareLinkCard = await screen.findByRole('region', {
+      name: 'Legacy table shared link',
+    })
+
+    await user.click(within(shareLinkCard).getByRole('button', { name: 'Reveal link' }))
+
+    expect(
+      await within(shareLinkCard).findByText(/This shared link can no longer be revealed/),
+    ).toBeTruthy()
+    expect(
+      within(shareLinkCard).getByText(/Revoke it and create a new share link/),
+    ).toBeTruthy()
+  })
 
   it('supports creating a second campaign and scoping the workspace to it', async () => {
     const user = userEvent.setup()
