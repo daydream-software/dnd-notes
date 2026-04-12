@@ -51,6 +51,30 @@ Membership provides the correct collaboration boundary — it avoids coupling to
 - TypeScript type definitions in sync across api and web workspaces
 - Schema design is backward-compatible and well-tested
 
+### 2026-04-12: Preserve local SQLite data during note attribution + regression coverage (consolidated)
+**By:** Data, Chunk
+
+**What:**
+When backend schema changes add backward-compatible nullable columns to SQLite tables (e.g., `notes` table for PR #21 attribution), the API should upgrade those columns in place during store initialization before preparing dependent statements. Regression test coverage confirms the legacy-schema bootstrap path by creating a pre-attribution `notes` table, inserting legacy data, reopening through `createNoteStore()`, and verifying legacy notes load with null attribution fields.
+
+**Why:**
+- Preserves existing local note data without manual developer resets
+- Keeps `npm run dev` working after merges
+- Matches the repo's current schema-bootstrap style (tables initialized at app startup)
+- Fresh test databases auto-initialized with new schema, so tests missed the legacy-schema path; regression coverage closes this gap
+- Smallest test surface that would have caught the startup crash before release
+
+**Implementation:**
+- Schema introspection on `notes` table in `createNoteStore()` detects missing attribution columns
+- Adds missing columns as nullable if needed
+- Regression test in `apps/api/test/app.test.ts` covers the legacy bootstrap path
+- Verified: lint, test, build, and `npm run dev` startup all pass
+
+**Files affected:**
+- `apps/api/src/note-store.ts`
+- `apps/api/test/app.test.ts`
+- `README.md`
+
 ## Governance
 
 - All meaningful changes require team consensus
