@@ -373,6 +373,44 @@ export function createNoteStore(
     ON notes(campaign_id, updated_at DESC);
   `)
 
+  const ensureNotesAttributionColumns = database.transaction(() => {
+    const notesTableExists = database
+      .prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'notes'
+      `)
+      .get()
+
+    if (!notesTableExists) {
+      return
+    }
+
+    const noteColumns = new Set(
+      (
+        database.prepare(`
+          PRAGMA table_info(notes)
+        `).all() as Array<{ name: string }>
+      ).map((column) => column.name),
+    )
+
+    if (!noteColumns.has('created_by_membership_id')) {
+      database.exec(`
+        ALTER TABLE notes
+        ADD COLUMN created_by_membership_id TEXT REFERENCES campaign_memberships(id)
+      `)
+    }
+
+    if (!noteColumns.has('last_edited_by_membership_id')) {
+      database.exec(`
+        ALTER TABLE notes
+        ADD COLUMN last_edited_by_membership_id TEXT REFERENCES campaign_memberships(id)
+      `)
+    }
+  })
+
+  ensureNotesAttributionColumns()
+
   const selectCampaignById = database.prepare(`
     SELECT
       id,

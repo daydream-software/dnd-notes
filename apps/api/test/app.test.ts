@@ -3,6 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import Database from 'better-sqlite3'
 import request, { type SuperTest, type Test } from 'supertest'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
@@ -439,6 +440,87 @@ test('notes and owner sessions persist across app recreation when using the same
   assert.equal(listResponse.status, 200)
   assert.equal(listResponse.body.notes.length, 1)
   assert.equal(listResponse.body.notes[0].title, 'Map the smugglers cave')
+})
+
+test('legacy note databases are upgraded in place for membership attribution columns', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-legacy-'))
+  const dbPath = join(directory, 'notes.sqlite')
+
+  t.after(async () => {
+    await rm(directory, { recursive: true, force: true })
+  })
+
+  const legacyDatabase = new Database(dbPath)
+  legacyDatabase.exec(`
+    CREATE TABLE notes (
+      id TEXT PRIMARY KEY,
+      campaign_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      status TEXT NOT NULL,
+      tags_json TEXT NOT NULL,
+      session_name TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `)
+  legacyDatabase
+    .prepare(`
+      INSERT INTO notes (
+        id,
+        campaign_id,
+        title,
+        body,
+        status,
+        tags_json,
+        session_name,
+        created_at,
+        updated_at
+      ) VALUES (
+        @id,
+        @campaign_id,
+        @title,
+        @body,
+        @status,
+        @tags_json,
+        @session_name,
+        @created_at,
+        @updated_at
+      )
+    `)
+    .run({
+      id: 'legacy-note',
+      campaign_id: defaultCampaignId,
+      title: 'Legacy harbor log',
+      body: 'Recorded before attribution columns existed.',
+      status: 'active',
+      tags_json: JSON.stringify(['harbor']),
+      session_name: null,
+      created_at: '2026-04-12T00:00:00.000Z',
+      updated_at: '2026-04-12T00:00:00.000Z',
+    })
+  legacyDatabase.close()
+
+  const noteStore = createNoteStore({ dbPath })
+
+  try {
+    const notes = noteStore.listNotes(defaultCampaignId)
+    assert.equal(notes.length, 1)
+    assert.equal(notes[0].title, 'Legacy harbor log')
+    assert.equal(notes[0].createdBy, null)
+    assert.equal(notes[0].lastEditedBy, null)
+  } finally {
+    noteStore.close()
+  }
+
+  const migratedDatabase = new Database(dbPath, { readonly: true })
+  const migratedColumns = (
+    migratedDatabase.prepare(`PRAGMA table_info(notes)`).all() as Array<{ name: string }>
+  ).map((column) => column.name)
+  migratedDatabase.close()
+
+  assert.ok(migratedColumns.includes('created_by_membership_id'))
+  assert.ok(migratedColumns.includes('last_edited_by_membership_id'))
 })
 
 test('owner note creation and editing attributes notes to campaign membership', async (t) => {
