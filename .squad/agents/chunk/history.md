@@ -51,3 +51,14 @@ Chunk initialized as Tester for the initial project squad.
 📌 Team update (2026-04-12T21:22:46Z): Issue #27 backend revision reviewed and approved. Data's fixes pass all regressions: route shadowing resolved, double-decode removed, auth switched to membership-aware access, contracts confirmed reusable. Lint, test, build green. Ship-safe. Issue #23 re-review also approved: Stef's regression coverage now proves non-owner rejection and cross-campaign scoping; consolidation ready to ship. Both decisions finalized in `.squad/decisions.md` — reviewed by Chunk
 
 📌 Team update (2026-04-12T21:44:58Z): CORRECTION — Issue #27 frontend UI REJECTED after re-review. Stef's implementation has four critical state-management regressions: (1) `noteBrowseMode` dependency causes workspace reload on mode toggle, clobbering editor state, (2) create-note drafts lost when workspace reloads, (3) stale-response race on session switch (heading mismatches list/detail), (4) missing regression coverage for mode toggles, create-note reset, and out-of-order responses. Backend remains approved and ship-safe. Revision owner changed to @copilot; Stef locked out of this cycle. Re-approval bar and rejection details finalized in `.squad/decisions.md` — decided by Chunk (reviewer)
+
+## 2026-04-12: Issue #33 Acceptance & Regression Targets Drafted
+
+- Issue #33 adds recent activity views for collaborative campaigns. Goal: help users see "what changed and who did it" without becoming a noisy audit log.
+- Three core user flows: (1) recent notes list sorted by `updated_at`, (2) activity filtered by a single collaborator, (3) activity scoped to a specific campaign with membership-aware auth.
+- Critical regression risk from issue #27 pattern: activity endpoints will need to use `resolveAccessibleCampaign()` (membership-aware auth), not `resolveOwnedCampaign()` (owner-only), to avoid blocking claimed collaborators.
+- Legacy notes with null `created_by_membership_id` are already bootstrapped in regression tests; activity endpoint must handle them gracefully (fallback name, "Unknown", or exclusion — product decides).
+- Consolidation (issue #23) affects activity: query current note state (no frozen history table needed); consolidated notes show target membership as author.
+- Scope creep risk: the word "activity" is broad. Must define: no full diffs, no per-field audit, no separate event table. MVP is "recent notes with who created/edited them."
+- Draft acceptance & regression targets written to `.squad/decisions/inbox/chunk-issue-33.md` with 7+ test cases, auth/scope warnings, and open questions for FFMikha (collaborator-filter privacy, guest access, pagination).
+- Key files: `apps/api/src/note-store.ts` stores `created_by_membership_id`, `last_edited_by_membership_id`, plus snapshotted display names; `apps/api/src/app.ts` has the auth/routing pattern to reuse; `apps/api/test/app.test.ts` has legacy bootstrap template.
