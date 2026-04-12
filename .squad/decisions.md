@@ -84,6 +84,39 @@ Campaign share links stay as the same reusable link per share-link record; this 
 **Why:**
 The user asked to re-reveal the same reusable share link later, not replace it with per-person links, and to keep reveal behind an intentional UX step. Keeping the main list metadata-only avoids bulk exposure of active secrets, while storing a recoverable token for new rows is the smallest change that supports owner re-reveal without changing guest access semantics. The explicit legacy-link warning documents the migration and security trade-off: older hash-only links cannot be reconstructed and must be revoked/recreated if owners need a revealable URL.
 
+### 2026-04-12: Issue #20 — Link guest memberships to real accounts (APPROVED)
+**By:** Brand, Data, Stef, Chunk (Lead Reviewer)
+
+**What:**
+Guest memberships can be claimed by real accounts through `POST /api/shared/:shareToken/membership/claim` on the shared route. The claim flow:
+- Links the real account to the existing guest membership by setting `campaign_memberships.user_id`
+- Rotates the guest token on claim so the old token no longer authenticates shared routes
+- Returns the new guest token to the browser for continued shared-route session
+- Grants the claimed account read/write access to `/api/campaigns`, `/api/campaigns/:campaignId`, `/api/overview`, and `/api/notes` through the linked membership
+- Preserves owner-only restrictions (campaign settings, membership lists, share-link management remain owner-only)
+- Stores the claimed campaign as the selected workspace so the signed-in app reopens it after claim
+- Keeps note attribution on the original guest membership (createdBy/lastEditedBy stay on that row)
+
+**Why:**
+Users need to convert guest campaign participation into persistent account membership without losing history, notes, and collaboration context. Same-browser claiming proves possession of the current guest session, preserves membership-based note attribution, avoids migrating history to a new actor, and keeps the v1 scope tight (no per-person links or cross-device flows). Token rotation prevents anonymous backdoor access post-claim.
+
+**Rejection cycle:**
+1. Brand's pass: old guest token still authenticated after claim → rejected
+2. Data's revision: guest token rotated, but claimed account could not access campaign → rejected
+3. Stef's revision: authenticated access unlocked for claimed memberships, full test coverage → approved
+
+**Verdict:** APPROVE  
+**Status:** Ready for merge. All regression coverage passes. Lint, test, build all green.
+
+**Files affected:**
+- `apps/api/src/note-store.ts`
+- `apps/api/src/app.ts`
+- `apps/api/test/app.test.ts`
+- `apps/web/src/App.tsx`
+- `apps/web/src/SharedCampaignRoute.tsx`
+- `apps/web/src/api.ts`
+- `apps/web/src/App.test.tsx`
+
 ## Governance
 
 - All meaningful changes require team consensus
