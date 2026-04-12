@@ -693,6 +693,14 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                                   {note.sessionName ? `${note.sessionName} • ` : ''}
                                   Updated {formatTimestamp(note.updatedAt)}
                                 </Typography>
+                                {note.createdBy && (
+                                  <Typography color="text.secondary" variant="body2">
+                                    Created by {note.createdBy.displayName}
+                                    {note.lastEditedBy &&
+                                      note.lastEditedBy.membershipId !== note.createdBy.membershipId &&
+                                      ` • Edited by ${note.lastEditedBy.displayName}`}
+                                  </Typography>
+                                )}
                               </Stack>
                             }
                           />
@@ -828,6 +836,7 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                           <Typography variant="subtitle1">{note.title}</Typography>
                           <Typography color="text.secondary" variant="body2">
                             Updated {formatTimestamp(note.updatedAt)}
+                            {note.lastEditedBy && ` by ${note.lastEditedBy.displayName}`}
                           </Typography>
                         </Stack>
                       ))
