@@ -732,10 +732,13 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.createNote({
-        ...validation.data,
-        campaignId: campaign.id,
-      })
+      const note = noteStore.createNote(
+        {
+          ...validation.data,
+          campaignId: campaign.id,
+        },
+        noteStore.getOwnerMembershipForCampaign(owner.id, campaign.id)?.id,
+      )
 
       response.status(201).json({ note })
     },
@@ -777,10 +780,14 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.updateNote(request.params.noteId, {
-        ...validation.data,
-        campaignId: existingNote.campaignId,
-      })
+      const note = noteStore.updateNote(
+        request.params.noteId,
+        {
+          ...validation.data,
+          campaignId: existingNote.campaignId,
+        },
+        noteStore.getOwnerMembershipForCampaign(owner.id, existingNote.campaignId)?.id,
+      )
 
       if (!note) {
         response
@@ -977,10 +984,13 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.createNote({
-        ...validation.data,
-        campaignId: shared.campaign.id,
-      })
+      const note = noteStore.createNote(
+        {
+          ...validation.data,
+          campaignId: shared.campaign.id,
+        },
+        membership.id,
+      )
 
       response.status(201).json({ note })
     },
@@ -1028,10 +1038,14 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.updateNote(request.params.noteId, {
-        ...validation.data,
-        campaignId: shared.campaign.id,
-      })
+      const note = noteStore.updateNote(
+        request.params.noteId,
+        {
+          ...validation.data,
+          campaignId: shared.campaign.id,
+        },
+        membership.id,
+      )
 
       if (!note) {
         response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
