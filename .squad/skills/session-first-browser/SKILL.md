@@ -20,6 +20,8 @@ Use this when the product needs a faster answer to "what happened in this sessio
 - Reset back to the flat note list when users start a brand-new note if the note-creation flow is already active elsewhere.
 - Use numeric-aware session-name sorting client-side when the backend contract is intentionally thin and only returns session names plus note counts.
 - Give the session list and session-note list explicit accessible labels so UI tests can scope assertions cleanly.
+- Read current browse-mode/selection state through refs or similarly stable state access when async workspace loaders participate in broader bootstrap effects.
+- Treat per-session note fetches as cancelable/latest-wins work so rapid drill-in clicks cannot paint stale notes under a newer session heading.
 
 ## Examples
 - `apps/web/src/App.tsx` layers session browsing into the existing owner workspace with a two-step session list → session notes flow.
@@ -31,3 +33,5 @@ Use this when the product needs a faster answer to "what happened in this sessio
 - Pulling session browsing into campaign settings or other owner-only surfaces just because session metadata exists.
 - Letting session mode hijack create-note flows when the main goal is browsing existing history faster.
 - Depending on flat lexical sorting for names like `Session 2` and `Session 11` when numeric-aware ordering is enough to improve chronology.
+- Letting a browse-mode toggle change callback identities that re-trigger auth/bootstrap workspace loads; that turns a thin local mode switch into a full reload and can clobber unsaved drafts.
+- Accepting session-detail responses without checking they still match the latest selected session.

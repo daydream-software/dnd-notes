@@ -205,7 +205,7 @@ Preview+confirm pattern provides clear frontend confirmation UI while keeping th
 **Verdict:** APPROVE  
 **Status:** Ship-ready. All regression coverage passes. Lint, test, build all green. No remaining blockers.
 
-### 2026-04-12: Issue #27 — Session Browsing Backend (REVISION APPROVED)
+### 2026-04-12: Issue #27 — Session Browsing Backend (REVISION APPROVED, consolidated)
 **By:** Data (backend fix), Chunk (reviewer), Mikey (approver)
 
 **What:**
@@ -215,16 +215,32 @@ Session-based note browsing v1 backend revision fixes four critical regressions 
 3. **Auth regression fix:** Switched both session-browsing routes from `resolveOwnedCampaign()` to `resolveAccessibleCampaign()`, granting linked collaborators proper access matching `/api/notes` pattern
 4. **Contract alignment:** Confirmed existing `SessionsResponse` and `NotesResponse` contracts in `apps/web/src/types.ts` are reusable
 
+**Chunk's validation confirms:**
+- Route shadowing fix verified: `/api/notes/sessions` and `/api/notes/sessions/:sessionId` registered before `/api/notes/:noteId` catch-all
+- Double-decode fix verified: manual `decodeURIComponent()` removed; Express decoding only applied
+- Auth regression fix verified: both session routes switched to `resolveAccessibleCampaign()` for membership-aware access
+- Test coverage validates session names with percent-encoding (e.g., `50% done`) correctly handled via Express param decoding
+- Claimed collaborators can browse sessions via authenticated membership access
+- No shadowing of session endpoints by note-detail catch-all
+
 **Frontend handoff:**
 - Session detail URLs must use `encodeURIComponent(sessionName)` exactly once
 - Endpoints are ship-safe for any authenticated linked collaborator
 - No additional scoping or contract changes needed
 
 **Why:**
-Original concept (lightweight session discovery, no schema migration) aligns with product roadmap (search and filtering before graph relationships). First shipped implementation had route ordering, double-decode, and auth pattern regressions. Revision fixes all four and maintains the thin-slice architecture.
+Original concept (lightweight session discovery, no schema migration) aligns with product roadmap (search and filtering before graph relationships). First shipped implementation had route ordering, double-decode, and auth pattern regressions. Revision fixes all four and maintains the thin-slice architecture. Chunk's validation confirms the backend slice is production-ready for frontend session UI work to proceed without blocking.
 
 **Verdict:** APPROVE  
 **Status:** Ship-ready. Lint, test, build all pass. Ready for frontend session-browsing UI work.
+
+**Files affected:**
+- `apps/api/src/app.ts`
+- `apps/api/src/note-store.ts`
+- `apps/api/src/types.ts`
+- `apps/api/test/app.test.ts`
+- `apps/web/src/types.ts`
+- `README.md`
 
 ### 2026-04-12: Issue #32 — Campaign Starter Templates (Client-Side, Creation-Only Scope, APPROVED)
 **By:** Stef (implementer), Mikey (reviewer)
@@ -241,55 +257,48 @@ Keeping templates client-side and campaign-creation-scoped avoids touching the c
 **Verdict:** APPROVE  
 **Status:** Ship-ready. Integration test coverage included. Lint, test, build all pass. No blockers remain. Best-effort campaign-seeding trade-off (if one `createNote()` fails, campaign may have partial starter notes) acceptable because issue wanted thin frontend slice with no new backend contract.
 
-### 2026-04-12: Issue #27 — Session Browsing Backend (REVISION APPROVED)
-**By:** Chunk (reviewer)
+### 2026-04-12: Issue #27 — Session Browsing Frontend (REJECTED)
+**By:** Chunk (reviewer)  
+**Requested by:** FFMikha  
+**Revision owner:** @copilot
 
-**What:**
-Chunk's review validates that Data's backend fixes resolved all four critical regressions:
-1. **Route shadowing fix verified:** `/api/notes/sessions` and `/api/notes/sessions/:sessionId` registered before `/api/notes/:noteId` catch-all
-2. **Double-decode fix verified:** Manual `decodeURIComponent()` removed; Express decoding only applied
-3. **Auth regression fix verified:** Both session routes switched to `resolveAccessibleCampaign()` for membership-aware access
-4. **Contract alignment confirmed:** `SessionsResponse` and `NotesResponse` types synced across workspaces
+**Verdict:** REJECT
 
-**Test coverage confirms:**
-- Session names with percent-encoding (e.g., `50% done`) correctly handled via Express param decoding
-- Claimed collaborators can browse sessions via authenticated membership access
-- No shadowing of session endpoints by note-detail catch-all
-
-**Why:**
-Validates that the backend slice is production-ready for frontend session UI work to proceed without blocking.
-
-**Verdict:** APPROVE  
-**Status:** Ship-ready. Lint, test, build all pass. Frontend session-browsing UI work can proceed.
-
-**Files affected:**
-- `apps/api/src/app.ts`
-- `apps/api/src/note-store.ts`
-- `apps/api/src/types.ts`
-- `apps/api/test/app.test.ts`
+**What I checked:**
+- `apps/web/src/App.tsx`
+- `apps/web/src/App.test.tsx`
+- `apps/web/src/api.ts`
 - `apps/web/src/types.ts`
 - `README.md`
+- Root validation: `npm run lint && npm run test && npm run build` (all passed)
 
-### 2026-04-12: Issue #27 — Session Browsing Frontend (APPROVED)
-**By:** Stef (implementer)
+**Findings:**
+The UI shape is still the right thin v1: it stays inside the existing note shell, uses the approved session endpoints, keeps the existing detail pane, and resets toward the flat note flow in intent. But the shipped state wiring is not safe enough to approve.
 
-**What:**
-Frontend session browsing UI slice: thin two-step flow integrated into existing note list/detail shell.
-- Browse by session opens session list via `/api/notes/sessions`
-- Selecting a session swaps left rail into that session's notes via `/api/notes/sessions/:sessionId`
-- Reset to "All notes" when creating new note (avoids collision with Issues #22/#31)
-- Client-side numeric-aware descending sort for session names
+1. `noteBrowseMode` is a dependency of `loadWorkspace()` in `apps/web/src/App.tsx`, which rebuilds `loadCampaigns()` and re-triggers the auth bootstrap `useEffect`. Toggling `All notes` / `Browse by session` therefore re-fetches the whole workspace, shows the full-screen workspace loader, and can overwrite local editor state.
+2. That same dependency chain means `New note` from session mode is not reliably isolated from the existing note flow: the forced workspace reload can repopulate the draft from server data and kick the user back onto an existing note instead of leaving them in clean create-note mode.
+3. `handleSelectSession()` has no stale-response guard or request cancellation. Fast session switching can leave the heading on the latest session while the note list/detail pane shows an earlier response that resolved later.
+4. `apps/web/src/App.test.tsx` only covers the happy-path drill-in. It does not lock down the create-note reset requirement, the no-full-reload toggle behavior, or out-of-order session responses.
 
-**Why:**
-Answers "what happened in this session?" without redesigning the workspace. Thin frontend mode inside existing shell minimizes risk, preserves established editor workflow, and aligns with product roadmap (search/filter before graph relationships).
+**Why this blocks approval:**
+Issue #27 asked for a thin browse mode that preserves the existing note flow and avoids collisions with active note-creation/settings work. The current implementation looks thin, but the mode toggles are not local UI state in practice—they can reboot the workspace and disturb draft/editing state. That is exactly the kind of weird-at-the-table regression this slice was supposed to avoid.
 
-**Verdict:** APPROVE  
-**Status:** Ship-ready. Integration test coverage included. Lint, test, build all pass.
+**Re-approval bar:**
+- Keep browse-mode reads out of the bootstrap dependency chain (use refs/current state reads instead of callback identity churn)
+- Make session detail loading latest-selection-safe
+- Add regression coverage for:
+  - switching modes without a full workspace reload
+  - starting a new note from session mode without losing create-note state
+  - rapid session changes resolving out of order
+
+**Status:** REQUIRES REVISION  
+**Next owner:** @copilot (Stef locked out of this revision cycle)
 
 **Files affected:**
 - `apps/web/src/App.tsx`
-- `apps/web/src/api.ts`
 - `apps/web/src/App.test.tsx`
+- `apps/web/src/api.ts`
+- `apps/web/src/types.ts`
 
 ## Governance
 
