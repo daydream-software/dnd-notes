@@ -47,3 +47,26 @@ Mikey initialized as Lead for the initial project squad.
 ## 2026-04-12: Issue #27 Backend Complete + #32 Approved + #23 Approved
 
 📌 Team update (2026-04-12T21:22:46Z): Issue #27 backend revision completed and approved by Chunk. Data fixed all four regressions (route shadowing, double-decode, auth scope, contracts). Ship-safe. Stef to start session-browsing UI on SessionsResponse. Issue #32 (campaign templates) approved by Mikey, no blockers. Issue #23 (membership consolidation) re-approved by Chunk after Stef's regression coverage closed safety gaps. All three decisions finalized in `.squad/decisions.md` — reviewed by Chunk, Mikey
+
+## 2026-04-12: Next Work Lane Routing — Issue #28 (Tag Facets) Recommended
+
+**Decision:** Recommend #28 (tag facets + counts) as the next highest-value, safest lane after current PRs (#35 quick capture, #36 session browsing) land.
+
+**Rationale:**
+- **Zero file collision:** In-flight PRs modify `App.tsx` and `apps/api/src/app.ts` heavily. #28 focuses on tag infrastructure (backend count query) + isolated tag browsing UI (no route changes, sidebar component only).
+- **Unblocks #24 (search):** Tag-count query is the hardest infrastructure piece for search filters. #28 lands it independently; #24 can consume it immediately.
+- **No blockers created:** #28 doesn't depend on #36 resolution; can land in parallel. #26 (formatting) and #30 (note links) remain unblocked.
+
+**Hold explicitly:**
+- #24 (search): Needs #28 tag infrastructure + #36 session browsing stable (App.tsx collision risk)
+- #25 (mobile): Needs #36 merged first (App.tsx note-browsing frame conflict)
+- #29 (graph-tag spike): Deferred per product roadmap (tag facets mature first)
+
+**Thin slice for #28:**
+- Backend: `NoteStore.listTagsWithCounts(campaignId)` + `GET /api/campaigns/:campaignId/tags` endpoint (~50 lines + tests)
+- Frontend: `TagsPanel.tsx` component in App sidebar, read-only, clickable for filtering (filtering UX deferred to #24) (~100 lines)
+- No schema changes, backward compatible, query-only backend
+
+**Next step after #28:** Route #24 (search) as the critical path to unlock #25 (mobile layout). The three form a dependency chain: #28 (tag infrastructure) → #24 (text search + filters) → #25 (mobile layout confident note browsing is query-ready).
+
+**Files:** Decision written to `.squad/decisions/inbox/mikey-next-lane.md`. GitHub comment added to issue #28 with thin-slice recommendation.

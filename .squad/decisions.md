@@ -305,3 +305,95 @@ Issue #27 asked for a thin browse mode that preserves the existing note flow and
 - All meaningful changes require team consensus
 - Document architectural decisions here
 - Keep history focused on work, decisions focused on direction
+
+### 2026-04-12: Issue #33 Acceptance & Regression Targets — Recent Activity Views (READY FOR BACKEND DESIGN)
+**By:** Chunk (Tester)
+
+**What:**
+Recent activity views acceptance criteria and regression targets for issue #33. Three user flows: recent notes list (sorted by recency, last editor + timestamp), activity filtered by collaborator (who did what), and activity scoped to campaign (with membership-aware auth). Critical regression targets: auth & scope (linked collaborators must access activity same as /api/notes), attribution consistency (null attribution from legacy notes, consolidated memberships), ordering & staleness (most-recent-first sort, pagination for v1), membership/collaborator lifecycle (display name changes, future member removal). Medium risk: noisy audit log scope creep (rejects minute-by-minute timestamps, full diffs, separate edit events). Low risk: response format follows /api/notes pattern.
+
+**Why:**
+Defines clear acceptance bar for backend implementation. Prevents scope creep toward full audit trails. Identifies critical regression paths (auth pattern from #27, legacy note handling, membership consolidation interaction). Test plan covers 7+ edge cases (null attribution, linked collaborator access, consolidated membership attribution, cross-campaign rejection, guest share-link access). Ship criteria: all tests pass, auth matches /api/notes pattern, legacy notes don't crash, cross-campaign requests gate properly, response format consistent.
+
+**Verdict:** READY FOR BACKEND DESIGN  
+**Status:** Acceptance criteria approved. Awaiting implementation. High-priority path block.
+
+**Files affected:**
+- `.squad/decisions/inbox/chunk-issue-33.md` (detailed acceptance & regression doc)
+
+### 2026-04-12: Issue #29 Recommendation — Defer Graph-Style Tags Until v3+ (DEFERRED)
+**By:** Stef (Frontend Dev)
+
+**What:**
+Graph-style tag relationships (edges between tags for flexible navigation) are recommended for deferral until after search and tag-browsing foundations land. Current app uses flat comma-separated tags with no discovery mechanism (no click-to-find, no filter, no search). Graph relationships only unlock value when paired with search, tag browsing (click tag → see notes), and visualization. Phase 1 (v1–v2, near-term): full-text search, tag list view, tag detail view with notes, mobile UX. Phase 2 (v3+, only after Phase 1): auto-inferred graph relationships and optional relationship editor. Current flat model is sufficient for v1; graph complexity premature without discovery.
+
+**Why:**
+Users can't traverse relationships without search and tag browsing UI. Without usage data from basic search/browsing, relationship definition becomes speculative. Risk: ship relationship editor that users don't use because they can't search or browse tags. Better path: ship search + tag browsing first, observe natural tag usage patterns, then add relationships if value is proven. Aligns with product roadmap decision prioritizing search/mobile before graph complexity.
+
+**Verdict:** DEFERRED UNTIL v3+  
+**Status:** Spike complete. Recommendation incorporated into product roadmap. Supports Mikey's routing (issue #28 tag facets unblocks #24 search for Phase 1 foundation).
+
+**Files affected:**
+- `.squad/decisions/inbox/stef-issue-29.md` (spike analysis and phasing)
+
+### 2026-04-12: Next Work Lane — Issue #28 (Tag Facets) Recommended (ROUTING DECISION)
+**By:** Mikey (Lead)
+
+**What:**
+Issue #28 (tag facets with counts, autocomplete, filtering infrastructure) identified as next safe high-value lane. Justification: zero file collision with in-flight PRs (#35 quick capture, #36 session browsing) — #28 focuses on tag backend (NoteStore.listTagsWithCounts, new /api/campaigns/:campaignId/tags endpoint) and isolated TagsPanel UI component. Unblocks #24 (search) without blocking anything; #24 can consume tag infrastructure immediately. Thin slice: backend API ~50 lines + ~30 lines tests, frontend component ~100 lines. Hold issues #24 (search), #25 (mobile) until PR #36 lands and App.tsx frame stabilizes. Proposed assignment: Stef (frontend) + Data (backend) if needed, or Data solo for backend slice with Stef following.
+
+**Why:**
+Routing is determined by dependency graph and file collision risk. #28 is unambiguously safe in current PR cluster; establishes tag querying infrastructure that #24 search needs. #24 and #25 both require stable App.tsx note-browsing frame, which PR #36 (session browsing frontend) is finalizing. Deferring #24/#25 until #36 merges prevents merge conflicts and scope collision. Issue #29 spike (Stef completed) recommends deferring graph tags entirely, making tag facets (#28) the right next step for search foundation. Expected timing: 2–4 hours combined (backend 1–2h, frontend 1–2h).
+
+**Verdict:** APPROVED FOR NEXT ASSIGNMENT  
+**Status:** Routing locked. Ready to queue #28 after current PR cluster stabilizes. #24 immediately queued after #28 lands.
+
+**Files affected:**
+- `.squad/decisions/inbox/mikey-next-lane.md` (detailed routing and thin-slice breakdown)
+
+### 2026-04-12: PR #35 Review — Quick Note Capture (CHANGES REQUESTED)
+**By:** Mikey (Lead)
+
+**What:**
+PR #35 adds quick-capture UI for rapid note entry (owner + shared flows). Changes requested: validation defaults in validateNoteInput() apply `.default('')` for body and `.default('draft')` for status. Same schema is reused for both POST (create) and PUT (update) handlers. Risk: client omitting body or status on PUT will silently blank the body or force note back to draft, breaking existing update semantics. Before PR #35, these requests failed validation. Quick-capture defaults are appropriate for create but must not affect update behavior. Required fix: separate create/update validation schemas, or apply defaults only in POST handlers. Add regression test proving update cannot accidentally clear body or reset status from omitted fields.
+
+**Why:**
+Validation regressions are high-risk for silent data loss. The oversight is natural (one schema, two contexts) but breaks the expectation that omitted fields don't alter stored data. Caught early via review; straightforward fix.
+
+**Verdict:** CHANGES REQUESTED  
+**Status:** Blocking. Requires validation schema revision before merge. Low-complexity fix; expected 15–30 min to address.
+
+**Files affected:**
+- `.squad/decisions/inbox/mikey-review-pr-35.md` (detailed blocking concern)
+- `apps/api/src/validation.ts` (separate schemas or scoped defaults)
+- `apps/api/src/app.ts` (apply defaults only to POST handlers)
+### 2026-04-12: Issue #28 Acceptance & Regression Targets — Tag Facets & Autocomplete (DRAFT, READY FOR PRODUCT SIGN-OFF)
+**By:** Chunk (Tester)
+
+**What:**
+Tag facets and autocomplete acceptance criteria for issue #28. Thin slice scope: tag autocomplete during note editing (suggest previously used tags in campaign) + tag browsing UI (facet list with counts, clickable to filter notes). No backend schema changes or new API endpoints required; all logic is client-side over existing /api/notes response. Critical features: campaign-scoped tag queries (no scope bleed to other campaigns), tag count accuracy under concurrent edits, multiple-tag AND logic filtering, state persistence during browsing/editing (no workspace reloads like issue #27 regression). Regression test matrix covers 30+ test cases: autocomplete deduplication, empty campaign handling, special character handling, tag facet count updates, multi-tag filtering, stale-response protection from rapid clicks, create-note flow while filtered, mode-switching orthogonality.
+
+**Why:**
+Chunk's acceptance strategy prevents scope creep and common traps (campaign-scoping bugs, issue #27 state-reload regression, concurrent count inconsistency, empty-state confusion). Thin slice proves user value first; backend optimization (dedicated tag endpoints) deferred. UX decisions blocking further work: tag name normalization (case handling), multiple-tag logic (AND vs. OR), autocomplete trigger timing, facet sort order, empty-state copy, null session handling, count staleness tolerance.
+
+**Verdict:** DRAFT, READY FOR PRODUCT SIGN-OFF  
+**Status:** Acceptance criteria complete. UX decisions require FFMikha approval (7 blockers listed). All regression tests defined; implementation can proceed once product sign-off received. High-signal feature for tag discovery and search foundation.
+
+**Files affected:**
+- `.squad/decisions/inbox/chunk-issue-28.md` (detailed acceptance, regression matrix, UX traps, sign-off checklist)
+### 2026-04-12: Issue #33 Backend Slice — Activity Endpoint (IMPLEMENTATION READY)
+**By:** Data (Backend Dev)
+
+**What:**
+Data implemented the activity endpoint for issue #33: `GET /api/notes/activity` scoped through `resolveAccessibleCampaign()` so owners and linked collaborators can read the same campaign activity feed. Endpoint returns one latest-state activity row per note (either created or edited state), plus collaborator summaries derived from membership attribution. Supports optional query params: `campaignId`, `membershipId`, `limit`. Non-audit-log design: no new persistence tables, no per-edit history table, just the latest practical note activity needed for UI awareness.
+
+**Why:**
+Aligns with Chunk's acceptance criteria (auth matches /api/notes pattern, no scope creep to audit log). Thin slice preserves existing data model, no schema migration required. Uses membership attribution from PR #21 to track collaborator actions. Matches issue #27 pattern (membership-aware auth, accessible to claimed collaborators).
+
+**Verdict:** IMPLEMENTATION READY  
+**Status:** Backend slice complete. Ready for Chunk's regression test validation. Awaits frontend UI work to consume the endpoint.
+
+**Files affected:**
+- `apps/api/src/app.ts` (GET /api/notes/activity endpoint)
+- `apps/api/src/note-store.ts` (activity query logic)
+- `apps/api/src/types.ts` (ActivityResponse shape)

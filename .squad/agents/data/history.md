@@ -35,6 +35,9 @@ Data initialized as Backend Dev for the initial project squad.
 - Regression coverage for membership consolidation lives in `apps/api/test/app.test.ts`, covering guest-to-guest reassignment counts plus explicit confirmation before role-changing owner-to-guest moves.
 - Session-browsing auth should mirror `/api/notes`: keep `GET /api/notes/sessions*` in `apps/api/src/app.ts` behind `resolveAccessibleCampaign()` so linked collaborators keep access, not `resolveOwnedCampaign()`.
 - Express already decodes `request.params.sessionId`; frontend callers should use `encodeURIComponent(sessionName)` once, and regressions for route ordering plus `%` session names live in `apps/api/test/app.test.ts`.
+- Issue #33 thin backend slice lives in `apps/api/src/app.ts` as `GET /api/notes/activity`, reusing `resolveAccessibleCampaign()` so owners and linked collaborators see the same campaign-scoped recent note feed.
+- The recent activity payload is intentionally latest-state only: derive one `created` or `edited` event per note from `createdAt`/`updatedAt`, and pair it with collaborator summaries built from note attribution instead of adding a noisy audit table.
+- `apps/api/src/note-store.ts` now guarantees `updatedAt` moves forward on note edits, which keeps latest-activity classification deterministic even when SQLite writes happen inside the same millisecond.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
