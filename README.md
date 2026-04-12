@@ -55,7 +55,7 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 ## Current note model
 
 - every note belongs to a campaign
-- owners authenticate before using campaign, overview, and note endpoints
+- real accounts authenticate before using campaign, overview, and note endpoints
 - guests join a shared campaign with a campaign-scoped display name and guest token
 - notes can optionally reference a session by name
 - the editable fields are `title`, `body`, `tags`, `status`, and `sessionName`
@@ -85,6 +85,7 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 - `DELETE /api/notes/:noteId`
 - `GET /api/shared/:shareToken/session`
 - `POST /api/shared/:shareToken/join`
+- `POST /api/shared/:shareToken/membership/claim`
 - `GET /api/shared/:shareToken/overview`
 - `GET /api/shared/:shareToken/notes`
 - `POST /api/shared/:shareToken/notes`
@@ -92,12 +93,15 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 - `DELETE /api/shared/:shareToken/notes/:noteId`
 
 All `/api/campaigns`, `/api/overview`, and `/api/notes` routes require an
-`Authorization: Bearer <token>` header from the owner auth endpoints.
+`Authorization: Bearer <token>` header from the real-account auth endpoints.
+Any linked campaign membership can open the authenticated workspace, while
+campaign management routes such as settings, memberships, and share links stay
+owner-only.
 
 `GET /api/overview` and `GET /api/notes` accept an optional `campaignId` query
-parameter to scope the response to a specific owned campaign. `POST /api/notes`
-accepts an optional `campaignId` in the payload and defaults to the owner's
-primary campaign when one is not provided.
+parameter to scope the response to a specific linked campaign. `POST /api/notes`
+accepts an optional `campaignId` in the payload and defaults to the signed-in
+account's primary accessible campaign when one is not provided.
 
 The `/api/shared/:shareToken/*` routes use `X-Guest-Token: <token>` after a
 guest joins the shared campaign. Share links are campaign-scoped, support
@@ -106,7 +110,13 @@ policy for the dedicated `/share/:shareToken` web route. Owner share-link list
 responses stay metadata-only; raw `{ token, url }` values come back on creation
 and from the owner-only reveal endpoint for that specific share link. Legacy
 links created before reveal support return an explicit regeneration-needed
-error because only their token hash was stored.
+error because only their token hash was stored. Guests can also create or sign
+in to a real account from the shared route and claim their existing membership
+with that same browser-held guest token. Claiming rotates that guest token, so
+the same browser keeps working with the replacement token while the old
+anonymous token stops authenticating shared routes. Membership-based note
+attribution therefore keeps the same history instead of migrating to a new
+actor.
 
 ## What works now
 
@@ -114,6 +124,8 @@ error because only their token hash was stored.
 - owners can register, sign in, and resume an existing session
 - owners can create campaigns, edit campaign settings, view memberships, and manage shared links
 - guests can open a shared campaign route, choose a display name, and re-enter with the saved guest token
+- guests can link an existing shared membership to a real account without changing prior note attribution
+- linked real accounts can open that claimed campaign in the authenticated app flow without reopening anonymous access
 - only the `/share/:shareToken` route is intended for embedding; the main app stays denied by default in the web server layer
 - the web app can create, edit, view, and delete notes inside the selected campaign
 - shared links can expose the same notes workspace to guests with viewer or editor permissions

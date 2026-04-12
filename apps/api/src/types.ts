@@ -118,6 +118,7 @@ export interface NoteStats {
 
 export interface NotesOverview {
   campaign: CampaignSummary
+  membership: CampaignMembership | null
   stats: NoteStats
   recentNotes: Note[]
 }
@@ -186,6 +187,11 @@ export interface SharedJoinResponse {
   shareLink: CampaignShareLink
   membership: CampaignMembership
   guestToken: string
+}
+
+export interface SharedMembershipClaimResponse {
+  membership: CampaignMembership
+  guestToken: string | null
 }
 
 export interface ErrorResponse {

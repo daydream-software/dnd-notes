@@ -19,12 +19,15 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  claimSharedMembership,
   createSharedNote,
   deleteSharedNote,
   fetchSharedNotes,
   fetchSharedOverview,
   fetchSharedSession,
   joinSharedCampaign,
+  loginOwner,
+  registerOwner,
   updateSharedNote,
 } from './api'
 import type {
@@ -36,6 +39,7 @@ import type {
   NoteInput,
   NoteStatus,
   NotesOverview,
+  OwnerAccount,
 } from './types'
 import { noteStatuses } from './types'
 
@@ -51,6 +55,19 @@ interface NoteDraft {
   sessionName: string
 }
 
+interface OwnerRegistrationDraft {
+  displayName: string
+  email: string
+  password: string
+}
+
+interface OwnerLoginDraft {
+  email: string
+  password: string
+}
+
+const authTokenStorageKey = 'dnd-notes:owner-auth-token'
+const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
 const heroCardRadius = '32px'
 const surfaceRadius = '24px'
@@ -118,6 +135,15 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
   const [membership, setMembership] = useState<CampaignMembership | null>(null)
   const [guestToken, setGuestToken] = useState<string | null>(null)
   const [joinDraft, setJoinDraft] = useState<GuestJoinInput>({ displayName: '' })
+  const [registerDraft, setRegisterDraft] = useState<OwnerRegistrationDraft>({
+    displayName: '',
+    email: '',
+    password: '',
+  })
+  const [loginDraft, setLoginDraft] = useState<OwnerLoginDraft>({
+    email: '',
+    password: '',
+  })
   const [overview, setOverview] = useState<NotesOverview | null>(null)
   const [notes, setNotes] = useState<Note[]>([])
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
@@ -126,8 +152,12 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
   const [isLoadingSession, setIsLoadingSession] = useState(true)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
+  const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isRegisterMode, setIsRegisterMode] = useState(true)
+  const [accountNotice, setAccountNotice] = useState<string | null>(null)
+  const [linkedOwner, setLinkedOwner] = useState<OwnerAccount | null>(null)
   const [error, setError] = useState<string | null>(null)
   const selectedNoteIdRef = useRef<string | null>(null)
   const shareLinkRef = useRef<CampaignShareLink | null>(null)
@@ -254,11 +284,21 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
         setError(null)
 
         if (session.membership && storedGuestToken) {
+          setRegisterDraft((currentDraft) =>
+            currentDraft.displayName.trim().length > 0
+              ? currentDraft
+              : {
+                  ...currentDraft,
+                  displayName: session.membership?.displayName ?? '',
+                },
+          )
           setGuestToken(storedGuestToken)
           await loadWorkspace(storedGuestToken, undefined, session.shareLink.accessLevel)
         } else {
           localStorage.removeItem(guestStorageKey)
           setGuestToken(null)
+          setLinkedOwner(null)
+          setAccountNotice(null)
           setOverview(null)
           setNotes([])
           setSelectedNoteId(null)
@@ -318,6 +358,7 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
   const handleJoin = async () => {
     const requestId = ++sessionRequestIdRef.current
     setError(null)
+    setAccountNotice(null)
     setIsJoining(true)
 
     try {
@@ -332,6 +373,14 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
       setCampaign(response.campaign)
       setShareLink(response.shareLink)
       setMembership(response.membership)
+      setRegisterDraft((currentDraft) =>
+        currentDraft.displayName.trim().length > 0
+          ? currentDraft
+          : {
+              ...currentDraft,
+              displayName: response.membership.displayName,
+            },
+      )
       await loadWorkspace(response.guestToken, undefined, response.shareLink.accessLevel)
     } catch (joinError) {
       if (requestId === sessionRequestIdRef.current) {
@@ -345,6 +394,55 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
       if (requestId === sessionRequestIdRef.current) {
         setIsJoining(false)
       }
+    }
+  }
+
+  const handleLinkAccount = async () => {
+    if (!guestToken || !membership) {
+      return
+    }
+
+    setError(null)
+    setAccountNotice(null)
+    setIsLinkingAccount(true)
+
+    try {
+      const session = isRegisterMode
+        ? await registerOwner(registerDraft)
+        : await loginOwner(loginDraft)
+
+      localStorage.setItem(authTokenStorageKey, session.token)
+
+      const claimedMembership = await claimSharedMembership(
+        shareToken,
+        session.token,
+        guestToken,
+      )
+
+      if (claimedMembership.guestToken) {
+        localStorage.setItem(guestStorageKey, claimedMembership.guestToken)
+        setGuestToken(claimedMembership.guestToken)
+      }
+
+      localStorage.setItem(
+        selectedCampaignStorageKey,
+        claimedMembership.membership.campaignId,
+      )
+      setLinkedOwner(session.owner)
+      setMembership(claimedMembership.membership)
+      setAccountNotice(
+        isRegisterMode
+          ? 'Real account created and linked to this guest membership.'
+          : 'Real account linked to this guest membership.',
+      )
+    } catch (linkError) {
+      setError(
+        linkError instanceof Error
+          ? linkError.message
+          : 'Could not link this guest membership to a real account.',
+      )
+    } finally {
+      setIsLinkingAccount(false)
     }
   }
 
@@ -570,6 +668,122 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
               {error}
             </Alert>
           ) : null}
+
+          {membership.userId === null ? (
+            <Card sx={{ borderRadius: surfaceRadius }}>
+              <CardContent sx={{ p: 3 }}>
+                <Stack spacing={2.5}>
+                  <Box>
+                    <Typography variant="h5">Link this guest membership</Typography>
+                    <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                      Create or connect a real account without changing the membership that
+                      already owns your shared note history. For this first release, the claim
+                      must happen from the same browser that joined the campaign.
+                    </Typography>
+                  </Box>
+
+                  {accountNotice ? (
+                    <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+                      {accountNotice}
+                    </Alert>
+                  ) : null}
+
+                  {isRegisterMode ? (
+                    <TextField
+                      label="Account display name"
+                      value={registerDraft.displayName}
+                      onChange={(event) =>
+                        setRegisterDraft((currentDraft) => ({
+                          ...currentDraft,
+                          displayName: event.target.value,
+                        }))
+                      }
+                    />
+                  ) : null}
+
+                  <TextField
+                    label="Email"
+                    type="email"
+                    value={isRegisterMode ? registerDraft.email : loginDraft.email}
+                    onChange={(event) => {
+                      const value = event.target.value
+
+                      if (isRegisterMode) {
+                        setRegisterDraft((currentDraft) => ({
+                          ...currentDraft,
+                          email: value,
+                        }))
+                      } else {
+                        setLoginDraft((currentDraft) => ({
+                          ...currentDraft,
+                          email: value,
+                        }))
+                      }
+                    }}
+                  />
+
+                  <TextField
+                    label="Password"
+                    type="password"
+                    value={isRegisterMode ? registerDraft.password : loginDraft.password}
+                    onChange={(event) => {
+                      const value = event.target.value
+
+                      if (isRegisterMode) {
+                        setRegisterDraft((currentDraft) => ({
+                          ...currentDraft,
+                          password: value,
+                        }))
+                      } else {
+                        setLoginDraft((currentDraft) => ({
+                          ...currentDraft,
+                          password: value,
+                        }))
+                      }
+                    }}
+                  />
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <Button
+                      variant="contained"
+                      onClick={handleLinkAccount}
+                      disabled={isLinkingAccount}
+                    >
+                      {isLinkingAccount
+                        ? isRegisterMode
+                          ? 'Creating and linking...'
+                          : 'Linking account...'
+                        : isRegisterMode
+                          ? 'Create and link account'
+                          : 'Sign in and link account'}
+                    </Button>
+                    <Button
+                      variant="text"
+                      onClick={() => {
+                        setAccountNotice(null)
+                        setError(null)
+                        setIsRegisterMode((current) => !current)
+                      }}
+                    >
+                      {isRegisterMode
+                        ? 'Already have an account? Sign in'
+                        : 'Need an account? Create one'}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          ) : (
+            <Card sx={{ borderRadius: surfaceRadius }}>
+              <CardContent sx={{ p: 3 }}>
+                <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+                  {linkedOwner && linkedOwner.id === membership.userId
+                    ? `Linked to ${linkedOwner.displayName}. This guest membership keeps the same note history.`
+                    : 'This guest membership is linked to a real account and keeps the same note history.'}
+                </Alert>
+              </CardContent>
+            </Card>
+          )}
 
           <Box
             component="ul"
