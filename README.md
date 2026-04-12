@@ -35,6 +35,9 @@ apps/api/data/dnd-notes.sqlite
 
 You can override that path with `NOTES_DB_PATH`.
 
+When the local database is from an older schema, the API upgrades compatible note
+attribution columns in place during startup so existing note data keeps loading.
+
 To load the starter notes into an empty local database:
 
 ```bash
