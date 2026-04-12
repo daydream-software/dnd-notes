@@ -18,6 +18,8 @@ Chunk initialized as Tester for the initial project squad.
 
 📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
 
+📌 Team update (2026-04-12T17:35:41Z): Issue #27 backend revision approved; frontend UI slice approved; both ready to merge; session browsing thin slice complete (two-step flow, numeric sort, no redesign) — decided by Chunk (reviewer), Stef (implementer)
+
 ## Learnings
 
 - Initial squad setup complete.
@@ -36,7 +38,12 @@ Chunk initialized as Tester for the initial project squad.
 - Issue #27 review trap: `apps/api/src/app.ts` declares `/api/notes/:noteId` before `/api/notes/sessions`, so `GET /api/notes/sessions` is shadowed as note ID `"sessions"` and always 404s before the new handler runs.
 - Session-name route safety for issue #27: Express already decodes `:sessionId`, so the extra `decodeURIComponent()` in `apps/api/src/app.ts` turns valid names like `50% done` into a 500 `URIError`; review path-param features against literal `%` coverage.
 - Session browsing regression gap: the new `/api/notes/sessions/:sessionId` endpoint is owner-scoped through `resolveOwnedCampaign()` even though authenticated note access elsewhere now uses linked-membership scoping, and `apps/api/test/app.test.ts` adds no coverage for the new session endpoints at all.
+- Issue #23 backend review: `apps/api/src/app.ts` and `apps/api/src/note-store.ts` gate membership consolidation to owner access and scope both memberships to the campaign before rewriting note attribution IDs, and the SQL update preserves note bodies/timestamps by touching only attribution columns. The current regression coverage in `apps/api/test/app.test.ts` only exercises happy-path consolidation plus role-mismatch confirmation, so owner-only and cross-campaign rejection paths still need explicit tests before this slice is safe to approve.
+- Issue #23 re-review passed: `apps/api/test/app.test.ts` now adds the missing regression gates by proving a claimed non-owner still gets `403` on both preview and apply for `/api/campaigns/:campaignId/memberships/consolidations`, while foreign-campaign membership IDs return the campaign-scoped `404` errors. Full repo validation (`npm run lint && npm run test && npm run build`) stayed green, so the attribution-only consolidation slice is now ship-safe.
+- Issue #27 approval gate: the backend session-browsing slice is ship-safe only when `apps/api/src/app.ts` keeps `/api/notes/sessions*` ahead of `/api/notes/:noteId`, consumes `request.params.sessionId` without manual decoding, and reuses `resolveAccessibleCampaign()` so claimed collaborators match authenticated note access; `apps/api/test/app.test.ts` now covers both percent-encoded names and claimed-collaborator access, and root `npm run lint && npm run test && npm run build` passed on the approved revision.
 
-## 2026-04-12: Issue #27 Review Complete
+## 2026-04-12: Issue #27 & #23 Reviews Complete
 
 📌 Team update (2026-04-12T16:45:23Z): Issue #27 session-browsing v1 concept approved, but implementation REJECTED for 4 regressions: (1) route shadowing: `/api/notes/sessions` shadowed as note ID "sessions", (2) double percent-decode crash on names like "50% done", (3) auth regression: endpoints use owner-only scoping, blocking claimed collaborators, (4) missing regression tests. Data assigned backend fixes. Stef to own follow-on UI work after fixes land. Full rejection details in `.squad/decisions.md`.
+
+📌 Team update (2026-04-12T21:22:46Z): Issue #27 backend revision reviewed and approved. Data's fixes pass all regressions: route shadowing resolved, double-decode removed, auth switched to membership-aware access, contracts confirmed reusable. Lint, test, build green. Ship-safe. Issue #23 re-review also approved: Stef's regression coverage now proves non-owner rejection and cross-campaign scoping; consolidation ready to ship. Both decisions finalized in `.squad/decisions.md` — reviewed by Chunk

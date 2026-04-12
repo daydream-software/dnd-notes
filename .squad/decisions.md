@@ -183,8 +183,8 @@ The concept of lightweight session discovery without schema migration is sound a
 
 **Status:** REQUIRES REVISION — concept approved, implementation rejected
 
-### 2026-04-12: Issue #23 — Membership Consolidation (Attribution-Only with Preview + Confirm)
-**By:** Data
+### 2026-04-12: Issue #23 — Membership Consolidation (Attribution-Only with Preview + Confirm, APPROVED)
+**By:** Data, Stef, Chunk (Lead Reviewer)
 
 **What:**
 Membership consolidation is strictly attribution-only:
@@ -197,10 +197,37 @@ Membership consolidation is strictly attribution-only:
 **Why:**
 Preview+confirm pattern provides clear frontend confirmation UI while keeping the backend scope tight. Ownership-cleanup is solved without making unscoped account/session merge decisions. Explicit role-mismatch confirmation blocks accidental historical-role rewrites.
 
-**Status:** Implementation completed, under Chunk review for integration and regression coverage.
+**Review cycle:**
+1. Chunk's first pass (2026-04-12): identified missing regression coverage for owner-only and campaign-scope guardrails → rejected
+2. Stef's revision: added explicit tests for linked-guest `403` rejection and cross-campaign membership `404` scoping
+3. Chunk's re-review (2026-04-12): confirmed regressions now covered, no blockers remain → approved
 
-### 2026-04-12: Issue #32 — Campaign Starter Templates (Client-Side, Creation-Only Scope)
-**By:** Stef
+**Verdict:** APPROVE  
+**Status:** Ship-ready. All regression coverage passes. Lint, test, build all green. No remaining blockers.
+
+### 2026-04-12: Issue #27 — Session Browsing Backend (REVISION APPROVED)
+**By:** Data (backend fix), Chunk (reviewer), Mikey (approver)
+
+**What:**
+Session-based note browsing v1 backend revision fixes four critical regressions from first attempt:
+1. **Route shadowing fix:** Moved `/api/notes/sessions*` routes ahead of `/api/notes/:noteId` catch-all in Express
+2. **Double-decode fix:** Removed manual `decodeURIComponent()` from session detail (Express already decodes the param)
+3. **Auth regression fix:** Switched both session-browsing routes from `resolveOwnedCampaign()` to `resolveAccessibleCampaign()`, granting linked collaborators proper access matching `/api/notes` pattern
+4. **Contract alignment:** Confirmed existing `SessionsResponse` and `NotesResponse` contracts in `apps/web/src/types.ts` are reusable
+
+**Frontend handoff:**
+- Session detail URLs must use `encodeURIComponent(sessionName)` exactly once
+- Endpoints are ship-safe for any authenticated linked collaborator
+- No additional scoping or contract changes needed
+
+**Why:**
+Original concept (lightweight session discovery, no schema migration) aligns with product roadmap (search and filtering before graph relationships). First shipped implementation had route ordering, double-decode, and auth pattern regressions. Revision fixes all four and maintains the thin-slice architecture.
+
+**Verdict:** APPROVE  
+**Status:** Ship-ready. Lint, test, build all pass. Ready for frontend session-browsing UI work.
+
+### 2026-04-12: Issue #32 — Campaign Starter Templates (Client-Side, Creation-Only Scope, APPROVED)
+**By:** Stef (implementer), Mikey (reviewer)
 
 **What:**
 Campaign starter templates are:
@@ -211,7 +238,58 @@ Campaign starter templates are:
 **Why:**
 Keeping templates client-side and campaign-creation-scoped avoids touching the campaign-settings surface that Issue #22 is actively using. This slice ships independently and does not block search/filter work.
 
-**Status:** Implementation completed, under Chunk review for acceptance criteria coverage.
+**Verdict:** APPROVE  
+**Status:** Ship-ready. Integration test coverage included. Lint, test, build all pass. No blockers remain. Best-effort campaign-seeding trade-off (if one `createNote()` fails, campaign may have partial starter notes) acceptable because issue wanted thin frontend slice with no new backend contract.
+
+### 2026-04-12: Issue #27 — Session Browsing Backend (REVISION APPROVED)
+**By:** Chunk (reviewer)
+
+**What:**
+Chunk's review validates that Data's backend fixes resolved all four critical regressions:
+1. **Route shadowing fix verified:** `/api/notes/sessions` and `/api/notes/sessions/:sessionId` registered before `/api/notes/:noteId` catch-all
+2. **Double-decode fix verified:** Manual `decodeURIComponent()` removed; Express decoding only applied
+3. **Auth regression fix verified:** Both session routes switched to `resolveAccessibleCampaign()` for membership-aware access
+4. **Contract alignment confirmed:** `SessionsResponse` and `NotesResponse` types synced across workspaces
+
+**Test coverage confirms:**
+- Session names with percent-encoding (e.g., `50% done`) correctly handled via Express param decoding
+- Claimed collaborators can browse sessions via authenticated membership access
+- No shadowing of session endpoints by note-detail catch-all
+
+**Why:**
+Validates that the backend slice is production-ready for frontend session UI work to proceed without blocking.
+
+**Verdict:** APPROVE  
+**Status:** Ship-ready. Lint, test, build all pass. Frontend session-browsing UI work can proceed.
+
+**Files affected:**
+- `apps/api/src/app.ts`
+- `apps/api/src/note-store.ts`
+- `apps/api/src/types.ts`
+- `apps/api/test/app.test.ts`
+- `apps/web/src/types.ts`
+- `README.md`
+
+### 2026-04-12: Issue #27 — Session Browsing Frontend (APPROVED)
+**By:** Stef (implementer)
+
+**What:**
+Frontend session browsing UI slice: thin two-step flow integrated into existing note list/detail shell.
+- Browse by session opens session list via `/api/notes/sessions`
+- Selecting a session swaps left rail into that session's notes via `/api/notes/sessions/:sessionId`
+- Reset to "All notes" when creating new note (avoids collision with Issues #22/#31)
+- Client-side numeric-aware descending sort for session names
+
+**Why:**
+Answers "what happened in this session?" without redesigning the workspace. Thin frontend mode inside existing shell minimizes risk, preserves established editor workflow, and aligns with product roadmap (search/filter before graph relationships).
+
+**Verdict:** APPROVE  
+**Status:** Ship-ready. Integration test coverage included. Lint, test, build all pass.
+
+**Files affected:**
+- `apps/web/src/App.tsx`
+- `apps/web/src/api.ts`
+- `apps/web/src/App.test.tsx`
 
 ## Governance
 

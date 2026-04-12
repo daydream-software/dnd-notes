@@ -16,6 +16,8 @@ Stef initialized as Frontend Dev for the initial project squad.
 
 📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
 
+📌 Team update (2026-04-12T17:35:41Z): Issue #27 session browsing backend fixes approved; frontend UI slice approved for ship; thin two-step flow (Browse by session → Select session → Browse notes) ready to merge — decided by Chunk (reviewer), Stef (implementer)
+
 ## Learnings
 
 - Initial squad setup complete.
@@ -26,7 +28,13 @@ Stef initialized as Frontend Dev for the initial project squad.
 - Built-in starter templates live client-side in `apps/web/src/templates.ts`, so frontend can seed reusable campaign scaffolds and note drafts without waiting on a backend template API.
 - Campaign template UI stays in create mode only inside `apps/web/src/App.tsx`, which keeps issue #32 off the owner campaign-settings surface while still seeding starter notes after `createCampaign()`.
 - Note templates stay optional in create-note mode and simply replace the local draft with editable plain-text scaffolding for NPC, faction, session, or location notes.
+- Membership consolidation regression coverage lives in `apps/api/test/app.test.ts`; keep the route owner-only for linked guest accounts and reject source/target membership IDs that come from another campaign with campaign-scoped 404s.
+- Issue #27 session browsing stays inside the existing list/detail shell in `apps/web/src/App.tsx`: add an `All notes` / `Browse by session` toggle, a session list view, and a session-notes view instead of a broader layout rewrite.
+- Session list data comes from the session endpoints in `apps/web/src/api.ts`; keep counts and detail loading separate so the flat note list still works unchanged when users stay in normal browsing mode.
+- Starting a new note should reset back to the flat note list so session browsing does not interfere with the active note-creation surface; regression coverage for the browse mode lives in `apps/web/src/App.test.tsx`.
 
-## 2026-04-12: Issue #27 & #32 Review Status
+## 2026-04-12: Issue #27 Backend Fixed, #32 & #23 Approved
 
 📌 Team update (2026-04-12T16:45:23Z): Issue #27 session-browsing v1 implementation rejected by Chunk (route shadowing, percent-decode crash, auth regression, missing regression tests). Concept approved; Data assigned backend fixes. You are assigned UI follow-on work for #27 after backend fixes land. Issue #32 (campaign templates) implementation completed and under Chunk review for acceptance criteria.
+
+📌 Team update (2026-04-12T21:22:46Z): Issue #27 backend revision approved and ship-safe. Data fixed all four regressions. You can now start thin session-browsing UI slice on the SessionsResponse contract. Issue #32 (campaign templates) approved by Mikey; no blockers. Issue #23 membership consolidation revision approved by Chunk; your regression coverage closed all safety gaps and is ship-ready. All three finalized in `.squad/decisions.md` — decided by Data, Chunk, Mikey
