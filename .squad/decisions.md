@@ -2,6 +2,15 @@
 
 ## Active Decisions
 
+### 2026-04-12: @copilot is enabled as a coding agent with auto-assignment
+**By:** FFMikha (via Copilot)
+
+**What:**
+`@copilot` is part of the squad roster and may automatically pick up issues labeled `squad:copilot`.
+
+**Why:**
+This gives the team an autonomous coding lane for small, clearly specified work without blocking the named squad members.
+
 ### 2026-04-11: GitHub Actions must be pinned to commit SHAs
 **By:** FFMikha (via Copilot), Brand, Mikey
 

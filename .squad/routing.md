@@ -12,6 +12,7 @@ How to decide who handles what.
 | Testing, QA, regression prevention | Chunk | Test coverage, bug reproduction, acceptance checks |
 | Code review | Mikey | Review PRs, architecture checks, cross-cutting feedback |
 | Scope & priorities | Mikey | What to build next, trade-offs, technical direction |
+| Small autonomous issue work with clear specs | @copilot | Bug fixes, test coverage, dependency bumps, scoped implementation work |
 | Session logging | Scribe | Automatic — never needs routing |
 
 ## Issue Routing
@@ -20,6 +21,7 @@ How to decide who handles what.
 |-------|--------|-----|
 | `squad` | Triage: analyze issue, assign `squad:{member}` label | Lead |
 | `squad:{name}` | Pick up issue and complete the work | Named member |
+| `squad:copilot` | Pick up autonomous issue work and open a draft PR | @copilot |
 
 ### How Issue Assignment Works
 
