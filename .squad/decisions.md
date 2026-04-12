@@ -9,18 +9,20 @@
 Post-Issue #28 triage identifies clear blocking issues in current PRs and recommends sequenced fixes before proceeding to higher-priority activity feature (#33 backend + frontend).
 
 **Immediate Priority (in order):**
-1. **PR #35 validation fix** (~30 min)
-   - Split `validateNoteInput()` into separate create/update functions
-   - Apply defaults only in POST handler, never in PUT
-   - Add regression test: PUT with omitted body/status must fail 400
+1. ✅ **PR #35 validation fix** — COMPLETE
+   - Split `validateNoteInput()` into separate create/update functions ✅
+   - Apply defaults only in POST handler, never in PUT ✅
+   - Add regression test: PUT with omitted body/status must fail 400 ✅
+   - **Verdict:** APPROVED by Mikey; merged in commit `6e1cf08`
    - Owner: @copilot
 
-2. **PR #36 session browsing rework** (~2–3 hours)
-   - Extract `browseMode`/`selectedSessionName` entirely out of `loadWorkspace` dependency chain
-   - Use ref or memo to avoid callback identity churn that triggers bootstrap rerun
-   - Add cancellation or "latest-selection-only" logic to `handleSelectSession()`
-   - Add regression tests: mode toggle without reload, new-note from session mode preserves state, rapid switches resolve in order
-   - Owner: @copilot
+2. ✅ **PR #36 session browsing rework** — COMPLETE
+   - Extract `browseMode`/`selectedSessionName` entirely out of `loadWorkspace` dependency chain ✅
+   - Use ref or memo to avoid callback identity churn that triggers bootstrap rerun ✅
+   - Add cancellation or "latest-selection-only" logic to `handleSelectSession()` ✅
+   - Add regression tests: mode toggle without reload, new-note from session mode preserves state, rapid switches resolve in order ✅
+   - **Verdict:** APPROVED by Chunk; merged and ready
+   - Owner: Stef (@copilot)
 
 3. **Issue #33 activity UI** (~1–2 hours after PR #36 lands)
    - Implement activity feed view in App.tsx using Data's stable activity endpoint
@@ -30,15 +32,15 @@ Post-Issue #28 triage identifies clear blocking issues in current PRs and recomm
    - Owner: Stef or @copilot
 
 **Why:**
-PR #35 is a quick validation fix blocking merge train. PR #36 is critical App.tsx collision gate for #24, #25, and #33 UI work. Activity is high-value follow-on: backend done and approved, frontend straightforward, improves product narrative (team visibility, recent changes).
+PR #35 validation fix eliminated data-loss blocker. PR #36 unblocked by PR #35 merge; stable App.tsx frame now ready for #24, #25, #33 UI work. Activity is next high-value lane: backend done and approved, frontend straightforward, improves product narrative.
 
 **Held Work:**
-- #24 (search): Unblocks after #28 tag infrastructure (done) AND App.tsx frame solid (waiting for #36)
-- #25 (mobile): Depends on #24 + stable note-browsing frame; hold until both #36 merges and #24 in progress
+- #24 (search): Unblocks after #28 tag infrastructure (done) AND App.tsx frame solid (PR #36 merged ✅)
+- #25 (mobile): Depends on #24 + stable note-browsing frame; hold until #24 in progress
 - #29 (graph-tag spike): Deferred per product roadmap (after search/browsing/mobile solid)
 - #26 (richer formatting), #30 (note-to-note links): Backlog, low priority vs. search + mobile
 
-**Status:** ACTIVE — Execute in sequenced order; gates next phase of product development
+**Status:** TWO OF THREE BLOCKED ITEMS RESOLVED — PR #35 & #36 approved; next lane is Issue #33 frontend (activity UI)
 
 ### 2026-04-12: Product roadmap prioritizes search, filtering, and mobile UX before graph-style tag relationships
 **By:** Mikey (Lead), Stef, Data
