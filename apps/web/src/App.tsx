@@ -1223,7 +1223,9 @@ function App() {
                         label={
                           activeMembership.role === 'owner'
                             ? 'Campaign owner'
-                            : 'Guest collaborator'
+                            : activeMembership.userId !== null
+                              ? 'Linked collaborator'
+                              : 'Guest collaborator'
                         }
                         color={canManageSelectedCampaign ? 'secondary' : 'default'}
                         size="small"
@@ -1371,8 +1373,8 @@ function App() {
                           {currentCampaignMemberships.map((membership) => (
                             <Chip
                               key={membership.id}
-                              label={`${membership.displayName} (${membership.role})`}
-                              color={membership.role === 'owner' ? 'secondary' : 'default'}
+                              label={`${membership.displayName} (${membership.role === 'guest' && membership.userId !== null ? 'linked collaborator' : membership.role})`}
+                              color={membership.role === 'owner' ? 'secondary' : membership.userId !== null ? 'primary' : 'default'}
                             />
                           ))}
                         </Stack>
