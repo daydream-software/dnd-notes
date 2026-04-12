@@ -2,6 +2,23 @@
 
 ## Active Decisions
 
+### 2026-04-12: Product roadmap prioritizes search, filtering, and mobile UX before graph-style tag relationships
+**By:** Mikey (Lead), Stef, Data
+
+**What:**
+Team consensus on phased product roadmap addresses user requests from FFMikha (Issue #20 product direction):
+- **Near-term bets (v1–v2, 4–8 weeks):** Linked-member visual differentiation, temporary claim indicator, collaborator navigation, member consolidation, search infrastructure, mobile note UX, richer editing
+- **Long-term vision (v3+):** Graph-style tag relationships deferred until search, filtering, and tag browsing foundations are mature
+- Rationale: Graph relationships only maximize user value once discovery and navigation foundations are solid; implementing relationships first creates friction before users can leverage them
+
+**Why:**
+Aligns team around sustainable feature velocity. Search and mobile UX unlock immediate user value and foundation for more complex features. Membership consolidation and collaborator navigation cleanup strengthen core data models and UX flows. Graph-style tags become powerful visualization and relationship exploration once users can efficiently search and filter content.
+
+**Status:** ACTIVE — shapes all near-term feature prioritization and scope
+
+**Files affected:**
+- `.squad/log/2026-04-12T16:15:00Z-product-direction-review.md` (detailed breakdown)
+
 ### 2026-04-12: @copilot is enabled as a coding agent with auto-assignment
 **By:** FFMikha (via Copilot)
 
