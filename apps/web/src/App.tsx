@@ -1,4 +1,5 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
+import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import EventRoundedIcon from '@mui/icons-material/EventRounded'
 import PlaylistAddCheckCircleRoundedIcon from '@mui/icons-material/PlaylistAddCheckCircleRounded'
@@ -304,6 +305,8 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [browseMode, setBrowseMode] = useState<BrowseMode>('all')
   const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null)
+  const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
+  const [isQuickCapturing, setIsQuickCapturing] = useState(false)
   const selectedNoteIdRef = useRef<string | null>(null)
 
   useEffect(() => {
@@ -665,6 +668,35 @@ function App() {
     setIsCreating(true)
     setDraft(createEmptyDraft())
     setError(null)
+  }
+
+  const handleQuickCapture = async () => {
+    const trimmedTitle = quickCaptureTitle.trim()
+
+    if (!authToken || !selectedCampaignId || !trimmedTitle) {
+      return
+    }
+
+    setError(null)
+    setIsQuickCapturing(true)
+
+    try {
+      const createdNote = await createNote(authToken, {
+        title: trimmedTitle,
+        campaignId: selectedCampaignId,
+      })
+
+      setQuickCaptureTitle('')
+      await loadWorkspace(authToken, selectedCampaignId, createdNote.id)
+    } catch (captureError) {
+      setError(
+        captureError instanceof Error
+          ? captureError.message
+          : 'Could not capture the note.',
+      )
+    } finally {
+      setIsQuickCapturing(false)
+    }
   }
 
   const handleSaveNote = async () => {
@@ -1796,6 +1828,34 @@ function App() {
                       }}
                     >
                       Browse by session
+                    </Button>
+                  </Stack>
+
+                  <Stack
+                    direction="row"
+                    spacing={1}
+                    component="form"
+                    onSubmit={(event: React.FormEvent) => {
+                      event.preventDefault()
+                      handleQuickCapture()
+                    }}
+                  >
+                    <TextField
+                      label="Quick capture"
+                      placeholder="Jot down a thought, clue, or reminder…"
+                      size="small"
+                      value={quickCaptureTitle}
+                      onChange={(event) => setQuickCaptureTitle(event.target.value)}
+                      disabled={isQuickCapturing}
+                      sx={{ flex: 1 }}
+                    />
+                    <Button
+                      type="submit"
+                      variant="contained"
+                      startIcon={<BoltRoundedIcon />}
+                      disabled={!quickCaptureTitle.trim() || isQuickCapturing}
+                    >
+                      {isQuickCapturing ? 'Capturing…' : 'Capture'}
                     </Button>
                   </Stack>
 

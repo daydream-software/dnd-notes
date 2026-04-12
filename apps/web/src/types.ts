@@ -101,10 +101,10 @@ export interface Note {
 
 export interface NoteInput {
   title: string
-  body: string
-  tags: string[]
-  status: NoteStatus
-  sessionName: string | null
+  body?: string
+  tags?: string[]
+  status?: NoteStatus
+  sessionName?: string | null
   campaignId?: string | null
 }
 

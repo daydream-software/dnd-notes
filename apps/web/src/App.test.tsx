@@ -1227,10 +1227,10 @@ describe('App', () => {
         const payload = JSON.parse(String(init?.body)) as {
           campaignId: string
           title: string
-          body: string
-          tags: string[]
-          status: NoteStatus
-          sessionName: string | null
+          body?: string
+          tags?: string[]
+          status?: NoteStatus
+          sessionName?: string | null
         }
 
         const accessFailure = ensureCampaignAccess(payload.campaignId)
@@ -1242,10 +1242,10 @@ describe('App', () => {
           id: `note-${(notesByCampaign[payload.campaignId] ?? []).length + 1}`,
           campaignId: payload.campaignId,
           title: payload.title,
-          body: payload.body,
-          tags: payload.tags,
-          status: payload.status,
-          sessionName: payload.sessionName,
+          body: payload.body ?? '',
+          tags: payload.tags ?? [],
+          status: payload.status ?? 'draft',
+          sessionName: payload.sessionName ?? null,
           createdAt: '2026-04-12T02:00:00.000Z',
           updatedAt: '2026-04-12T02:00:00.000Z',
         }
@@ -1926,4 +1926,28 @@ describe('App', () => {
       screen.getByText(/No session-linked notes yet/),
     ).toBeTruthy()
   }, 25000)
+
+  it('lets an owner use quick capture to create a note with just a title', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    const quickCaptureInput = screen.getByLabelText('Quick capture')
+    expect(quickCaptureInput).toBeTruthy()
+
+    await user.type(quickCaptureInput, 'Strange runes near the harbor')
+    await user.click(screen.getByRole('button', { name: 'Capture' }))
+
+    expect(
+      await screen.findByDisplayValue('Strange runes near the harbor'),
+    ).toBeTruthy()
+  }, 15000)
 })

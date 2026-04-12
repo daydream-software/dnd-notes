@@ -1,4 +1,5 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
+import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import {
   Alert,
@@ -158,6 +159,8 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
   const [isRegisterMode, setIsRegisterMode] = useState(true)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
+  const [isQuickCapturing, setIsQuickCapturing] = useState(false)
   const selectedNoteIdRef = useRef<string | null>(null)
   const shareLinkRef = useRef<CampaignShareLink | null>(null)
   const sessionRequestIdRef = useRef(0)
@@ -351,6 +354,34 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
     setIsCreating(true)
     setDraft(createEmptyDraft())
     setError(null)
+  }
+
+  const handleQuickCapture = async () => {
+    const trimmedTitle = quickCaptureTitle.trim()
+
+    if (!guestToken || !canEdit || !trimmedTitle) {
+      return
+    }
+
+    setError(null)
+    setIsQuickCapturing(true)
+
+    try {
+      const createdNote = await createSharedNote(shareToken, guestToken, {
+        title: trimmedTitle,
+      })
+
+      setQuickCaptureTitle('')
+      await loadWorkspace(guestToken, createdNote.id)
+    } catch (captureError) {
+      setError(
+        captureError instanceof Error
+          ? captureError.message
+          : 'Could not capture the note.',
+      )
+    } finally {
+      setIsQuickCapturing(false)
+    }
   }
 
   const handleJoin = async () => {
@@ -885,6 +916,36 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                       Shared notes for {campaign.name} stay inside this link.
                     </Typography>
                   </Box>
+
+                  {canEdit ? (
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      component="form"
+                      onSubmit={(event: React.FormEvent) => {
+                        event.preventDefault()
+                        handleQuickCapture()
+                      }}
+                    >
+                      <TextField
+                        label="Quick capture"
+                        placeholder="Jot down a thought, clue, or reminder…"
+                        size="small"
+                        value={quickCaptureTitle}
+                        onChange={(event) => setQuickCaptureTitle(event.target.value)}
+                        disabled={isQuickCapturing}
+                        sx={{ flex: 1 }}
+                      />
+                      <Button
+                        type="submit"
+                        variant="contained"
+                        startIcon={<BoltRoundedIcon />}
+                        disabled={!quickCaptureTitle.trim() || isQuickCapturing}
+                      >
+                        {isQuickCapturing ? 'Capturing…' : 'Capture'}
+                      </Button>
+                    </Stack>
+                  ) : null}
 
                   {notes.length === 0 ? (
                     <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
