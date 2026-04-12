@@ -19,8 +19,10 @@ import type {
   CampaignShareLink,
   CampaignShareLinkInput,
   CampaignMembership,
+  CampaignMembershipRole,
   CampaignSummary,
   Note,
+  NoteAttribution,
   NoteInput,
   NoteStats,
   OwnerAccount,
@@ -58,6 +60,12 @@ interface NoteRow {
   status: Note['status']
   tags_json: string
   session_name: string | null
+  created_by_membership_id: string | null
+  last_edited_by_membership_id: string | null
+  created_by_display_name: string | null
+  created_by_role: string | null
+  last_edited_by_display_name: string | null
+  last_edited_by_role: string | null
   created_at: string
   updated_at: string
 }
@@ -125,11 +133,12 @@ export interface NoteStore {
     displayName: string,
   ): { membership: CampaignMembership; guestToken: string }
   getGuestMembershipByToken(token: string): CampaignMembership | null
+  getOwnerMembershipForCampaign(ownerUserId: string, campaignId: string): CampaignMembership | null
   listNotes(campaignId?: string): Note[]
   listRecentNotes(limit: number, campaignId?: string): Note[]
   getNote(noteId: string): Note | null
-  createNote(input: NoteInput): Note
-  updateNote(noteId: string, input: NoteInput): Note | null
+  createNote(input: NoteInput, membershipId?: string): Note
+  updateNote(noteId: string, input: NoteInput, membershipId?: string): Note | null
   deleteNote(noteId: string): boolean
   resetNotes(inputs: NoteInput[], campaignId?: string): Note[]
   getStats(campaignId?: string): NoteStats
@@ -205,6 +214,26 @@ function mapMembershipRow(row: CampaignMembershipRow): CampaignMembership {
 }
 
 function mapNoteRow(row: NoteRow): Note {
+  let createdBy: NoteAttribution | null = null
+
+  if (row.created_by_membership_id && row.created_by_display_name && row.created_by_role) {
+    createdBy = {
+      membershipId: row.created_by_membership_id,
+      displayName: row.created_by_display_name,
+      role: row.created_by_role as CampaignMembershipRole,
+    }
+  }
+
+  let lastEditedBy: NoteAttribution | null = null
+
+  if (row.last_edited_by_membership_id && row.last_edited_by_display_name && row.last_edited_by_role) {
+    lastEditedBy = {
+      membershipId: row.last_edited_by_membership_id,
+      displayName: row.last_edited_by_display_name,
+      role: row.last_edited_by_role as CampaignMembershipRole,
+    }
+  }
+
   return {
     id: row.id,
     campaignId: row.campaign_id,
@@ -213,6 +242,8 @@ function mapNoteRow(row: NoteRow): Note {
     status: row.status,
     tags: JSON.parse(row.tags_json) as string[],
     sessionName: row.session_name,
+    createdBy,
+    lastEditedBy,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -332,6 +363,8 @@ export function createNoteStore(
       status TEXT NOT NULL,
       tags_json TEXT NOT NULL,
       session_name TEXT,
+      created_by_membership_id TEXT REFERENCES campaign_memberships(id),
+      last_edited_by_membership_id TEXT REFERENCES campaign_memberships(id),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -499,6 +532,20 @@ export function createNoteStore(
       updated_at
     FROM campaign_memberships
     WHERE guest_token_id = ? AND role = 'guest'
+  `)
+
+  const selectMembershipById = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      role,
+      display_name,
+      user_id,
+      guest_token_id,
+      created_at,
+      updated_at
+    FROM campaign_memberships
+    WHERE id = ?
   `)
 
   const insertMembership = database.prepare(`
@@ -698,33 +745,53 @@ export function createNoteStore(
 
   const selectNotesByCampaignId = database.prepare(`
     SELECT
-      id,
-      campaign_id,
-      title,
-      body,
-      status,
-      tags_json,
-      session_name,
-      created_at,
-      updated_at
+      notes.id,
+      notes.campaign_id,
+      notes.title,
+      notes.body,
+      notes.status,
+      notes.tags_json,
+      notes.session_name,
+      notes.created_by_membership_id,
+      notes.last_edited_by_membership_id,
+      cb.display_name AS created_by_display_name,
+      cb.role AS created_by_role,
+      eb.display_name AS last_edited_by_display_name,
+      eb.role AS last_edited_by_role,
+      notes.created_at,
+      notes.updated_at
     FROM notes
-    WHERE campaign_id = ?
-    ORDER BY updated_at DESC
+    LEFT JOIN campaign_memberships cb
+      ON cb.id = notes.created_by_membership_id
+    LEFT JOIN campaign_memberships eb
+      ON eb.id = notes.last_edited_by_membership_id
+    WHERE notes.campaign_id = ?
+    ORDER BY notes.updated_at DESC
   `)
 
   const selectNoteById = database.prepare(`
     SELECT
-      id,
-      campaign_id,
-      title,
-      body,
-      status,
-      tags_json,
-      session_name,
-      created_at,
-      updated_at
+      notes.id,
+      notes.campaign_id,
+      notes.title,
+      notes.body,
+      notes.status,
+      notes.tags_json,
+      notes.session_name,
+      notes.created_by_membership_id,
+      notes.last_edited_by_membership_id,
+      cb.display_name AS created_by_display_name,
+      cb.role AS created_by_role,
+      eb.display_name AS last_edited_by_display_name,
+      eb.role AS last_edited_by_role,
+      notes.created_at,
+      notes.updated_at
     FROM notes
-    WHERE id = ?
+    LEFT JOIN campaign_memberships cb
+      ON cb.id = notes.created_by_membership_id
+    LEFT JOIN campaign_memberships eb
+      ON eb.id = notes.last_edited_by_membership_id
+    WHERE notes.id = ?
   `)
 
   const insertNote = database.prepare(`
@@ -736,6 +803,8 @@ export function createNoteStore(
       status,
       tags_json,
       session_name,
+      created_by_membership_id,
+      last_edited_by_membership_id,
       created_at,
       updated_at
     ) VALUES (
@@ -746,6 +815,8 @@ export function createNoteStore(
       @status,
       @tags_json,
       @session_name,
+      @created_by_membership_id,
+      @last_edited_by_membership_id,
       @created_at,
       @updated_at
     )
@@ -759,6 +830,7 @@ export function createNoteStore(
       status = @status,
       tags_json = @tags_json,
       session_name = @session_name,
+      last_edited_by_membership_id = @last_edited_by_membership_id,
       updated_at = @updated_at
     WHERE id = @id
   `)
@@ -1072,6 +1144,8 @@ export function createNoteStore(
       status: note.status,
       tags_json: JSON.stringify(note.tags),
       session_name: note.sessionName,
+      created_by_membership_id: note.createdBy?.membershipId ?? null,
+      last_edited_by_membership_id: note.lastEditedBy?.membershipId ?? null,
       created_at: note.createdAt,
       updated_at: note.updatedAt,
     })
@@ -1094,6 +1168,8 @@ export function createNoteStore(
           tags: input.tags,
           status: input.status,
           sessionName: input.sessionName,
+          createdBy: null,
+          lastEditedBy: null,
           createdAt: timestamp,
           updatedAt: timestamp,
         }
@@ -1213,6 +1289,14 @@ export function createNoteStore(
 
       return row ? mapMembershipRow(row) : null
     },
+    getOwnerMembershipForCampaign(ownerUserId, campaignId) {
+      const row = selectOwnerMembershipByCampaignAndUser.get(
+        campaignId,
+        ownerUserId,
+      ) as CampaignMembershipRow | undefined
+
+      return row ? mapMembershipRow(row) : null
+    },
     listNotes,
     listRecentNotes(limit, campaignId) {
       return listNotes(campaignId).slice(0, limit)
@@ -1221,9 +1305,22 @@ export function createNoteStore(
       const row = selectNoteById.get(noteId) as NoteRow | undefined
       return row ? mapNoteRow(row) : null
     },
-    createNote(input) {
+    createNote(input, membershipId) {
       const campaign = requireCampaign(input.campaignId)
       const timestamp = new Date().toISOString()
+
+      const membership = membershipId
+        ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
+        : undefined
+
+      const attribution: NoteAttribution | null = membership
+        ? {
+            membershipId: membership.id,
+            displayName: membership.display_name,
+            role: membership.role as CampaignMembershipRole,
+          }
+        : null
+
       const note: Note = {
         id: randomUUID(),
         campaignId: campaign.id,
@@ -1232,6 +1329,8 @@ export function createNoteStore(
         tags: input.tags,
         status: input.status,
         sessionName: input.sessionName,
+        createdBy: attribution,
+        lastEditedBy: attribution,
         createdAt: timestamp,
         updatedAt: timestamp,
       }
@@ -1239,12 +1338,24 @@ export function createNoteStore(
       insertPersistedNote(note)
       return note
     },
-    updateNote(noteId, input) {
+    updateNote(noteId, input, membershipId) {
       const existing = this.getNote(noteId)
 
       if (!existing) {
         return null
       }
+
+      const membership = membershipId
+        ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
+        : undefined
+
+      const editAttribution: NoteAttribution | null = membership
+        ? {
+            membershipId: membership.id,
+            displayName: membership.display_name,
+            role: membership.role as CampaignMembershipRole,
+          }
+        : existing.lastEditedBy
 
       const nextNote: Note = {
         ...existing,
@@ -1253,6 +1364,7 @@ export function createNoteStore(
         tags: input.tags,
         status: input.status,
         sessionName: input.sessionName,
+        lastEditedBy: editAttribution,
         updatedAt: new Date().toISOString(),
       }
 
@@ -1263,6 +1375,7 @@ export function createNoteStore(
         status: nextNote.status,
         tags_json: JSON.stringify(nextNote.tags),
         session_name: nextNote.sessionName,
+        last_edited_by_membership_id: nextNote.lastEditedBy?.membershipId ?? null,
         updated_at: nextNote.updatedAt,
       })
 

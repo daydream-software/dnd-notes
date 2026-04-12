@@ -440,3 +440,133 @@ test('notes and owner sessions persist across app recreation when using the same
   assert.equal(listResponse.body.notes.length, 1)
   assert.equal(listResponse.body.notes[0].title, 'Map the smugglers cave')
 })
+
+test('owner note creation and editing attributes notes to campaign membership', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token, owner } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const createResponse = await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Rune circle near the harbor',
+    body: 'The runes glow faintly when the tide recedes.',
+    tags: ['runes'],
+    status: 'draft',
+    sessionName: null,
+  })
+
+  assert.equal(createResponse.status, 201)
+  assert.ok(createResponse.body.note.createdBy)
+  assert.equal(createResponse.body.note.createdBy.displayName, owner.displayName)
+  assert.equal(createResponse.body.note.createdBy.role, 'owner')
+  assert.ok(createResponse.body.note.lastEditedBy)
+  assert.equal(createResponse.body.note.lastEditedBy.membershipId, createResponse.body.note.createdBy.membershipId)
+
+  const noteId = createResponse.body.note.id as string
+
+  const updateResponse = await authed.put(`/api/notes/${noteId}`).send({
+    title: 'Rune circle near the harbor',
+    body: 'The runes pulse in rhythm with the full moon cycle.',
+    tags: ['runes', 'moonwell'],
+    status: 'active',
+    sessionName: 'Session 16',
+  })
+
+  assert.equal(updateResponse.status, 200)
+  assert.ok(updateResponse.body.note.createdBy)
+  assert.equal(updateResponse.body.note.createdBy.displayName, owner.displayName)
+  assert.ok(updateResponse.body.note.lastEditedBy)
+  assert.equal(updateResponse.body.note.lastEditedBy.displayName, owner.displayName)
+  assert.equal(updateResponse.body.note.lastEditedBy.role, 'owner')
+
+  const getResponse = await authed.get(`/api/notes/${noteId}`)
+  assert.equal(getResponse.status, 200)
+  assert.ok(getResponse.body.note.createdBy)
+  assert.equal(getResponse.body.note.createdBy.displayName, owner.displayName)
+})
+
+test('guest note creation and editing attributes notes to guest membership', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const shareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'Editor link',
+      accessLevel: 'editor',
+      frameAncestors: null,
+    })
+  const shareToken = shareLinkResponse.body.token as string
+
+  const joinResponse = await request(app).post(`/api/shared/${shareToken}/join`).send({
+    displayName: 'Thorn',
+  })
+  assert.equal(joinResponse.status, 201)
+
+  const guestToken = joinResponse.body.guestToken as string
+  const guest = withGuest(request(app), guestToken)
+
+  const createResponse = await guest.post(`/api/shared/${shareToken}/notes`).send({
+    title: 'Hidden passage behind the altar',
+    body: 'The statue rotates to reveal a narrow staircase descending into darkness.',
+    tags: ['dungeon', 'secret'],
+    status: 'draft',
+    sessionName: 'Session 17',
+  })
+
+  assert.equal(createResponse.status, 201)
+  assert.ok(createResponse.body.note.createdBy)
+  assert.equal(createResponse.body.note.createdBy.displayName, 'Thorn')
+  assert.equal(createResponse.body.note.createdBy.role, 'guest')
+  assert.ok(createResponse.body.note.lastEditedBy)
+  assert.equal(createResponse.body.note.lastEditedBy.displayName, 'Thorn')
+
+  const noteId = createResponse.body.note.id as string
+
+  const updateResponse = await guest.put(`/api/shared/${shareToken}/notes/${noteId}`).send({
+    title: 'Hidden passage behind the altar',
+    body: 'The staircase leads to an underground river. Faint chanting echoes from below.',
+    tags: ['dungeon', 'secret', 'underground'],
+    status: 'active',
+    sessionName: null,
+  })
+
+  assert.equal(updateResponse.status, 200)
+  assert.ok(updateResponse.body.note.createdBy)
+  assert.equal(updateResponse.body.note.createdBy.displayName, 'Thorn')
+  assert.ok(updateResponse.body.note.lastEditedBy)
+  assert.equal(updateResponse.body.note.lastEditedBy.displayName, 'Thorn')
+  assert.equal(updateResponse.body.note.lastEditedBy.role, 'guest')
+})
+
+test('notes without membership attribution return null for createdBy and lastEditedBy', async (t) => {
+  const { app, noteStore, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  noteStore.resetNotes(
+    [
+      {
+        title: 'Legacy note',
+        body: 'Created without attribution.',
+        tags: [],
+        status: 'active',
+        sessionName: null,
+      },
+    ],
+    defaultCampaignId,
+  )
+
+  const listResponse = await authed.get('/api/notes').query({ campaignId: defaultCampaignId })
+  assert.equal(listResponse.status, 200)
+  assert.equal(listResponse.body.notes.length, 1)
+  assert.equal(listResponse.body.notes[0].createdBy, null)
+  assert.equal(listResponse.body.notes[0].lastEditedBy, null)
+})

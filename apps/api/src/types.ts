@@ -79,6 +79,12 @@ export interface OwnerLoginInput {
   password: string
 }
 
+export interface NoteAttribution {
+  membershipId: string
+  displayName: string
+  role: CampaignMembershipRole
+}
+
 export interface Note {
   id: string
   campaignId: string
@@ -87,6 +93,8 @@ export interface Note {
   tags: string[]
   status: NoteStatus
   sessionName: string | null
+  createdBy: NoteAttribution | null
+  lastEditedBy: NoteAttribution | null
   createdAt: string
   updatedAt: string
 }
