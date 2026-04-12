@@ -31,31 +31,43 @@ const nullableTrimmedString = (field: string, maxLength: number) =>
       return trimmed.length > 0 ? trimmed : null
     })
 
-const notePayloadSchema = z.object({
-  title: z
-    .string()
-    .trim()
-    .min(1, 'Title is required.')
-    .max(120, 'Title must be 120 characters or fewer.'),
-  body: z
-    .string()
-    .trim()
-    .max(10_000, 'Body must be 10,000 characters or fewer.')
-    .default(''),
+const noteTitle = z
+  .string()
+  .trim()
+  .min(1, 'Title is required.')
+  .max(120, 'Title must be 120 characters or fewer.')
+
+const noteBody = z
+  .string()
+  .trim()
+  .max(10_000, 'Body must be 10,000 characters or fewer.')
+
+const noteTags = z
+  .array(
+    z
+      .string()
+      .trim()
+      .min(1, 'Tags cannot be empty.')
+      .max(24, 'Tags must be 24 characters or fewer.'),
+  )
+  .max(8, 'Use at most 8 tags.')
+  .transform((tags) => [...new Set(tags.map((tag) => tag.toLowerCase()))])
+
+const noteCreateSchema = z.object({
+  title: noteTitle,
+  body: noteBody.default(''),
   status: z.enum(noteStatuses).default('draft'),
-  tags: z
-    .array(
-      z
-        .string()
-        .trim()
-        .min(1, 'Tags cannot be empty.')
-        .max(24, 'Tags must be 24 characters or fewer.'),
-    )
-    .max(8, 'Use at most 8 tags.')
-    .default([])
-    .transform((tags) => [...new Set(tags.map((tag) => tag.toLowerCase()))]),
+  tags: noteTags.default([]),
   sessionName: nullableTrimmedString('Session name', 120),
   campaignId: nullableTrimmedString('Campaign id', 120),
+})
+
+const noteUpdateSchema = z.object({
+  title: noteTitle,
+  body: noteBody.min(1, 'Body is required.'),
+  status: z.enum(noteStatuses),
+  tags: noteTags,
+  sessionName: nullableTrimmedString('Session name', 120),
 })
 
 const campaignPayloadSchema = z.object({
@@ -188,10 +200,16 @@ function mapValidationResult<T>(
   }
 }
 
+export function validateNoteCreateInput(
+  input: unknown,
+): { success: true; data: NoteInput } | { success: false; errors: string[] } {
+  return mapValidationResult(noteCreateSchema.safeParse(input))
+}
+
 export function validateNoteInput(
   input: unknown,
 ): { success: true; data: NoteInput } | { success: false; errors: string[] } {
-  return mapValidationResult(notePayloadSchema.safeParse(input))
+  return mapValidationResult(noteUpdateSchema.safeParse(input))
 }
 
 export function validateCampaignInput(

@@ -25,6 +25,7 @@ import {
   validateCampaignInput,
   validateCampaignShareLinkInput,
   validateGuestJoinInput,
+  validateNoteCreateInput,
   validateNoteInput,
   validateOwnerLoginInput,
   validateOwnerRegistrationInput,
@@ -806,7 +807,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const validation = validateNoteInput(request.body)
+      const validation = validateNoteCreateInput(request.body)
 
       if (!validation.success) {
         response.status(400).json({
@@ -1146,7 +1147,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const validation = validateNoteInput(request.body)
+      const validation = validateNoteCreateInput(request.body)
 
       if (!validation.success) {
         response.status(400).json({

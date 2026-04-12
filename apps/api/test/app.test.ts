@@ -305,6 +305,52 @@ test('quick capture creates a note with only a title using server defaults', asy
   assert.equal(updateResponse.body.note.sessionName, 'Session 14')
 })
 
+test('updating a note that omits body or status returns 400 instead of silently blanking fields', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const createResponse = await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Harbor watch schedule',
+    body: 'Guard rotations change at midnight.',
+    tags: ['logistics'],
+    status: 'active',
+    sessionName: 'Session 8',
+  })
+
+  assert.equal(createResponse.status, 201)
+  const noteId = createResponse.body.note.id as string
+
+  const missingBodyResponse = await authed.put(`/api/notes/${noteId}`).send({
+    title: 'Harbor watch schedule',
+    tags: ['logistics'],
+    status: 'active',
+    sessionName: 'Session 8',
+  })
+
+  assert.equal(missingBodyResponse.status, 400)
+  assert.equal(missingBodyResponse.body.error, 'Note payload is invalid.')
+
+  const missingStatusResponse = await authed.put(`/api/notes/${noteId}`).send({
+    title: 'Harbor watch schedule',
+    body: 'Guard rotations change at midnight.',
+    tags: ['logistics'],
+    sessionName: 'Session 8',
+  })
+
+  assert.equal(missingStatusResponse.status, 400)
+  assert.equal(missingStatusResponse.body.error, 'Note payload is invalid.')
+
+  const verifyResponse = await authed.get('/api/notes').query({ campaignId: defaultCampaignId })
+  assert.equal(verifyResponse.status, 200)
+  const note = verifyResponse.body.notes.find((n: { id: string }) => n.id === noteId)
+  assert.equal(note.body, 'Guard rotations change at midnight.')
+  assert.equal(note.status, 'active')
+})
+
 test('shared links support guest join, scoped access, and editor note workflow', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
