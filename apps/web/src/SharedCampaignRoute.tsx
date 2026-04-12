@@ -27,6 +27,7 @@ import {
   fetchSharedSession,
   joinSharedCampaign,
   loginOwner,
+  logoutOwner,
   registerOwner,
   updateSharedNote,
 } from './api'
@@ -39,7 +40,6 @@ import type {
   NoteInput,
   NoteStatus,
   NotesOverview,
-  OwnerAccount,
 } from './types'
 import { noteStatuses } from './types'
 
@@ -157,7 +157,6 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRegisterMode, setIsRegisterMode] = useState(true)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
-  const [linkedOwner, setLinkedOwner] = useState<OwnerAccount | null>(null)
   const [error, setError] = useState<string | null>(null)
   const selectedNoteIdRef = useRef<string | null>(null)
   const shareLinkRef = useRef<CampaignShareLink | null>(null)
@@ -297,7 +296,6 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
         } else {
           localStorage.removeItem(guestStorageKey)
           setGuestToken(null)
-          setLinkedOwner(null)
           setAccountNotice(null)
           setOverview(null)
           setNotes([])
@@ -428,12 +426,11 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
         selectedCampaignStorageKey,
         claimedMembership.membership.campaignId,
       )
-      setLinkedOwner(session.owner)
       setMembership(claimedMembership.membership)
       setAccountNotice(
         isRegisterMode
-          ? 'Real account created and linked to this guest membership.'
-          : 'Real account linked to this guest membership.',
+          ? `Linked to ${session.owner.displayName}. Real account created and linked to this guest membership.`
+          : `Linked to ${session.owner.displayName}. Real account linked to this guest membership.`,
       )
     } catch (linkError) {
       setError(
@@ -444,6 +441,22 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
     } finally {
       setIsLinkingAccount(false)
     }
+  }
+
+  const handleSignOut = async () => {
+    const storedAuthToken = localStorage.getItem(authTokenStorageKey)
+
+    if (storedAuthToken) {
+      try {
+        await logoutOwner(storedAuthToken)
+      } catch {
+        // Intentionally ignore logout failures because local sign-out should still work.
+      }
+    }
+
+    localStorage.removeItem(authTokenStorageKey)
+    localStorage.removeItem(selectedCampaignStorageKey)
+    window.location.assign('/')
   }
 
   const handleSaveNote = async () => {
@@ -627,6 +640,11 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                     <Typography sx={{ mt: 2, color: 'rgba(255, 255, 255, 0.65)' }}>
                       Joined as {membership.displayName}. This link is {canEdit ? 'editor' : 'viewer'} access.
                     </Typography>
+                    <Chip
+                      label={membership.userId !== null ? 'Linked collaborator' : 'Guest'}
+                      size="small"
+                      sx={{ mt: 2, bgcolor: 'rgba(255, 255, 255, 0.14)', color: 'white' }}
+                    />
                   </Box>
 
                   <Stack
@@ -656,6 +674,25 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                       >
                         New note
                       </Button>
+                    ) : null}
+                    {membership.userId !== null ? (
+                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                        <Button
+                          variant="contained"
+                          onClick={() => {
+                            window.location.assign('/')
+                          }}
+                        >
+                          Switch campaigns
+                        </Button>
+                        <Button
+                          variant="text"
+                          color="inherit"
+                          onClick={handleSignOut}
+                        >
+                          Sign out
+                        </Button>
+                      </Stack>
                     ) : null}
                   </Stack>
                 </Stack>
@@ -773,17 +810,11 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                 </Stack>
               </CardContent>
             </Card>
-          ) : (
-            <Card sx={{ borderRadius: surfaceRadius }}>
-              <CardContent sx={{ p: 3 }}>
-                <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
-                  {linkedOwner && linkedOwner.id === membership.userId
-                    ? `Linked to ${linkedOwner.displayName}. This guest membership keeps the same note history.`
-                    : 'This guest membership is linked to a real account and keeps the same note history.'}
-                </Alert>
-              </CardContent>
-            </Card>
-          )}
+          ) : accountNotice ? (
+            <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+              {accountNotice}
+            </Alert>
+          ) : null}
 
           <Box
             component="ul"
