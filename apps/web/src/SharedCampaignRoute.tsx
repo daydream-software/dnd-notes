@@ -429,8 +429,8 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
       setMembership(claimedMembership.membership)
       setAccountNotice(
         isRegisterMode
-          ? `Linked to ${session.owner.displayName}. Real account created and linked to this guest membership.`
-          : `Linked to ${session.owner.displayName}. Real account linked to this guest membership.`,
+          ? `Account created and linked to ${session.owner.displayName}.`
+          : `Linked to ${session.owner.displayName}.`,
       )
     } catch (linkError) {
       setError(
