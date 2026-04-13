@@ -1071,3 +1071,66 @@ Before implementation starts, confirm:
 **Date:** 2026-04-13  
 **Ready for:** Product sign-off (FFMikha) on open questions, then backend/frontend implementation  
 **Next Steps:** FFMikha reviews and approves this document; squad routes to dev team for implementation; Chunk owns QA gate before merge
+
+---
+
+### 2026-04-13: Issue #28 Branch Re-Review — REJECT Current State
+
+**By:** Chunk (Tester)
+
+**What:**
+Current branch implementation of tag facets and filtering is functionally complete but contains a critical list/detail mismatch that blocks shipment.
+
+**Status:** REJECTED — not ship-safe yet
+
+**What still works:**
+- Tag facets and counts derived locally from `notes` state
+- Active single-tag filter visible in workspace chrome
+- Tag autocomplete reuses same local facet list
+- Tag clicks do NOT trigger extra workspace fetches (regression-verified)
+- Root lint/build/test passing
+
+**Ship blocker — Editor/Detail Pane Mismatch:**
+
+When a tag filter is applied, `filteredNotes` narrows the left pane list, but `selectedNote` still pulls from the full `notes` array. The form can focus on and edit a note that no longer appears in the filtered list.
+
+**Code evidence:**
+- `App.tsx` computes `filteredNotes` from `selectedTagFilter` (list narrows locally)
+- `selectedNote` derives from `selectedNoteId` against full `notes` array (no filtering)
+- `handleSelectTagFilter()` flips filter state but does NOT reconcile `selectedNoteId`, `isCreating`, or `draft` with filtered results
+
+**User impact:** Left pane says "Notes tagged 'clue'" while the form edits an unrelated note. Trust-breaking corner case.
+
+**Regression expectation for fix:**
+Add web regression that selects a non-matching note, clicks a tag facet, and proves the editor either:
+1. Retargets to the first visible matching note, OR
+2. Clears into a safe create/empty state
+
+(Either acceptable; silently editing a hidden note is not.)
+
+**Revision owner:** @copilot  
+**Locked out for this cycle:** Stef
+
+**Why:** List/detail sync is a core trust mechanism. Shipment without this fix risks user confusion and data-mutation surprises.
+
+---
+
+### 2026-04-13: Clear Tag Filter When Starting a Brand-New Note
+
+**By:** Stef (Frontend Dev)
+
+**What:**
+When starting a brand-new note from a filtered list view, the active tag filter is now cleared locally in `App.tsx`.
+
+**Why:**
+- Composing and browsing are distinct workflows
+- Leaving the filter on makes a fresh save feel incomplete if it doesn't use the filtered tag
+- Keeps the fix frontend-only (no workspace reload or API traffic)
+- Maintains regression coverage proving no extra fetches
+
+**Impact:**
+- Tag browsing still stays local and visible while browsing
+- Note editor still reuses facet tags for autocomplete
+- Regression coverage proves **New note** clears filter without re-fetching workspace data
+
+**Status:** Merged into implementation scope, verified via test updates
