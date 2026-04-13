@@ -1,6 +1,6 @@
 # Current Focus
 
-- **Updated:** 2026-04-13T11:37:29.540Z
-- **Requested by:** FFMikha
-- **Focus:** Issue #28 reviewer rejection routed to `@copilot` after branch finish pass found a list/detail mismatch under tag filtering
-- **Next likely task:** Let `@copilot` revise issue #28, then re-run reviewer QA before merging
+- **Updated:** 2026-04-13T15:58:35Z
+- **Latest completed issue:** #24 (Campaign note search UI and filters) — approved for merge
+- **Focus:** Issue #24 session completed; team approved search implementation for merge after handling web test infrastructure blocker (Data diagnosed as pre-existing, Chunk approved despite hang)
+- **Next likely task:** Investigate and fix web test infrastructure (vitest 4.1.4 hang with React 19 + MUI 9) as separate P1 issue; establish CI workflow for web tests
