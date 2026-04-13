@@ -1,10 +1,12 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
+import ClearRoundedIcon from '@mui/icons-material/ClearRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import EventRoundedIcon from '@mui/icons-material/EventRounded'
 import PlaylistAddCheckCircleRoundedIcon from '@mui/icons-material/PlaylistAddCheckCircleRounded'
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
+import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
 import {
   Alert,
@@ -18,6 +20,8 @@ import {
   CircularProgress,
   Container,
   FormControlLabel,
+  IconButton,
+  InputAdornment,
   List,
   ListItemButton,
   ListItemText,
@@ -419,6 +423,7 @@ function App() {
   const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null)
   const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
     useState<NarrowWorkspacePanel>('browse')
+  const [searchText, setSearchText] = useState('')
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
   const [tagInputValue, setTagInputValue] = useState('')
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
@@ -594,13 +599,46 @@ function App() {
       membershipConsolidationDraft.targetMembershipId &&
     (!membershipConsolidationPreview.requiresRoleMismatchConfirmation ||
       membershipConsolidationDraft.confirmRoleMismatch)
-  const filteredNotes = useMemo(
-    () =>
-      selectedTagFilter
-        ? notes.filter((note) => note.tags.includes(selectedTagFilter))
-        : notes,
-    [notes, selectedTagFilter],
-  )
+  const filteredNotes = useMemo(() => {
+    let result = notes
+
+    // Filter by tag if selected
+    if (selectedTagFilter) {
+      result = result.filter((note) => note.tags.includes(selectedTagFilter))
+    }
+
+    // Filter by search text
+    if (searchText.trim()) {
+      const searchLower = searchText.toLowerCase()
+      result = result.filter((note) => {
+        const titleMatch = note.title.toLowerCase().includes(searchLower)
+        const bodyMatch = note.body.toLowerCase().includes(searchLower)
+        const tagMatch = note.tags.some((tag) =>
+          tag.toLowerCase().includes(searchLower),
+        )
+        const sessionMatch = note.sessionName
+          ?.toLowerCase()
+          .includes(searchLower)
+        const creatorMatch = note.createdBy?.displayName
+          .toLowerCase()
+          .includes(searchLower)
+        const editorMatch = note.lastEditedBy?.displayName
+          .toLowerCase()
+          .includes(searchLower)
+
+        return (
+          titleMatch ||
+          bodyMatch ||
+          tagMatch ||
+          sessionMatch ||
+          creatorMatch ||
+          editorMatch
+        )
+      })
+    }
+
+    return result
+  }, [notes, selectedTagFilter, searchText])
   const displayedNotes = useMemo(
     () =>
       noteBrowseMode === 'sessions' && selectedSessionName
@@ -714,11 +752,15 @@ function App() {
         ? selectedSessionName
           ? `Browse the notes captured during ${selectedSessionName} without leaving the note detail view.`
           : 'Jump into a session to answer “what happened in this session?” without digging through the whole campaign.'
-        : selectedTagFacet
-          ? `Showing ${selectedTagFacet.count} ${
-              selectedTagFacet.count === 1 ? 'note' : 'notes'
-            } tagged ${selectedTagFacet.tag} in ${overview?.campaign.name ?? 'this campaign'}.`
-          : 'The note workflow now runs inside the selected owner campaign.'
+        : searchText.trim() && selectedTagFacet
+          ? `Showing ${filteredNotes.length} ${filteredNotes.length === 1 ? 'note' : 'notes'} matching "${searchText}" in ${selectedTagFacet.tag}.`
+          : searchText.trim()
+            ? `Showing ${filteredNotes.length} ${filteredNotes.length === 1 ? 'note' : 'notes'} matching "${searchText}" across titles, body, tags, sessions, and collaborators.`
+            : selectedTagFacet
+              ? `Showing ${selectedTagFacet.count} ${
+                  selectedTagFacet.count === 1 ? 'note' : 'notes'
+                } tagged ${selectedTagFacet.tag} in ${overview?.campaign.name ?? 'this campaign'}.`
+              : 'The note workflow now runs inside the selected owner campaign.'
 
   const resetShareLinkInteractionState = useCallback(() => {
     setShareLinkNotice(null)
@@ -1171,6 +1213,11 @@ function App() {
     setError(null)
   }
 
+  const handleClearSearch = () => {
+    setSearchText('')
+    setError(null)
+  }
+
   const handleOpenSessionBrowser = () => {
     setNoteBrowseMode('sessions')
     setNarrowWorkspacePanel('browse')
@@ -1278,6 +1325,7 @@ function App() {
     setNarrowWorkspacePanel('editor')
     resetSessionBrowserState()
     setSelectedTagFilter(null)
+    setSearchText('')
     setSelectedNoteId(null)
     setIsCreating(true)
     setSelectedNoteTemplateId(blankNoteTemplateId)
@@ -2943,6 +2991,36 @@ function App() {
                       {isQuickCapturing ? 'Capturing…' : 'Capture'}
                     </Button>
                   </Stack>
+
+                  <TextField
+                    label="Search notes"
+                    placeholder="Search by title, body, tags, session, or collaborator…"
+                    size="small"
+                    value={searchText}
+                    onChange={(event) => setSearchText(event.target.value)}
+                    slotProps={{
+                      input: {
+                        startAdornment: (
+                          <InputAdornment position="start">
+                            <SearchRoundedIcon />
+                          </InputAdornment>
+                        ),
+                        endAdornment: searchText ? (
+                          <InputAdornment position="end">
+                            <IconButton
+                              size="small"
+                              onClick={handleClearSearch}
+                              edge="end"
+                              aria-label="Clear search"
+                            >
+                              <ClearRoundedIcon />
+                            </IconButton>
+                          </InputAdornment>
+                        ) : null,
+                      },
+                    }}
+                    sx={{ width: '100%' }}
+                  />
 
                   <Stack spacing={1.5}>
                     <Stack
