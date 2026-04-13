@@ -17,6 +17,7 @@ Brand initialized as Platform Dev for the initial project squad.
 
 ## Learnings
 
+- Treat `.squad/config.json` as the preferred worktree path source of truth: if `workTreesFolder` is set, resolve it from the repo root; if not, document the sibling-path fallback consistently across governance, lifecycle docs, and workflow skills.
 - Initial squad setup complete.
 - GitHub Actions refs in active `.github/workflows/` files and source `.squad/templates/workflows/` templates need SHA pins for orgs that enforce immutable action references; keep the current major visible with inline comments for maintainability.
 - Guest account linking now runs through `POST /api/shared/:shareToken/membership/claim`, with the shared-route UI handling register/sign-in plus claim in `apps/web/src/SharedCampaignRoute.tsx`.
@@ -95,4 +96,3 @@ Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-han
 ---
 
 **2026-04-13T13:26:28Z — Scribe Session:** Task completed. Decision merged to `.squad/decisions.md`. Orchestration and session logs created.
-

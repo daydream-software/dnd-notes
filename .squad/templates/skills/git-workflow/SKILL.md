@@ -73,18 +73,32 @@ When the coordinator routes multiple issues simultaneously (e.g., "fix bugs X, Y
 
 ### Setup
 
+Preferred repo-local config in `.squad/config.json`:
+
+```json
+{
+  "version": 1,
+  "worktrees": true,
+  "workTreesFolder": ".worktrees"
+}
+```
+
+If `workTreesFolder` is present, resolve worktrees under `{repo-root}/{workTreesFolder}/{issue-number}`. If it is absent, fall back to the legacy sibling path `../{repo-name}-{issue-number}`.
+
 From the main clone (must be on dev or any branch):
 
 ```bash
 # Ensure dev is current
 git fetch origin dev
 
-# Create a worktree per issue — siblings to the main clone
-git worktree add ../squad-195 -b squad/195-fix-stamp-bug origin/dev
-git worktree add ../squad-193 -b squad/193-refactor-loader origin/dev
+# Preferred repo-local folder from .squad/config.json
+git worktree add .worktrees/195 -b squad/195-fix-stamp-bug origin/dev
+git worktree add .worktrees/193 -b squad/193-refactor-loader origin/dev
 ```
 
-**Naming convention:** `../{repo-name}-{issue-number}` (e.g., `../squad-195`, `../squad-pr-42`).
+**Path convention:**
+- Configured folder: `{repo-root}/{workTreesFolder}/{issue-number}` (for example, `.worktrees/195`)
+- Fallback when `workTreesFolder` is absent: `../{repo-name}-{issue-number}`
 
 Each worktree:
 - Has its own working directory and index
@@ -96,7 +110,7 @@ Each worktree:
 Each agent operates inside its worktree exactly like the single-issue workflow:
 
 ```bash
-cd ../squad-195
+cd .worktrees/195
 
 # Work normally — commits, tests, pushes
 git add -A && git commit -m "fix: stamp bug (#195)"
@@ -121,13 +135,13 @@ After a worktree's PR is merged to dev:
 
 ```bash
 # From the main clone
-git worktree remove ../squad-195
+git worktree remove .worktrees/195
 git worktree prune          # clean stale metadata
 git branch -d squad/195-fix-stamp-bug
 git push origin --delete squad/195-fix-stamp-bug
 ```
 
-If a worktree was deleted manually (rm -rf), `git worktree prune` recovers the state.
+If `workTreesFolder` is absent, use the legacy sibling path instead. If a worktree was deleted manually (rm -rf), `git worktree prune` recovers the state.
 
 ---
 
