@@ -54,3 +54,32 @@ Data initialized as Backend Dev for the initial project squad.
 📌 Team update (2026-04-13T14:00:00Z): Issue #30 note-to-note links v1 implementation (by Stef) rejected by Chunk for three critical gaps: (1) legacy database crash when `linked_notes_json` undefined (SELECT queries missing column), (2) validation schemas missing `linkedNoteIds` causing operations to fail, (3) backlink discovery/related-note surfacing insufficient for acceptance. Also missing regression coverage for cross-campaign validation, guest permissions, and workspace reload safety. Data assigned to fix backend implementation, add tests, validate, and commit.
 
 📌 Team update (2026-04-13T14:30:00Z): Issue #30 backend revision complete and approved. All three gaps fixed: (1) added `linked_notes_json` to all note SELECT queries so field populates correctly, (2) added `linkedNoteIds` to validation schemas with 20-link limit, (3) implemented `getBacklinks()` in note-store and `GET /api/notes/:noteId/backlinks` endpoint with proper campaign scoping. Error handling improved: createNote/updateNote wrapped in try-catch to return 400 for link validation failures (non-existent notes, cross-campaign links). Comprehensive regression tests added covering full linking workflow, backlink discovery, cross-campaign blocking, too-many-links validation, and legacy migration safety. All 28 tests pass, lint clean, build succeeds. Ship-safe — decided by Data (implementer), pending Chunk review
+
+## 2026-04-13: Issue #24 Web Test Infrastructure Investigation
+
+📌 Team update (2026-04-13T17:45:00Z): Issue #24 revision assigned after Chunk rejection. Stef (original author) locked out. Task: diagnose web test stall, add regression coverage, get to reviewer-ready state.
+
+**Investigation outcome:** Web test suite (`apps/web/src/App.test.tsx`, 3200 lines) hangs indefinitely in vitest 4.1.4. Tests remain in `[queued]` state and never execute. Confirmed this affects BOTH current branch (28bd0ed) AND parent commit (7dec493), proving it's a pre-existing environmental issue, not a regression from Stef's implementation.
+
+**Evidence:**
+- API tests (`apps/api/test/app.test.ts`): ✅ All 26 tests pass
+- Lint (`npm run lint --workspaces`): ✅ Passes
+- Build (`npm run build --workspaces`): ✅ Passes
+- Simple standalone test: ✅ Runs
+- Any test rendering `<App />`: ⚠️ Hangs (including minimal test)
+- Parent commit tests: ⚠️ Same hang behavior
+- No GitHub Actions workflow exists for web tests
+
+**Resolution:**
+- Created `apps/web/src/CampaignSearch.test.tsx` with focused regression tests for issue #24 search functionality (title search, body search, clear button, combined filters, result count, new note behavior)
+- Updated `vite.config.ts` with proper test pool configuration (removed deprecated poolOptions)
+- Documented full investigation in `TEST_INVESTIGATION.md`
+- Committed diagnostic work with clear explanation of pre-existing test infrastructure failure
+
+**Learnings:**
+- Web test infrastructure is fundamentally broken and needs investigation independent of any feature work
+- vitest 4.1.4 + React 19 + MUI 9 combination may have compatibility issues
+- Absence of CI for web tests allowed this infrastructure failure to go undetected
+- When test infrastructure is broken, document thoroughly, provide alternative validation (lint/build), and escalate the infrastructure issue separately
+- Regression test files can still be created to specify expected behavior even when test runner is broken — they serve as living documentation until infrastructure is fixed
+
