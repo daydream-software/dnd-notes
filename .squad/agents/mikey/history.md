@@ -98,3 +98,36 @@ Examined process state: Stef's issue #28 implementation rejected by Chunk for li
 Proceed with planned revision. Copilot should: (1) pick a list/detail reconciliation strategy (soft redirect or clear to create), (2) implement safety check in `handleSelectNote` or tag-filter handler, (3) add regression test, (4) rerun tests; Chunk re-reviews.
 
 ---
+
+## 2026-04-13: PR #37 Review — Tag Filter Sync Fix
+
+**By:** Mikey (Lead)
+
+**What:**
+Reviewed PR #37, the `@copilot` revision of Issue #28 after Chunk's earlier rejection for the list/detail mismatch under tag filtering.
+
+**Findings:**
+- `apps/web/src/App.tsx` now reconciles `selectedNoteId` against the visible filtered note set via `syncNoteSelectionToVisibleNotes`, which closes the trust-boundary bug from the rejected branch.
+- `apps/web/src/App.test.tsx` adds the required regression proving the editor retargets when the active note falls out of the filtered list, and local validation passed with `npm run lint && npm run test && npm run build`.
+- Scope stayed thin and correct: frontend-only tag facets/autocomplete, no backend contract creep, README updated to reflect the shipped behavior.
+
+**Verdict:**
+Lead-level review is **APPROVE**, with two remaining merge conditions: Chunk should give the QA sign-off required by the routing plan, and PR #37 should be moved out of draft before landing.
+
+---
+
+## 2026-04-13: PR #37 Merged & Issue #28 Closed
+
+📌 **Coordinator action:** PR #37 moved out of draft, approved by Mikey (Lead) + Chunk (QA), and merged to `main`. Issue #28 closed as resolved.
+
+**Merged Changes:**
+- `apps/web/src/App.tsx` — tag facets + filtering + `syncNoteSelectionToVisibleNotes` logic
+- `apps/web/src/App.test.tsx` — regression coverage (filter switching, clearing, re-selection)
+- `README.md` — feature documentation
+
+**Impact:** Issue #28 (tag infrastructure) now fully shipped and unblocks issue #24 (search foundation). All three blockers from the earlier branch rejection are now retired:
+1. ✅ List/detail mismatch fixed via immediate reconciliation in `handleSelectTagFilter()`
+2. ✅ Regression proof covers the failure case
+3. ✅ Safety net via `useEffect` reconciliation keeps editor aligned across note changes
+
+**Next Steps:** Issue #24 (search + filters) unblocked for implementation.
