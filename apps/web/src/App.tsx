@@ -320,16 +320,21 @@ interface TagFacet {
 
 function sortTagFacets(notes: Note[]): TagFacet[] {
   const counts = new Map<string, number>()
+  const displayForm = new Map<string, string>()
 
   for (const note of notes) {
     for (const tag of note.tags) {
       const normalized = tag.toLowerCase()
       counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+
+      if (!displayForm.has(normalized)) {
+        displayForm.set(normalized, normalized)
+      }
     }
   }
 
   return [...counts.entries()]
-    .map(([tag, count]) => ({ tag, count }))
+    .map(([key, count]) => ({ tag: displayForm.get(key) ?? key, count }))
     .sort((left, right) =>
       right.count !== left.count
         ? right.count - left.count
@@ -539,6 +544,29 @@ function App() {
     }
   }, [selectedTag, tagFacets])
 
+  const syncNoteSelectionToFilteredList = useCallback((filteredNotes: Note[]) => {
+    const currentStillVisible =
+      selectedNoteId && !isCreating
+        ? filteredNotes.some((note) => note.id === selectedNoteId)
+        : false
+
+    if (!currentStillVisible) {
+      const fallback = filteredNotes[0] ?? null
+
+      if (fallback) {
+        setSelectedNoteId(fallback.id)
+        setIsCreating(false)
+        setSelectedNoteTemplateId(blankNoteTemplateId)
+        setDraft(createDraftFromNote(fallback))
+      } else {
+        setSelectedNoteId(null)
+        setIsCreating(true)
+        setSelectedNoteTemplateId(blankNoteTemplateId)
+        setDraft(createEmptyDraft())
+      }
+    }
+  }, [isCreating, selectedNoteId])
+
   // Keep selected note in sync with the displayed note list so the detail
   // pane never shows a note that isn't visible in the list (the list/detail
   // mismatch bug).
@@ -547,26 +575,8 @@ function App() {
       return
     }
 
-    if (selectedNoteId && !isCreating) {
-      const stillVisible = displayedNotes.some(
-        (note) => note.id === selectedNoteId,
-      )
-
-      if (!stillVisible) {
-        const fallback = displayedNotes[0] ?? null
-
-        if (fallback) {
-          setSelectedNoteId(fallback.id)
-          setDraft(createDraftFromNote(fallback))
-        } else {
-          setSelectedNoteId(null)
-          setIsCreating(true)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createEmptyDraft())
-        }
-      }
-    }
-  }, [displayedNotes, isCreating, noteBrowseMode, selectedNoteId, selectedTag])
+    syncNoteSelectionToFilteredList(displayedNotes)
+  }, [displayedNotes, noteBrowseMode, selectedTag, syncNoteSelectionToFilteredList])
 
   const sortedActivityEntries = useMemo(
     () => sortActivityEntries(activityEntries),
@@ -1008,24 +1018,7 @@ function App() {
       const filtered = notes.filter((note) =>
         note.tags.some((noteTag) => noteTag.toLowerCase() === lowerTag),
       )
-      const currentStillVisible =
-        selectedNoteId && !isCreating
-          ? filtered.some((note) => note.id === selectedNoteId)
-          : false
-      if (!currentStillVisible) {
-        const fallback = filtered[0] ?? null
-        if (fallback) {
-          setSelectedNoteId(fallback.id)
-          setIsCreating(false)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createDraftFromNote(fallback))
-        } else {
-          setSelectedNoteId(null)
-          setIsCreating(true)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createEmptyDraft())
-        }
-      }
+      syncNoteSelectionToFilteredList(filtered)
     }
   }
 
