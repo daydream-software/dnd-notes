@@ -2,6 +2,51 @@
 
 ## Active Decisions
 
+### 2026-04-13: Issue #33 Backend Restore + Combined Approval — Ready for Merge
+**By:** Data (Backend), Scribe (Memory Manager)
+
+**What:**
+Post-rebase verification confirms both issue #33 backend and frontend slices are APPROVED and ready for merge:
+
+**Backend: Activity Endpoint (`GET /api/notes/activity`)** ✅ APPROVED
+- Post-rebase validation by Data confirmed stable implementation
+- Membership-aware auth via `resolveAccessibleCampaign()` (no regression)
+- Route ordering safe (no issue #27 shadow-routing)
+- Collaborator summaries derivation correct
+- Null-attribution fallback (optional chaining + graceful "Unknown" display)
+- Full regression test coverage: owner/guest access, filter isolation, foreign rejection, claim validation
+- Non-blocking gaps: limit parameter edge-case test (future optimization); legacy null-attribution response test (fallback verified in code)
+- **Verdict:** Ship-safe. Frontend can proceed independently.
+
+**Frontend: Activity UI Slice** ✅ APPROVED by Chunk
+- Recent Activity list (sorted by `updatedAt` descending) ✅
+- Collaborator sidebar with click-to-filter, click-again-to-clear ✅
+- Created vs. edited action distinction with actor attribution ✅
+- Empty state handling ✅
+- Membership-aware access (linked collaborators supported) ✅
+- **All 5 regression gates retired:**
+  - RT1: Activity endpoint request does NOT trigger workspace reload (verified via per-endpoint request counting)
+  - RT2: Collaborator filter does NOT shadow route params (filter state uses refs)
+  - RT3: Stale-response race on rapid filter clicks prevented (abort controllers + monotonic request IDs)
+  - RT4: No stale-timestamp confusion (activity ↔ session browsing use independent state channels)
+  - RT5: Empty states intact across all modes (campaign-empty, filtered-empty, session-empty)
+- Code quality: membership-aware auth, null-attribution test, no bootstrap coupling, quick-capture preservation, lint clean
+- Test results: 16 web + 24 API tests passing
+- **Verdict:** APPROVED FOR MERGE (2026-04-13T00:05:00Z)
+
+**Combined Status:** 🚀 READY FOR MERGE
+- Both backend + frontend approved
+- Full regression coverage (RT1–RT5 gates all retired)
+- All tests passing (16 web + 24 API)
+- No merge blockers
+- Next: Mikey confirms CI gates green and merges to main
+
+**Orchestration logs:**
+- Backend restore: `.squad/orchestration-log/2026-04-13T00:06:00Z-backend-restore-and-combined-approval.md`
+- Backend approval: `.squad/orchestration-log/2026-04-13T00:05:00Z-issue-33-ui-approval.md` (includes backend verification)
+
+**Status:** APPROVED & READY FOR MERGE — Mikey to gate merge post-CI
+
 ### 2026-04-12: Immediate action plan — Unblock PR #35 and PR #36, then route Issue #33 frontend
 **By:** Mikey (Lead)
 
