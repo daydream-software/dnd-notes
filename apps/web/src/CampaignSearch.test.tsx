@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 
 /**
@@ -11,6 +11,11 @@ import App from './App'
  */
 
 describe('Campaign Note Search (Issue #24)', () => {
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
   beforeEach(() => {
     localStorage.clear()
     window.history.replaceState({}, '', '/')
@@ -23,7 +28,7 @@ describe('Campaign Note Search (Issue #24)', () => {
       const method = init?.method?.toUpperCase() ?? 'GET'
 
       // Owner registration
-      if (path === '/api/owners' && method === 'POST') {
+      if (path === '/api/auth/register' && method === 'POST') {
         return new Response(
           JSON.stringify({
             owner: {
@@ -36,6 +41,27 @@ describe('Campaign Note Search (Issue #24)', () => {
             token: 'test-token',
           }),
           { status: 201, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+
+      if (path === '/api/campaigns' && method === 'GET') {
+        return new Response(
+          JSON.stringify({
+            campaigns: [
+              {
+                id: 'campaign-1',
+                name: 'Test Campaign',
+                tagline: 'Test tagline',
+                system: 'D&D 5e',
+                setting: 'Forgotten Realms',
+                nextSession: null,
+                archivedAt: null,
+                createdAt: '2026-04-13T00:00:00.000Z',
+                updatedAt: '2026-04-13T00:00:00.000Z',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
 
@@ -149,6 +175,26 @@ describe('Campaign Note Search (Issue #24)', () => {
                 lastEditedBy: null,
                 createdAt: '2026-04-07T10:00:00.000Z',
                 updatedAt: '2026-04-07T10:00:00.000Z',
+              },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+
+      if (path === '/api/notes/sessions' && method === 'GET') {
+        return new Response(
+          JSON.stringify({
+            sessions: [
+              {
+                sessionName: 'Session 5',
+                noteCount: 1,
+                latestActivity: '2026-04-10T10:00:00.000Z',
+              },
+              {
+                sessionName: 'Session 4',
+                noteCount: 1,
+                latestActivity: '2026-04-09T10:00:00.000Z',
               },
             ],
           }),
@@ -271,7 +317,7 @@ describe('Campaign Note Search (Issue #24)', () => {
     })
 
     // Then click the "combat" tag - should narrow down to Dragon Encounter only
-    await user.click(screen.getByRole('button', { name: /combat/ }))
+    await user.click(screen.getAllByRole('button', { name: /combat/ })[0])
 
     await waitFor(() => {
       const notesList = screen.getByRole('list', { name: 'Notes list' })
@@ -322,7 +368,12 @@ describe('Campaign Note Search (Issue #24)', () => {
     })
 
     // Click "New note" button
-    await user.click(screen.getByRole('button', { name: 'New note' }))
+    await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
+
+    const browseNotesButtons = screen.queryAllByRole('button', { name: 'Browse notes' })
+    if (browseNotesButtons.length > 0) {
+      await user.click(browseNotesButtons[0])
+    }
 
     // Search should be cleared
     await waitFor(() => {
