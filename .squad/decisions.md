@@ -52,6 +52,28 @@ Team should test and confirm Coordinator uses the configured folder.
 
 ---
 
+### 2026-04-13: Brand — Worktree Governance Decision
+
+**By:** Brand (Platform Dev)  
+**Requested by:** FFMikha  
+**Status:** IMPLEMENTED
+
+## Decision
+
+Treat `.squad/config.json` as the preferred repo-local source of truth for Squad worktree behavior. When `workTreesFolder` is set, resolve worktrees under that folder from the repo root / team root; when it is absent, keep the legacy sibling-path fallback.
+
+## Why
+
+The repo already enabled `worktrees: true` with `workTreesFolder: ".worktrees"`, but the authoritative Squad governance still documented sibling-folder defaults only. Aligning governance, lifecycle docs, and workflow examples removes ambiguity for coordinator setup, manual worktree commands, and future template reuse.
+
+## Impact
+
+- Repo-local `.worktrees/` layouts are now clearly supported
+- Existing sibling-folder behavior remains the documented fallback
+- Worktree creation, reuse, and cleanup examples now describe the same resolution rule across Squad docs
+
+---
+
 ### 2026-04-13: Issue #33 Backend Restore + Combined Approval — Ready for Merge
 **By:** Data (Backend), Scribe (Memory Manager)
 

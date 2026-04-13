@@ -17,6 +17,7 @@ Brand initialized as Platform Dev for the initial project squad.
 
 ## Learnings
 
+- **Worktree Governance (2026-04-13):** Treat `.squad/config.json` as the authoritative worktree path source. When `workTreesFolder` is set, resolve worktrees from repo root; when absent, fall back to sibling-path legacy behavior. This alignment removes ambiguity across governance docs, lifecycle guides, and coordinator templates.
 - Treat `.squad/config.json` as the preferred worktree path source of truth: if `workTreesFolder` is set, resolve it from the repo root; if not, document the sibling-path fallback consistently across governance, lifecycle docs, and workflow skills.
 - Initial squad setup complete.
 - GitHub Actions refs in active `.github/workflows/` files and source `.squad/templates/workflows/` templates need SHA pins for orgs that enforce immutable action references; keep the current major visible with inline comments for maintainability.
