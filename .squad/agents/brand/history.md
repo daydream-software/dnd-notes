@@ -91,3 +91,8 @@ Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-han
 - Current squad.agent.md template describes sibling-folder default behavior
 - **Next step if needed:** If Coordinator doesn't yet parse `workTreesFolder`, team should test and confirm behavior, then update squad agent template path calculation logic if required
 - Documented in `.squad/decisions/inbox/brand-worktree-setup.md` with exact follow-up steps
+
+---
+
+**2026-04-13T13:26:28Z — Scribe Session:** Task completed. Decision merged to `.squad/decisions.md`. Orchestration and session logs created.
+
