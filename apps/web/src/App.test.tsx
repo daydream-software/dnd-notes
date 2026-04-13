@@ -2590,4 +2590,90 @@ describe('App', () => {
       await screen.findByDisplayValue('Strange runes near the harbor'),
     ).toBeTruthy()
   }, 15000)
+
+  it('syncs the selected note when a tag filter excludes the current detail pane note', async () => {
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'reef-warning',
+        campaignId: defaultCampaignId,
+        title: 'Reef warning',
+        body: 'Scout marks point to a hidden channel beside the reef.',
+        tags: ['clue', 'reef'],
+        status: 'draft',
+        sessionName: null,
+        createdAt: '2026-04-09T18:00:00.000Z',
+        updatedAt: '2026-04-10T21:00:00.000Z',
+      },
+      {
+        id: 'harbor-watch',
+        campaignId: defaultCampaignId,
+        title: 'Harbor watch',
+        body: 'Dock crews rotate faster whenever the envoy ship arrives.',
+        tags: ['harbor'],
+        status: 'active',
+        sessionName: 'Session 12',
+        createdAt: '2026-04-10T18:00:00.000Z',
+        updatedAt: '2026-04-11T08:00:00.000Z',
+      },
+      {
+        id: 'cipher-fragment',
+        campaignId: defaultCampaignId,
+        title: 'Cipher fragment recovered',
+        body: 'Candlekeep contact goes silent after delivering the translated cipher.',
+        tags: ['clue', 'candlekeep'],
+        status: 'active',
+        sessionName: 'Session 11',
+        createdAt: '2026-04-08T18:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    // The first note (Reef warning) should be loaded in the editor
+    expect(await screen.findByDisplayValue('Reef warning')).toBeTruthy()
+
+    // Click the 'harbor' tag — Reef warning has ['clue', 'reef'], not 'harbor'
+    await user.click(screen.getByRole('button', { name: 'harbor (1)' }))
+
+    // The editor MUST switch to the note that has the 'harbor' tag
+    // This is the list/detail sync fix — previously the editor would
+    // stay on 'Reef warning' even though it was hidden from the list
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Harbor watch')).toBeTruthy()
+    })
+
+    // The notes list should only show 1 note
+    const notesList = screen.getByRole('list', { name: 'Notes list' })
+    expect(within(notesList).getAllByRole('button').length).toBe(1)
+    expect(within(notesList).getByText('Harbor watch')).toBeTruthy()
+    expect(within(notesList).queryByText('Reef warning')).toBeNull()
+
+    // Switch to a multi-match tag — 'clue' matches 2 notes
+    await user.click(screen.getByRole('button', { name: 'clue (2)' }))
+
+    // Editor should switch to one of the clue-tagged notes
+    await waitFor(() => {
+      const filtered = screen.getByRole('list', { name: 'Notes list' })
+      expect(within(filtered).getAllByRole('button').length).toBe(2)
+    })
+    expect(
+      screen.getByDisplayValue('Reef warning') ||
+        screen.getByDisplayValue('Cipher fragment recovered'),
+    ).toBeTruthy()
+
+    // Clear filter should restore all notes
+    await user.click(screen.getByRole('button', { name: 'Clear filter' }))
+
+    await waitFor(() => {
+      const allList = screen.getByRole('list', { name: 'Notes list' })
+      expect(within(allList).getAllByRole('button').length).toBe(3)
+    })
+  }, 15000)
 })

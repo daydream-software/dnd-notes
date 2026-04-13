@@ -549,6 +549,36 @@ function App() {
     }
   }, [selectedTagFilter, tagFacets])
 
+  // Keep the selected note in sync with the displayed note list so the
+  // detail pane never shows a note that is not visible in the list.
+  useEffect(() => {
+    if (noteBrowseMode !== 'notes' || !selectedTagFilter) {
+      return
+    }
+
+    if (selectedNoteId && !isCreating) {
+      const stillVisible = displayedNotes.some(
+        (note) => note.id === selectedNoteId,
+      )
+
+      if (!stillVisible) {
+        const fallback = displayedNotes[0] ?? null
+
+        if (fallback) {
+          setSelectedNoteId(fallback.id)
+          setIsCreating(false)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createDraftFromNote(fallback))
+        } else {
+          setSelectedNoteId(null)
+          setIsCreating(true)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createEmptyDraft())
+        }
+      }
+    }
+  }, [displayedNotes, isCreating, noteBrowseMode, selectedNoteId, selectedTagFilter])
+
   const statCards = useMemo(() => {
     if (!overview) {
       return []
@@ -986,8 +1016,30 @@ function App() {
   const handleSelectTagFilter = (tag: string) => {
     setNoteBrowseMode('notes')
     resetSessionBrowserState()
-    setSelectedTagFilter((currentTag) => (currentTag === tag ? null : tag))
+    const nextTag = selectedTagFilter === tag ? null : tag
+    setSelectedTagFilter(nextTag)
     setError(null)
+
+    if (nextTag && selectedNoteId && !isCreating) {
+      const filtered = notes.filter((note) => note.tags.includes(nextTag))
+      const stillVisible = filtered.some((note) => note.id === selectedNoteId)
+
+      if (!stillVisible) {
+        const fallback = filtered[0] ?? null
+
+        if (fallback) {
+          setSelectedNoteId(fallback.id)
+          setIsCreating(false)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createDraftFromNote(fallback))
+        } else {
+          setSelectedNoteId(null)
+          setIsCreating(true)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createEmptyDraft())
+        }
+      }
+    }
   }
 
   const handleClearTagFilter = () => {
