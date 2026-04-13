@@ -133,3 +133,6 @@ Lead-level review is **APPROVE**, with two remaining merge conditions: Chunk sho
 **Next Steps:** Issue #24 (search + filters) unblocked for implementation.
 
 - **Issue Sweep (2026-04-13):** Ran a conservative GitHub issue sweep and closed #29, #32, and #33 as forgotten-to-close work. #29's spike outcome was already decided (defer graph-style tags until later phases), #32 starter templates are shipped on `main`, and #33 recent activity is shipped on `main`. Left #23 open because the backend consolidation route exists but a clearly surfaced owner-facing pick/preview/apply flow is not obvious in the current app; #24, #25, #26, and #30 remain clearly unshipped.
+
+## 2026-04-13T16:07:01Z
+✅ Issue #30 third revision: Completed frontend defensive coding fix for linkedNoteIds undefined crashes. Added optional chaining and nullish coalescing at four hotspots. All 49 tests passing. Issue approved by Chunk and ready to merge. Commit: 3d5b3ef
