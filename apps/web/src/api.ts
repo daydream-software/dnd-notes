@@ -11,6 +11,7 @@ import type {
   CurrentOwnerResponse,
   ErrorResponse,
   GuestJoinInput,
+  NoteActivityResponse,
   NoteInput,
   NoteResponse,
   NotesOverview,
@@ -266,13 +267,48 @@ export async function fetchNotes(
   return readJson<NotesResponse>(response)
 }
 
+export async function fetchNoteActivity(
+  authToken: string,
+  options: {
+    campaignId?: string | null
+    membershipId?: string | null
+    limit?: number
+    signal?: AbortSignal
+  } = {},
+) {
+  const searchParams = new URLSearchParams()
+
+  if (options.campaignId) {
+    searchParams.set('campaignId', options.campaignId)
+  }
+
+  if (options.membershipId) {
+    searchParams.set('membershipId', options.membershipId)
+  }
+
+  if (options.limit !== undefined) {
+    searchParams.set('limit', String(options.limit))
+  }
+
+  const search = searchParams.toString()
+  const response = await fetch(
+    `${apiBaseUrl}/api/notes/activity${search ? `?${search}` : ''}`,
+    {
+      headers: createHeaders(authToken),
+      signal: options.signal,
+    },
+  )
+
+  return readJson<NoteActivityResponse>(response)
+}
+
 export async function fetchSessions(
   authToken: string,
-  campaignId: string,
+  campaignId?: string | null,
   signal?: AbortSignal,
 ) {
   const response = await fetch(
-    `${apiBaseUrl}/api/campaigns/${campaignId}/sessions`,
+    createCampaignPath('/api/notes/sessions', campaignId),
     {
       headers: createHeaders(authToken),
       signal,
@@ -280,6 +316,26 @@ export async function fetchSessions(
   )
 
   return readJson<SessionsResponse>(response)
+}
+
+export async function fetchSessionNotes(
+  authToken: string,
+  sessionName: string,
+  campaignId?: string | null,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(
+    createCampaignPath(
+      `/api/notes/sessions/${encodeURIComponent(sessionName)}`,
+      campaignId,
+    ),
+    {
+      headers: createHeaders(authToken),
+      signal,
+    },
+  )
+
+  return readJson<NotesResponse>(response)
 }
 
 export async function createNote(authToken: string, note: NoteInput) {
@@ -385,19 +441,6 @@ export async function fetchSharedNotes(
   })
 
   return readJson<NotesResponse>(response)
-}
-
-export async function fetchSharedSessions(
-  shareToken: string,
-  guestToken: string,
-  signal?: AbortSignal,
-) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/sessions`, {
-    headers: createGuestHeaders(guestToken),
-    signal,
-  })
-
-  return readJson<SessionsResponse>(response)
 }
 
 export async function createSharedNote(

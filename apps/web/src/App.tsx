@@ -31,9 +31,12 @@ import {
   deleteNote,
   fetchCampaignMemberships,
   fetchCampaigns,
+  fetchNoteActivity,
   fetchNotes,
   fetchOverview,
   fetchOwnerSession,
+  fetchSessionNotes,
+  fetchSessions,
   loginOwner,
   logoutOwner,
   revealCampaignShareLink,
@@ -42,17 +45,31 @@ import {
   updateCampaign,
   updateNote,
 } from './api'
+import {
+  blankCampaignTemplateId,
+  blankNoteTemplateId,
+  campaignStarterTemplates,
+  createStarterNoteInput,
+  getCampaignStarterTemplate,
+  getNoteStarterTemplate,
+  noteStarterTemplates,
+  type StarterNoteSeed,
+} from './templates'
 import type {
+  ActivityCollaborator,
   CampaignInput,
+  CampaignMembershipRole,
   CampaignMembership,
   CampaignShareLink,
   CampaignShareLinkInput,
   CampaignSummary,
   Note,
+  NoteActivityEntry,
   NoteInput,
   NoteStatus,
   NotesOverview,
   OwnerAccount,
+  SessionSummary,
   ShareAccessLevel,
 } from './types'
 import { noteStatuses } from './types'
@@ -97,10 +114,11 @@ interface RevealedShareLink {
 }
 
 type CampaignFormMode = 'closed' | 'create' | 'edit'
-type BrowseMode = 'all' | 'by-session'
+type NoteBrowseMode = 'notes' | 'sessions' | 'activity'
 
 const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
+const recentActivityLimit = 20
 
 function getShareTokenFromPath(pathname: string) {
   const match = pathname.match(/^\/share\/([^/]+)\/?$/)
@@ -124,6 +142,16 @@ function createDraftFromNote(note: Note): NoteDraft {
     tagsText: note.tags.join(', '),
     status: note.status,
     sessionName: note.sessionName ?? '',
+  }
+}
+
+function createDraftFromStarterNote(starterNote: StarterNoteSeed): NoteDraft {
+  return {
+    title: starterNote.title,
+    body: starterNote.body,
+    tagsText: starterNote.tags.join(', '),
+    status: starterNote.status,
+    sessionName: starterNote.sessionName ?? '',
   }
 }
 
@@ -237,6 +265,10 @@ function formatTimestamp(value: string) {
 }
 
 function excerpt(body: string) {
+  if (body.trim().length === 0) {
+    return 'No details yet. Flesh this out when you have a minute.'
+  }
+
   if (body.length <= 112) {
     return body
   }
@@ -244,10 +276,41 @@ function excerpt(body: string) {
   return `${body.slice(0, 109)}...`
 }
 
+function formatRoleLabel(role: CampaignMembershipRole) {
+  return role === 'owner' ? 'Owner' : 'Guest'
+}
+
+function formatAttribution(actor: Pick<ActivityCollaborator, 'displayName' | 'role'> | null) {
+  if (!actor) {
+    return 'Unknown'
+  }
+
+  return `${actor.displayName} (${formatRoleLabel(actor.role)})`
+}
+
+function sortActivityEntries(entries: NoteActivityEntry[]) {
+  return [...entries].sort((leftEntry, rightEntry) =>
+    rightEntry.updatedAt.localeCompare(leftEntry.updatedAt),
+  )
+}
+
 const heroCardRadius = '32px'
 const surfaceRadius = '24px'
 const noteItemRadius = '20px'
 const statPillRadius = '999px'
+const sessionNameCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: 'base',
+})
+
+function sortSessionSummaries(sessions: SessionSummary[]) {
+  return [...sessions].sort((leftSession, rightSession) =>
+    sessionNameCollator.compare(
+      rightSession.sessionName,
+      leftSession.sessionName,
+    ),
+  )
+}
 
 function App() {
   const shareToken = useMemo(
@@ -265,6 +328,17 @@ function App() {
   const [shareLinks, setShareLinks] = useState<CampaignShareLink[]>([])
   const [overview, setOverview] = useState<NotesOverview | null>(null)
   const [notes, setNotes] = useState<Note[]>([])
+  const [noteBrowseMode, setNoteBrowseMode] = useState<NoteBrowseMode>('notes')
+  const [sessionSummaries, setSessionSummaries] = useState<SessionSummary[]>([])
+  const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null)
+  const [sessionNotes, setSessionNotes] = useState<Note[]>([])
+  const [activityEntries, setActivityEntries] = useState<NoteActivityEntry[]>([])
+  const [activityCollaborators, setActivityCollaborators] = useState<ActivityCollaborator[]>(
+    [],
+  )
+  const [selectedActivityMembershipId, setSelectedActivityMembershipId] = useState<
+    string | null
+  >(null)
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
     createCampaignDraft,
@@ -283,6 +357,9 @@ function App() {
   const [isCreating, setIsCreating] = useState(false)
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false)
+  const [isLoadingSessionNotes, setIsLoadingSessionNotes] = useState(false)
+  const [isLoadingActivity, setIsLoadingActivity] = useState(false)
+  const [isQuickCapturing, setIsQuickCapturing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
@@ -291,6 +368,12 @@ function App() {
   const [isRegisterMode, setIsRegisterMode] = useState(true)
   const [campaignFormMode, setCampaignFormMode] =
     useState<CampaignFormMode>('closed')
+  const [selectedCampaignTemplateId, setSelectedCampaignTemplateId] = useState(
+    blankCampaignTemplateId,
+  )
+  const [selectedNoteTemplateId, setSelectedNoteTemplateId] = useState(
+    blankNoteTemplateId,
+  )
   const [shareLinkNotice, setShareLinkNotice] = useState<string | null>(null)
   const [revealedShareLinks, setRevealedShareLinks] = useState<
     Record<string, RevealedShareLink>
@@ -302,67 +385,45 @@ function App() {
     null,
   )
   const [copiedShareLinkId, setCopiedShareLinkId] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [browseMode, setBrowseMode] = useState<BrowseMode>('all')
-  const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null)
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
-  const [isQuickCapturing, setIsQuickCapturing] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const noteBrowseModeRef = useRef<NoteBrowseMode>('notes')
   const selectedNoteIdRef = useRef<string | null>(null)
+  const selectedSessionNameRef = useRef<string | null>(null)
+  const selectedActivityMembershipIdRef = useRef<string | null>(null)
+  const activityRequestIdRef = useRef(0)
+  const sessionRequestIdRef = useRef(0)
+  const activityAbortControllerRef = useRef<AbortController | null>(null)
+  const sessionAbortControllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    noteBrowseModeRef.current = noteBrowseMode
+  }, [noteBrowseMode])
 
   useEffect(() => {
     selectedNoteIdRef.current = selectedNoteId
   }, [selectedNoteId])
 
+  useEffect(() => {
+    selectedSessionNameRef.current = selectedSessionName
+  }, [selectedSessionName])
+
+  useEffect(() => {
+    selectedActivityMembershipIdRef.current = selectedActivityMembershipId
+  }, [selectedActivityMembershipId])
+
+  useEffect(
+    () => () => {
+      activityAbortControllerRef.current?.abort()
+      sessionAbortControllerRef.current?.abort()
+    },
+    [],
+  )
+
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
     [notes, selectedNoteId],
   )
-
-  const sessionSummaries = useMemo(() => {
-    const sessionMap = new Map<string, { noteCount: number; latestActivity: string }>()
-
-    for (const note of notes) {
-      if (note.sessionName === null) {
-        continue
-      }
-
-      const existing = sessionMap.get(note.sessionName)
-
-      if (existing) {
-        existing.noteCount += 1
-        if (note.updatedAt > existing.latestActivity) {
-          existing.latestActivity = note.updatedAt
-        }
-      } else {
-        sessionMap.set(note.sessionName, {
-          noteCount: 1,
-          latestActivity: note.updatedAt,
-        })
-      }
-    }
-
-    const summaries: { sessionName: string; noteCount: number; latestActivity: string }[] = []
-
-    for (const [sessionName, data] of sessionMap) {
-      summaries.push({
-        sessionName,
-        noteCount: data.noteCount,
-        latestActivity: data.latestActivity,
-      })
-    }
-
-    summaries.sort((a, b) => b.latestActivity.localeCompare(a.latestActivity))
-
-    return summaries
-  }, [notes])
-
-  const displayedNotes = useMemo(() => {
-    if (browseMode !== 'by-session' || selectedSessionName === null) {
-      return notes
-    }
-
-    return notes.filter((note) => note.sessionName === selectedSessionName)
-  }, [notes, browseMode, selectedSessionName])
 
   const selectedCampaign = useMemo(
     () =>
@@ -381,6 +442,35 @@ function App() {
   )
   const activeMembership = overview?.membership ?? null
   const canManageSelectedCampaign = activeMembership?.role === 'owner'
+  const selectedCampaignTemplate = getCampaignStarterTemplate(
+    selectedCampaignTemplateId,
+  )
+  const selectedNoteTemplate = getNoteStarterTemplate(selectedNoteTemplateId)
+  const selectedSessionSummary = useMemo(
+    () =>
+      sessionSummaries.find(
+        (sessionSummary) => sessionSummary.sessionName === selectedSessionName,
+      ) ?? null,
+    [selectedSessionName, sessionSummaries],
+  )
+  const selectedActivityCollaborator = useMemo(
+    () =>
+      activityCollaborators.find(
+        (collaborator) => collaborator.membershipId === selectedActivityMembershipId,
+      ) ?? null,
+    [activityCollaborators, selectedActivityMembershipId],
+  )
+  const displayedNotes = useMemo(
+    () =>
+      noteBrowseMode === 'sessions' && selectedSessionName
+        ? sessionNotes
+        : notes,
+    [noteBrowseMode, notes, selectedSessionName, sessionNotes],
+  )
+  const sortedActivityEntries = useMemo(
+    () => sortActivityEntries(activityEntries),
+    [activityEntries],
+  )
 
   const statCards = useMemo(() => {
     if (!overview) {
@@ -410,6 +500,24 @@ function App() {
       },
     ]
   }, [overview])
+  const notePaneHeading =
+    noteBrowseMode === 'activity'
+      ? 'Recent activity'
+      : noteBrowseMode === 'sessions'
+        ? selectedSessionName
+          ? `${selectedSessionName} notes`
+          : 'Sessions'
+        : 'Notes'
+  const notePaneDescription =
+    noteBrowseMode === 'activity'
+      ? selectedActivityCollaborator
+        ? `See the latest notes created or edited by ${selectedActivityCollaborator.displayName} without digging through the full archive.`
+        : 'See which notes changed recently and who touched them, without turning the workspace into a full audit log.'
+      : noteBrowseMode === 'sessions'
+        ? selectedSessionName
+          ? `Browse the notes captured during ${selectedSessionName} without leaving the note detail view.`
+          : 'Jump into a session to answer “what happened in this session?” without digging through the whole campaign.'
+        : 'The note workflow now runs inside the selected owner campaign.'
 
   const resetShareLinkInteractionState = useCallback(() => {
     setShareLinkNotice(null)
@@ -419,9 +527,84 @@ function App() {
     setCopiedShareLinkId(null)
   }, [])
 
+  const resetSessionBrowserState = useCallback(() => {
+    sessionAbortControllerRef.current?.abort()
+    setSelectedSessionName(null)
+    setSessionNotes([])
+    setIsLoadingSessionNotes(false)
+  }, [])
+
+  const resetActivityState = useCallback((preserveFilter = false) => {
+    activityAbortControllerRef.current?.abort()
+    setActivityEntries([])
+    setActivityCollaborators([])
+    setIsLoadingActivity(false)
+
+    if (!preserveFilter) {
+      setSelectedActivityMembershipId(null)
+    }
+  }, [])
+
+  const loadActivity = useCallback(
+    async (
+      sessionToken: string,
+      campaignId: string,
+      membershipId?: string | null,
+    ) => {
+      activityRequestIdRef.current += 1
+      const requestId = activityRequestIdRef.current
+
+      activityAbortControllerRef.current?.abort()
+      const abortController = new AbortController()
+      activityAbortControllerRef.current = abortController
+
+      setIsLoadingActivity(true)
+      setActivityEntries([])
+
+      try {
+        const response = await fetchNoteActivity(sessionToken, {
+          campaignId,
+          membershipId,
+          limit: recentActivityLimit,
+          signal: abortController.signal,
+        })
+
+        if (activityRequestIdRef.current !== requestId) {
+          return
+        }
+
+        setActivityCollaborators(response.collaborators)
+        setActivityEntries(response.activity)
+        setError(null)
+      } catch (loadError) {
+        if (
+          abortController.signal.aborted ||
+          activityRequestIdRef.current !== requestId
+        ) {
+          return
+        }
+
+        setActivityEntries([])
+        setActivityCollaborators([])
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Could not load recent activity.',
+        )
+      } finally {
+        if (activityRequestIdRef.current === requestId) {
+          setIsLoadingActivity(false)
+        }
+      }
+    },
+    [],
+  )
+
   const clearSession = useCallback(() => {
     localStorage.removeItem(authTokenStorageKey)
     localStorage.removeItem(selectedCampaignStorageKey)
+    resetSessionBrowserState()
+    resetActivityState()
     setAuthToken(null)
     setOwner(null)
     setCampaigns([])
@@ -430,15 +613,18 @@ function App() {
     setShareLinks([])
     setOverview(null)
     setNotes([])
+    setNoteBrowseMode('notes')
+    setSessionSummaries([])
+    setQuickCaptureTitle('')
     setSelectedNoteId(null)
     setDraft(createEmptyDraft())
     setCampaignDraft(createCampaignDraft())
     setShareLinkDraft(createShareLinkDraft())
     setCampaignFormMode('closed')
-    setBrowseMode('all')
-    setSelectedSessionName(null)
+    setSelectedCampaignTemplateId(blankCampaignTemplateId)
+    setSelectedNoteTemplateId(blankNoteTemplateId)
     resetShareLinkInteractionState()
-  }, [resetShareLinkInteractionState])
+  }, [resetActivityState, resetSessionBrowserState, resetShareLinkInteractionState])
 
   const loadWorkspace = useCallback(
     async (
@@ -449,19 +635,42 @@ function App() {
       setIsLoadingWorkspace(true)
 
       try {
-        const [nextOverview, notesResponse] = await Promise.all([
+        const [nextOverview, notesResponse, sessionsResponse] = await Promise.all([
           fetchOverview(sessionToken, campaignId),
           fetchNotes(sessionToken, campaignId),
+          fetchSessions(sessionToken, campaignId),
         ])
+        const nextSessionSummaries = sortSessionSummaries(sessionsResponse.sessions)
+        const currentSessionName = selectedSessionNameRef.current
+        const shouldRefreshSelectedSession =
+          currentSessionName !== null &&
+          nextSessionSummaries.some(
+            (sessionSummary) => sessionSummary.sessionName === currentSessionName,
+          )
+        const nextSessionNotes = shouldRefreshSelectedSession
+          ? (
+              await fetchSessionNotes(
+                sessionToken,
+                currentSessionName,
+                campaignId,
+              )
+            ).notes
+          : []
 
         setSelectedCampaignId(campaignId)
         localStorage.setItem(selectedCampaignStorageKey, campaignId)
         setOverview(nextOverview)
         setNotes(notesResponse.notes)
+        setSessionSummaries(nextSessionSummaries)
+        setSessionNotes(nextSessionNotes)
+        setSelectedSessionName(
+          shouldRefreshSelectedSession ? currentSessionName : null,
+        )
         setCampaignDraft(createCampaignDraft(nextOverview.campaign))
 
         const fallbackNoteId = notesResponse.notes[0]?.id ?? null
         const currentSelection = selectedNoteIdRef.current
+        const currentBrowseMode = noteBrowseModeRef.current
         const nextSelectedId =
           preferredNoteId !== undefined
             ? preferredNoteId
@@ -474,14 +683,31 @@ function App() {
           nextSelectedId !== null
             ? notesResponse.notes.find((note) => note.id === nextSelectedId) ?? null
             : null
+        const nextDisplayedNotes =
+          currentBrowseMode === 'sessions' && shouldRefreshSelectedSession
+            ? nextSessionNotes
+            : notesResponse.notes
+        const sessionFallbackNote =
+          currentBrowseMode === 'sessions' && shouldRefreshSelectedSession
+            ? nextDisplayedNotes[0] ?? null
+            : null
+        const resolvedActiveNote =
+          activeNote &&
+          (currentBrowseMode !== 'sessions' ||
+            !shouldRefreshSelectedSession ||
+            nextDisplayedNotes.some((note) => note.id === activeNote.id))
+            ? activeNote
+            : sessionFallbackNote
 
-        if (activeNote) {
-          setSelectedNoteId(activeNote.id)
+        if (resolvedActiveNote) {
+          setSelectedNoteId(resolvedActiveNote.id)
           setIsCreating(false)
-          setDraft(createDraftFromNote(activeNote))
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createDraftFromNote(resolvedActiveNote))
         } else {
           setSelectedNoteId(null)
           setIsCreating(true)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
           setDraft(createEmptyDraft())
         }
 
@@ -523,6 +749,10 @@ function App() {
         setSelectedCampaignId(null)
         setOverview(null)
         setNotes([])
+        setSessionSummaries([])
+        resetSessionBrowserState()
+        resetActivityState()
+        setQuickCaptureTitle('')
         setSelectedNoteId(null)
         setMemberships([])
         setShareLinks([])
@@ -534,7 +764,7 @@ function App() {
 
       await loadWorkspace(sessionToken, nextCampaign.id, preferredNoteId)
     },
-    [loadWorkspace],
+    [loadWorkspace, resetActivityState, resetSessionBrowserState],
   )
 
   useEffect(() => {
@@ -659,13 +889,123 @@ function App() {
   const handleSelectNote = (note: Note) => {
     setSelectedNoteId(note.id)
     setIsCreating(false)
+    setSelectedNoteTemplateId(blankNoteTemplateId)
     setDraft(createDraftFromNote(note))
     setError(null)
   }
 
+  const handleOpenAllNotes = () => {
+    setNoteBrowseMode('notes')
+    resetSessionBrowserState()
+    setError(null)
+  }
+
+  const handleOpenSessionBrowser = () => {
+    setNoteBrowseMode('sessions')
+    resetSessionBrowserState()
+    setError(null)
+  }
+
+  const handleOpenRecentActivity = async () => {
+    if (!authToken || !selectedCampaignId) {
+      return
+    }
+
+    setNoteBrowseMode('activity')
+    resetSessionBrowserState()
+    setError(null)
+    await loadActivity(
+      authToken,
+      selectedCampaignId,
+      selectedActivityMembershipIdRef.current,
+    )
+  }
+
+  const handleSelectActivityCollaborator = async (membershipId: string | null) => {
+    if (!authToken || !selectedCampaignId) {
+      return
+    }
+
+    setSelectedActivityMembershipId(membershipId)
+    setError(null)
+    await loadActivity(authToken, selectedCampaignId, membershipId)
+  }
+
+  const handleSelectSession = async (sessionName: string) => {
+    if (!authToken || !selectedCampaignId) {
+      return
+    }
+
+    sessionRequestIdRef.current += 1
+    const requestId = sessionRequestIdRef.current
+
+    sessionAbortControllerRef.current?.abort()
+    const abortController = new AbortController()
+    sessionAbortControllerRef.current = abortController
+
+    setError(null)
+    setNoteBrowseMode('sessions')
+    setSelectedSessionName(sessionName)
+    setSessionNotes([])
+    setIsLoadingSessionNotes(true)
+
+    try {
+      const sessionNotesResponse = await fetchSessionNotes(
+        authToken,
+        sessionName,
+        selectedCampaignId,
+        abortController.signal,
+      )
+
+      if (
+        abortController.signal.aborted ||
+        sessionRequestIdRef.current !== requestId
+      ) {
+        return
+      }
+
+      setSessionNotes(sessionNotesResponse.notes)
+
+      const currentSelectedId = selectedNoteIdRef.current
+      const currentSessionNote =
+        currentSelectedId !== null
+          ? sessionNotesResponse.notes.find((note) => note.id === currentSelectedId) ?? null
+          : null
+      const nextSelectedNote = currentSessionNote ?? sessionNotesResponse.notes[0] ?? null
+
+      if (nextSelectedNote) {
+        setSelectedNoteId(nextSelectedNote.id)
+        setIsCreating(false)
+        setSelectedNoteTemplateId(blankNoteTemplateId)
+        setDraft(createDraftFromNote(nextSelectedNote))
+      }
+    } catch (loadError) {
+      if (
+        abortController.signal.aborted ||
+        sessionRequestIdRef.current !== requestId
+      ) {
+        return
+      }
+
+      resetSessionBrowserState()
+      setError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'Could not load notes for that session.',
+      )
+    } finally {
+      if (sessionRequestIdRef.current === requestId) {
+        setIsLoadingSessionNotes(false)
+      }
+    }
+  }
+
   const handleStartNote = () => {
+    setNoteBrowseMode('notes')
+    resetSessionBrowserState()
     setSelectedNoteId(null)
     setIsCreating(true)
+    setSelectedNoteTemplateId(blankNoteTemplateId)
     setDraft(createEmptyDraft())
     setError(null)
   }
@@ -687,6 +1027,8 @@ function App() {
       })
 
       setQuickCaptureTitle('')
+      setNoteBrowseMode('notes')
+      resetSessionBrowserState()
       await loadWorkspace(authToken, selectedCampaignId, createdNote.id)
     } catch (captureError) {
       setError(
@@ -696,6 +1038,22 @@ function App() {
       )
     } finally {
       setIsQuickCapturing(false)
+    }
+  }
+
+  const handleSelectNoteTemplate = (templateId: string) => {
+    setSelectedNoteTemplateId(templateId)
+    setError(null)
+
+    if (templateId === blankNoteTemplateId) {
+      setDraft(createEmptyDraft())
+      return
+    }
+
+    const template = getNoteStarterTemplate(templateId)
+
+    if (template.starterNote) {
+      setDraft(createDraftFromStarterNote(template.starterNote))
     }
   }
 
@@ -716,6 +1074,14 @@ function App() {
       } else {
         const updatedNote = await updateNote(authToken, selectedNoteId, payload)
         await loadWorkspace(authToken, selectedCampaignId, updatedNote.id)
+      }
+
+      if (noteBrowseModeRef.current === 'activity') {
+        await loadActivity(
+          authToken,
+          selectedCampaignId,
+          selectedActivityMembershipIdRef.current,
+        )
       }
     } catch (saveError) {
       setError(
@@ -739,6 +1105,14 @@ function App() {
     try {
       await deleteNote(authToken, selectedNoteId)
       await loadWorkspace(authToken, selectedCampaignId, null)
+
+      if (noteBrowseModeRef.current === 'activity') {
+        await loadActivity(
+          authToken,
+          selectedCampaignId,
+          selectedActivityMembershipIdRef.current,
+        )
+      }
     } catch (deleteError) {
       setError(
         deleteError instanceof Error
@@ -800,6 +1174,7 @@ function App() {
 
   const handleOpenCampaignCreate = () => {
     setCampaignDraft(createCampaignDraft())
+    setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setMemberships([])
     setShareLinks([])
     setShareLinkDraft(createShareLinkDraft())
@@ -815,6 +1190,7 @@ function App() {
     }
 
     setCampaignDraft(createCampaignDraft(selectedCampaign))
+    setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setShareLinkDraft(createShareLinkDraft())
     resetShareLinkInteractionState()
     setCampaignFormMode('edit')
@@ -824,6 +1200,7 @@ function App() {
   const handleCancelCampaignForm = () => {
     setCampaignDraft(createCampaignDraft(selectedCampaign))
     setCampaignFormMode(campaigns.length === 0 ? 'create' : 'closed')
+    setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setShareLinkDraft(createShareLinkDraft())
     resetShareLinkInteractionState()
     setError(null)
@@ -839,9 +1216,25 @@ function App() {
 
     try {
       const payload = createCampaignPayload(campaignDraft)
+      let starterTemplateError: string | null = null
 
       if (campaignFormMode === 'create') {
         const createdCampaign = await createCampaign(authToken, payload)
+
+        if (selectedCampaignTemplateId !== blankCampaignTemplateId) {
+          try {
+            for (const starterNote of selectedCampaignTemplate.starterNotes) {
+              await createNote(
+                authToken,
+                createStarterNoteInput(starterNote, createdCampaign.id),
+              )
+            }
+          } catch {
+            starterTemplateError =
+              'Campaign created, but the starter notes could not be added. You can still add notes manually.'
+          }
+        }
+
         await loadCampaigns(authToken, createdCampaign.id)
       } else if (campaignFormMode === 'edit' && selectedCampaignId) {
         const updatedCampaign = await updateCampaign(
@@ -853,6 +1246,11 @@ function App() {
       }
 
       setCampaignFormMode('closed')
+      setSelectedCampaignTemplateId(blankCampaignTemplateId)
+
+      if (starterTemplateError) {
+        setError(starterTemplateError)
+      }
     } catch (campaignError) {
       setError(
         campaignError instanceof Error
@@ -1022,10 +1420,12 @@ function App() {
     }
 
     setCampaignFormMode('closed')
+    setNoteBrowseMode('notes')
+    resetSessionBrowserState()
+    resetActivityState()
+    setQuickCaptureTitle('')
     setMemberships([])
     setShareLinks([])
-    setBrowseMode('all')
-    setSelectedSessionName(null)
     resetShareLinkInteractionState()
     await loadWorkspace(authToken, campaignId)
   }
@@ -1403,6 +1803,50 @@ function App() {
                         : 'Update campaign metadata and review the owner-side membership list.'}
                     </Typography>
                   </Box>
+
+                  {campaignFormMode === 'create' ? (
+                    <Stack spacing={1.5}>
+                      <TextField
+                        select
+                        label="Campaign starter"
+                        value={selectedCampaignTemplateId}
+                        onChange={(event) =>
+                          setSelectedCampaignTemplateId(event.target.value)
+                        }
+                        helperText="Optional. Seed flexible starter notes or leave the campaign blank."
+                      >
+                        {campaignStarterTemplates.map((template) => (
+                          <MenuItem key={template.id} value={template.id}>
+                            {template.name}
+                          </MenuItem>
+                        ))}
+                      </TextField>
+
+                      {selectedCampaignTemplate.starterNotes.length > 0 ? (
+                        <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                          <Stack spacing={1}>
+                            <Typography variant="body2">
+                              {selectedCampaignTemplate.description}
+                            </Typography>
+                            <Stack
+                              direction="row"
+                              spacing={1}
+                              useFlexGap
+                              sx={{ flexWrap: 'wrap' }}
+                            >
+                              {selectedCampaignTemplate.starterNotes.map((starterNote) => (
+                                <Chip
+                                  key={starterNote.title}
+                                  label={starterNote.title}
+                                  size="small"
+                                />
+                              ))}
+                            </Stack>
+                          </Stack>
+                        </Alert>
+                      ) : null}
+                    </Stack>
+                  ) : null}
 
                   <TextField
                     label="Campaign name"
@@ -1794,50 +2238,53 @@ function App() {
                     sx={{ justifyContent: 'space-between' }}
                   >
                     <Box>
-                      <Typography variant="h5">Notes</Typography>
+                      <Typography variant="h5">{notePaneHeading}</Typography>
                       <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                        The note workflow now runs inside the selected owner campaign.
+                        {notePaneDescription}
                       </Typography>
                     </Box>
-                    <Button
-                      variant="outlined"
-                      startIcon={<AddRoundedIcon />}
-                      onClick={handleStartNote}
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      spacing={1}
+                      sx={{ alignItems: { sm: 'flex-start' } }}
                     >
-                      New note
-                    </Button>
-                  </Stack>
-
-                  <Stack direction="row" spacing={1}>
-                    <Button
-                      variant={browseMode === 'all' ? 'contained' : 'outlined'}
-                      size="small"
-                      onClick={() => {
-                        setBrowseMode('all')
-                        setSelectedSessionName(null)
-                      }}
-                    >
-                      All notes
-                    </Button>
-                    <Button
-                      variant={browseMode === 'by-session' ? 'contained' : 'outlined'}
-                      size="small"
-                      onClick={() => {
-                        setBrowseMode('by-session')
-                        setSelectedSessionName(null)
-                      }}
-                    >
-                      Browse by session
-                    </Button>
+                      <Stack direction="row" spacing={1}>
+                        <Button
+                          variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
+                          onClick={handleOpenAllNotes}
+                        >
+                          All notes
+                        </Button>
+                        <Button
+                          variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
+                          onClick={handleOpenSessionBrowser}
+                        >
+                          Browse by session
+                        </Button>
+                        <Button
+                          variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
+                          onClick={() => void handleOpenRecentActivity()}
+                        >
+                          Recent activity
+                        </Button>
+                      </Stack>
+                      <Button
+                        variant="outlined"
+                        startIcon={<AddRoundedIcon />}
+                        onClick={handleStartNote}
+                      >
+                        New note
+                      </Button>
+                    </Stack>
                   </Stack>
 
                   <Stack
                     direction="row"
                     spacing={1}
                     component="form"
-                    onSubmit={(event: React.FormEvent) => {
+                    onSubmit={(event) => {
                       event.preventDefault()
-                      handleQuickCapture()
+                      void handleQuickCapture()
                     }}
                   >
                     <TextField
@@ -1859,22 +2306,194 @@ function App() {
                     </Button>
                   </Stack>
 
-                  {browseMode === 'by-session' && selectedSessionName === null ? (
+                  {noteBrowseMode === 'activity' ? (
+                    <Stack spacing={2.5}>
+                      <Stack spacing={1.5}>
+                        <Typography variant="subtitle1">Filter by collaborator</Typography>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          useFlexGap
+                          aria-label="Activity collaborator filter"
+                          sx={{ flexWrap: 'wrap' }}
+                        >
+                          <Button
+                            variant={
+                              selectedActivityMembershipId === null ? 'contained' : 'outlined'
+                            }
+                            size="small"
+                            onClick={() => void handleSelectActivityCollaborator(null)}
+                          >
+                            All collaborators
+                          </Button>
+                          {activityCollaborators.map((collaborator) => (
+                            <Button
+                              key={collaborator.membershipId}
+                              variant={
+                                selectedActivityMembershipId === collaborator.membershipId
+                                  ? 'contained'
+                                  : 'outlined'
+                              }
+                              size="small"
+                              onClick={() =>
+                                void handleSelectActivityCollaborator(
+                                  collaborator.membershipId,
+                                )
+                              }
+                            >
+                              {collaborator.displayName} ({collaborator.noteCount})
+                            </Button>
+                          ))}
+                        </Stack>
+                        {selectedActivityCollaborator ? (
+                          <Stack
+                            direction={{ xs: 'column', sm: 'row' }}
+                            spacing={1}
+                            sx={{ alignItems: { sm: 'center' } }}
+                          >
+                            <Chip
+                              label={`Filtering by ${selectedActivityCollaborator.displayName}`}
+                              size="small"
+                              color="primary"
+                            />
+                            <Button
+                              size="small"
+                              variant="text"
+                              onClick={() => void handleSelectActivityCollaborator(null)}
+                            >
+                              Clear filter
+                            </Button>
+                          </Stack>
+                        ) : null}
+                      </Stack>
+
+                      {isLoadingActivity ? (
+                        <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
+                          <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
+                            <CircularProgress size={28} />
+                            <Typography color="text.secondary" variant="body2">
+                              Loading recent activity...
+                            </Typography>
+                          </Stack>
+                        </Box>
+                      ) : sortedActivityEntries.length === 0 ? (
+                        <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                          {selectedActivityCollaborator
+                            ? `No recent notes for ${selectedActivityCollaborator.displayName} yet.`
+                            : 'No notes in this campaign yet. Create your first note to get started.'}
+                        </Alert>
+                      ) : (
+                        <List
+                          disablePadding
+                          aria-label="Recent activity list"
+                          sx={{ display: 'grid', gap: 1.5 }}
+                        >
+                          {sortedActivityEntries.map((activityEntry) => (
+                            <ListItemButton
+                              key={activityEntry.id}
+                              selected={selectedNoteId === activityEntry.id && !isCreating}
+                              onClick={() => handleSelectNote(activityEntry)}
+                              sx={{
+                                borderRadius: noteItemRadius,
+                                border: '1px solid',
+                                borderColor:
+                                  selectedNoteId === activityEntry.id && !isCreating
+                                    ? 'primary.main'
+                                    : 'divider',
+                                alignItems: 'flex-start',
+                              }}
+                            >
+                              <ListItemText
+                                disableTypography
+                                primary={
+                                  <Stack
+                                    direction={{ xs: 'column', sm: 'row' }}
+                                    spacing={1}
+                                    sx={{ justifyContent: 'space-between' }}
+                                  >
+                                    <Typography variant="h6">{activityEntry.title}</Typography>
+                                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                      <Chip
+                                        label={activityEntry.action === 'created' ? 'Created' : 'Edited'}
+                                        color={
+                                          activityEntry.action === 'created'
+                                            ? 'primary'
+                                            : 'secondary'
+                                        }
+                                        size="small"
+                                      />
+                                      <Chip label={activityEntry.status} size="small" />
+                                    </Stack>
+                                  </Stack>
+                                }
+                                secondary={
+                                  <Stack spacing={1.25} sx={{ mt: 1.25 }}>
+                                    <Typography color="text.secondary">
+                                      {excerpt(activityEntry.body)}
+                                    </Typography>
+                                    <Typography color="text.secondary" variant="body2">
+                                      {activityEntry.sessionName
+                                        ? `${activityEntry.sessionName} • `
+                                        : ''}
+                                      {activityEntry.action === 'created' ? 'Created' : 'Updated'}{' '}
+                                      {formatTimestamp(activityEntry.updatedAt)}
+                                    </Typography>
+                                    <Stack
+                                      direction={{ xs: 'column', sm: 'row' }}
+                                      spacing={1}
+                                      useFlexGap
+                                      sx={{ flexWrap: 'wrap' }}
+                                    >
+                                      <Chip
+                                        label={`Created by ${formatAttribution(
+                                          activityEntry.createdBy,
+                                        )}`}
+                                        size="small"
+                                        variant="outlined"
+                                      />
+                                      {activityEntry.lastEditedBy &&
+                                      activityEntry.lastEditedBy.membershipId !==
+                                        activityEntry.createdBy?.membershipId ? (
+                                        <Chip
+                                          label={`Last edited by ${formatAttribution(
+                                            activityEntry.lastEditedBy,
+                                          )}`}
+                                          size="small"
+                                          variant="outlined"
+                                        />
+                                      ) : null}
+                                    </Stack>
+                                  </Stack>
+                                }
+                              />
+                            </ListItemButton>
+                          ))}
+                        </List>
+                      )}
+                    </Stack>
+                  ) : noteBrowseMode === 'sessions' && !selectedSessionName ? (
                     sessionSummaries.length === 0 ? (
                       <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                        No session-linked notes yet. Add a session name to a note to start
-                        grouping notes by session.
+                        No session-linked notes yet. Add a session name to notes when you want
+                        a quick “what happened in this session?” view.
                       </Alert>
                     ) : (
-                      <List disablePadding sx={{ display: 'grid', gap: 1.5 }}>
-                        {sessionSummaries.map((session) => (
+                      <List
+                        disablePadding
+                        aria-label="Session list"
+                        sx={{ display: 'grid', gap: 1.5 }}
+                      >
+                        {sessionSummaries.map((sessionSummary) => (
                           <ListItemButton
-                            key={session.sessionName}
-                            onClick={() => setSelectedSessionName(session.sessionName)}
+                            key={sessionSummary.sessionName}
+                            onClick={() =>
+                              void handleSelectSession(sessionSummary.sessionName)
+                            }
                             sx={{
                               borderRadius: noteItemRadius,
                               border: '1px solid',
                               borderColor: 'divider',
+                              alignItems: 'flex-start',
                             }}
                           >
                             <ListItemText
@@ -1885,17 +2504,20 @@ function App() {
                                   spacing={1}
                                   sx={{ justifyContent: 'space-between' }}
                                 >
-                                  <Typography variant="h6">{session.sessionName}</Typography>
+                                  <Typography variant="h6">
+                                    {sessionSummary.sessionName}
+                                  </Typography>
                                   <Chip
-                                    label={`${session.noteCount} ${session.noteCount === 1 ? 'note' : 'notes'}`}
-                                    color="primary"
+                                    label={`${sessionSummary.noteCount} ${
+                                      sessionSummary.noteCount === 1 ? 'note' : 'notes'
+                                    }`}
                                     size="small"
                                   />
                                 </Stack>
                               }
                               secondary={
-                                <Typography color="text.secondary" variant="body2" sx={{ mt: 1 }}>
-                                  Last activity {formatTimestamp(session.latestActivity)}
+                                <Typography color="text.secondary" sx={{ mt: 1.25 }}>
+                                  Open this session to see the note trail in one pass.
                                 </Typography>
                               }
                             />
@@ -1903,34 +2525,55 @@ function App() {
                         ))}
                       </List>
                     )
-                  ) : notes.length === 0 ? (
-                    <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                      No notes yet in this campaign. Create the first one to start using the
-                      workspace.
-                    </Alert>
                   ) : (
-                    <>
-                      {browseMode === 'by-session' && selectedSessionName !== null ? (
-                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                          <Button
-                            size="small"
-                            variant="text"
-                            onClick={() => setSelectedSessionName(null)}
-                          >
-                            ← All sessions
+                    <Stack spacing={2}>
+                      {noteBrowseMode === 'sessions' && selectedSessionName ? (
+                        <Stack
+                          direction={{ xs: 'column', sm: 'row' }}
+                          spacing={1}
+                          sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
+                        >
+                          <Button variant="text" onClick={handleOpenSessionBrowser}>
+                            Back to sessions
                           </Button>
-                          <Typography variant="subtitle1" color="text.secondary">
-                            {selectedSessionName}
-                          </Typography>
+                          <Chip
+                            label={`${
+                              selectedSessionSummary?.noteCount ?? displayedNotes.length
+                            } ${
+                              (selectedSessionSummary?.noteCount ?? displayedNotes.length) === 1
+                                ? 'note'
+                                : 'notes'
+                            } in ${selectedSessionName}`}
+                            size="small"
+                          />
                         </Stack>
                       ) : null}
 
-                      {displayedNotes.length === 0 ? (
+                      {isLoadingSessionNotes ? (
+                        <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
+                          <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
+                            <CircularProgress size={28} />
+                            <Typography color="text.secondary" variant="body2">
+                              Loading session notes...
+                            </Typography>
+                          </Stack>
+                        </Box>
+                      ) : displayedNotes.length === 0 ? (
                         <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                          No notes in this session.
+                          {noteBrowseMode === 'sessions' && selectedSessionName
+                            ? 'No notes remain in this session. Head back to the session list or save a note with the same session name.'
+                            : 'No notes yet in this campaign. Create the first one to start using the workspace.'}
                         </Alert>
                       ) : (
-                        <List disablePadding sx={{ display: 'grid', gap: 1.5 }}>
+                        <List
+                          disablePadding
+                          aria-label={
+                            noteBrowseMode === 'sessions' && selectedSessionName
+                              ? 'Session notes'
+                              : 'Notes list'
+                          }
+                          sx={{ display: 'grid', gap: 1.5 }}
+                        >
                           {displayedNotes.map((note) => (
                             <ListItemButton
                               key={note.id}
@@ -1981,7 +2624,8 @@ function App() {
                                       <Typography color="text.secondary" variant="body2">
                                         Created by {note.createdBy.displayName}
                                         {note.lastEditedBy &&
-                                          note.lastEditedBy.membershipId !== note.createdBy.membershipId &&
+                                          note.lastEditedBy.membershipId !==
+                                            note.createdBy.membershipId &&
                                           ` • Edited by ${note.lastEditedBy.displayName}`}
                                       </Typography>
                                     )}
@@ -2002,7 +2646,7 @@ function App() {
                           ))}
                         </List>
                       )}
-                    </>
+                    </Stack>
                   )}
                 </Stack>
               </CardContent>
@@ -2017,10 +2661,37 @@ function App() {
                         {isCreating ? 'Create note' : 'Edit note'}
                       </Typography>
                       <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                        Every save is scoped to {overview.campaign.name}, so each campaign can
-                        keep its own note trail.
+                        {noteBrowseMode === 'sessions' && selectedSessionName
+                          ? `Every save is scoped to ${overview.campaign.name}. You are currently reviewing ${selectedSessionName}.`
+                          : `Every save is scoped to ${overview.campaign.name}, so each campaign can keep its own note trail.`}
                       </Typography>
                     </Box>
+
+                    {isCreating ? (
+                      <Stack spacing={1.5}>
+                        <TextField
+                          select
+                          label="Note template"
+                          value={selectedNoteTemplateId}
+                          onChange={(event) =>
+                            handleSelectNoteTemplate(event.target.value)
+                          }
+                          helperText="Optional. Load a starter structure, then edit anything you want."
+                        >
+                          {noteStarterTemplates.map((template) => (
+                            <MenuItem key={template.id} value={template.id}>
+                              {template.name}
+                            </MenuItem>
+                          ))}
+                        </TextField>
+
+                        {selectedNoteTemplate.starterNote ? (
+                          <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                            {selectedNoteTemplate.description}
+                          </Alert>
+                        ) : null}
+                      </Stack>
+                    ) : null}
 
                     <TextField
                       label="Title"
@@ -2112,14 +2783,14 @@ function App() {
               <Card sx={{ borderRadius: surfaceRadius }}>
                 <CardContent sx={{ p: 3 }}>
                   <Stack spacing={2}>
-                    <Typography variant="h5">Recent activity</Typography>
+                    <Typography variant="h5">Recent notes</Typography>
                     <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                      The most recently updated notes for {overview.campaign.name} show up
-                      here.
+                      Keep a lightweight snapshot of the latest notes for {overview.campaign.name}
+                      within easy reach.
                     </Typography>
                     {overview.recentNotes.length === 0 ? (
                       <Typography color="text.secondary">
-                        Once you save notes, the most recently updated ones show up here.
+                        Once you save notes, the freshest ones show up here.
                       </Typography>
                     ) : (
                       overview.recentNotes.map((note) => (

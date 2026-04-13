@@ -58,6 +58,16 @@ interface NoteFixture {
   tags: string[]
   status: NoteStatus
   sessionName: string | null
+  createdBy?: {
+    membershipId: string
+    displayName: string
+    role: 'owner' | 'guest'
+  } | null
+  lastEditedBy?: {
+    membershipId: string
+    displayName: string
+    role: 'owner' | 'guest'
+  } | null
   createdAt: string
   updatedAt: string
 }
@@ -71,6 +81,10 @@ function buildOverview(
   notes: NoteFixture[],
   membership: CampaignMembershipFixture | null,
 ) {
+  const sortedNotes = [...notes].sort((leftNote, rightNote) =>
+    rightNote.updatedAt.localeCompare(leftNote.updatedAt),
+  )
+
   return {
     campaign,
     membership,
@@ -81,8 +95,28 @@ function buildOverview(
       archivedNotes: notes.filter((note) => note.status === 'archived').length,
       sessionLinkedNotes: notes.filter((note) => note.sessionName !== null).length,
     },
-    recentNotes: notes.slice(0, 3),
+    recentNotes: sortedNotes.slice(0, 3),
   }
+}
+
+function createAttribution(membership: CampaignMembershipFixture | null) {
+  if (!membership) {
+    return null
+  }
+
+  return {
+    membershipId: membership.id,
+    displayName: membership.displayName,
+    role: membership.role,
+  } as const
+}
+
+function countActivityMatches(notes: NoteFixture[], membershipId: string) {
+  return notes.filter(
+    (note) =>
+      note.createdBy?.membershipId === membershipId ||
+      note.lastEditedBy?.membershipId === membershipId,
+  ).length
 }
 
 function serializeShareLink(shareLink: CampaignShareLinkFixture) {
@@ -144,6 +178,7 @@ describe('App', () => {
   let notesByCampaign: Record<string, NoteFixture[]>
   let sharedSessionRequestCount: number
   let sharedSessionResponseDelaysMs: number[]
+  let activityResponseDelayByMembershipId: Record<string, number>
   let writeTextMock: ReturnType<typeof vi.fn>
   let execCommandMock: ReturnType<typeof vi.fn>
 
@@ -186,6 +221,28 @@ describe('App', () => {
     notesByCampaign = {
       [defaultCampaignId]: [
         {
+          id: 'storm-ledger',
+          campaignId: defaultCampaignId,
+          title: 'Storm ledger updated',
+          body: 'Session fallout points toward a storm giant envoy and a rushed harbor meeting.',
+          tags: ['recap', 'harbor'],
+          status: 'draft',
+          sessionName: 'Session 12',
+          createdAt: '2026-04-10T19:00:00.000Z',
+          updatedAt: '2026-04-10T21:30:00.000Z',
+        },
+        {
+          id: 'vault-sigils',
+          campaignId: defaultCampaignId,
+          title: 'Vault sigils mapped',
+          body: 'Three sigils match the missing druid circles and point toward the western reef.',
+          tags: ['clue', 'sigils'],
+          status: 'active',
+          sessionName: 'Session 12',
+          createdAt: '2026-04-10T18:15:00.000Z',
+          updatedAt: '2026-04-10T20:45:00.000Z',
+        },
+        {
           id: 'cipher-fragment',
           campaignId: defaultCampaignId,
           title: 'Cipher fragment recovered',
@@ -196,10 +253,22 @@ describe('App', () => {
           createdAt: '2026-04-08T18:00:00.000Z',
           updatedAt: '2026-04-10T20:00:00.000Z',
         },
+        {
+          id: 'quartermaster-ledger',
+          campaignId: defaultCampaignId,
+          title: 'Quartermaster ledger',
+          body: 'Track which harbor favors are still owed before the next departure.',
+          tags: ['logistics'],
+          status: 'draft',
+          sessionName: null,
+          createdAt: '2026-04-07T18:00:00.000Z',
+          updatedAt: '2026-04-07T18:30:00.000Z',
+        },
       ],
     }
     sharedSessionRequestCount = 0
     sharedSessionResponseDelaysMs = []
+    activityResponseDelayByMembershipId = {}
 
     localStorage.clear()
     window.history.replaceState({}, '', '/')
@@ -348,6 +417,49 @@ describe('App', () => {
         }
 
         return membership
+      }
+
+      const buildActivityResponse = (
+        campaignId: string,
+        membershipId: string | null,
+        limit: number,
+      ) => {
+        const campaign = campaigns.find(
+          (candidateCampaign) => candidateCampaign.id === campaignId,
+        )
+        const campaignNotes = [...(notesByCampaign[campaignId] ?? [])].sort((leftNote, rightNote) =>
+          rightNote.updatedAt.localeCompare(leftNote.updatedAt),
+        )
+        const filteredNotes = membershipId
+          ? campaignNotes.filter(
+              (note) =>
+                note.createdBy?.membershipId === membershipId ||
+                note.lastEditedBy?.membershipId === membershipId,
+            )
+          : campaignNotes
+
+        const collaborators = (membershipsByCampaign[campaignId] ?? [])
+          .map((membership) => ({
+            membershipId: membership.id,
+            displayName: membership.displayName,
+            role: membership.role,
+            noteCount: countActivityMatches(campaignNotes, membership.id),
+          }))
+          .filter((collaborator) => collaborator.noteCount > 0)
+          .sort((leftCollaborator, rightCollaborator) =>
+            rightCollaborator.noteCount !== leftCollaborator.noteCount
+              ? rightCollaborator.noteCount - leftCollaborator.noteCount
+              : leftCollaborator.displayName.localeCompare(rightCollaborator.displayName),
+          )
+
+        return {
+          campaign,
+          collaborators,
+          activity: filteredNotes.slice(0, limit).map((note) => ({
+            ...note,
+            action: note.createdAt === note.updatedAt ? 'created' : 'edited',
+          })),
+        }
       }
 
       if (path === '/api/auth/register' && method === 'POST') {
@@ -1046,6 +1158,7 @@ describe('App', () => {
           status: NoteStatus
           sessionName: string | null
         }
+        const attribution = createAttribution(membership)
 
         const createdNote: NoteFixture = {
           id: `shared-note-${(notesByCampaign[resolved.campaign.id] ?? []).length + 1}`,
@@ -1055,6 +1168,8 @@ describe('App', () => {
           tags: payload.tags,
           status: payload.status,
           sessionName: payload.sessionName,
+          createdBy: attribution,
+          lastEditedBy: attribution,
           createdAt: '2026-04-12T03:00:00.000Z',
           updatedAt: '2026-04-12T03:00:00.000Z',
         }
@@ -1113,6 +1228,7 @@ describe('App', () => {
           status: NoteStatus
           sessionName: string | null
         }
+        const attribution = createAttribution(membership)
 
         notesByCampaign[resolved.campaign.id] = (notesByCampaign[resolved.campaign.id] ?? []).map(
           (note) =>
@@ -1124,6 +1240,7 @@ describe('App', () => {
                   tags: payload.tags,
                   status: payload.status,
                   sessionName: payload.sessionName,
+                  lastEditedBy: attribution,
                   updatedAt: '2026-04-12T03:30:00.000Z',
                 }
               : note,
@@ -1223,6 +1340,97 @@ describe('App', () => {
         )
       }
 
+      if (path === '/api/notes/activity' && method === 'GET') {
+        const campaignId = readCampaignId()
+        const accessFailure = ensureCampaignAccess(campaignId)
+        if (accessFailure) {
+          return accessFailure
+        }
+
+        const membershipId = parsedUrl.searchParams.get('membershipId')
+        const delayMs = membershipId
+          ? activityResponseDelayByMembershipId[membershipId]
+          : undefined
+
+        if (delayMs) {
+          await new Promise((resolve) => setTimeout(resolve, delayMs))
+        }
+
+        const limit = Number(parsedUrl.searchParams.get('limit') ?? '20')
+
+        return new Response(
+          JSON.stringify(buildActivityResponse(campaignId, membershipId, limit)),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      if (path === '/api/notes/sessions' && method === 'GET') {
+        const campaignId = readCampaignId()
+        const accessFailure = ensureCampaignAccess(campaignId)
+        if (accessFailure) {
+          return accessFailure
+        }
+
+        const sessions = Object.values(
+          (notesByCampaign[campaignId] ?? []).reduce<
+            Record<string, { sessionName: string; noteCount: number }>
+          >((sessionMap, note) => {
+            if (!note.sessionName) {
+              return sessionMap
+            }
+
+            sessionMap[note.sessionName] ??= {
+              sessionName: note.sessionName,
+              noteCount: 0,
+            }
+            sessionMap[note.sessionName].noteCount += 1
+            return sessionMap
+          }, {}),
+        )
+
+        return new Response(
+          JSON.stringify({
+            sessions,
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      const sessionNotesMatch = path.match(/^\/api\/notes\/sessions\/([^/]+)$/)
+      if (sessionNotesMatch && method === 'GET') {
+        const campaignId = readCampaignId()
+        const accessFailure = ensureCampaignAccess(campaignId)
+        if (accessFailure) {
+          return accessFailure
+        }
+
+        const sessionName = decodeURIComponent(sessionNotesMatch[1])
+
+        return new Response(
+          JSON.stringify({
+            notes: (notesByCampaign[campaignId] ?? []).filter(
+              (note) => note.sessionName === sessionName,
+            ),
+          }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
       if (path === '/api/notes' && method === 'POST') {
         const payload = JSON.parse(String(init?.body)) as {
           campaignId: string
@@ -1237,6 +1445,7 @@ describe('App', () => {
         if (accessFailure) {
           return accessFailure
         }
+        const attribution = createAttribution(findCampaignMembership(payload.campaignId))
 
         const createdNote: NoteFixture = {
           id: `note-${(notesByCampaign[payload.campaignId] ?? []).length + 1}`,
@@ -1246,6 +1455,8 @@ describe('App', () => {
           tags: payload.tags ?? [],
           status: payload.status ?? 'draft',
           sessionName: payload.sessionName ?? null,
+          createdBy: attribution,
+          lastEditedBy: attribution,
           createdAt: '2026-04-12T02:00:00.000Z',
           updatedAt: '2026-04-12T02:00:00.000Z',
         }
@@ -1284,6 +1495,7 @@ describe('App', () => {
           status: NoteStatus
           sessionName: string | null
         }
+        const attribution = createAttribution(findCampaignMembership(targetCampaignId))
 
         notesByCampaign[targetCampaignId] = (notesByCampaign[targetCampaignId] ?? []).map(
           (note) =>
@@ -1295,6 +1507,7 @@ describe('App', () => {
                   tags: payload.tags,
                   status: payload.status,
                   sessionName: payload.sessionName,
+                  lastEditedBy: attribution,
                   updatedAt: '2026-04-12T03:00:00.000Z',
                 }
               : note,
@@ -1441,7 +1654,47 @@ describe('App', () => {
         screen.queryByDisplayValue('Harper safe house secured'),
       ).toBeNull()
     })
-  }, 25000)
+  }, 45000)
+
+  it('can switch into session browsing and drill into one session note trail', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Browse by session' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeTruthy()
+
+    const sessionList = screen.getByRole('list', { name: 'Session list' })
+    expect(within(sessionList).getByText('Session 12')).toBeTruthy()
+    expect(within(sessionList).getByText('2 notes')).toBeTruthy()
+    expect(within(sessionList).getByText('Session 11')).toBeTruthy()
+    expect(within(sessionList).getByText('1 note')).toBeTruthy()
+
+    await user.click(within(sessionList).getByText('Session 12'))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Session 12 notes' }),
+    ).toBeTruthy()
+    expect(screen.getByText('2 notes in Session 12')).toBeTruthy()
+    expect(screen.getByDisplayValue('Storm ledger updated')).toBeTruthy()
+    const sessionNotesList = screen.getByRole('list', { name: 'Session notes' })
+    expect(within(sessionNotesList).getByText('Vault sigils mapped')).toBeTruthy()
+    expect(within(sessionNotesList).queryByText('Cipher fragment recovered')).toBeNull()
+    expect(within(sessionNotesList).queryByText('Quartermaster ledger')).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Back to sessions' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeTruthy()
+  }, 35000)
 
   it('surfaces when an older shared link can no longer be revealed', async () => {
     shareLinksByCampaign[defaultCampaignId] = [
@@ -1529,6 +1782,64 @@ describe('App', () => {
     const statsList = (await screen.findAllByRole('list', { name: 'Campaign stats' }))[0]
     expect(within(statsList).getByText('Total notes')).toBeTruthy()
     expect(within(statsList).getByText('Draft notes')).toBeTruthy()
+  }, 35000)
+
+  it('can seed a new campaign from the starter pack template', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getAllByRole('button', { name: 'New campaign' })[0])
+    await user.click(screen.getByRole('combobox', { name: 'Campaign starter' }))
+    await user.click(await screen.findByRole('option', { name: 'Starter pack' }))
+
+    expect(screen.getByText(/Seeds flexible notes for NPCs, factions, locations/)).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Campaign name'), 'Starfall Routes')
+    await user.type(
+      screen.getByLabelText('Tagline'),
+      'Keep the cast, places, and session fallout ready before the first recap.',
+    )
+    await user.type(screen.getByLabelText('System'), 'Dungeons & Dragons 5e')
+    await user.type(screen.getByLabelText('Setting'), 'The Starfall Coast')
+    await user.click(screen.getByRole('button', { name: 'Create campaign' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Starfall Routes' }))[0],
+    ).toBeTruthy()
+    expect(await screen.findByText('NPC roster')).toBeTruthy()
+    expect((await screen.findAllByText('Faction tracker')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Location ledger')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('Session log')).length).toBeGreaterThan(0)
+  }, 30000)
+
+  it('can start a new note from a built-in template', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
+    await user.click(screen.getByRole('combobox', { name: 'Note template' }))
+    await user.click(await screen.findByRole('option', { name: 'Faction brief' }))
+
+    expect(screen.getByDisplayValue('Faction brief')).toBeTruthy()
+    expect(screen.getByDisplayValue('faction, politics')).toBeTruthy()
+    expect(screen.getByDisplayValue(/What the faction wants:/)).toBeTruthy()
+
+    await user.clear(screen.getByLabelText('Title'))
+    await user.type(screen.getByLabelText('Title'), 'Ashen Hand brief')
+    await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
+
+    expect(await screen.findByDisplayValue('Ashen Hand brief')).toBeTruthy()
+    expect((await screen.findAllByText('Ashen Hand brief')).length).toBeGreaterThan(0)
   }, 15000)
 
   it('supports the guest join flow on a shared campaign route', async () => {
@@ -1743,7 +2054,7 @@ describe('App', () => {
     expect(screen.queryByText('Loading shared campaign...')).toBeNull()
   }, 20000)
 
-  it('supports session-based browsing without refetching the workspace', async () => {
+  it('keeps session browsing local and loads recent activity without reloading the workspace', async () => {
     notesByCampaign[defaultCampaignId] = [
       {
         id: 'cipher-fragment',
@@ -1810,12 +2121,36 @@ describe('App', () => {
 
     expect(screen.getByRole('button', { name: 'All notes' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Browse by session' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Recent activity' })).toBeTruthy()
 
-    const fetchCountBeforeBrowse = vi.mocked(globalThis.fetch).mock.calls.length
+    const countRequestsForPath = (pathname: string) =>
+      vi.mocked(globalThis.fetch).mock.calls.filter(([input]) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
+
+        return new URL(url, 'http://localhost').pathname === pathname
+      }).length
+
+    const workspaceRequestCountBeforeBrowse =
+      countRequestsForPath('/api/auth/session') +
+      countRequestsForPath('/api/campaigns') +
+      countRequestsForPath('/api/overview') +
+      countRequestsForPath('/api/notes') +
+      countRequestsForPath('/api/notes/sessions')
 
     await user.click(screen.getByRole('button', { name: 'Browse by session' }))
 
-    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCountBeforeBrowse)
+    expect(
+      countRequestsForPath('/api/auth/session') +
+        countRequestsForPath('/api/campaigns') +
+        countRequestsForPath('/api/overview') +
+        countRequestsForPath('/api/notes') +
+        countRequestsForPath('/api/notes/sessions'),
+    ).toBe(workspaceRequestCountBeforeBrowse)
 
     expect(screen.getByText('Session 11')).toBeTruthy()
     expect(screen.getByText('Session 12')).toBeTruthy()
@@ -1824,13 +2159,19 @@ describe('App', () => {
 
     await user.click(screen.getByText('Session 11'))
 
-    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCountBeforeBrowse)
+    expect(
+      countRequestsForPath('/api/auth/session') +
+        countRequestsForPath('/api/campaigns') +
+        countRequestsForPath('/api/overview') +
+        countRequestsForPath('/api/notes') +
+        countRequestsForPath('/api/notes/sessions'),
+    ).toBe(workspaceRequestCountBeforeBrowse)
 
     expect(screen.getAllByText('Cipher fragment recovered').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Moonwell ritual notes').length).toBeGreaterThan(0)
-    expect(screen.getByRole('button', { name: '← All sessions' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Back to sessions' })).toBeTruthy()
 
-    await user.click(screen.getByRole('button', { name: '← All sessions' }))
+    await user.click(screen.getByRole('button', { name: 'Back to sessions' }))
 
     expect(screen.getByText('Session 11')).toBeTruthy()
     expect(screen.getByText('Session 12')).toBeTruthy()
@@ -1841,14 +2182,34 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'All notes' }))
 
-    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCountBeforeBrowse)
+    expect(
+      countRequestsForPath('/api/auth/session') +
+        countRequestsForPath('/api/campaigns') +
+        countRequestsForPath('/api/overview') +
+        countRequestsForPath('/api/notes') +
+        countRequestsForPath('/api/notes/sessions'),
+    ).toBe(workspaceRequestCountBeforeBrowse)
 
     expect(screen.getAllByText('Cipher fragment recovered').length).toBeGreaterThan(0)
     expect(screen.getAllByText('Harbor ambush').length).toBeGreaterThan(0)
     expect(screen.getByText('Campaign timeline ideas')).toBeTruthy()
+
+    const activityRequestsBeforeOpen = countRequestsForPath('/api/notes/activity')
+
+    await user.click(screen.getByRole('button', { name: 'Recent activity' }))
+
+    expect(await screen.findByRole('heading', { name: 'Recent activity' })).toBeTruthy()
+    expect(countRequestsForPath('/api/notes/activity')).toBe(activityRequestsBeforeOpen + 1)
+    expect(
+      countRequestsForPath('/api/auth/session') +
+        countRequestsForPath('/api/campaigns') +
+        countRequestsForPath('/api/overview') +
+        countRequestsForPath('/api/notes') +
+        countRequestsForPath('/api/notes/sessions'),
+    ).toBe(workspaceRequestCountBeforeBrowse)
   }, 25000)
 
-  it('preserves draft state when switching browse modes', async () => {
+  it('preserves draft state when switching between notes, sessions, and recent activity', async () => {
     notesByCampaign[defaultCampaignId] = [
       {
         id: 'session-note-1',
@@ -1887,10 +2248,150 @@ describe('App', () => {
     expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
     expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
 
+    await user.click(screen.getByRole('button', { name: 'Recent activity' }))
+
+    expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
+    expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+
     await user.click(screen.getByRole('button', { name: 'All notes' }))
 
     expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
     expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+  }, 25000)
+
+  it('shows a recent activity empty state when a campaign has no notes yet', async () => {
+    notesByCampaign[defaultCampaignId] = []
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getByRole('button', { name: 'Recent activity' }))
+
+    expect(
+      await screen.findByText(
+        'No notes in this campaign yet. Create your first note to get started.',
+      ),
+    ).toBeTruthy()
+  }, 25000)
+
+  it('shows recent activity with collaborator filters and keeps the latest filter response', async () => {
+    const guestMembership: CampaignMembershipFixture = {
+      id: 'membership-default-guest-1',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Scout Mira',
+      userId: null,
+      guestTokenId: 'guest-token-1',
+      createdAt: '2026-04-01T12:30:00.000Z',
+      updatedAt: '2026-04-01T12:30:00.000Z',
+    }
+    membershipsByCampaign[defaultCampaignId] = [
+      ...(membershipsByCampaign[defaultCampaignId] ?? []),
+      guestMembership,
+    ]
+
+    const ownerAttribution = {
+      membershipId: membershipsByCampaign[defaultCampaignId][0].id,
+      displayName: 'Campaign owner',
+      role: 'owner' as const,
+    }
+    const guestAttribution = {
+      membershipId: guestMembership.id,
+      displayName: guestMembership.displayName,
+      role: 'guest' as const,
+    }
+
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'owner-watch-list',
+        campaignId: defaultCampaignId,
+        title: 'Owner watch list',
+        body: 'Track the factions that still owe favors before the next council.',
+        tags: ['faction'],
+        status: 'active',
+        sessionName: null,
+        createdBy: ownerAttribution,
+        lastEditedBy: ownerAttribution,
+        createdAt: '2026-04-09T18:00:00.000Z',
+        updatedAt: '2026-04-09T18:00:00.000Z',
+      },
+      {
+        id: 'scout-route-update',
+        campaignId: defaultCampaignId,
+        title: 'Scout route update',
+        body: 'Mira found a safer shoreline approach for the next landing.',
+        tags: ['travel'],
+        status: 'draft',
+        sessionName: 'Session 15',
+        createdBy: guestAttribution,
+        lastEditedBy: guestAttribution,
+        createdAt: '2026-04-11T08:00:00.000Z',
+        updatedAt: '2026-04-11T08:00:00.000Z',
+      },
+      {
+        id: 'crossroads-briefing',
+        campaignId: defaultCampaignId,
+        title: 'Crossroads briefing',
+        body: 'Started by the owner, then updated with Mira’s scouting notes.',
+        tags: ['briefing'],
+        status: 'active',
+        sessionName: 'Session 15',
+        createdBy: ownerAttribution,
+        lastEditedBy: guestAttribution,
+        createdAt: '2026-04-10T18:00:00.000Z',
+        updatedAt: '2026-04-12T09:30:00.000Z',
+      },
+      {
+        id: 'legacy-loose-end',
+        campaignId: defaultCampaignId,
+        title: 'Legacy loose end',
+        body: 'Older imported note without attribution metadata.',
+        tags: ['legacy'],
+        status: 'archived',
+        sessionName: null,
+        createdBy: null,
+        lastEditedBy: null,
+        createdAt: '2026-04-08T12:00:00.000Z',
+        updatedAt: '2026-04-08T12:00:00.000Z',
+      },
+    ]
+
+    activityResponseDelayByMembershipId = {
+      [guestMembership.id]: 90,
+      [membershipsByCampaign[defaultCampaignId][0].id]: 10,
+    }
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getByRole('button', { name: 'Recent activity' }))
+
+    expect(await screen.findByRole('heading', { name: 'Recent activity' })).toBeTruthy()
+    expect(await screen.findByText('Created by Unknown')).toBeTruthy()
+    expect(screen.getByText('Last edited by Scout Mira (Guest)')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stef (2)' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Scout Mira (2)' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Scout Mira (2)' }))
+    await user.click(screen.getByRole('button', { name: 'Stef (2)' }))
+
+    expect(await screen.findByText('Filtering by Stef')).toBeTruthy()
+    const activityList = screen.getByRole('list', { name: 'Recent activity list' })
+
+    await waitFor(() => {
+      expect(within(activityList).getAllByText('Owner watch list').length).toBeGreaterThan(0)
+      expect(within(activityList).queryAllByText('Scout route update')).toHaveLength(0)
+    })
   }, 25000)
 
   it('shows empty state for session browsing when no notes have session names', async () => {
