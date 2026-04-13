@@ -1,4 +1,5 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
+import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import EventRoundedIcon from '@mui/icons-material/EventRounded'
@@ -24,7 +25,9 @@ import {
   Stack,
   TextField,
   Typography,
+  useMediaQuery,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   consolidateCampaignMemberships,
@@ -131,6 +134,7 @@ interface TagFacet {
 
 type CampaignFormMode = 'closed' | 'create' | 'edit'
 type NoteBrowseMode = 'notes' | 'sessions' | 'activity'
+type NarrowWorkspacePanel = 'browse' | 'editor'
 
 const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
@@ -384,6 +388,8 @@ function createTagFacets(notes: Note[]): TagFacet[] {
 }
 
 function App() {
+  const theme = useTheme()
+  const hasSplitNoteWorkspace = useMediaQuery(theme.breakpoints.up('lg'))
   const shareToken = useMemo(
     () =>
       typeof window === 'undefined'
@@ -411,6 +417,8 @@ function App() {
     string | null
   >(null)
   const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null)
+  const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
+    useState<NarrowWorkspacePanel>('browse')
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
   const [tagInputValue, setTagInputValue] = useState('')
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
@@ -606,6 +614,10 @@ function App() {
     () => sortActivityEntries(activityEntries),
     [activityEntries],
   )
+  const isNarrowNoteWorkspace = !hasSplitNoteWorkspace
+  const showBrowsePane = hasSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
+  const showEditorPane = hasSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
+  const mobileEditorLabel = isCreating ? 'Create note' : 'Edit note'
 
   useEffect(() => {
     if (
@@ -811,6 +823,7 @@ function App() {
     setOverview(null)
     setNotes([])
     setNoteBrowseMode('notes')
+    setNarrowWorkspacePanel('browse')
     setSessionSummaries([])
     setQuickCaptureTitle('')
     setSelectedNoteId(null)
@@ -1099,6 +1112,10 @@ function App() {
   }
 
   const handleSelectNote = (note: Note) => {
+    if (!hasSplitNoteWorkspace) {
+      setNarrowWorkspacePanel('editor')
+    }
+
     setSelectedNoteId(note.id)
     setIsCreating(false)
     setSelectedNoteTemplateId(blankNoteTemplateId)
@@ -1130,12 +1147,14 @@ function App() {
 
   const handleOpenAllNotes = () => {
     setNoteBrowseMode('notes')
+    setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
     setError(null)
   }
 
   const handleSelectTagFilter = (tag: string) => {
     setNoteBrowseMode('notes')
+    setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
     const nextTag = selectedTagFilter === tag ? null : tag
     setSelectedTagFilter(nextTag)
@@ -1154,6 +1173,7 @@ function App() {
 
   const handleOpenSessionBrowser = () => {
     setNoteBrowseMode('sessions')
+    setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
     setError(null)
   }
@@ -1164,6 +1184,7 @@ function App() {
     }
 
     setNoteBrowseMode('activity')
+    setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
     setError(null)
     await loadActivity(
@@ -1254,6 +1275,7 @@ function App() {
 
   const handleStartNote = () => {
     setNoteBrowseMode('notes')
+    setNarrowWorkspacePanel('editor')
     resetSessionBrowserState()
     setSelectedTagFilter(null)
     setSelectedNoteId(null)
@@ -1784,6 +1806,7 @@ function App() {
 
     setCampaignFormMode('closed')
     setNoteBrowseMode('notes')
+    setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
     resetActivityState()
     setQuickCaptureTitle('')
@@ -2792,60 +2815,109 @@ function App() {
             sx={{
               display: 'grid',
               gap: 3,
-              gridTemplateColumns: { xs: '1fr', lg: '1.2fr 1fr' },
+              gridTemplateColumns: {
+                xs: '1fr',
+                lg: 'minmax(0, 1.2fr) minmax(0, 1fr)',
+              },
             }}
           >
-            <Card sx={{ borderRadius: surfaceRadius }}>
-              <CardContent sx={{ p: 3 }}>
-                <Stack spacing={3}>
-                  <Stack
-                    direction={{ xs: 'column', sm: 'row' }}
-                    spacing={2}
-                    sx={{ justifyContent: 'space-between' }}
-                  >
+            {!hasSplitNoteWorkspace ? (
+              <Card
+                sx={{
+                  borderRadius: surfaceRadius,
+                  gridColumn: '1 / -1',
+                }}
+              >
+                <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
+                  <Stack spacing={1.5}>
                     <Box>
-                      <Typography variant="h5">{notePaneHeading}</Typography>
-                      <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                        {notePaneDescription}
+                      <Typography variant="overline" color="text.secondary">
+                        Mobile note workspace
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Switch between browsing and editing so smaller screens stay roomy.
                       </Typography>
                     </Box>
-                    <Stack
-                      direction={{ xs: 'column', sm: 'row' }}
-                      spacing={1}
-                      sx={{ alignItems: { sm: 'flex-start' } }}
-                    >
-                      <Stack direction="row" spacing={1}>
-                        <Button
-                          variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
-                          onClick={handleOpenAllNotes}
-                        >
-                          All notes
-                        </Button>
-                        <Button
-                          variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
-                          onClick={handleOpenSessionBrowser}
-                        >
-                          Browse by session
-                        </Button>
-                        <Button
-                          variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
-                          onClick={() => void handleOpenRecentActivity()}
-                        >
-                          Recent activity
-                        </Button>
-                      </Stack>
+                    <Stack direction="row" spacing={1}>
                       <Button
-                        variant="outlined"
-                        startIcon={<AddRoundedIcon />}
-                        onClick={handleStartNote}
+                        fullWidth
+                        variant={showBrowsePane ? 'contained' : 'outlined'}
+                        onClick={() => setNarrowWorkspacePanel('browse')}
                       >
-                        New note
+                        Browse notes
+                      </Button>
+                      <Button
+                        fullWidth
+                        variant={showEditorPane ? 'contained' : 'outlined'}
+                        onClick={() => setNarrowWorkspacePanel('editor')}
+                      >
+                        {mobileEditorLabel}
                       </Button>
                     </Stack>
                   </Stack>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            {showBrowsePane ? (
+              <Card sx={{ borderRadius: surfaceRadius }}>
+                <CardContent sx={{ p: 3 }}>
+                  <Stack spacing={3}>
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      spacing={2}
+                      sx={{ justifyContent: 'space-between' }}
+                    >
+                      <Box>
+                        <Typography variant="h5">{notePaneHeading}</Typography>
+                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                          {notePaneDescription}
+                        </Typography>
+                      </Box>
+                      <Stack spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
+                        <Box
+                          sx={{
+                            display: 'grid',
+                            gap: 1,
+                            width: '100%',
+                            gridTemplateColumns: {
+                              xs: '1fr',
+                              sm: 'repeat(2, minmax(0, 1fr))',
+                            },
+                          }}
+                        >
+                          <Button
+                            variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
+                            onClick={handleOpenAllNotes}
+                          >
+                            All notes
+                          </Button>
+                          <Button
+                            variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
+                            onClick={handleOpenSessionBrowser}
+                          >
+                            Browse by session
+                          </Button>
+                          <Button
+                            variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
+                            onClick={() => void handleOpenRecentActivity()}
+                          >
+                            Recent activity
+                          </Button>
+                          <Button
+                            variant="outlined"
+                            startIcon={<AddRoundedIcon />}
+                            onClick={handleStartNote}
+                            sx={{ width: '100%' }}
+                          >
+                            New note
+                          </Button>
+                        </Box>
+                      </Stack>
+                    </Stack>
 
                   <Stack
-                    direction="row"
+                    direction={{ xs: 'column', sm: 'row' }}
                     spacing={1}
                     component="form"
                     onSubmit={(event) => {
@@ -3275,24 +3347,38 @@ function App() {
                       )}
                     </Stack>
                   )}
-                </Stack>
-              </CardContent>
-            </Card>
+                  </Stack>
+                </CardContent>
+              </Card>
+            ) : null}
 
-            <Stack spacing={3}>
-              <Card sx={{ borderRadius: surfaceRadius }}>
-                <CardContent sx={{ p: 3 }}>
-                  <Stack spacing={2.5}>
-                    <Box>
-                      <Typography variant="h5">
-                        {isCreating ? 'Create note' : 'Edit note'}
-                      </Typography>
-                      <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                        {noteBrowseMode === 'sessions' && selectedSessionName
-                          ? `Every save is scoped to ${overview.campaign.name}. You are currently reviewing ${selectedSessionName}.`
-                          : `Every save is scoped to ${overview.campaign.name}, so each campaign can keep its own note trail.`}
-                      </Typography>
-                    </Box>
+            {showEditorPane ? (
+              <Stack spacing={3}>
+                <Card sx={{ borderRadius: surfaceRadius }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2.5}>
+                      {isNarrowNoteWorkspace ? (
+                        <Button
+                          variant="text"
+                          size="small"
+                          startIcon={<ArrowBackRoundedIcon />}
+                          onClick={() => setNarrowWorkspacePanel('browse')}
+                          sx={{ alignSelf: 'flex-start' }}
+                        >
+                          Browse notes
+                        </Button>
+                      ) : null}
+
+                      <Box>
+                        <Typography variant="h5">
+                          {isCreating ? 'Create note' : 'Edit note'}
+                        </Typography>
+                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                          {noteBrowseMode === 'sessions' && selectedSessionName
+                            ? `Every save is scoped to ${overview.campaign.name}. You are currently reviewing ${selectedSessionName}.`
+                            : `Every save is scoped to ${overview.campaign.name}, so each campaign can keep its own note trail.`}
+                        </Typography>
+                      </Box>
 
                     {isCreating ? (
                       <Stack spacing={1.5}>
@@ -3436,33 +3522,36 @@ function App() {
                 </CardContent>
               </Card>
 
-              <Card sx={{ borderRadius: surfaceRadius }}>
-                <CardContent sx={{ p: 3 }}>
-                  <Stack spacing={2}>
-                    <Typography variant="h5">Recent notes</Typography>
-                    <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                      Keep a lightweight snapshot of the latest notes for {overview.campaign.name}
-                      within easy reach.
-                    </Typography>
-                    {overview.recentNotes.length === 0 ? (
-                      <Typography color="text.secondary">
-                        Once you save notes, the freshest ones show up here.
-                      </Typography>
-                    ) : (
-                      overview.recentNotes.map((note) => (
-                        <Stack key={note.id} spacing={0.75}>
-                          <Typography variant="subtitle1">{note.title}</Typography>
-                          <Typography color="text.secondary" variant="body2">
-                            Updated {formatTimestamp(note.updatedAt)}
-                            {note.lastEditedBy && ` by ${note.lastEditedBy.displayName}`}
+                {hasSplitNoteWorkspace ? (
+                  <Card sx={{ borderRadius: surfaceRadius }}>
+                    <CardContent sx={{ p: 3 }}>
+                      <Stack spacing={2}>
+                        <Typography variant="h5">Recent notes</Typography>
+                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                          Keep a lightweight snapshot of the latest notes for{' '}
+                          {overview.campaign.name} within easy reach.
+                        </Typography>
+                        {overview.recentNotes.length === 0 ? (
+                          <Typography color="text.secondary">
+                            Once you save notes, the freshest ones show up here.
                           </Typography>
-                        </Stack>
-                      ))
-                    )}
-                  </Stack>
-                </CardContent>
-              </Card>
-            </Stack>
+                        ) : (
+                          overview.recentNotes.map((note) => (
+                            <Stack key={note.id} spacing={0.75}>
+                              <Typography variant="subtitle1">{note.title}</Typography>
+                              <Typography color="text.secondary" variant="body2">
+                                Updated {formatTimestamp(note.updatedAt)}
+                                {note.lastEditedBy && ` by ${note.lastEditedBy.displayName}`}
+                              </Typography>
+                            </Stack>
+                          ))
+                        )}
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ) : null}
+              </Stack>
+            ) : null}
           </Box>
         </Stack>
       </Container>

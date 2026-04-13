@@ -149,6 +149,7 @@ actor.
 - linked real accounts can open that claimed campaign in the authenticated app flow without reopening anonymous access
 - only the `/share/:shareToken` route is intended for embedding; the main app stays denied by default in the web server layer
 - the web app can create, edit, view, and delete notes inside the selected campaign, including built-in note templates for common structures
+- the authenticated note workspace keeps desktop browse/edit speed while switching to a single-pane browse-or-edit flow on smaller screens
 - shared links can expose the same notes workspace to guests with viewer or editor permissions
 - authenticated collaborators can switch between the flat note list and a session-focused browsing mode to answer "what happened in this session?"
 - authenticated collaborators can browse campaign tags with local facet counts, keep a visible single-tag filter, and reuse those tags through note-editor autocomplete without extra API calls
