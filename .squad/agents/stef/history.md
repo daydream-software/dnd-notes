@@ -89,3 +89,5 @@ Key patterns:
 
 ## 2026-04-13T16:07:01Z
 📌 Team update: Issue #30 third revision completed by Mikey (Lead) with frontend defensive coding fix. Issue now approved and ready to merge. Stef's initial frontend implementation (pass 1) was foundation for solution.
+
+📌 Team update (2026-04-13T18:14:27Z): UX feedback review completed—phased notes UX roadmap approved (compact header + editor + inline references), Lexical editor recommended over TipTap for markdown-native alignment, backend data model strategy for qualified references finalized — decided by Mikey (Product), Stef (Frontend), Data (Backend)

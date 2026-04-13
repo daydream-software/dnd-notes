@@ -2426,3 +2426,29 @@ Frontend defensive coding at four hotspots prevents crashes without cascading ty
 
 **Issue #30 APPROVED** — Ready to merge. All acceptance criteria met.
 
+# Notes UX + editor recommendation
+
+## Summary
+Keep the next slice thin: first compact the workspace and make campaign context obvious, then replace the plain textarea/preview pair with a markdown-native editor, then add first-class inline note references.
+
+## Immediate frontend-only changes
+- Shrink the current hero/workspace header into a compact campaign bar with the campaign selector, campaign name, system/setting, and small icon-first actions.
+- Reuse the existing browse/editor swap on every breakpoint so desktop can focus on one pane too; treat split view as optional, not the only large-screen mode.
+- Compress the browse surface: move quick capture + search + tag filters into a short toolbar / accordion, and reduce note rows to three single-line, ellipsized lines (title, body excerpt, session/meta).
+- Remove the always-on stacked markdown preview; use a mode toggle in the editor instead.
+
+## Backend / data-model work
+- Do not keep `linkedNoteIds` as the long-term source of truth for inline references. Add first-class note references derived from the body so links, backlinks, and search all come from one contract.
+- Save markdown as the canonical note body, but extract/persist structured references (source note, target note, label/qualifier) for rename safety, backlinking, and searchable meanings.
+
+## Phased order
+1. Compact header + campaign identity + universal browse/editor toggle + denser note rows.
+2. Introduce a dedicated editor component behind the existing `body: string` API contract.
+3. Add inline `!` reference insertion and body-derived reference panels.
+4. Expand search/filter UI to reference-aware queries once the reference model exists.
+
+## Editor recommendation
+Recommend Lexical for the editor layer, wrapped in MUI chrome, with markdown import/export so the API keeps storing `body` as markdown. It is more assembly work than TipTap, but it fits this repo better because the backend already stores markdown, `react-markdown` + `remark-gfm` already render that markdown correctly, and Lexical gives us the cleanest path to a custom inline note-reference node plus a raw-markdown mode without inventing a second document format.
+
+---
+

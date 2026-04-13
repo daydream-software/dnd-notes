@@ -88,3 +88,5 @@ Data initialized as Backend Dev for the initial project squad.
 
 ## 2026-04-13T16:07:01Z
 📌 Team update: Issue #30 third revision completed by Mikey (Lead). Data's backend implementation (second revision) successfully merged with frontend defensive coding. Issue now approved and ready to merge.
+
+📌 Team update (2026-04-13T18:14:27Z): UX feedback review completed—phased notes UX roadmap approved (compact header + editor + inline references), Lexical editor recommended over TipTap for markdown-native alignment, backend data model strategy for qualified references finalized — decided by Mikey (Product), Stef (Frontend), Data (Backend)
