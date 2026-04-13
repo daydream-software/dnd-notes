@@ -2,104 +2,122 @@
 
 ## Overview
 
-This project is configured to use git worktrees for isolated issue-based work. All worktrees are created in a dedicated .worktrees folder within the repo root, keeping the project structure clean and predictable.
+This project uses git worktrees for isolated issue-based work. The repo-local source of truth is `.squad/config.json`, which currently enables worktrees and places them in a dedicated `.worktrees/` folder inside the repo root.
 
-## Configuration
+## Preferred Configuration
 
-File: .squad/config.json
+File: `.squad/config.json`
 
+```json
 {
   "version": 1,
   "worktrees": true,
   "workTreesFolder": ".worktrees"
 }
+```
 
-- worktrees: true enables automatic worktree creation for issue-based work
-- workTreesFolder: ".worktrees" means all worktrees are created under repo-root/.worktrees/
+- `worktrees: true` enables worktree-based issue work
+- `workTreesFolder: ".worktrees"` tells Squad to create worktrees under `repo-root/.worktrees/`
+- Relative `workTreesFolder` values resolve from the repo root / team root
 
-## How Worktrees Are Created
+## Fallback Behavior
 
-When the Squad Coordinator assigns work on an issue, it:
+If `workTreesFolder` is omitted but `worktrees` stays enabled, Squad falls back to the legacy sibling-path layout:
 
-1. Determines the worktree path:
-   {repo-root}/.worktrees/{issue-number}
-   Example: Issue #42 → .worktrees/42/
+- Preferred in this repo: `{repo-root}/.worktrees/{issue-number}`
+- Fallback without `workTreesFolder`: `{repo-parent}/{repo-name}-{issue-number}`
 
-2. Creates a new worktree with an issue-specific branch:
-   git worktree add .worktrees/42 -b squad/42-kebab-case-slug main
+Example:
+- Configured folder: `/workspace/dnd-notes/.worktrees/42`
+- Fallback sibling path: `/workspace/dnd-notes-42`
 
-3. Links node_modules from the main repo to avoid reinstalling dependencies
+## How Worktrees Are Resolved
 
-4. Spawns agents with WORKTREE_PATH set to the worktree location
+When the Squad coordinator assigns issue-based work, it should:
+
+1. Read `.squad/config.json` first when deciding whether worktree mode is enabled
+2. Check `worktrees: true`
+3. If `workTreesFolder` is set, resolve `{repo-root}/{workTreesFolder}/{issue-number}`
+4. If `workTreesFolder` is absent, fall back to `{repo-parent}/{repo-name}-{issue-number}`
+5. Create or reuse the issue-specific branch worktree
+6. Link `node_modules` from the main repo when that optimization is available
+7. Spawn agents with `WORKTREE_PATH` set to the resolved path
 
 ## Folder Structure Example
 
+```text
 dnd-notes/
 ├── .git/
 ├── .squad/
-├── .worktrees/                    (All issue worktrees here)
-│   ├── 42/                        (Issue 42)
+├── .worktrees/
+│   ├── 42/
 │   │   ├── .git
 │   │   ├── apps/
 │   │   ├── package.json
-│   │   └── node_modules -> ../../../node_modules (symlink)
-│   ├── 45/                        (Issue 45)
-│   │   ├── .git
-│   │   ├── apps/
-│   │   └── ...
+│   │   └── node_modules -> ../../node_modules
+│   ├── 45/
 │   └── ...
 ├── apps/
 ├── package.json
 ├── node_modules/
 └── ...
+```
 
-## Usage
+## Manual Commands
 
-### For Squad Members Working in a Worktree
+Create a worktree with the configured repo-local folder:
 
-When the Coordinator spawns you for issue-based work:
-
-1. Your spawn prompt includes WORKTREE_PATH: repo-root/.worktrees/{issue-number}
-2. All file operations are relative to that path
-3. Do NOT switch branches — you're in an isolated worktree with its own branch
-4. Submit your work as usual; the Coordinator handles PR creation and worktree cleanup after merge
-
-### For Manual Worktree Operations
-
-If you need to create or manage worktrees manually:
-
-Create a worktree for issue N:
+```bash
 cd /workspace/dnd-notes
-git worktree add .worktrees/N -b squad/N-descriptive-slug main
-cd .worktrees/N
+git worktree add .worktrees/42 -b squad/42-descriptive-slug main
+cd .worktrees/42
 ln -s ../../node_modules node_modules
-npm run dev
+```
 
-List all active worktrees:
-git worktree list
+If `workTreesFolder` is not configured, use the fallback sibling path instead:
 
-Remove a worktree (after PR is merged):
+```bash
 cd /workspace/dnd-notes
-git worktree remove .worktrees/N
-git branch -d squad/N-descriptive-slug
+git worktree add ../dnd-notes-42 -b squad/42-descriptive-slug main
+cd ../dnd-notes-42
+ln -s ../dnd-notes/node_modules node_modules
+```
 
-## Why .worktrees/ ?
+List active worktrees:
 
-✅ Predictable location: All issue branches are under one folder
-✅ Clean repo root: No sibling dnd-notes-42 folders cluttering the workspace
-✅ Easy cleanup: Remove all worktrees at once if needed
-✅ Git-ignorable: Worktrees are local runtime state, excluded from version control
+```bash
+git worktree list
+```
 
-## Notes
+Remove a worktree after merge:
 
-- Worktrees are not tracked by git — they're in .gitignore by design
-- Each worktree has its own branch and git history
-- Worktrees can be created/removed freely without affecting the main repo
-- node_modules is symlinked to save disk space and installation time
-- The Coordinator automatically manages worktree lifecycle (create on issue start, remove on PR merge)
+```bash
+cd /workspace/dnd-notes
+git worktree remove .worktrees/42
+git branch -d squad/42-descriptive-slug
+```
 
-## See Also
+Fallback cleanup without `workTreesFolder`:
 
-- .squad/config.json — Project-level configuration
-- Squad Agent Template (.squad/templates/squad.agent.md) — Coordinator worktree automation rules
-- .gitignore — Excluded .worktrees/ from version control
+```bash
+cd /workspace/dnd-notes
+git worktree remove ../dnd-notes-42
+git branch -d squad/42-descriptive-slug
+```
+
+## Why `.worktrees/`?
+
+- Predictable location inside the project
+- Cleaner parent workspace: no sibling `dnd-notes-42` folders by default
+- Easy cleanup and discovery with one dedicated folder
+- Safe to ignore in git as local runtime state
+
+## Related Governance
+
+These files now describe the same behavior:
+
+- `.github/agents/squad.agent.md`
+- `.squad/templates/squad.agent.md`
+- `.squad/templates/issue-lifecycle.md`
+- `.squad/templates/skills/git-workflow/SKILL.md`
+- `.squad/config.json`
