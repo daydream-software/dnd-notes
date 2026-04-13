@@ -1743,6 +1743,190 @@ describe('App', () => {
     expect(screen.queryByText('Loading shared campaign...')).toBeNull()
   }, 20000)
 
+  it('supports session-based browsing without refetching the workspace', async () => {
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'cipher-fragment',
+        campaignId: defaultCampaignId,
+        title: 'Cipher fragment recovered',
+        body: 'Candlekeep contact goes silent after delivering the translated cipher.',
+        tags: ['clue', 'candlekeep'],
+        status: 'active',
+        sessionName: 'Session 11',
+        createdAt: '2026-04-08T18:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+      {
+        id: 'moonwell-ritual',
+        campaignId: defaultCampaignId,
+        title: 'Moonwell ritual notes',
+        body: 'The ritual requires three silver tokens placed at twilight.',
+        tags: ['ritual', 'moonwell'],
+        status: 'draft',
+        sessionName: 'Session 11',
+        createdAt: '2026-04-08T19:00:00.000Z',
+        updatedAt: '2026-04-10T21:00:00.000Z',
+      },
+      {
+        id: 'harbor-ambush',
+        campaignId: defaultCampaignId,
+        title: 'Harbor ambush',
+        body: 'Pirates attacked the trade ship during the night watch.',
+        tags: ['combat'],
+        status: 'active',
+        sessionName: 'Session 12',
+        createdAt: '2026-04-09T18:00:00.000Z',
+        updatedAt: '2026-04-11T20:00:00.000Z',
+      },
+      {
+        id: 'general-thoughts',
+        campaignId: defaultCampaignId,
+        title: 'Campaign timeline ideas',
+        body: 'Need to plan the faction dynamics for the next arc.',
+        tags: ['planning'],
+        status: 'draft',
+        sessionName: null,
+        createdAt: '2026-04-10T10:00:00.000Z',
+        updatedAt: '2026-04-10T10:00:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    expect(screen.getAllByText('Cipher fragment recovered').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Moonwell ritual notes').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Harbor ambush').length).toBeGreaterThan(0)
+    expect(screen.getByText('Campaign timeline ideas')).toBeTruthy()
+
+    expect(screen.getByRole('button', { name: 'All notes' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Browse by session' })).toBeTruthy()
+
+    const fetchCountBeforeBrowse = vi.mocked(globalThis.fetch).mock.calls.length
+
+    await user.click(screen.getByRole('button', { name: 'Browse by session' }))
+
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCountBeforeBrowse)
+
+    expect(screen.getByText('Session 11')).toBeTruthy()
+    expect(screen.getByText('Session 12')).toBeTruthy()
+    expect(screen.getByText('2 notes')).toBeTruthy()
+    expect(screen.getByText('1 note')).toBeTruthy()
+
+    await user.click(screen.getByText('Session 11'))
+
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCountBeforeBrowse)
+
+    expect(screen.getAllByText('Cipher fragment recovered').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Moonwell ritual notes').length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: '← All sessions' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: '← All sessions' }))
+
+    expect(screen.getByText('Session 11')).toBeTruthy()
+    expect(screen.getByText('Session 12')).toBeTruthy()
+
+    await user.click(screen.getByText('Session 12'))
+
+    expect(screen.getAllByText('Harbor ambush').length).toBeGreaterThan(0)
+
+    await user.click(screen.getByRole('button', { name: 'All notes' }))
+
+    expect(vi.mocked(globalThis.fetch).mock.calls.length).toBe(fetchCountBeforeBrowse)
+
+    expect(screen.getAllByText('Cipher fragment recovered').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Harbor ambush').length).toBeGreaterThan(0)
+    expect(screen.getByText('Campaign timeline ideas')).toBeTruthy()
+  }, 25000)
+
+  it('preserves draft state when switching browse modes', async () => {
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'session-note-1',
+        campaignId: defaultCampaignId,
+        title: 'Tavern encounter',
+        body: 'Met a suspicious elf at the tavern.',
+        tags: ['npc'],
+        status: 'active',
+        sessionName: 'Session 3',
+        createdAt: '2026-04-08T18:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
+
+    await user.type(screen.getByLabelText('Title'), 'Draft in progress')
+    await user.type(screen.getByLabelText('Body'), 'This is work in progress.')
+
+    expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Browse by session' }))
+
+    expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
+    expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'All notes' }))
+
+    expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
+    expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+  }, 25000)
+
+  it('shows empty state for session browsing when no notes have session names', async () => {
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'unlinked-note',
+        campaignId: defaultCampaignId,
+        title: 'Loose thoughts',
+        body: 'Some campaign ideas without a session.',
+        tags: [],
+        status: 'draft',
+        sessionName: null,
+        createdAt: '2026-04-08T18:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Browse by session' }))
+
+    expect(
+      screen.getByText(/No session-linked notes yet/),
+    ).toBeTruthy()
+  }, 25000)
+
   it('lets an owner use quick capture to create a note with just a title', async () => {
     const user = userEvent.setup()
     render(<App />)

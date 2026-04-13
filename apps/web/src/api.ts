@@ -17,6 +17,7 @@ import type {
   NotesResponse,
   OwnerLoginInput,
   OwnerRegistrationInput,
+  SessionsResponse,
   SharedJoinResponse,
   SharedMembershipClaimResponse,
   SharedSessionResponse,
@@ -265,6 +266,22 @@ export async function fetchNotes(
   return readJson<NotesResponse>(response)
 }
 
+export async function fetchSessions(
+  authToken: string,
+  campaignId: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/api/campaigns/${campaignId}/sessions`,
+    {
+      headers: createHeaders(authToken),
+      signal,
+    },
+  )
+
+  return readJson<SessionsResponse>(response)
+}
+
 export async function createNote(authToken: string, note: NoteInput) {
   const response = await fetch(`${apiBaseUrl}/api/notes`, {
     method: 'POST',
@@ -368,6 +385,19 @@ export async function fetchSharedNotes(
   })
 
   return readJson<NotesResponse>(response)
+}
+
+export async function fetchSharedSessions(
+  shareToken: string,
+  guestToken: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/sessions`, {
+    headers: createGuestHeaders(guestToken),
+    signal,
+  })
+
+  return readJson<SessionsResponse>(response)
 }
 
 export async function createSharedNote(

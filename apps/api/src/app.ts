@@ -17,6 +17,7 @@ import type {
   NotesOverview,
   NotesResponse,
   OwnerAccount,
+  SessionsResponse,
   SharedJoinResponse,
   SharedMembershipClaimResponse,
   SharedSessionResponse,
@@ -455,6 +456,33 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       }
 
       response.json({ campaign })
+    },
+  )
+
+  app.get(
+    '/api/campaigns/:campaignId/sessions',
+    (
+      request: Request<CampaignParams>,
+      response: Response<SessionsResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveAccessibleCampaign(
+        noteStore,
+        owner,
+        request.params.campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      response.json({ sessions: noteStore.listSessionNames(campaign.id) })
     },
   )
 
@@ -1119,6 +1147,35 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       }
 
       response.json({ notes: noteStore.listNotes(shared.campaign.id) })
+    },
+  )
+
+  app.get(
+    '/api/shared/:shareToken/sessions',
+    (
+      request: Request<ShareParams>,
+      response: Response<SessionsResponse | ErrorResponse>,
+    ) => {
+      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+
+      if (!shared) {
+        return
+      }
+
+      applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
+
+      const membership = requireSharedMembership(
+        noteStore,
+        request,
+        shared.campaign.id,
+        response,
+      )
+
+      if (!membership) {
+        return
+      }
+
+      response.json({ sessions: noteStore.listSessionNames(shared.campaign.id) })
     },
   )
 

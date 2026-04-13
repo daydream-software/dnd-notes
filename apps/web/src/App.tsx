@@ -97,6 +97,7 @@ interface RevealedShareLink {
 }
 
 type CampaignFormMode = 'closed' | 'create' | 'edit'
+type BrowseMode = 'all' | 'by-session'
 
 const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
@@ -302,6 +303,8 @@ function App() {
   )
   const [copiedShareLinkId, setCopiedShareLinkId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [browseMode, setBrowseMode] = useState<BrowseMode>('all')
+  const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null)
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
   const [isQuickCapturing, setIsQuickCapturing] = useState(false)
   const selectedNoteIdRef = useRef<string | null>(null)
@@ -314,6 +317,52 @@ function App() {
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
     [notes, selectedNoteId],
   )
+
+  const sessionSummaries = useMemo(() => {
+    const sessionMap = new Map<string, { noteCount: number; latestActivity: string }>()
+
+    for (const note of notes) {
+      if (note.sessionName === null) {
+        continue
+      }
+
+      const existing = sessionMap.get(note.sessionName)
+
+      if (existing) {
+        existing.noteCount += 1
+        if (note.updatedAt > existing.latestActivity) {
+          existing.latestActivity = note.updatedAt
+        }
+      } else {
+        sessionMap.set(note.sessionName, {
+          noteCount: 1,
+          latestActivity: note.updatedAt,
+        })
+      }
+    }
+
+    const summaries: { sessionName: string; noteCount: number; latestActivity: string }[] = []
+
+    for (const [sessionName, data] of sessionMap) {
+      summaries.push({
+        sessionName,
+        noteCount: data.noteCount,
+        latestActivity: data.latestActivity,
+      })
+    }
+
+    summaries.sort((a, b) => b.latestActivity.localeCompare(a.latestActivity))
+
+    return summaries
+  }, [notes])
+
+  const displayedNotes = useMemo(() => {
+    if (browseMode !== 'by-session' || selectedSessionName === null) {
+      return notes
+    }
+
+    return notes.filter((note) => note.sessionName === selectedSessionName)
+  }, [notes, browseMode, selectedSessionName])
 
   const selectedCampaign = useMemo(
     () =>
@@ -386,6 +435,8 @@ function App() {
     setCampaignDraft(createCampaignDraft())
     setShareLinkDraft(createShareLinkDraft())
     setCampaignFormMode('closed')
+    setBrowseMode('all')
+    setSelectedSessionName(null)
     resetShareLinkInteractionState()
   }, [resetShareLinkInteractionState])
 
@@ -973,6 +1024,8 @@ function App() {
     setCampaignFormMode('closed')
     setMemberships([])
     setShareLinks([])
+    setBrowseMode('all')
+    setSelectedSessionName(null)
     resetShareLinkInteractionState()
     await loadWorkspace(authToken, campaignId)
   }
@@ -1755,6 +1808,29 @@ function App() {
                     </Button>
                   </Stack>
 
+                  <Stack direction="row" spacing={1}>
+                    <Button
+                      variant={browseMode === 'all' ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => {
+                        setBrowseMode('all')
+                        setSelectedSessionName(null)
+                      }}
+                    >
+                      All notes
+                    </Button>
+                    <Button
+                      variant={browseMode === 'by-session' ? 'contained' : 'outlined'}
+                      size="small"
+                      onClick={() => {
+                        setBrowseMode('by-session')
+                        setSelectedSessionName(null)
+                      }}
+                    >
+                      Browse by session
+                    </Button>
+                  </Stack>
+
                   <Stack
                     direction="row"
                     spacing={1}
@@ -1783,83 +1859,150 @@ function App() {
                     </Button>
                   </Stack>
 
-                  {notes.length === 0 ? (
+                  {browseMode === 'by-session' && selectedSessionName === null ? (
+                    sessionSummaries.length === 0 ? (
+                      <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                        No session-linked notes yet. Add a session name to a note to start
+                        grouping notes by session.
+                      </Alert>
+                    ) : (
+                      <List disablePadding sx={{ display: 'grid', gap: 1.5 }}>
+                        {sessionSummaries.map((session) => (
+                          <ListItemButton
+                            key={session.sessionName}
+                            onClick={() => setSelectedSessionName(session.sessionName)}
+                            sx={{
+                              borderRadius: noteItemRadius,
+                              border: '1px solid',
+                              borderColor: 'divider',
+                            }}
+                          >
+                            <ListItemText
+                              disableTypography
+                              primary={
+                                <Stack
+                                  direction={{ xs: 'column', sm: 'row' }}
+                                  spacing={1}
+                                  sx={{ justifyContent: 'space-between' }}
+                                >
+                                  <Typography variant="h6">{session.sessionName}</Typography>
+                                  <Chip
+                                    label={`${session.noteCount} ${session.noteCount === 1 ? 'note' : 'notes'}`}
+                                    color="primary"
+                                    size="small"
+                                  />
+                                </Stack>
+                              }
+                              secondary={
+                                <Typography color="text.secondary" variant="body2" sx={{ mt: 1 }}>
+                                  Last activity {formatTimestamp(session.latestActivity)}
+                                </Typography>
+                              }
+                            />
+                          </ListItemButton>
+                        ))}
+                      </List>
+                    )
+                  ) : notes.length === 0 ? (
                     <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
                       No notes yet in this campaign. Create the first one to start using the
                       workspace.
                     </Alert>
                   ) : (
-                    <List disablePadding sx={{ display: 'grid', gap: 1.5 }}>
-                      {notes.map((note) => (
-                        <ListItemButton
-                          key={note.id}
-                          selected={selectedNoteId === note.id && !isCreating}
-                          onClick={() => handleSelectNote(note)}
-                          sx={{
-                            borderRadius: noteItemRadius,
-                            border: '1px solid',
-                            borderColor:
-                              selectedNoteId === note.id && !isCreating
-                                ? 'primary.main'
-                                : 'divider',
-                            alignItems: 'flex-start',
-                          }}
-                        >
-                          <ListItemText
-                            disableTypography
-                            primary={
-                              <Stack
-                                direction={{ xs: 'column', sm: 'row' }}
-                                spacing={1}
-                                sx={{ justifyContent: 'space-between' }}
-                              >
-                                <Typography variant="h6">{note.title}</Typography>
-                                <Chip
-                                  label={note.status}
-                                  color={
-                                    note.status === 'active'
-                                      ? 'secondary'
-                                      : note.status === 'archived'
-                                        ? 'default'
-                                        : 'primary'
-                                  }
-                                  size="small"
-                                />
-                              </Stack>
-                            }
-                            secondary={
-                              <Stack spacing={1.25} sx={{ mt: 1.25 }}>
-                                <Typography color="text.secondary">
-                                  {excerpt(note.body)}
-                                </Typography>
-                                <Typography color="text.secondary" variant="body2">
-                                  {note.sessionName ? `${note.sessionName} • ` : ''}
-                                  Updated {formatTimestamp(note.updatedAt)}
-                                </Typography>
-                                {note.createdBy && (
-                                  <Typography color="text.secondary" variant="body2">
-                                    Created by {note.createdBy.displayName}
-                                    {note.lastEditedBy &&
-                                      note.lastEditedBy.membershipId !== note.createdBy.membershipId &&
-                                      ` • Edited by ${note.lastEditedBy.displayName}`}
-                                  </Typography>
-                                )}
-                                <Stack
-                                  direction="row"
-                                  spacing={1}
-                                  useFlexGap
-                                  sx={{ flexWrap: 'wrap' }}
-                                >
-                                  {note.tags.map((tag) => (
-                                    <Chip key={tag} label={tag} size="small" />
-                                  ))}
-                                </Stack>
-                              </Stack>
-                            }
-                          />
-                        </ListItemButton>
-                      ))}
-                    </List>
+                    <>
+                      {browseMode === 'by-session' && selectedSessionName !== null ? (
+                        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                          <Button
+                            size="small"
+                            variant="text"
+                            onClick={() => setSelectedSessionName(null)}
+                          >
+                            ← All sessions
+                          </Button>
+                          <Typography variant="subtitle1" color="text.secondary">
+                            {selectedSessionName}
+                          </Typography>
+                        </Stack>
+                      ) : null}
+
+                      {displayedNotes.length === 0 ? (
+                        <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                          No notes in this session.
+                        </Alert>
+                      ) : (
+                        <List disablePadding sx={{ display: 'grid', gap: 1.5 }}>
+                          {displayedNotes.map((note) => (
+                            <ListItemButton
+                              key={note.id}
+                              selected={selectedNoteId === note.id && !isCreating}
+                              onClick={() => handleSelectNote(note)}
+                              sx={{
+                                borderRadius: noteItemRadius,
+                                border: '1px solid',
+                                borderColor:
+                                  selectedNoteId === note.id && !isCreating
+                                    ? 'primary.main'
+                                    : 'divider',
+                                alignItems: 'flex-start',
+                              }}
+                            >
+                              <ListItemText
+                                disableTypography
+                                primary={
+                                  <Stack
+                                    direction={{ xs: 'column', sm: 'row' }}
+                                    spacing={1}
+                                    sx={{ justifyContent: 'space-between' }}
+                                  >
+                                    <Typography variant="h6">{note.title}</Typography>
+                                    <Chip
+                                      label={note.status}
+                                      color={
+                                        note.status === 'active'
+                                          ? 'secondary'
+                                          : note.status === 'archived'
+                                            ? 'default'
+                                            : 'primary'
+                                      }
+                                      size="small"
+                                    />
+                                  </Stack>
+                                }
+                                secondary={
+                                  <Stack spacing={1.25} sx={{ mt: 1.25 }}>
+                                    <Typography color="text.secondary">
+                                      {excerpt(note.body)}
+                                    </Typography>
+                                    <Typography color="text.secondary" variant="body2">
+                                      {note.sessionName ? `${note.sessionName} • ` : ''}
+                                      Updated {formatTimestamp(note.updatedAt)}
+                                    </Typography>
+                                    {note.createdBy && (
+                                      <Typography color="text.secondary" variant="body2">
+                                        Created by {note.createdBy.displayName}
+                                        {note.lastEditedBy &&
+                                          note.lastEditedBy.membershipId !== note.createdBy.membershipId &&
+                                          ` • Edited by ${note.lastEditedBy.displayName}`}
+                                      </Typography>
+                                    )}
+                                    <Stack
+                                      direction="row"
+                                      spacing={1}
+                                      useFlexGap
+                                      sx={{ flexWrap: 'wrap' }}
+                                    >
+                                      {note.tags.map((tag) => (
+                                        <Chip key={tag} label={tag} size="small" />
+                                      ))}
+                                    </Stack>
+                                  </Stack>
+                                }
+                              />
+                            </ListItemButton>
+                          ))}
+                        </List>
+                      )}
+                    </>
                   )}
                 </Stack>
               </CardContent>
