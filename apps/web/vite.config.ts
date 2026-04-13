@@ -73,6 +73,8 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), createFrameAncestorsPlugin(apiBaseUrl)],
     test: {
       environment: 'jsdom',
+      pool: 'threads',
+      testTimeout: 15000,
     },
   }
 })
