@@ -7,6 +7,7 @@ import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -312,6 +313,54 @@ function sortSessionSummaries(sessions: SessionSummary[]) {
   )
 }
 
+interface TagFacet {
+  tag: string
+  count: number
+}
+
+function sortTagFacets(notes: Note[]): TagFacet[] {
+  const counts = new Map<string, number>()
+
+  for (const note of notes) {
+    for (const tag of note.tags) {
+      const normalized = tag.toLowerCase()
+      counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+    }
+  }
+
+  return [...counts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((left, right) =>
+      right.count !== left.count
+        ? right.count - left.count
+        : left.tag.localeCompare(right.tag),
+    )
+}
+
+function normalizeTagValues(values: string[]): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const raw of values) {
+    for (const segment of raw.split(',')) {
+      const trimmed = segment.trim()
+
+      if (trimmed.length === 0) {
+        continue
+      }
+
+      const key = trimmed.toLowerCase()
+
+      if (!seen.has(key)) {
+        seen.add(key)
+        result.push(trimmed)
+      }
+    }
+  }
+
+  return result
+}
+
 function App() {
   const shareToken = useMemo(
     () =>
@@ -386,6 +435,7 @@ function App() {
   )
   const [copiedShareLinkId, setCopiedShareLinkId] = useState<string | null>(null)
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const noteBrowseModeRef = useRef<NoteBrowseMode>('notes')
   const selectedNoteIdRef = useRef<string | null>(null)
@@ -460,13 +510,64 @@ function App() {
       ) ?? null,
     [activityCollaborators, selectedActivityMembershipId],
   )
-  const displayedNotes = useMemo(
-    () =>
+  const tagFacets = useMemo(() => sortTagFacets(notes), [notes])
+  const allTagNames = useMemo(
+    () => tagFacets.map((facet) => facet.tag),
+    [tagFacets],
+  )
+  const displayedNotes = useMemo(() => {
+    const base =
       noteBrowseMode === 'sessions' && selectedSessionName
         ? sessionNotes
-        : notes,
-    [noteBrowseMode, notes, selectedSessionName, sessionNotes],
-  )
+        : notes
+    if (noteBrowseMode === 'notes' && selectedTag) {
+      const lowerTag = selectedTag.toLowerCase()
+      return base.filter((note) =>
+        note.tags.some((tag) => tag.toLowerCase() === lowerTag),
+      )
+    }
+    return base
+  }, [noteBrowseMode, notes, selectedSessionName, selectedTag, sessionNotes])
+
+  // Auto-clear selectedTag when the tag disappears from facets (e.g. last note with that tag was edited)
+  useEffect(() => {
+    if (
+      selectedTag &&
+      !tagFacets.some((facet) => facet.tag === selectedTag)
+    ) {
+      setSelectedTag(null)
+    }
+  }, [selectedTag, tagFacets])
+
+  // Keep selected note in sync with the displayed note list so the detail
+  // pane never shows a note that isn't visible in the list (the list/detail
+  // mismatch bug).
+  useEffect(() => {
+    if (noteBrowseMode !== 'notes' || !selectedTag) {
+      return
+    }
+
+    if (selectedNoteId && !isCreating) {
+      const stillVisible = displayedNotes.some(
+        (note) => note.id === selectedNoteId,
+      )
+
+      if (!stillVisible) {
+        const fallback = displayedNotes[0] ?? null
+
+        if (fallback) {
+          setSelectedNoteId(fallback.id)
+          setDraft(createDraftFromNote(fallback))
+        } else {
+          setSelectedNoteId(null)
+          setIsCreating(true)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createEmptyDraft())
+        }
+      }
+    }
+  }, [displayedNotes, isCreating, noteBrowseMode, selectedNoteId, selectedTag])
+
   const sortedActivityEntries = useMemo(
     () => sortActivityEntries(activityEntries),
     [activityEntries],
@@ -616,6 +717,7 @@ function App() {
     setNoteBrowseMode('notes')
     setSessionSummaries([])
     setQuickCaptureTitle('')
+    setSelectedTag(null)
     setSelectedNoteId(null)
     setDraft(createEmptyDraft())
     setCampaignDraft(createCampaignDraft())
@@ -894,14 +996,49 @@ function App() {
     setError(null)
   }
 
+  const handleSelectTag = (tag: string) => {
+    setNoteBrowseMode('notes')
+    resetSessionBrowserState()
+    setError(null)
+    const nextTag = selectedTag === tag ? null : tag
+    setSelectedTag(nextTag)
+
+    if (nextTag) {
+      const lowerTag = nextTag.toLowerCase()
+      const filtered = notes.filter((note) =>
+        note.tags.some((noteTag) => noteTag.toLowerCase() === lowerTag),
+      )
+      const currentStillVisible =
+        selectedNoteId && !isCreating
+          ? filtered.some((note) => note.id === selectedNoteId)
+          : false
+      if (!currentStillVisible) {
+        const fallback = filtered[0] ?? null
+        if (fallback) {
+          setSelectedNoteId(fallback.id)
+          setIsCreating(false)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createDraftFromNote(fallback))
+        } else {
+          setSelectedNoteId(null)
+          setIsCreating(true)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createEmptyDraft())
+        }
+      }
+    }
+  }
+
   const handleOpenAllNotes = () => {
     setNoteBrowseMode('notes')
+    setSelectedTag(null)
     resetSessionBrowserState()
     setError(null)
   }
 
   const handleOpenSessionBrowser = () => {
     setNoteBrowseMode('sessions')
+    setSelectedTag(null)
     resetSessionBrowserState()
     setError(null)
   }
@@ -912,6 +1049,7 @@ function App() {
     }
 
     setNoteBrowseMode('activity')
+    setSelectedTag(null)
     resetSessionBrowserState()
     setError(null)
     await loadActivity(
@@ -1002,6 +1140,7 @@ function App() {
 
   const handleStartNote = () => {
     setNoteBrowseMode('notes')
+    setSelectedTag(null)
     resetSessionBrowserState()
     setSelectedNoteId(null)
     setIsCreating(true)
@@ -1028,6 +1167,7 @@ function App() {
 
       setQuickCaptureTitle('')
       setNoteBrowseMode('notes')
+      setSelectedTag(null)
       resetSessionBrowserState()
       await loadWorkspace(authToken, selectedCampaignId, createdNote.id)
     } catch (captureError) {
@@ -2306,6 +2446,47 @@ function App() {
                     </Button>
                   </Stack>
 
+                  {noteBrowseMode === 'notes' && tagFacets.length > 0 ? (
+                    <Stack spacing={1.5}>
+                      <Typography variant="subtitle1">Browse by tag</Typography>
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        useFlexGap
+                        aria-label="Tag facets"
+                        sx={{ flexWrap: 'wrap' }}
+                      >
+                        {tagFacets.map((facet) => (
+                          <Chip
+                            key={facet.tag}
+                            label={`${facet.tag} (${facet.count})`}
+                            size="small"
+                            color={selectedTag === facet.tag ? 'primary' : 'default'}
+                            variant={selectedTag === facet.tag ? 'filled' : 'outlined'}
+                            onClick={() => handleSelectTag(facet.tag)}
+                          />
+                        ))}
+                      </Stack>
+                      {selectedTag ? (
+                        <Button
+                          variant="text"
+                          size="small"
+                          onClick={() => {
+                            setSelectedTag(null)
+                            setError(null)
+                          }}
+                          sx={{ alignSelf: 'flex-start' }}
+                        >
+                          Clear tag filter
+                        </Button>
+                      ) : null}
+                    </Stack>
+                  ) : noteBrowseMode === 'notes' && notes.length > 0 && tagFacets.length === 0 ? (
+                    <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                      Tags become quick campaign shelves. Add tags to notes and they appear here for one-click browsing.
+                    </Alert>
+                  ) : null}
+
                   {noteBrowseMode === 'activity' ? (
                     <Stack spacing={2.5}>
                       <Stack spacing={1.5}>
@@ -2562,7 +2743,9 @@ function App() {
                         <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
                           {noteBrowseMode === 'sessions' && selectedSessionName
                             ? 'No notes remain in this session. Head back to the session list or save a note with the same session name.'
-                            : 'No notes yet in this campaign. Create the first one to start using the workspace.'}
+                            : selectedTag
+                              ? `No notes use the ${selectedTag} tag yet. Clear the filter or add the tag to a note.`
+                              : 'No notes yet in this campaign. Create the first one to start using the workspace.'}
                         </Alert>
                       ) : (
                         <List
@@ -2710,13 +2893,62 @@ function App() {
                       helperText="Optional. Use this when a note belongs to a specific session."
                     />
 
-                    <TextField
-                      label="Tags"
-                      value={draft.tagsText}
-                      onChange={(event) =>
-                        handleDraftChange('tagsText', event.target.value)
+                    <Autocomplete
+                      multiple
+                      freeSolo
+                      filterSelectedOptions
+                      options={allTagNames}
+                      value={draft.tagsText
+                        .split(',')
+                        .map((tag) => tag.trim())
+                        .filter(Boolean)}
+                      onChange={(_event, nextValues) => {
+                        const normalized = normalizeTagValues(
+                          nextValues as string[],
+                        )
+                        handleDraftChange('tagsText', normalized.join(', '))
+                      }}
+                      onBlur={(event) => {
+                        const input = (event.target as HTMLInputElement).value?.trim()
+                        if (input) {
+                          const current = draft.tagsText
+                            .split(',')
+                            .map((tag) => tag.trim())
+                            .filter(Boolean)
+                          const normalized = normalizeTagValues([...current, input])
+                          handleDraftChange('tagsText', normalized.join(', '))
+                        }
+                      }}
+                      renderValue={(
+                        values: string[],
+                        getItemProps: (args: { index: number }) => {
+                          key: number
+                          className: string
+                          disabled: boolean
+                          'data-item-index': number
+                          tabIndex: -1
+                          onDelete: (event: unknown) => void
+                        },
+                      ) =>
+                        values.map((option: string, index: number) => {
+                          const { key, ...chipProps } = getItemProps({ index })
+                          return (
+                            <Chip
+                              key={key}
+                              label={option}
+                              size="small"
+                              {...chipProps}
+                            />
+                          )
+                        })
                       }
-                      helperText="Comma-separated tags such as clue, faction, or travel."
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Tags"
+                          helperText="Type a tag and press Enter, or pick from suggestions."
+                        />
+                      )}
                     />
 
                     <TextField

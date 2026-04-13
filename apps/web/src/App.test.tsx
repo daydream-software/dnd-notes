@@ -1637,7 +1637,7 @@ describe('App', () => {
     await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
 
     expect(await screen.findByDisplayValue('Harper safe house')).toBeTruthy()
-    expect(screen.getByText('safehouse')).toBeTruthy()
+    expect(screen.getAllByText('safehouse').length).toBeGreaterThan(0)
 
     await user.clear(screen.getByLabelText('Title'))
     await user.type(screen.getByLabelText('Title'), 'Harper safe house secured')
@@ -1831,7 +1831,8 @@ describe('App', () => {
     await user.click(await screen.findByRole('option', { name: 'Faction brief' }))
 
     expect(screen.getByDisplayValue('Faction brief')).toBeTruthy()
-    expect(screen.getByDisplayValue('faction, politics')).toBeTruthy()
+    expect(screen.getAllByText('faction').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('politics').length).toBeGreaterThan(0)
     expect(screen.getByDisplayValue(/What the faction wants:/)).toBeTruthy()
 
     await user.clear(screen.getByLabelText('Title'))
@@ -2450,5 +2451,186 @@ describe('App', () => {
     expect(
       await screen.findByDisplayValue('Strange runes near the harbor'),
     ).toBeTruthy()
+  }, 15000)
+
+  it('renders tag facets with counts and filters notes when a tag is clicked', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    // Tag facets should be visible (clue appears on 2 notes, recap on 1, etc.)
+    const tagFacets = screen.getByLabelText('Tag facets')
+    expect(tagFacets).toBeTruthy()
+    expect(within(tagFacets).getByText('clue (2)')).toBeTruthy()
+    expect(within(tagFacets).getByText('recap (1)')).toBeTruthy()
+    expect(within(tagFacets).getByText('harbor (1)')).toBeTruthy()
+    expect(within(tagFacets).getByText('sigils (1)')).toBeTruthy()
+    expect(within(tagFacets).getByText('candlekeep (1)')).toBeTruthy()
+    expect(within(tagFacets).getByText('logistics (1)')).toBeTruthy()
+
+    // Verify all 4 notes are shown initially
+    const notesList = screen.getByRole('list', { name: 'Notes list' })
+    expect(within(notesList).getAllByRole('button').length).toBe(4)
+
+    // Click the 'clue' tag to filter
+    await user.click(within(tagFacets).getByText('clue (2)'))
+
+    // Only 2 notes should be visible
+    await waitFor(() => {
+      expect(within(notesList).getAllByRole('button').length).toBe(2)
+    })
+    expect(within(notesList).getByText('Vault sigils mapped')).toBeTruthy()
+    expect(within(notesList).getByText('Cipher fragment recovered')).toBeTruthy()
+
+    // Clear tag filter button should be visible
+    expect(screen.getByRole('button', { name: 'Clear tag filter' })).toBeTruthy()
+
+    // Click tag again to deselect
+    await user.click(within(tagFacets).getByText('clue (2)'))
+
+    await waitFor(() => {
+      expect(within(notesList).getAllByRole('button').length).toBe(4)
+    })
+  }, 15000)
+
+  it('keeps the selected note in sync when a tag filter excludes the current detail pane note', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    // The first note (Storm ledger updated) should be loaded in the editor
+    expect(screen.getByDisplayValue('Storm ledger updated')).toBeTruthy()
+
+    // Click the 'logistics' tag — Storm ledger has ['recap', 'harbor'], not 'logistics'
+    const tagFacets = screen.getByLabelText('Tag facets')
+    await user.click(within(tagFacets).getByText('logistics (1)'))
+
+    // The editor should now show the note that has the 'logistics' tag (Quartermaster ledger)
+    await waitFor(() => {
+      expect(screen.getByDisplayValue('Quartermaster ledger')).toBeTruthy()
+    })
+
+    // The notes list should only show 1 note
+    const notesList = screen.getByRole('list', { name: 'Notes list' })
+    expect(within(notesList).getAllByRole('button').length).toBe(1)
+    expect(within(notesList).getByText('Quartermaster ledger')).toBeTruthy()
+  }, 15000)
+
+  it('clears tag filter when switching to session browsing or recent activity', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    // Select a tag
+    const tagFacets = screen.getByLabelText('Tag facets')
+    await user.click(within(tagFacets).getByText('clue (2)'))
+
+    // Verify the filter is active (only 2 notes shown)
+    const notesList = screen.getByRole('list', { name: 'Notes list' })
+    await waitFor(() => {
+      expect(within(notesList).getAllByRole('button').length).toBe(2)
+    })
+
+    // Switch to session browsing
+    await user.click(screen.getByRole('button', { name: 'Browse by session' }))
+
+    // Switch back to All notes
+    await user.click(screen.getByRole('button', { name: 'All notes' }))
+
+    // Tag filter should be cleared — all 4 notes should be visible
+    await waitFor(() => {
+      const list = screen.getByRole('list', { name: 'Notes list' })
+      expect(within(list).getAllByRole('button').length).toBe(4)
+    })
+  }, 15000)
+
+  it('suggests existing tags in the autocomplete when editing a note', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    // The first note (Storm ledger) should be loaded — it has tags 'recap', 'harbor'
+    expect(screen.getByDisplayValue('Storm ledger updated')).toBeTruthy()
+
+    // The tags should be rendered as chips in the Autocomplete
+    // The existing tags on the note should show as chips
+    expect(screen.getAllByText('recap').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('harbor').length).toBeGreaterThan(0)
+
+    // Type a new tag from the suggestion list into the Tags input
+    const tagsInput = screen.getByLabelText('Tags')
+    await user.click(tagsInput)
+    await user.type(tagsInput, 'cl')
+
+    // The autocomplete should suggest 'clue' (which exists on other notes)
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: 'clue' })).toBeTruthy()
+    })
+  }, 15000)
+
+  it('updates tag facet counts after saving a note with new tags', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(
+      (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    // Initially 'clue' tag has count 2
+    const tagFacets = screen.getByLabelText('Tag facets')
+    expect(within(tagFacets).getByText('clue (2)')).toBeTruthy()
+
+    // Edit the first note (Storm ledger) to add 'clue' tag
+    expect(screen.getByDisplayValue('Storm ledger updated')).toBeTruthy()
+
+    const tagsInput = screen.getByLabelText('Tags')
+    await user.click(tagsInput)
+    await user.type(tagsInput, 'clue')
+    await user.keyboard('{Enter}')
+
+    await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
+
+    // After save, clue count should increase to 3
+    await waitFor(() => {
+      const updatedFacets = screen.getByLabelText('Tag facets')
+      expect(within(updatedFacets).getByText('clue (3)')).toBeTruthy()
+    })
   }, 15000)
 })
