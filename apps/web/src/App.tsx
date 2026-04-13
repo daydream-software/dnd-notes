@@ -551,18 +551,18 @@ function App() {
 
   // Keep the selected note in sync with the displayed note list so the
   // detail pane never shows a note that is not visible in the list.
-  useEffect(() => {
-    if (noteBrowseMode !== 'notes' || !selectedTagFilter) {
-      return
-    }
+  const syncNoteSelectionToVisibleNotes = useCallback(
+    (visibleNotes: Note[]) => {
+      if (!selectedNoteId || isCreating) {
+        return
+      }
 
-    if (selectedNoteId && !isCreating) {
-      const stillVisible = displayedNotes.some(
+      const stillVisible = visibleNotes.some(
         (note) => note.id === selectedNoteId,
       )
 
       if (!stillVisible) {
-        const fallback = displayedNotes[0] ?? null
+        const fallback = visibleNotes[0] ?? null
 
         if (fallback) {
           setSelectedNoteId(fallback.id)
@@ -576,8 +576,17 @@ function App() {
           setDraft(createEmptyDraft())
         }
       }
+    },
+    [isCreating, selectedNoteId],
+  )
+
+  useEffect(() => {
+    if (noteBrowseMode !== 'notes' || !selectedTagFilter) {
+      return
     }
-  }, [displayedNotes, isCreating, noteBrowseMode, selectedNoteId, selectedTagFilter])
+
+    syncNoteSelectionToVisibleNotes(displayedNotes)
+  }, [displayedNotes, noteBrowseMode, selectedTagFilter, syncNoteSelectionToVisibleNotes])
 
   const statCards = useMemo(() => {
     if (!overview) {
@@ -1020,25 +1029,9 @@ function App() {
     setSelectedTagFilter(nextTag)
     setError(null)
 
-    if (nextTag && selectedNoteId && !isCreating) {
+    if (nextTag) {
       const filtered = notes.filter((note) => note.tags.includes(nextTag))
-      const stillVisible = filtered.some((note) => note.id === selectedNoteId)
-
-      if (!stillVisible) {
-        const fallback = filtered[0] ?? null
-
-        if (fallback) {
-          setSelectedNoteId(fallback.id)
-          setIsCreating(false)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createDraftFromNote(fallback))
-        } else {
-          setSelectedNoteId(null)
-          setIsCreating(true)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createEmptyDraft())
-        }
-      }
+      syncNoteSelectionToVisibleNotes(filtered)
     }
   }
 

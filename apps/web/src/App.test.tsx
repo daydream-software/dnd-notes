@@ -2663,10 +2663,11 @@ describe('App', () => {
       const filtered = screen.getByRole('list', { name: 'Notes list' })
       expect(within(filtered).getAllByRole('button').length).toBe(2)
     })
+    const editorTitle = screen.getByLabelText('Title') as HTMLInputElement
     expect(
-      screen.getByDisplayValue('Reef warning') ||
-        screen.getByDisplayValue('Cipher fragment recovered'),
-    ).toBeTruthy()
+      editorTitle.value === 'Reef warning' ||
+        editorTitle.value === 'Cipher fragment recovered',
+    ).toBe(true)
 
     // Clear filter should restore all notes
     await user.click(screen.getByRole('button', { name: 'Clear filter' }))
