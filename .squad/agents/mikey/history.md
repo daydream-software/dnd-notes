@@ -44,6 +44,10 @@ Mikey initialized as Lead for the initial project squad.
 - **Key file paths:** Schema in `apps/api/src/note-store.ts:342-353`, share link creation at `:1040-1081`, token hashing at `:181-187`, UI share card at `apps/web/src/App.tsx:1246-1287`.
 - **Architecture decision:** Recommended storing tokens reversibly (plaintext or encrypted) alongside existing hash. Same link, no second mechanism. Two-slice plan: backend token storage + retrieval endpoint, then frontend blur/reveal UX. The consolidated outcome now lives in `.squad/decisions.md`.
 
+## 2026-04-13: Post-#33 Routing Correction & Landing Order Analysis
+
+📌 Team update (2026-04-13): Mikey completed routing correction pass confirming next lane post-#33. Corrected stale assumption (PRs #35, #36 pending) with actual state (both merged). Routing decision unchanged and confirmed: zero-dependency path to Issue #28 immediately after #33 lands. Reviewed `NoteStore.ts` for tag-query pattern fit; no architectural surprises. Landing order confirmed: #33 → #28 → #24 → #25; #26, #30 parking lot. #28 ownership: Stef preferred, Copilot fallback (4–6h). Decision: PROCEED WITH #28 (CONFIRMED). Full analysis: `.squad/decisions/inbox/mikey-correct-post-33-lane.md`
+
 ## 2026-04-12: Issue #27 Backend Complete + #32 Approved + #23 Approved
 
 📌 Team update (2026-04-12T21:22:46Z): Issue #27 backend revision completed and approved by Chunk. Data fixed all four regressions (route shadowing, double-decode, auth scope, contracts). Ship-safe. Stef to start session-browsing UI on SessionsResponse. Issue #32 (campaign templates) approved by Mikey, no blockers. Issue #23 (membership consolidation) re-approved by Chunk after Stef's regression coverage closed safety gaps. All three decisions finalized in `.squad/decisions.md` — reviewed by Chunk, Mikey
@@ -70,3 +74,4 @@ Mikey initialized as Lead for the initial project squad.
 **Next step after #28:** Route #24 (search) as the critical path to unlock #25 (mobile layout). The three form a dependency chain: #28 (tag infrastructure) → #24 (text search + filters) → #25 (mobile layout confident note browsing is query-ready).
 
 **Files:** Decision written to `.squad/decisions/inbox/mikey-next-lane.md`. GitHub comment added to issue #28 with thin-slice recommendation.
+📌 Team update (2026-04-13T00:04:28Z): Issue #27 COMPLETE — Frontend UI approved and merged after @copilot's revision (PR #36). Parallel lane decision on Issue #33 (activity UI) RESOLVED: Issue #33 UI unblocked post-PR-#36 merge, Issue #28 (tag facets) remains safe parallel option. PR #36 merged on main. Issue #33 queued for immediate assignment (primary: Stef, fallback: @copilot). Frontend thin slice scope: activity feed UI, collaborator filter sidebar, created/edited attribution, empty state. Backend contract stable. Regression test plan documented (RT1–RT5 gates). Awaiting product decisions on shared-workspace activity support and filter privacy. Assignment in orchestration log. No blocking architectural decisions — decided by FFMikha, Chunk, Scribe

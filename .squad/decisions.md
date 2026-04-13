@@ -610,4 +610,464 @@ NoteActivityResponse {
 **Files affected:**
 - `apps/api/src/app.ts` (GET /api/notes/activity endpoint)
 - `apps/api/src/note-store.ts` (activity query logic)
-- `apps/api/src/types.ts` (ActivityResponse shape)
+- `apps/api/src/types.ts` (ActivityResponse shape)# Corrected Post-#33 Routing: Proceed with Issue #28 (Tag Facets)
+
+**By:** Mikey (Lead)  
+**Date:** 2026-04-13 (correction pass)  
+**Status:** READY FOR IMMEDIATE START (post-#33 merge)
+
+---
+
+## Context
+
+Prior recommendation (in `mikey-post-33-lane.md`) assumed #35 and #36 were still pending merge. **That context is now stale.**
+
+**Actual local state (2026-04-13):**
+- ✅ PR #35 (quick capture): MERGED to main (`8443cba`)
+- ✅ PR #36 (session browsing): MERGED to main (`9d0966b`)
+- ✅ Issue #33 (activity UI): APPROVED locally, approved code in dirty worktree, ready to merge commit
+- ✅ No open PRs remain
+- ⏳ Issue #28, #24, #25, #26, #30: All still open on GitHub, waiting for next lane assignment
+
+---
+
+## Corrected Decision
+
+**Proceed with Issue #28 (tag facets + counts) immediately after #33 lands.**
+
+The prior recommendation is **correct and unchanged**. #28 is:
+- **Zero-dependency**: Can start the moment #33 merges (no blockers)
+- **Unblocks critical path**: #28 → #24 (search) → #25 (mobile)
+- **File-safe**: No collision with other work; isolated backend + sidebar component
+- **Thin slice**: ~150 lines total, backward compatible, no schema changes
+
+---
+
+## Preparatory Non-Code Work (Worth Doing Now)
+
+**No implementation work yet** — the worktree is intentionally dirty with #33. Once #33 merges:
+
+1. **Land #33 locally** ✓ (approved, ready to git commit + push)
+   - Verify CI passes green post-merge
+   - Confirm main is clean and ready for next slice
+
+2. **Assign #28 ownership** (concurrent with #33 merge)
+   - Primary: Stef (frontend focus preferred; tag UI is straightforward)
+   - Fallback: @copilot if Stef blocked
+   - Estimated effort: 4–6 hours (isolated scope, no cross-team dependencies)
+
+3. **Optional sketch before code** (low-effort, high-confidence)
+   - Review `apps/api/src/note-store.ts` for existing note-listing logic
+   - Confirm SQL group-by + count pattern fits alongside existing queries (it does; no surprises expected)
+   - No design gate needed; scope is explicit in prior decision doc
+
+---
+
+## Why This Correction
+
+The prior decision was **strategically sound** — the local state change (PRs already merged) doesn't alter the routing choice. However:
+
+- **Stale assumption:** "PRs #35 and #36 are pending merge" → Now both merged
+- **Stale concern:** "File collision risk in App.tsx and app.ts" → Risk eliminated; those PRs are stable on main
+- **Confirmation:** #28's safety and priority are **unchanged**; proceed with confidence
+- **Impact:** No blocking architectural decisions or new risks discovered
+
+---
+
+## Thin Slice Scope (Unchanged from Prior Doc)
+
+### Backend (~50 lines + tests)
+- `NoteStore.listTagsWithCounts(campaignId)` → `{ tag: string; count: number }[]`
+- `GET /api/campaigns/:campaignId/tags` endpoint, owner-auth required
+- No schema changes; respects campaign boundaries
+
+### Frontend (~100 lines)
+- `TagsPanel.tsx` read-only sidebar component
+- Integration into App sidebar (next to activity panel)
+- `fetchTags(campaignId)` in api.ts
+
+### Testing
+- API: auth, foreign rejection, empty state, count accuracy
+- Web: render empty, render with counts, no filter wiring yet (deferred to #24)
+
+---
+
+## Post-#28 Work
+
+Once #28 merges:
+
+1. **Immediately route #24 (search)** — Now unblocked; highest priority after mobile baseline
+2. **Keep #25 (mobile) queued** — Will start after #24 closure
+3. **Parking lot:** #26 (rich formatting), #30 (note links) — Mikey design gate deferred; collect requirements in parallel
+
+---
+
+## Notes for FFMikha
+
+- No action needed until #33 merges and CI passes
+- #28 is production-ready once approved; no follow-on architecture review required
+- After #28 + #24 land, mobile layout work (#25) becomes the next P1 gate
+# Issue #24 — Campaign Note Search with Filters
+
+**Prepared by:** Chunk (Tester)  
+**Date:** 2026-04-13  
+**Status:** PREP ONLY — Acceptance criteria and regression target list; no code implementation.
+
+---
+
+## Charter
+
+This document defines acceptance criteria and regression target tests for issue #24: adding a search UI with multi-filter capabilities to find campaign notes by title, body, tags, session, and collaborator. The feature must respect campaign scope, owner/collaborator access, work on mobile, and integrate cleanly with the quick-capture and session-browsing flows that are now merged.
+
+---
+
+## Product Goals
+
+1. **Search in one campaign at a time** — respects the selected campaign and never bleeds results across campaigns
+2. **Find notes by content** — title and body full-text matching (case-insensitive)
+3. **Filter by metadata** — tags (AND logic), session name, collaborator who created/edited
+4. **Preserve access model** — only show notes the user can edit/view based on campaign membership
+5. **Mobile-safe UX** — filters and results stack naturally on small screens
+6. **Integrate with existing flows** — quick capture, session browsing, activity view work together without interference
+
+---
+
+## Acceptance Criteria (AC)
+
+### AC1: Search Input & Scope
+- **Given:** User is in authenticated workspace with a campaign selected
+- **When:** User types in the search input box
+- **Then:** 
+  - Search updates in real-time (debounced ≥200ms to avoid thrashing)
+  - Search is scoped to the selected campaign only (never shows notes from other campaigns)
+  - Empty search shows all notes in the campaign (equivalent to "no filter")
+  - Whitespace-only search is treated as empty
+  - Search text is preserved when toggling between browse modes (notes ↔ sessions ↔ activity)
+
+### AC2: Title and Body Matching
+- **Given:** A campaign has notes with various titles/bodies
+- **When:** User enters search text (e.g., "goblin", "dragon", "50%")
+- **Then:**
+  - Matching is case-insensitive (e.g., "GOBLIN" matches "goblin")
+  - Both title and body are searched (note: product to confirm if match-any or match-all fields; default assume match-any = OR)
+  - Partial word match is supported (e.g., "drag" matches "dragon", "dragged", "dragonborn")
+  - Special characters in search text are literal (e.g., "50%" matches "50% done", not regex)
+  - Results update immediately as user types (debounced)
+  - Leading/trailing whitespace in search input is trimmed before matching
+
+### AC3: Tag Filtering
+- **Given:** Campaign has notes with various tags
+- **When:** User selects one or more tags from the tag facet list or autocomplete
+- **Then:**
+  - Selected tags are shown as chips/pills (visual affordance for "active filter")
+  - Matching uses AND logic: only notes that have ALL selected tags are shown
+  - Tag matching is case-insensitive and respects tag normalization (product confirms rules)
+  - Tag facet count is accurate (reflects total notes matching current search + session + other active filters)
+  - Clicking an active tag chip clears that tag from the filter
+  - Multiple-tag deselect works: clicking a second time on a selected tag removes it
+
+### AC4: Session Filtering
+- **Given:** Campaign has notes assigned to multiple sessions (or no session)
+- **When:** User selects a specific session from the session dropdown/list
+- **Then:**
+  - Only notes tagged with that session name are shown
+  - "(No session)" or "Unassigned" option shows notes with null `sessionName`
+  - "All sessions" clears the session filter and shows all notes
+  - Session filter works in combination with search + tags (all filters apply simultaneously)
+  - Session count in the filter shows how many notes match current search + tag filters + this session
+
+### AC5: Collaborator/Member Filtering
+- **Given:** Campaign has notes created/edited by different collaborators
+- **When:** User selects a collaborator from the member filter
+- **Then:**
+  - Filter shows notes created by that member (respects `created_by_membership_id`)
+  - Also include notes last edited by that member (respects `last_edited_by_membership_id`)
+  - Collaborator name is displayed with optional role badge (owner, editor, viewer, or claimed)
+  - Filter shows only collaborators who appear in the current search + tag + session result set
+  - "All members" or clicking the active member clears the collaborator filter
+  - Null attribution (legacy notes) are handled gracefully: either shown under "Unknown", excluded, or listed separately (product decides)
+
+### AC6: Mobile-Safe UI Behavior
+- **Given:** User is on a mobile device (< 768px viewport width)
+- **When:** User interacts with search, filters, and results
+- **Then:**
+  - Search input and all filter controls stack vertically without horizontal scroll
+  - Filter dropdowns/panels are touch-friendly (min 44px tap targets)
+  - Results list is full-width and scrollable
+  - Active filters are visible and removable even when filter panel is collapsed
+  - Switching between browse modes (notes ↔ sessions ↔ activity) preserves search state
+  - No layout shift or reflow when filters expand/collapse
+
+### AC7: Access Control
+- **Given:** User has linked collaborator membership in a campaign
+- **When:** User searches and filters notes
+- **Then:**
+  - Only notes in the linked campaign are searchable
+  - Search results respect note edit permissions (collaborator can see their own notes and team notes)
+  - Collaborator filters show only members of the current campaign
+  - Owner-only management functions (delete, revoke access) remain gated outside search results
+  - Guest users (shared link) see their campaign's notes only; search works with same filters
+
+### AC8: Integration with Quick Capture
+- **Given:** User has search active (text entered, filters selected)
+- **When:** User creates a new note via the quick-capture button
+- **Then:**
+  - New note appears in the search results immediately (if it matches current filters)
+  - Search state and filter selections are NOT cleared
+  - New note is added to the appropriate session (respects quick-capture session assignment)
+  - Tag suggestions in quick-capture still show all campaign tags (not filtered by current search)
+
+### AC9: Integration with Session Browsing
+- **Given:** User is in session-browse mode with a session selected
+- **When:** User toggles to "All notes" or enters search/filters
+- **Then:**
+  - Session selection is preserved in the background (does NOT re-run workspace bootstrap)
+  - Search + filters work across all sessions (not just the previously selected session)
+  - Clicking back to "Browse by session" with an active search state shows that session's notes matching the search
+  - Rapid mode toggles do NOT cause workspace reload, flashing loader, or lost drafts
+
+### AC10: Integration with Activity View
+- **Given:** User is in the activity view
+- **When:** Activity shows recent notes
+- **Then:**
+  - Search + filter state is independent of activity view (does NOT affect activity results)
+  - Activity view shows all unfiltered recent changes (not search-filtered)
+  - Clicking a note in activity view opens it; search/filter state is preserved
+  - Toggling from activity back to all-notes restores the previous search/filter state
+
+### AC11: Empty States
+- **Given:** User has applied search + filters that match zero notes
+- **When:** Results list is empty
+- **Then:**
+  - Empty state message is shown (e.g., "No notes match your search")
+  - Message suggests clear filters or broaden search (CTA copy TBD by product)
+  - Filter state is still visible so user knows what to adjust
+  - If campaign is empty (no notes at all), message says "No notes in this campaign yet" or CTA to create one
+
+### AC12: Performance & Responsiveness
+- **Given:** Campaign has 100+ notes
+- **When:** User searches and filters
+- **Then:**
+  - Search input debouncing prevents excessive re-renders (debounce threshold: ≥200ms, product confirms)
+  - Filter facet counts are computed from current notes array, not cached (keep fresh)
+  - Results render without noticeable lag (< 500ms visible update after debounce window)
+  - Search state does NOT trigger workspace bootstrap (avoids the issue #27 regression)
+
+---
+
+## Regression Target List (RTL)
+
+### RT1: Campaign Scope Isolation
+**Risk:** Search bleeds results across campaigns (tag facet / search / filter state resets on campaign switch)
+- **Test:** Multi-campaign user selects campaign A, searches for "dragon", switches to campaign B → results clear; switching back to A restores search "dragon" and previous result count
+- **Test:** Tag facet shows only tags from selected campaign (not union of all campaigns)
+- **Test:** After switching campaigns, new campaign's collaborator list is shown (not previous campaign's members)
+- **Key file:** `apps/web/src/App.tsx` (campaign selection, notes array scope)
+
+### RT2: Search State Preservation During Mode Toggles
+**Risk:** Toggling between notes ↔ sessions ↔ activity re-runs workspace bootstrap, flashing loader, losing drafts
+- **Test:** User types "goblin" in search, switches to session-browse mode, toggles back to all-notes → search text "goblin" is still there, no flashing loader
+- **Test:** User has unsaved note draft open, clicks "Browse by session", then "All notes" → draft is preserved
+- **Test:** Activity view can be toggled on/off without affecting search state
+- **Key file:** `apps/web/src/App.tsx` (browseMode state, loadWorkspace deps)
+
+### RT3: Stale-Response Race on Rapid Filter Clicks
+**Risk:** User clicks tag A, then tag B, then clears A; out-of-order responses paint wrong result set
+- **Test:** Rapid tag selections (click tag1 → tag2 → tag3 → clear tag2) resolve in correct order; final result matches the last filter state
+- **Test:** Rapid session switches show correct note list under heading (no list/heading mismatch)
+- **Test:** Abort controllers or request deduplication prevents old searches from overwriting newer ones
+- **Key file:** `apps/web/src/App.tsx` (filter handlers, fetch abort/dedup logic)
+
+### RT4: Tag Filter AND Logic
+**Risk:** Multiple tags use OR instead of AND; user selects tag:combat AND tag:boss but sees notes with either tag
+- **Test:** Note has tag:combat AND tag:boss. User selects both tags → note shown. User deselects tag:boss → note still shown. User selects tag:trap (and note doesn't have it) → note hidden.
+- **Test:** Empty results when no note has all selected tags (intersection is empty)
+- **Key file:** `apps/web/src/App.tsx` (filter logic), `apps/api/src/note-store.ts` (backend if filter added later)
+
+### RT5: Collaborator Attribution Accuracy
+**Risk:** Null/legacy attribution causes crashes or "Unknown" label never shown; consolidation rewrites author name incorrectly
+- **Test:** Note with null `created_by_membership_id` is shown in collaborator filter as "Unknown" (or handled gracefully per product decision)
+- **Test:** After consolidation (issue #23), moved notes show target membership as author in search results
+- **Test:** Claimed collaborator (issue #20) sees their own notes under their real account name, not guest token name
+- **Key file:** `apps/api/src/note-store.ts` (null attribution fallback), `apps/web/src/App.tsx` (render attribution)
+
+### RT6: Session Filter on Notes Without Session
+**Risk:** Notes with null `sessionName` are excluded from "No session" filter; session filter prevents other filters from working
+- **Test:** Note with null `sessionName` appears when user selects "(No session)" filter
+- **Test:** Combining session filter + text search: user searches "dragon" + filters to "Session 3" → only notes in Session 3 matching "dragon" shown
+- **Test:** Clearing session filter while search is active shows all matching notes across all sessions
+- **Key file:** `apps/web/src/App.tsx` (filter combination logic)
+
+### RT7: Title/Body Matching Case Sensitivity & Partial Words
+**Risk:** Search is case-sensitive; partial word matches fail; special regex chars crash search
+- **Test:** User searches "GOBLIN" (uppercase) → finds notes with "goblin" (lowercase)
+- **Test:** Search "dragon" → finds "Dragonborn", "dragon", "dragged" (partial match)
+- **Test:** Search "50%" (literal special char) → finds "50% done", not interpreted as regex
+- **Test:** Search with leading/trailing spaces is trimmed (search " goblin " = search "goblin")
+- **Key file:** `apps/web/src/App.tsx` (search normalization)
+
+### RT8: Tag Facet Count Accuracy Under Concurrency
+**Risk:** Facet counts are stale; clicking a tag with 0 notes shows empty result; counts don't reflect current filters
+- **Test:** User enters search "goblin", facet shows tag:location has 3 notes. User selects tag:location → result set shows exactly 3 notes (all matching "goblin" AND tag:location)
+- **Test:** User selects tag:combat, then refines search to "boss" → tag:combat facet count updates to reflect only notes matching "boss" AND tag:combat
+- **Key file:** `apps/web/src/App.tsx` (facet count computation, should be live per `notes` array state)
+
+### RT9: Mobile Layout & Touch Targets
+**Risk:** Filters are unreadable on mobile; tap targets too small; horizontal scroll required
+- **Test:** Mobile viewport (375px width): search input, tag pills, session dropdown all stack without horizontal overflow
+- **Test:** All interactive elements have ≥44px touch target
+- **Test:** Collapsing filter panels on mobile preserves active filter visibility
+- **Key file:** `apps/web/src/App.tsx` (CSS Grid, media queries; Material UI responsive styling)
+
+### RT10: Search Does NOT Affect Activity View
+**Risk:** Search/filter state leaks into activity endpoint; activity is filtered when it shouldn't be
+- **Test:** User has search "dragon" active, switches to activity view → activity shows all recent notes, NOT filtered to "dragon"
+- **Test:** User applies tag:combat filter, switches to activity → activity shows all collaborators, NOT filtered to notes with tag:combat
+- **Test:** Activity endpoint call does not include search text or filter params (independent state channels)
+- **Key file:** `apps/web/src/App.tsx` (separate state for search vs. activity), `apps/api/src/app.ts` (activity endpoint)
+
+### RT11: Create/Edit Note Doesn't Clear Search State
+**Risk:** Creating a note through quick capture clears search text; editing a note in-place breaks filters
+- **Test:** User searches "goblin", creates a new note with quick-capture → search text "goblin" is still in input, result list updates to include new note (if it matches)
+- **Test:** User filters to tag:combat, clicks a note to edit it, saves → tag:combat filter is still active, result list refreshes
+- **Test:** Canceling a note edit preserves search + filter state
+- **Key file:** `apps/web/src/App.tsx` (note lifecycle handlers, draft state)
+
+### RT12: Shared Campaign (Guest) Search
+**Risk:** Guest users cannot search (missing endpoint); guest search bleeds results across campaigns; guest-to-owner-claim breaks search state
+- **Test:** Guest user in shared campaign can search notes (if read permissions allow)
+- **Test:** Guest user search is scoped to the shared campaign only
+- **Test:** After claiming membership (issue #20), user can search with authenticated access using linked account
+- **Key file:** `apps/web/src/SharedCampaignRoute.tsx`, `apps/api/src/app.ts` (guest note endpoints)
+
+### RT13: Search Input Debouncing
+**Risk:** Search fires on every keystroke; typing "dragon" triggers 6 requests instead of 1
+- **Test:** User types "d", "dr", "dra", "drag", "drago", "dragon" quickly → only 1–2 API requests (debounced ≥200ms)
+- **Test:** Debounce is reset if user pauses and resumes typing
+- **Key file:** `apps/web/src/App.tsx` (useCallback + debounce logic)
+
+### RT14: Orthogonality with Existing Tag Facets (Issue #28)
+**Risk:** Search filters conflict with tag facet state from issue #28; tag facet AND/OR logic changes under search
+- **Test:** Tag facets from issue #28 continue to work as before (AND logic, counts are live)
+- **Test:** New search text input does not interfere with facet panel (both can coexist)
+- **Test:** Toggling between "All notes" and "Browse by session" with search active does NOT re-render facets incorrectly
+- **Key file:** `apps/web/src/App.tsx` (facet state, search state integration)
+
+### RT15: Product Decisions (Open Questions for FFMikha)
+**Defer to product sign-off before implementation:**
+1. **Title + body search logic:** Match-any (OR) or match-all (AND)? Default assume OR.
+2. **Tag normalization:** Uppercase tags, trailing spaces, accent handling — apply same rules from issue #28.
+3. **Null attribution in collaborator filter:** Show as "Unknown", exclude, or separate category?
+4. **Empty-state CTA copy:** "No notes match your search" or "Try clearing filters"?
+5. **Session filter:** "(No session)", "Unassigned", or both?
+6. **Debounce threshold:** 200ms, 300ms, or configurable?
+7. **Facet sort order:** Alphabetic or by note count (same as issue #28)?
+8. **Guest access:** Can guests search shared campaigns?
+9. **Pagination/lazy-load:** Cap results on screen (e.g., 50) or load all?
+10. **Search persistence:** Save search state in localStorage or only session memory?
+
+---
+
+## Scope & Non-Goals
+
+### In Scope
+- Campaign-scoped full-text search on title + body
+- Multi-filter UI: tags (AND), session, collaborator
+- Mobile-safe responsive layout
+- Integration with quick-capture, session browsing, activity view
+- Regression coverage for auth, state isolation, concurrent updates
+
+### Out of Scope (Defer to Future Issues)
+- Backend API search endpoint (product confirms if needed or client-side only)
+- Advanced query syntax (e.g., `tag:"combat" AND body:"dragon"`)
+- Search history / saved searches
+- Search analytics / trending search terms
+- Full-text indexing / FTS optimization
+- Bookmark/favorite notes
+- Note preview hover cards in search results (use existing note-detail panel)
+
+---
+
+## Test Plan & Coverage Matrix
+
+| Test Case ID | User Flow | Filter Combo | Expected Result | Key Risk |
+|--------------|-----------|--------------|-----------------|----------|
+| TC-S1 | Search "goblin" (no filters) | search only | Shows all notes with "goblin" in title/body | Case sensitivity, partial match |
+| TC-S2 | Search "goblin" + tag:combat | search + 1 tag | Shows notes matching "goblin" AND tag:combat | AND logic correctness |
+| TC-S3 | Search "goblin" + tag:combat + tag:boss | search + 2 tags | Shows notes with "goblin" AND both tags | Multi-tag AND |
+| TC-S4 | Search empty, tag:combat selected | tags only | Shows all notes with tag:combat (count accuracy) | Tag facet staleness |
+| TC-S5 | Session-browse mode → "All notes" with search "goblin" | mode toggle + search | No loader flash, search preserved | RT2: state preservation |
+| TC-S6 | Rapid tag clicks: A → B → C → clear B | rapid filter clicks | Final result matches last filter state (only A+C) | RT3: stale responses |
+| TC-S7 | Create note while search "goblin" active | quick-capture + search | New note appears in results if it matches | RT11: search preservation |
+| TC-S8 | Edit note tags; toggle session filter on/off | edit + filter toggle | Result list refreshes, search state preserved | Filter/edit interaction |
+| TC-S9 | Multi-campaign user: campaign A search "dragon" → switch to B | campaign switch | Search "dragon" clears; switching back to A restores it | RT1: scope isolation |
+| TC-S10 | Null attribution note + collaborator filter | legacy note + collaborator | Note shown under "Unknown" or handled gracefully | RT5: null attribution |
+| TC-S11 | Mobile viewport, 5 active filters | responsive layout | All filters visible, no horizontal scroll, stacked | RT9: mobile layout |
+| TC-S12 | Search "50%", special characters | special chars | Matched literally (not regex) | RT7: escaping |
+| TC-S13 | Activity view active, search "goblin" | activity + search | Activity shows all notes, NOT filtered to "goblin" | RT10: activity isolation |
+| TC-S14 | Debounce test: type "d-r-a-g-o-n" quickly | debounce | Only 1–2 API requests (not 6) | RT13: performance |
+| TC-S15 | Guest shared campaign search | guest access | Guest can search (if enabled); results scoped to share | RT12: guest scope |
+
+---
+
+## Regression Gate Criteria (Ship Checklist)
+
+**Before marking issue #24 "ready to merge", all of the following must be true:**
+
+- ✅ AC1–AC12 all pass with evidence (test cases, manual QA, or both)
+- ✅ RT1–RT14 all regression tests pass; RT15 open questions answered by FFMikha
+- ✅ Search state does NOT trigger workspace bootstrap (avoids issue #27 pattern)
+- ✅ Mobile layout tested on real device or emulator (iOS + Android)
+- ✅ Null attribution gracefully handled (no crashes, "Unknown" or exclusion shown)
+- ✅ Tag AND logic verified (multiple tags require ALL to match)
+- ✅ Debouncing working (rapid typing doesn't spam API)
+- ✅ Integration tests pass: quick-capture creates note → appears in search, session-browse toggle preserves search, activity view independent
+- ✅ ESLint + TypeScript compilation clean
+- ✅ `npm run test && npm run build` all pass
+- ✅ Accessibility check: ARIA labels on filters, keyboard navigation works
+
+---
+
+## File Changes Expected
+
+### Backend (if needed, product confirms)
+- `apps/api/src/app.ts` — new search/filter endpoint (optional; may be client-side only)
+- `apps/api/src/note-store.ts` — search query builder if backend-driven (optional)
+- `apps/api/test/app.test.ts` — regression tests for search scope, filters, auth (optional)
+- `apps/api/src/types.ts` — search request/response types (optional)
+
+### Frontend
+- `apps/web/src/App.tsx` — search input, filter state management, result rendering
+- `apps/web/src/App.test.tsx` — regression test coverage (RT1–RT14)
+- `apps/web/src/api.ts` — search/filter API calls (if backend endpoint added)
+
+### No Changes
+- `apps/api/data/dnd-notes.sqlite` — schema unchanged
+- `apps/web/src/templates.ts` — starter notes stay same
+- Shared routes — guest access logic same as notes endpoint
+
+---
+
+## Open Questions for FFMikha (Product)
+
+Before implementation starts, confirm:
+
+1. **Search algorithm:** Full-text search (client-side on `notes` array or backend endpoint)?
+2. **Title + body matching:** OR (match either) or AND (match both)?
+3. **Tag normalization:** Same rules as issue #28 (case-insensitive, trim spaces, remove accents)?
+4. **Collaborator filter:** Include both created_by AND last_edited_by, or just created_by?
+5. **Null attribution:** Show as "Unknown", exclude, or "Uncredited"?
+6. **Session filter:** Show "(No session)" option or auto-hide if no notes have null sessionName?
+7. **Mobile priority:** Full feature parity on mobile or simplified filter UI?
+8. **Guest search:** Enable search in shared campaigns or read-only for guests?
+9. **Debounce delay:** 200ms, 300ms, or user-configurable?
+10. **Persistence:** Save search state in localStorage (survive page reload) or session-only?
+
+---
+
+## Status
+
+**Prepared by:** Chunk (Tester)  
+**Date:** 2026-04-13  
+**Ready for:** Product sign-off (FFMikha) on open questions, then backend/frontend implementation  
+**Next Steps:** FFMikha reviews and approves this document; squad routes to dev team for implementation; Chunk owns QA gate before merge
