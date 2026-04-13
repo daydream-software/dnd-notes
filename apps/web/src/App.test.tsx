@@ -159,6 +159,28 @@ function readHeader(
   return typeof value === 'string' ? value : null
 }
 
+let viewportWidth = 1440
+
+function matchesMediaQuery(query: string) {
+  const normalizedQuery = query.replace(/^@media\s*/, '')
+  const minWidthMatch = normalizedQuery.match(/\(min-width:\s*(\d+(?:\.\d+)?)px\)/)
+  const maxWidthMatch = normalizedQuery.match(/\(max-width:\s*(\d+(?:\.\d+)?)px\)/)
+
+  const matchesMinWidth = minWidthMatch ? viewportWidth >= Number(minWidthMatch[1]) : true
+  const matchesMaxWidth = maxWidthMatch ? viewportWidth <= Number(maxWidthMatch[1]) : true
+
+  return matchesMinWidth && matchesMaxWidth
+}
+
+function setViewportWidth(width: number) {
+  viewportWidth = width
+  Object.defineProperty(window, 'innerWidth', {
+    configurable: true,
+    writable: true,
+    value: width,
+  })
+}
+
 describe('App', () => {
   let owner:
     | {
@@ -184,6 +206,21 @@ describe('App', () => {
   let execCommandMock: ReturnType<typeof vi.fn>
 
   beforeEach(() => {
+    setViewportWidth(1440)
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: matchesMediaQuery(query),
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    })
     owner = null
     ownerPassword = null
     activeToken = null
@@ -2228,6 +2265,84 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Back to sessions' }))
 
     expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeTruthy()
+  }, 35000)
+
+  it('keeps browse and edit visible together on desktop screens', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(await screen.findByRole('list', { name: 'Notes list' })).toBeTruthy()
+    expect(screen.getByLabelText('Title')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Browse notes' })).toBeNull()
+  })
+
+  it('uses a single-pane browse/edit flow on narrow screens without losing note saves', async () => {
+    setViewportWidth(390)
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(await screen.findByRole('button', { name: 'Browse notes' })).toBeTruthy()
+    expect(screen.queryByLabelText('Title')).toBeNull()
+
+    const mobileNotesList = screen.getByRole('list', { name: 'Notes list' })
+    await user.click(within(mobileNotesList).getByText('Storm ledger updated'))
+
+    expect(await screen.findByDisplayValue('Storm ledger updated')).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Notes list' })).toBeNull()
+
+    await user.clear(screen.getByLabelText('Title'))
+    await user.type(screen.getByLabelText('Title'), 'Storm ledger tightened')
+    await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
+
+    expect(await screen.findByDisplayValue('Storm ledger tightened')).toBeTruthy()
+
+    await user.click(screen.getAllByRole('button', { name: 'Browse notes' })[0])
+
+    const updatedNotesList = await screen.findByRole('list', { name: 'Notes list' })
+    expect(within(updatedNotesList).getByText('Storm ledger tightened')).toBeTruthy()
+    expect(notesByCampaign[defaultCampaignId][0].title).toBe('Storm ledger tightened')
+  }, 35000)
+
+  it('opens the editor immediately when starting a new note on narrow screens', async () => {
+    setViewportWidth(390)
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    expect(await screen.findByRole('button', { name: 'Browse notes' })).toBeTruthy()
+    expect(screen.queryByLabelText('Title')).toBeNull()
+
+    await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
+
+    expect(await screen.findByRole('heading', { name: 'Create note' })).toBeTruthy()
+    expect(screen.getByLabelText('Title')).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Notes list' })).toBeNull()
+
+    await user.type(screen.getByLabelText('Title'), 'Fresh phone note')
+    await user.type(
+      screen.getByLabelText('Body'),
+      'New-note creation should stay in the editor until the save is done.',
+    )
+    await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
+
+    expect(await screen.findByDisplayValue('Fresh phone note')).toBeTruthy()
+    expect(notesByCampaign[defaultCampaignId][0].title).toBe('Fresh phone note')
   }, 35000)
 
   it('derives tag facets locally, clears the active filter for a new note, and reuses tags in the editor', async () => {
