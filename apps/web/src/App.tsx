@@ -66,6 +66,7 @@ import {
   noteStarterTemplates,
   type StarterNoteSeed,
 } from './templates'
+import { NoteBodyPreview } from './note-formatting'
 import type {
   ActivityCollaborator,
   CampaignInput,
@@ -3562,7 +3563,26 @@ function App() {
                       onChange={(event) =>
                         handleDraftChange('body', event.target.value)
                       }
+                      helperText="Supports Markdown formatting like headings, lists, emphasis, and links."
                     />
+
+                    <Stack spacing={1}>
+                      <Typography variant="subtitle1">Rendered preview</Typography>
+                      <Box
+                        sx={{
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          borderRadius: surfaceRadius,
+                          p: { xs: 2, sm: 2.5 },
+                        }}
+                      >
+                        <NoteBodyPreview
+                          ariaLabel="Note body preview"
+                          body={draft.body}
+                          emptyMessage="Nothing to preview yet. Headings, lists, emphasis, and links render here without changing what gets saved."
+                        />
+                      </Box>
+                    </Stack>
 
                     <Stack
                       direction={{ xs: 'column', sm: 'row' }}
