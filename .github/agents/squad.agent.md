@@ -323,14 +323,19 @@ prompt: |
   **Requested by:** {current user name}
   
   {% if WORKTREE_MODE %}
-  **WORKTREE:** Working in `{WORKTREE_PATH}`. All operations relative to this path. Do NOT switch branches.
+  **WORKTREE:** Working in `{WORKTREE_PATH}`.
+  - Resolve code and app files from `{WORKTREE_PATH}`.
+  - Resolve `.squad/` state from `{team_root}`.
+  - Runtime workaround: if a shell or task starts in the repo root, run commands as `cd "{WORKTREE_PATH}" && ...` instead of relying on the starting cwd.
+  - When a tool accepts explicit paths, prefer paths under `{WORKTREE_PATH}` over cwd-relative paths.
+  - Do NOT switch branches.
   {% endif %}
 
   TASK: {specific task description}
   TARGET FILE(S): {exact file path(s)}
 
   Do the work. Keep it focused.
-  If you made a meaningful decision, write to .squad/decisions/inbox/{name}-{brief-slug}.md
+  If you made a meaningful decision, write to {team_root}/.squad/decisions/inbox/{name}-{brief-slug}.md
 
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a plain text summary as FINAL output.
@@ -786,17 +791,20 @@ prompt: |
   
   {% if WORKTREE_MODE %}
   **WORKTREE:** You are working in a dedicated worktree at `{WORKTREE_PATH}`.
-  - All file operations should be relative to this path
+  - Resolve code and app files from `{WORKTREE_PATH}`
+  - Resolve `.squad/` state from `{team_root}`
+  - Runtime workaround: if a shell or task starts in the repo root, run commands as `cd "{WORKTREE_PATH}" && ...`
+  - When a tool accepts explicit paths, prefer paths under `{WORKTREE_PATH}` over cwd-relative paths
   - Do NOT switch branches — the worktree IS your branch (`{branch_name}`)
   - Build and test in the worktree, not the main repo
   - Commit and push from the worktree
   {% endif %}
   
-  Read .squad/agents/{name}/history.md (your project knowledge).
-  Read .squad/decisions.md (team decisions to respect).
-  If .squad/identity/wisdom.md exists, read it before starting work.
-  If .squad/identity/now.md exists, read it at spawn time.
-  If .squad/skills/ has relevant SKILL.md files, read them before working.
+  Read {team_root}/.squad/agents/{name}/history.md (your project knowledge).
+  Read {team_root}/.squad/decisions.md (team decisions to respect).
+  If {team_root}/.squad/identity/wisdom.md exists, read it before starting work.
+  If {team_root}/.squad/identity/now.md exists, read it at spawn time.
+  If {team_root}/.squad/skills/ has relevant SKILL.md files, read them before working.
   
   {only if MCP tools detected — omit entirely if none:}
   MCP TOOLS: {service}: ✅ ({tools}) | ❌. Fall back to CLI when unavailable.
@@ -813,12 +821,12 @@ prompt: |
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
   
   AFTER work:
-  1. APPEND to .squad/agents/{name}/history.md under "## Learnings":
+  1. APPEND to {team_root}/.squad/agents/{name}/history.md under "## Learnings":
      architecture decisions, patterns, user preferences, key file paths.
   2. If you made a team-relevant decision, write to:
-     .squad/decisions/inbox/{name}-{brief-slug}.md
+     {team_root}/.squad/decisions/inbox/{name}-{brief-slug}.md
   3. SKILL EXTRACTION: If you found a reusable pattern, write/update
-     .squad/skills/{skill-name}/SKILL.md (read templates/skill.md for format).
+     {team_root}/.squad/skills/{skill-name}/SKILL.md (read {team_root}/.squad/templates/skill.md for format).
   
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a 2-3 sentence plain text
   summary as your FINAL output. No tool calls after this summary.

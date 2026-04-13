@@ -43,6 +43,21 @@ When the Squad coordinator assigns issue-based work, it should:
 6. Link `node_modules` from the main repo when that optimization is available
 7. Spawn agents with `WORKTREE_PATH` set to the resolved path
 
+## Current Runtime Workaround
+
+A live smoke test for issue `#23` confirmed that Squad currently:
+
+- resolves and creates the correct repo-local worktree under `.worktrees/`
+- passes `WORKTREE_PATH` into spawned agents
+- may still launch the spawned agent with its initial `cwd` at the main repo root
+
+Until the upstream launcher starts agents with `cwd = WORKTREE_PATH`, use this workaround in agent prompts and shell commands:
+
+- resolve code and app files from `WORKTREE_PATH`
+- resolve `.squad/` state from `TEAM_ROOT`
+- prefix shell commands with `cd "$WORKTREE_PATH" && ...` unless the command already targets that path explicitly
+- prefer explicit paths under `WORKTREE_PATH` instead of relying on cwd-relative defaults
+
 ## Folder Structure Example
 
 ```text
