@@ -7,6 +7,7 @@ import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
@@ -113,6 +114,11 @@ interface RevealedShareLink {
   isVisible: boolean
 }
 
+interface TagFacet {
+  tag: string
+  count: number
+}
+
 type CampaignFormMode = 'closed' | 'create' | 'edit'
 type NoteBrowseMode = 'notes' | 'sessions' | 'activity'
 
@@ -135,11 +141,31 @@ function createEmptyDraft(): NoteDraft {
   }
 }
 
+function normalizeTags(rawTags: readonly string[]) {
+  const seen = new Set<string>()
+
+  return rawTags
+    .flatMap((tag) => tag.split(','))
+    .map((tag) => tag.trim())
+    .filter((tag) => {
+      if (!tag || seen.has(tag)) {
+        return false
+      }
+
+      seen.add(tag)
+      return true
+    })
+}
+
+function createTagsText(tags: readonly string[]) {
+  return normalizeTags(tags).join(', ')
+}
+
 function createDraftFromNote(note: Note): NoteDraft {
   return {
     title: note.title,
     body: note.body,
-    tagsText: note.tags.join(', '),
+    tagsText: createTagsText(note.tags),
     status: note.status,
     sessionName: note.sessionName ?? '',
   }
@@ -149,7 +175,7 @@ function createDraftFromStarterNote(starterNote: StarterNoteSeed): NoteDraft {
   return {
     title: starterNote.title,
     body: starterNote.body,
-    tagsText: starterNote.tags.join(', '),
+    tagsText: createTagsText(starterNote.tags),
     status: starterNote.status,
     sessionName: starterNote.sessionName ?? '',
   }
@@ -163,10 +189,7 @@ function createNotePayload(
     title: draft.title,
     body: draft.body,
     status: draft.status,
-    tags: draft.tagsText
-      .split(',')
-      .map((tag) => tag.trim())
-      .filter(Boolean),
+    tags: normalizeTags([draft.tagsText]),
     sessionName: draft.sessionName.trim() || null,
     campaignId,
   }
@@ -302,6 +325,9 @@ const sessionNameCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: 'base',
 })
+const tagFacetCollator = new Intl.Collator(undefined, {
+  sensitivity: 'base',
+})
 
 function sortSessionSummaries(sessions: SessionSummary[]) {
   return [...sessions].sort((leftSession, rightSession) =>
@@ -310,6 +336,24 @@ function sortSessionSummaries(sessions: SessionSummary[]) {
       leftSession.sessionName,
     ),
   )
+}
+
+function createTagFacets(notes: Note[]): TagFacet[] {
+  const tagCounts = new Map<string, number>()
+
+  for (const note of notes) {
+    for (const tag of note.tags) {
+      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
+    }
+  }
+
+  return [...tagCounts.entries()]
+    .map(([tag, count]) => ({ tag, count }))
+    .sort((leftFacet, rightFacet) =>
+      rightFacet.count !== leftFacet.count
+        ? rightFacet.count - leftFacet.count
+        : tagFacetCollator.compare(leftFacet.tag, rightFacet.tag),
+    )
 }
 
 function App() {
@@ -339,7 +383,9 @@ function App() {
   const [selectedActivityMembershipId, setSelectedActivityMembershipId] = useState<
     string | null
   >(null)
+  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null)
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
+  const [tagInputValue, setTagInputValue] = useState('')
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
     createCampaignDraft,
   )
@@ -420,6 +466,10 @@ function App() {
     [],
   )
 
+  useEffect(() => {
+    setTagInputValue('')
+  }, [draft.tagsText])
+
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
     [notes, selectedNoteId],
@@ -460,17 +510,44 @@ function App() {
       ) ?? null,
     [activityCollaborators, selectedActivityMembershipId],
   )
+  const draftTags = useMemo(() => normalizeTags([draft.tagsText]), [draft.tagsText])
+  const tagFacets = useMemo(() => createTagFacets(notes), [notes])
+  const selectedTagFacet = useMemo(
+    () =>
+      selectedTagFilter
+        ? tagFacets.find((tagFacet) => tagFacet.tag === selectedTagFilter) ?? null
+        : null,
+    [selectedTagFilter, tagFacets],
+  )
+  const filteredNotes = useMemo(
+    () =>
+      selectedTagFilter
+        ? notes.filter((note) => note.tags.includes(selectedTagFilter))
+        : notes,
+    [notes, selectedTagFilter],
+  )
   const displayedNotes = useMemo(
     () =>
       noteBrowseMode === 'sessions' && selectedSessionName
         ? sessionNotes
-        : notes,
-    [noteBrowseMode, notes, selectedSessionName, sessionNotes],
+        : noteBrowseMode === 'notes'
+          ? filteredNotes
+          : notes,
+    [filteredNotes, noteBrowseMode, notes, selectedSessionName, sessionNotes],
   )
   const sortedActivityEntries = useMemo(
     () => sortActivityEntries(activityEntries),
     [activityEntries],
   )
+
+  useEffect(() => {
+    if (
+      selectedTagFilter &&
+      !tagFacets.some((tagFacet) => tagFacet.tag === selectedTagFilter)
+    ) {
+      setSelectedTagFilter(null)
+    }
+  }, [selectedTagFilter, tagFacets])
 
   const statCards = useMemo(() => {
     if (!overview) {
@@ -507,7 +584,9 @@ function App() {
         ? selectedSessionName
           ? `${selectedSessionName} notes`
           : 'Sessions'
-        : 'Notes'
+        : selectedTagFilter
+          ? `Notes tagged “${selectedTagFilter}”`
+          : 'Notes'
   const notePaneDescription =
     noteBrowseMode === 'activity'
       ? selectedActivityCollaborator
@@ -517,7 +596,11 @@ function App() {
         ? selectedSessionName
           ? `Browse the notes captured during ${selectedSessionName} without leaving the note detail view.`
           : 'Jump into a session to answer “what happened in this session?” without digging through the whole campaign.'
-        : 'The note workflow now runs inside the selected owner campaign.'
+        : selectedTagFacet
+          ? `Showing ${selectedTagFacet.count} ${
+              selectedTagFacet.count === 1 ? 'note' : 'notes'
+            } tagged ${selectedTagFacet.tag} in ${overview?.campaign.name ?? 'this campaign'}.`
+          : 'The note workflow now runs inside the selected owner campaign.'
 
   const resetShareLinkInteractionState = useCallback(() => {
     setShareLinkNotice(null)
@@ -900,6 +983,18 @@ function App() {
     setError(null)
   }
 
+  const handleSelectTagFilter = (tag: string) => {
+    setNoteBrowseMode('notes')
+    resetSessionBrowserState()
+    setSelectedTagFilter((currentTag) => (currentTag === tag ? null : tag))
+    setError(null)
+  }
+
+  const handleClearTagFilter = () => {
+    setSelectedTagFilter(null)
+    setError(null)
+  }
+
   const handleOpenSessionBrowser = () => {
     setNoteBrowseMode('sessions')
     resetSessionBrowserState()
@@ -1003,6 +1098,7 @@ function App() {
   const handleStartNote = () => {
     setNoteBrowseMode('notes')
     resetSessionBrowserState()
+    setSelectedTagFilter(null)
     setSelectedNoteId(null)
     setIsCreating(true)
     setSelectedNoteTemplateId(blankNoteTemplateId)
@@ -1055,6 +1151,18 @@ function App() {
     if (template.starterNote) {
       setDraft(createDraftFromStarterNote(template.starterNote))
     }
+  }
+
+  const handleDraftTagsChange = (nextTags: readonly string[]) => {
+    handleDraftChange('tagsText', createTagsText(nextTags))
+  }
+
+  const commitPendingTagInput = () => {
+    if (!tagInputValue.trim()) {
+      return
+    }
+
+    handleDraftTagsChange([...draftTags, tagInputValue])
   }
 
   const handleSaveNote = async () => {
@@ -2306,6 +2414,65 @@ function App() {
                     </Button>
                   </Stack>
 
+                  <Stack spacing={1.5}>
+                    <Stack
+                      direction={{ xs: 'column', sm: 'row' }}
+                      spacing={1}
+                      sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
+                    >
+                      <Box>
+                        <Typography variant="subtitle1">Browse by tag</Typography>
+                        <Typography color="text.secondary" variant="body2">
+                          Pick a campaign tag to narrow the note list without reloading the
+                          workspace.
+                        </Typography>
+                      </Box>
+                      {selectedTagFacet ? (
+                        <Stack
+                          direction={{ xs: 'column', sm: 'row' }}
+                          spacing={1}
+                          sx={{ alignItems: { sm: 'center' } }}
+                        >
+                          <Chip
+                            label={`Filtering by ${selectedTagFacet.tag} (${selectedTagFacet.count})`}
+                            color="primary"
+                            size="small"
+                          />
+                          <Button size="small" variant="text" onClick={handleClearTagFilter}>
+                            Clear filter
+                          </Button>
+                        </Stack>
+                      ) : null}
+                    </Stack>
+
+                    {tagFacets.length === 0 ? (
+                      <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                        No tagged notes yet. Add tags to a note to browse the campaign this way.
+                      </Alert>
+                    ) : (
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        useFlexGap
+                        aria-label="Tag filter list"
+                        sx={{ flexWrap: 'wrap' }}
+                      >
+                        {tagFacets.map((tagFacet) => (
+                          <Button
+                            key={tagFacet.tag}
+                            size="small"
+                            variant={
+                              selectedTagFilter === tagFacet.tag ? 'contained' : 'outlined'
+                            }
+                            onClick={() => handleSelectTagFilter(tagFacet.tag)}
+                          >
+                            {tagFacet.tag} ({tagFacet.count})
+                          </Button>
+                        ))}
+                      </Stack>
+                    )}
+                  </Stack>
+
                   {noteBrowseMode === 'activity' ? (
                     <Stack spacing={2.5}>
                       <Stack spacing={1.5}>
@@ -2560,7 +2727,9 @@ function App() {
                         </Box>
                       ) : displayedNotes.length === 0 ? (
                         <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                          {noteBrowseMode === 'sessions' && selectedSessionName
+                          {noteBrowseMode === 'notes' && selectedTagFilter
+                            ? `No notes tagged ${selectedTagFilter} yet. Clear the filter or add that tag to a note to reuse it later.`
+                            : noteBrowseMode === 'sessions' && selectedSessionName
                             ? 'No notes remain in this session. Head back to the session list or save a note with the same session name.'
                             : 'No notes yet in this campaign. Create the first one to start using the workspace.'}
                         </Alert>
@@ -2710,13 +2879,42 @@ function App() {
                       helperText="Optional. Use this when a note belongs to a specific session."
                     />
 
-                    <TextField
-                      label="Tags"
-                      value={draft.tagsText}
-                      onChange={(event) =>
-                        handleDraftChange('tagsText', event.target.value)
-                      }
-                      helperText="Comma-separated tags such as clue, faction, or travel."
+                    <Autocomplete
+                      multiple
+                      freeSolo
+                      disablePortal
+                      filterSelectedOptions
+                      options={tagFacets.map((tagFacet) => tagFacet.tag)}
+                      value={draftTags}
+                      inputValue={tagInputValue}
+                      onInputChange={(_, value, reason) => {
+                        if (reason === 'reset') {
+                          return
+                        }
+
+                        setTagInputValue(value)
+                      }}
+                      onChange={(_, value) => {
+                        handleDraftTagsChange(value)
+                        setTagInputValue('')
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Tags"
+                          helperText="Reuse existing tags or type new ones. Press Enter, comma, or blur to commit."
+                          onBlur={commitPendingTagInput}
+                          onKeyDown={(event) => {
+                            if (
+                              (event.key === 'Enter' || event.key === ',') &&
+                              tagInputValue.trim()
+                            ) {
+                              event.preventDefault()
+                              commitPendingTagInput()
+                            }
+                          }}
+                        />
+                      )}
                     />
 
                     <TextField

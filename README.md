@@ -151,4 +151,5 @@ actor.
 - the web app can create, edit, view, and delete notes inside the selected campaign, including built-in note templates for common structures
 - shared links can expose the same notes workspace to guests with viewer or editor permissions
 - authenticated collaborators can switch between the flat note list and a session-focused browsing mode to answer "what happened in this session?"
+- authenticated collaborators can browse campaign tags with local facet counts, keep a visible single-tag filter, and reuse those tags through note-editor autocomplete without extra API calls
 - authenticated collaborators can open a recent activity view in the main workspace and optionally narrow it by collaborator

@@ -1628,7 +1628,7 @@ describe('App', () => {
     await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
     await user.type(screen.getByLabelText('Title'), 'Harper safe house')
     await user.type(screen.getByLabelText('Session name'), 'Session 13')
-    await user.type(screen.getByLabelText('Tags'), 'harpers, safehouse')
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'harpers, safehouse')
     await user.type(
       screen.getByLabelText('Body'),
       'A hidden cellar beneath the inn gives the party a safe fallback location.',
@@ -1637,7 +1637,7 @@ describe('App', () => {
     await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
 
     expect(await screen.findByDisplayValue('Harper safe house')).toBeTruthy()
-    expect(screen.getByText('safehouse')).toBeTruthy()
+    expect(screen.getAllByText('safehouse').length).toBeGreaterThan(0)
 
     await user.clear(screen.getByLabelText('Title'))
     await user.type(screen.getByLabelText('Title'), 'Harper safe house secured')
@@ -1694,6 +1694,129 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Back to sessions' }))
 
     expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeTruthy()
+  }, 35000)
+
+  it('derives tag facets locally, clears the active filter for a new note, and reuses tags in the editor', async () => {
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'cipher-fragment',
+        campaignId: defaultCampaignId,
+        title: 'Cipher fragment recovered',
+        body: 'Candlekeep contact goes silent after delivering the translated cipher.',
+        tags: ['clue', 'candlekeep'],
+        status: 'active',
+        sessionName: 'Session 11',
+        createdAt: '2026-04-08T18:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+      {
+        id: 'reef-warning',
+        campaignId: defaultCampaignId,
+        title: 'Reef warning',
+        body: 'Scout marks point to a hidden channel beside the reef.',
+        tags: ['clue', 'reef'],
+        status: 'draft',
+        sessionName: null,
+        createdAt: '2026-04-09T18:00:00.000Z',
+        updatedAt: '2026-04-10T21:00:00.000Z',
+      },
+      {
+        id: 'harbor-watch',
+        campaignId: defaultCampaignId,
+        title: 'Harbor watch',
+        body: 'Dock crews rotate faster whenever the envoy ship arrives.',
+        tags: ['harbor'],
+        status: 'active',
+        sessionName: 'Session 12',
+        createdAt: '2026-04-10T18:00:00.000Z',
+        updatedAt: '2026-04-11T08:00:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    const countRequestsForPath = (pathname: string) =>
+      vi.mocked(globalThis.fetch).mock.calls.filter(([input]) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
+
+        return new URL(url, 'http://localhost').pathname === pathname
+      }).length
+
+    const workspaceRequestCountBeforeFilter =
+      countRequestsForPath('/api/auth/session') +
+      countRequestsForPath('/api/campaigns') +
+      countRequestsForPath('/api/overview') +
+      countRequestsForPath('/api/notes') +
+      countRequestsForPath('/api/notes/sessions')
+
+    await user.click(screen.getByRole('button', { name: 'clue (2)' }))
+
+    expect(await screen.findByRole('heading', { name: 'Notes tagged “clue”' })).toBeTruthy()
+    expect(screen.getByText('Filtering by clue (2)')).toBeTruthy()
+    expect(
+      countRequestsForPath('/api/auth/session') +
+        countRequestsForPath('/api/campaigns') +
+        countRequestsForPath('/api/overview') +
+        countRequestsForPath('/api/notes') +
+        countRequestsForPath('/api/notes/sessions'),
+    ).toBe(workspaceRequestCountBeforeFilter)
+
+    const filteredNotesList = screen.getByRole('list', { name: 'Notes list' })
+    expect(within(filteredNotesList).getByText('Cipher fragment recovered')).toBeTruthy()
+    expect(within(filteredNotesList).getByText('Reef warning')).toBeTruthy()
+    expect(within(filteredNotesList).queryByText('Harbor watch')).toBeNull()
+
+    await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
+
+    expect(await screen.findByRole('heading', { name: 'Notes' })).toBeTruthy()
+    expect(screen.queryByText('Filtering by clue (2)')).toBeNull()
+    expect(screen.getByRole('button', { name: 'clue (2)' })).toBeTruthy()
+    expect(
+      countRequestsForPath('/api/auth/session') +
+        countRequestsForPath('/api/campaigns') +
+        countRequestsForPath('/api/overview') +
+        countRequestsForPath('/api/notes') +
+        countRequestsForPath('/api/notes/sessions'),
+    ).toBe(workspaceRequestCountBeforeFilter)
+
+    const allNotesList = screen.getByRole('list', { name: 'Notes list' })
+    expect(within(allNotesList).getByText('Harbor watch')).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Title'), 'Shoreline clue map')
+    const tagsCombobox = screen.getByRole('combobox', { name: 'Tags' })
+    await user.click(tagsCombobox)
+    await user.type(tagsCombobox, 'cl')
+
+    expect(await screen.findByRole('option', { name: 'clue' })).toBeTruthy()
+
+    await user.click(screen.getByRole('option', { name: 'clue' }))
+    await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'shoreline, harbor')
+    await user.tab()
+    await user.type(
+      screen.getByLabelText('Body'),
+      'Keep the shoreline clue bundled with the harbor route notes.',
+    )
+    await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
+
+    expect(await screen.findByDisplayValue('Shoreline clue map')).toBeTruthy()
+    expect(notesByCampaign[defaultCampaignId][0].tags).toEqual([
+      'clue',
+      'shoreline',
+      'harbor',
+    ])
+    expect(screen.queryByText('Filtering by clue (3)')).toBeNull()
+    expect(screen.getByRole('button', { name: 'clue (3)' })).toBeTruthy()
   }, 35000)
 
   it('surfaces when an older shared link can no longer be revealed', async () => {
@@ -1831,7 +1954,8 @@ describe('App', () => {
     await user.click(await screen.findByRole('option', { name: 'Faction brief' }))
 
     expect(screen.getByDisplayValue('Faction brief')).toBeTruthy()
-    expect(screen.getByDisplayValue('faction, politics')).toBeTruthy()
+    expect(screen.getAllByText('faction').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('politics').length).toBeGreaterThan(0)
     expect(screen.getByDisplayValue(/What the faction wants:/)).toBeTruthy()
 
     await user.clear(screen.getByLabelText('Title'))
@@ -2243,20 +2367,29 @@ describe('App', () => {
 
     expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
 
+    await user.click(screen.getByRole('button', { name: 'npc (1)' }))
+
+    expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
+    expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+    expect(screen.getByText('Filtering by npc (1)')).toBeTruthy()
+
     await user.click(screen.getByRole('button', { name: 'Browse by session' }))
 
     expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
     expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+    expect(screen.getByText('Filtering by npc (1)')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Recent activity' }))
 
     expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
     expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+    expect(screen.getByText('Filtering by npc (1)')).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'All notes' }))
 
     expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
     expect(screen.getByDisplayValue('This is work in progress.')).toBeTruthy()
+    expect(screen.getByText('Filtering by npc (1)')).toBeTruthy()
   }, 25000)
 
   it('shows a recent activity empty state when a campaign has no notes yet', async () => {
@@ -2419,6 +2552,12 @@ describe('App', () => {
 
     expect(
       (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
+    ).toBeTruthy()
+
+    expect(
+      screen.getByText(
+        'No tagged notes yet. Add tags to a note to browse the campaign this way.',
+      ),
     ).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Browse by session' }))
