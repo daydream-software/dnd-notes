@@ -90,3 +90,45 @@ Data initialized as Backend Dev for the initial project squad.
 📌 Team update: Issue #30 third revision completed by Mikey (Lead). Data's backend implementation (second revision) successfully merged with frontend defensive coding. Issue now approved and ready to merge.
 
 📌 Team update (2026-04-13T18:14:27Z): UX feedback review completed—phased notes UX roadmap approved (compact header + editor + inline references), Lexical editor recommended over TipTap for markdown-native alignment, backend data model strategy for qualified references finalized — decided by Mikey (Product), Stef (Frontend), Data (Backend)
+
+## 2026-04-13: Phase 2 Inline Reference Architecture Analysis
+
+📌 Inspection complete: Phase 2 implementation recommendation finalized for inline note references. Key findings:
+
+**Current state:** `linkedNoteIds` persisted as JSON in `notes.linked_notes_json`, validated at 20-link limit, same-campaign-only enforcement, backlink discovery via `GET /api/notes/:noteId/backlinks`. Frontend can read but not author references yet. No body-derived reference model.
+
+**Recommendation (Phase 2a-c staged):**
+- Phase 2a: Add `note_references` table (normalized, dual-source: explicit from old linkedNoteIds + implicit from markdown body). Single source of truth for all link queries. Lazy migration of legacy data. Backward-compatible NoteInput accepts both linkedNoteIds and inlineReferences.
+- Phase 2b: Frontend Lexical editor parses markdown `[[note-id]]` syntax, emits inlineReferences array on save. Backend validates against actual parsed body (defensive).
+- Phase 2c: New endpoints (`GET /api/notes/:noteId/references`, `/incoming-references`, reference-aware search filters).
+
+**Safety rationale:** Keeps markdown body plain text (rename-safe, no custom format), decouples reference structure from syntax, supports partial editor adoption (new notes get implicit refs, old notes stay explicit), normalizes all link semantics to one table for search/graph operations.
+
+**Migration window:** 3 minor versions: Ship 2a, deprecate linkedNoteIds from API, remove field. During window both oldconstructs and new are accepted; normalized to same table.
+
+**Implementation scope:** Backend: schema + lazy sync + dual-input normalization + query layer expansion (3 new endpoints + search filters). Frontend: Lexical + parser + reference UI. Design decision written to decisions/inbox/data-note-reference-phase2.md — decision by Data (Backend), flagged for team review (Product, Frontend, Review).
+
+
+## 2026-04-13: Phase 2 Backend — References Table & Migration Strategy
+
+📌 **Orchestration complete:** Data reviewed backend architecture and proposed Phase 2 implementation strategy for inline references.
+
+**Outcome:**
+- ✅ Phase 1 (linkedNoteIds): Complete and validated
+- 🔴 Phase 2a: Add `note_references` table as single source of truth
+- 🔴 Phase 2b: Support body-derived references via NoteInput.inlineReferences
+- 🔴 Phase 2c: Query endpoints for reference discovery
+
+**Key decisions:**
+- Safe staged migration: Both `linkedNoteIds` and `inlineReferences` accepted during transition (Phase 2a/2b/2c)
+- Reference table stores type ('implicit' vs 'explicit'), campaign, and normalized target node IDs
+- Lazy sync on first read/write; no immediate data conversion required
+- Target ID in table (not title) ensures rename operations never break references
+- Backend re-parses body to validate parser consistency (400 on divergence)
+
+**Phase 2a blocking work:**
+1. Schema design + indexes
+2. Migration tests (legacy data, cross-campaign scoping, validation)
+3. NoteStore.syncLinkedNotesIntoReferences() for lazy migration
+
+**Ready to begin schema design immediately; coordinate with Stef on NoteInput contract during Phase 2b.**

@@ -138,3 +138,53 @@ Lead-level review is **APPROVE**, with two remaining merge conditions: Chunk sho
 ✅ Issue #30 third revision: Completed frontend defensive coding fix for linkedNoteIds undefined crashes. Added optional chaining and nullish coalescing at four hotspots. All 49 tests passing. Issue approved by Chunk and ready to merge. Commit: 3d5b3ef
 
 📌 Team update (2026-04-13T18:14:27Z): UX feedback review completed—phased notes UX roadmap approved (compact header + editor + inline references), Lexical editor recommended over TipTap for markdown-native alignment, backend data model strategy for qualified references finalized — decided by Mikey (Product), Stef (Frontend), Data (Backend)
+
+## 2026-04-13: Phase 2 Implementation Audit
+
+**Context:** FFMikha requested implementation recommendations for note references, editor migration, and overall next steps.
+
+**Key findings from codebase inspection:**
+- Current editor: plain `<TextField multiline>` + separate `<NoteBodyPreview>` using react-markdown/remark-gfm (App.tsx:3656-3682)
+- Note links: `linkedNoteIds: string[]` stored as JSON in `linked_notes_json` column (note-store.ts:463), validated against same-campaign constraint (note-store.ts:1952-1959)
+- Frontend link picker: MUI `<Autocomplete multiple>` in editor pane (App.tsx:3619-3639), backlinks computed via filter (App.tsx:588-593)
+- Web tests: vitest 4.1.4 infrastructure broken with React 19 + MUI 9 (pre-existing, not feature regression)
+- Decision already made (decisions.md:2429-2452): Lexical over TipTap, phased approach (compact header → editor → inline refs)
+
+**File ownership map:**
+- `apps/web/src/App.tsx`: editor pane, draft state, link picker, preview (~3800 lines, monolithic)
+- `apps/web/src/note-formatting.tsx`: react-markdown wrapper (keep for read-only contexts)
+- `apps/api/src/types.ts` + `apps/web/src/types.ts`: `Note.linkedNoteIds` and `NoteInput.linkedNoteIds`
+- `apps/api/src/validation.ts`: create/update schemas with linkedNoteIds validation
+- `apps/api/src/note-store.ts`: `linked_notes_json` column, same-campaign validation
+
+**Recommendation delivered to user:** Lexical remains correct editor choice. Phase order: compact header → new editor component → body-derived reference model (backend + extraction). Note reference migration safest as additive: keep `linkedNoteIds` until body-derived refs are authoritative.
+
+
+## 2026-04-13: Phase 2 Leadership — Scope, Timeline, and Approvals
+
+📌 **Review complete:** Mikey reviewed Phase 2 scope and approved implementation strategy.
+
+**Outcome:**
+- ✅ **Phase 2 APPROVED** — all team members aligned on scope, timeline, and responsibilities
+- ✅ Frontend + Backend decisions merged to decisions.md
+- ✅ Orchestration logs created for Stef, Data, and Mikey
+
+**Phase 2 scope confirmed:**
+- Frontend: Dual-mode editor (2a toggle, 2b Lexical, 2c inline refs)
+- Backend: Additive references table (safe migration, no breaking changes)
+- Timeline: 7–10 days total (Phase 2a: 1–2d, 2b: 4–5d, 2c: 2–3d)
+- Ship target: 2026-05-02 (best case)
+
+**Key approvals:**
+- Lexical chosen over TipTap (markdown-first, backend already stores markdown)
+- Markdown canonical throughout (no format conversion)
+- References table as single source of truth (rename-safe, searchable)
+- Zero API breaking change Phase 2 (backward compatible migration window)
+
+**Handoffs confirmed:**
+- **Stef:** Phase 2a ready to start immediately (mode toggle)
+- **Data:** Phase 2a schema design + lazy migration tests
+- **Chunk:** Regression test plan needed (import/export, backlinks, search)
+- **Product:** Phase 2 timeline approved; scope flexible post-2b for user testing
+
+**Phase 2 is green-lit. Immediate actions: Stef begins Phase 2a; Data designs schema.**
