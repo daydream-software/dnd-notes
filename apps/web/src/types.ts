@@ -144,6 +144,34 @@ export interface CampaignMembershipsResponse {
   memberships: CampaignMembership[]
 }
 
+export interface MembershipConsolidationInput {
+  sourceMembershipId: string
+  targetMembershipId: string
+  confirm?: boolean
+  confirmRoleMismatch?: boolean
+}
+
+export interface MembershipConsolidationNoteChanges {
+  authoredNoteCount: number
+  editedNoteCount: number
+  authoredAndEditedNoteCount: number
+  affectedNoteCount: number
+}
+
+export interface MembershipConsolidationSummary {
+  applied: boolean
+  effect: 'note-attribution-only'
+  sourceMembership: CampaignMembership
+  targetMembership: CampaignMembership
+  noteChanges: MembershipConsolidationNoteChanges
+  warnings: string[]
+  requiresRoleMismatchConfirmation: boolean
+}
+
+export interface MembershipConsolidationResponse {
+  consolidation: MembershipConsolidationSummary
+}
+
 export interface CampaignShareLinksResponse {
   shareLinks: CampaignShareLink[]
 }

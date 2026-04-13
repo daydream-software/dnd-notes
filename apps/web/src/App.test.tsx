@@ -179,6 +179,7 @@ describe('App', () => {
   let sharedSessionRequestCount: number
   let sharedSessionResponseDelaysMs: number[]
   let activityResponseDelayByMembershipId: Record<string, number>
+  let failNextOverviewRequest: boolean
   let writeTextMock: ReturnType<typeof vi.fn>
   let execCommandMock: ReturnType<typeof vi.fn>
 
@@ -218,6 +219,7 @@ describe('App', () => {
       [defaultCampaignId]: [],
     }
     guestMembershipByToken = {}
+    failNextOverviewRequest = false
     notesByCampaign = {
       [defaultCampaignId]: [
         {
@@ -462,6 +464,79 @@ describe('App', () => {
         }
       }
 
+      const buildMembershipConsolidationSummary = (
+        campaignId: string,
+        sourceMembershipId: string,
+        targetMembershipId: string,
+        applied: boolean,
+      ) => {
+        const sourceMembership = (membershipsByCampaign[campaignId] ?? []).find(
+          (membership) => membership.id === sourceMembershipId,
+        )
+        const targetMembership = (membershipsByCampaign[campaignId] ?? []).find(
+          (membership) => membership.id === targetMembershipId,
+        )
+
+        if (!sourceMembership || !targetMembership) {
+          return null
+        }
+
+        let authoredNoteCount = 0
+        let editedNoteCount = 0
+        let authoredAndEditedNoteCount = 0
+        let affectedNoteCount = 0
+
+        for (const note of notesByCampaign[campaignId] ?? []) {
+          const isAuthoredBySource =
+            note.createdBy?.membershipId === sourceMembershipId
+          const isEditedBySource =
+            note.lastEditedBy?.membershipId === sourceMembershipId
+
+          if (isAuthoredBySource) {
+            authoredNoteCount += 1
+          }
+
+          if (isEditedBySource) {
+            editedNoteCount += 1
+          }
+
+          if (isAuthoredBySource && isEditedBySource) {
+            authoredAndEditedNoteCount += 1
+          }
+
+          if (isAuthoredBySource || isEditedBySource) {
+            affectedNoteCount += 1
+          }
+        }
+
+        const requiresRoleMismatchConfirmation =
+          sourceMembership.role !== targetMembership.role
+        const warnings = [
+          `This keeps note text intact and only moves authorship onto ${targetMembership.displayName}.`,
+        ]
+
+        if (requiresRoleMismatchConfirmation) {
+          warnings.push(
+            `This changes note attribution from ${sourceMembership.role} to ${targetMembership.role}.`,
+          )
+        }
+
+        return {
+          applied,
+          effect: 'note-attribution-only' as const,
+          sourceMembership,
+          targetMembership,
+          noteChanges: {
+            authoredNoteCount,
+            editedNoteCount,
+            authoredAndEditedNoteCount,
+            affectedNoteCount,
+          },
+          warnings,
+          requiresRoleMismatchConfirmation,
+        }
+      }
+
       if (path === '/api/auth/register' && method === 'POST') {
         const payload = JSON.parse(String(init?.body)) as {
           displayName: string
@@ -684,6 +759,127 @@ describe('App', () => {
 
         return new Response(
           JSON.stringify({ memberships: membershipsByCampaign[campaignId] ?? [] }),
+          {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          },
+        )
+      }
+
+      const consolidationMatch = path.match(
+        /^\/api\/campaigns\/([^/]+)\/memberships\/consolidations$/,
+      )
+      if (consolidationMatch && method === 'POST') {
+        const campaignId = consolidationMatch[1]
+        const ownershipFailure = ensureOwnerCampaign(campaignId)
+        if (ownershipFailure) {
+          return ownershipFailure
+        }
+
+        const payload = JSON.parse(String(init?.body)) as {
+          sourceMembershipId: string
+          targetMembershipId: string
+          confirm?: boolean
+          confirmRoleMismatch?: boolean
+        }
+
+        if (payload.sourceMembershipId === payload.targetMembershipId) {
+          return new Response(
+            JSON.stringify({
+              error: 'Membership consolidation requires two different memberships.',
+              details: ['Pick a distinct source membership and target membership.'],
+            }),
+            {
+              status: 400,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const summary = buildMembershipConsolidationSummary(
+          campaignId,
+          payload.sourceMembershipId,
+          payload.targetMembershipId,
+          Boolean(payload.confirm),
+        )
+
+        if (!summary) {
+          const missingSource = !(membershipsByCampaign[campaignId] ?? []).some(
+            (membership) => membership.id === payload.sourceMembershipId,
+          )
+
+          return new Response(
+            JSON.stringify({
+              error: missingSource
+                ? 'Source membership was not found in this campaign.'
+                : 'Target membership was not found in this campaign.',
+            }),
+            {
+              status: 404,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        if (!payload.confirm) {
+          return new Response(JSON.stringify({ consolidation: summary }), {
+            status: 200,
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          })
+        }
+
+        if (
+          summary.requiresRoleMismatchConfirmation &&
+          !payload.confirmRoleMismatch
+        ) {
+          return new Response(
+            JSON.stringify({
+              error: 'This consolidation changes note attribution roles.',
+              details: [
+                `Confirm the ${summary.sourceMembership.role}-to-${summary.targetMembership.role} change before applying it.`,
+              ],
+            }),
+            {
+              status: 409,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
+        const targetAttribution = createAttribution(summary.targetMembership)
+        notesByCampaign[campaignId] = (notesByCampaign[campaignId] ?? []).map(
+          (note) => ({
+            ...note,
+            createdBy:
+              note.createdBy?.membershipId === payload.sourceMembershipId
+                ? targetAttribution
+                : note.createdBy,
+            lastEditedBy:
+              note.lastEditedBy?.membershipId === payload.sourceMembershipId
+                ? targetAttribution
+                : note.lastEditedBy,
+          }),
+        )
+
+        return new Response(
+          JSON.stringify({
+            consolidation: buildMembershipConsolidationSummary(
+              campaignId,
+              payload.sourceMembershipId,
+              payload.targetMembershipId,
+              true,
+            ),
+          }),
           {
             status: 200,
             headers: {
@@ -1300,6 +1496,19 @@ describe('App', () => {
       }
 
       if (path === '/api/overview' && method === 'GET') {
+        if (failNextOverviewRequest) {
+          failNextOverviewRequest = false
+          return new Response(
+            JSON.stringify({ error: 'Workspace refresh failed.' }),
+            {
+              status: 500,
+              headers: {
+                'Content-Type': 'application/json',
+              },
+            },
+          )
+        }
+
         const campaignId = readCampaignId()
         const accessFailure = ensureCampaignAccess(campaignId)
         if (accessFailure) {
@@ -1655,6 +1864,331 @@ describe('App', () => {
       ).toBeNull()
     })
   }, 45000)
+
+  it('lets owners preview and apply membership consolidation from campaign settings', async () => {
+    const sourceMembership: CampaignMembershipFixture = {
+      id: 'membership-guest-source',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Mira Guest',
+      userId: null,
+      guestTokenId: 'hashed-source-guest',
+      createdAt: '2026-04-09T18:00:00.000Z',
+      updatedAt: '2026-04-09T18:00:00.000Z',
+    }
+    const targetMembership: CampaignMembershipFixture = {
+      id: 'membership-guest-target',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Mira Linked',
+      userId: 'owner-mira-linked',
+      guestTokenId: null,
+      createdAt: '2026-04-09T18:30:00.000Z',
+      updatedAt: '2026-04-09T18:30:00.000Z',
+    }
+
+    membershipsByCampaign[defaultCampaignId] = [
+      membershipsByCampaign[defaultCampaignId][0],
+      sourceMembership,
+      targetMembership,
+    ]
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'duplicate-authorship-note',
+        campaignId: defaultCampaignId,
+        title: 'Duplicate authorship note',
+        body: 'Old guest note that should move onto the linked membership.',
+        tags: ['duplication'],
+        status: 'active',
+        sessionName: 'Session 12',
+        createdBy: createAttribution(sourceMembership),
+        lastEditedBy: createAttribution(sourceMembership),
+        createdAt: '2026-04-10T20:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+      {
+        id: 'mixed-attribution-note',
+        campaignId: defaultCampaignId,
+        title: 'Mixed authorship note',
+        body: 'Created by the old guest and edited later from the linked account.',
+        tags: ['duplication'],
+        status: 'draft',
+        sessionName: 'Session 12',
+        createdBy: createAttribution(sourceMembership),
+        lastEditedBy: createAttribution(targetMembership),
+        createdAt: '2026-04-10T19:00:00.000Z',
+        updatedAt: '2026-04-10T19:30:00.000Z',
+      },
+      {
+        id: 'already-linked-note',
+        campaignId: defaultCampaignId,
+        title: 'Already linked note',
+        body: 'This attribution should stay on the target membership.',
+        tags: ['linked'],
+        status: 'active',
+        sessionName: 'Session 11',
+        createdBy: createAttribution(targetMembership),
+        lastEditedBy: createAttribution(targetMembership),
+        createdAt: '2026-04-09T18:00:00.000Z',
+        updatedAt: '2026-04-10T18:30:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getByRole('button', { name: 'Campaign settings' }))
+    await user.click(screen.getByRole('combobox', { name: 'Source membership' }))
+    await user.click(await screen.findByRole('option', { name: 'Mira Guest (guest)' }))
+    await user.click(screen.getByRole('combobox', { name: 'Target membership' }))
+    await user.click(
+      await screen.findByRole('option', {
+        name: 'Mira Linked (linked collaborator)',
+      }),
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Preview consolidation' }))
+
+    expect(await screen.findByText('Consolidation preview')).toBeTruthy()
+    expect(
+      screen.getByText('Mira Guest (guest) -> Mira Linked (linked collaborator)'),
+    ).toBeTruthy()
+    expect(screen.getByText(/Affected notes:\s*2\./)).toBeTruthy()
+    expect(
+      screen.getByText(
+        /only moves authorship onto Mira Linked/i,
+      ),
+    ).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Apply consolidation' }))
+
+    expect(
+      await screen.findByText('Moved note attribution from Mira Guest to Mira Linked.'),
+    ).toBeTruthy()
+    expect(notesByCampaign[defaultCampaignId][0].createdBy?.membershipId).toBe(
+      targetMembership.id,
+    )
+    expect(notesByCampaign[defaultCampaignId][0].lastEditedBy?.membershipId).toBe(
+      targetMembership.id,
+    )
+    expect(notesByCampaign[defaultCampaignId][1].createdBy?.membershipId).toBe(
+      targetMembership.id,
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Cancel' }))
+
+    expect((await screen.findAllByText(/Created by Mira Linked/)).length).toBeGreaterThan(
+      0,
+    )
+    expect(screen.queryByText(/Created by Mira Guest/)).toBeNull()
+  })
+
+  it(
+    'requires explicit confirmation before applying a role-changing consolidation',
+    async () => {
+    const firstGuestMembership: CampaignMembershipFixture = {
+      id: 'membership-guest-role-mismatch',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Mira Guest',
+      userId: null,
+      guestTokenId: 'hashed-role-mismatch',
+      createdAt: '2026-04-09T18:00:00.000Z',
+      updatedAt: '2026-04-09T18:00:00.000Z',
+    }
+    const secondGuestMembership: CampaignMembershipFixture = {
+      id: 'membership-guest-role-mismatch-2',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Mira Linked',
+      userId: 'guest-user-2',
+      guestTokenId: null,
+      createdAt: '2026-04-09T19:00:00.000Z',
+      updatedAt: '2026-04-09T19:00:00.000Z',
+    }
+
+    membershipsByCampaign[defaultCampaignId] = [
+      membershipsByCampaign[defaultCampaignId][0],
+      firstGuestMembership,
+      secondGuestMembership,
+    ]
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'owner-attribution-note',
+        campaignId: defaultCampaignId,
+        title: 'Owner attribution note',
+        body: 'This note starts on the owner membership.',
+        tags: ['ownership'],
+        status: 'active',
+        sessionName: 'Session 12',
+        createdBy: createAttribution(membershipsByCampaign[defaultCampaignId][0]),
+        lastEditedBy: createAttribution(membershipsByCampaign[defaultCampaignId][0]),
+        createdAt: '2026-04-10T20:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getByRole('button', { name: 'Campaign settings' }))
+    await user.click(screen.getByRole('combobox', { name: 'Source membership' }))
+    await user.click(await screen.findByRole('option', { name: 'Stef (owner)' }))
+    await user.click(screen.getByRole('combobox', { name: 'Target membership' }))
+    await user.click(await screen.findByRole('option', { name: 'Mira Guest (guest)' }))
+    await user.click(screen.getByRole('button', { name: 'Preview consolidation' }))
+
+    expect(await screen.findByText('Consolidation preview')).toBeTruthy()
+    expect(
+      screen.getByRole('checkbox', {
+        name: 'I understand this moves owner note attribution onto guest.',
+      }),
+    ).toBeTruthy()
+    expect(
+      (
+        screen.getByRole('button', { name: 'Apply consolidation' }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true)
+
+    await user.click(
+      screen.getByRole('checkbox', {
+        name: 'I understand this moves owner note attribution onto guest.',
+      }),
+    )
+
+    expect(
+      (
+        screen.getByRole('button', { name: 'Apply consolidation' }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false)
+
+    await user.click(screen.getByRole('combobox', { name: 'Target membership' }))
+    await user.click(
+      await screen.findByRole('option', {
+        name: 'Mira Linked (linked collaborator)',
+      }),
+    )
+
+    expect(screen.queryByText('Consolidation preview')).toBeNull()
+    expect(
+      (
+        screen.getByRole('button', { name: 'Apply consolidation' }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true)
+
+    await user.click(screen.getByRole('button', { name: 'Preview consolidation' }))
+
+    expect(await screen.findByText('Consolidation preview')).toBeTruthy()
+    expect(
+      (
+        screen.getByRole('button', { name: 'Apply consolidation' }) as HTMLButtonElement
+      ).disabled,
+    ).toBe(true)
+
+    expect(screen.queryByText('Consolidation applied')).toBeNull()
+    expect(
+      (
+        screen.getByRole('checkbox', {
+          name: 'I understand this moves owner note attribution onto guest.',
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(false)
+    },
+    10_000,
+  )
+
+  it('keeps the apply success message accurate when workspace refresh fails afterward', async () => {
+    const sourceMembership: CampaignMembershipFixture = {
+      id: 'membership-guest-refresh-source',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Old Guest',
+      userId: null,
+      guestTokenId: 'hashed-refresh-source',
+      createdAt: '2026-04-09T18:00:00.000Z',
+      updatedAt: '2026-04-09T18:00:00.000Z',
+    }
+    const targetMembership: CampaignMembershipFixture = {
+      id: 'membership-guest-refresh-target',
+      campaignId: defaultCampaignId,
+      role: 'guest',
+      displayName: 'Linked Guest',
+      userId: 'guest-refresh-target',
+      guestTokenId: null,
+      createdAt: '2026-04-09T19:00:00.000Z',
+      updatedAt: '2026-04-09T19:00:00.000Z',
+    }
+
+    membershipsByCampaign[defaultCampaignId] = [
+      membershipsByCampaign[defaultCampaignId][0],
+      sourceMembership,
+      targetMembership,
+    ]
+    notesByCampaign[defaultCampaignId] = [
+      {
+        id: 'refresh-failure-note',
+        campaignId: defaultCampaignId,
+        title: 'Refresh failure note',
+        body: 'This note should still consolidate even if the follow-up refresh fails.',
+        tags: ['duplication'],
+        status: 'active',
+        sessionName: 'Session 12',
+        createdBy: createAttribution(sourceMembership),
+        lastEditedBy: createAttribution(sourceMembership),
+        createdAt: '2026-04-10T20:00:00.000Z',
+        updatedAt: '2026-04-10T20:00:00.000Z',
+      },
+    ]
+
+    const user = userEvent.setup()
+    render(<App />)
+
+    await user.type(await screen.findByLabelText('Owner display name'), 'Stef')
+    await user.type(screen.getByLabelText('Email'), 'stef@example.com')
+    await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
+    await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getByRole('button', { name: 'Campaign settings' }))
+    await user.click(screen.getByRole('combobox', { name: 'Source membership' }))
+    await user.click(await screen.findByRole('option', { name: 'Old Guest (guest)' }))
+    await user.click(screen.getByRole('combobox', { name: 'Target membership' }))
+    await user.click(
+      await screen.findByRole('option', {
+        name: 'Linked Guest (linked collaborator)',
+      }),
+    )
+    await user.click(screen.getByRole('button', { name: 'Preview consolidation' }))
+
+    expect(await screen.findByText('Consolidation preview')).toBeTruthy()
+
+    failNextOverviewRequest = true
+    await user.click(screen.getByRole('button', { name: 'Apply consolidation' }))
+
+    expect(
+      await screen.findByText(
+        'Moved note attribution from Old Guest to Linked Guest.',
+      ),
+    ).toBeTruthy()
+    expect(
+      await screen.findByText(
+        'Consolidation succeeded, but the workspace could not refresh. Reload the page to see the latest note attribution.',
+      ),
+    ).toBeTruthy()
+    expect(screen.queryByText('Could not apply the consolidation.')).toBeNull()
+    expect(notesByCampaign[defaultCampaignId][0].createdBy?.membershipId).toBe(
+      targetMembership.id,
+    )
+  })
 
   it('can switch into session browsing and drill into one session note trail', async () => {
     const user = userEvent.setup()

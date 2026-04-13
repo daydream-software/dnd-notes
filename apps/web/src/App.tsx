@@ -12,9 +12,11 @@ import {
   Button,
   Card,
   CardContent,
+  Checkbox,
   Chip,
   CircularProgress,
   Container,
+  FormControlLabel,
   List,
   ListItemButton,
   ListItemText,
@@ -25,6 +27,7 @@ import {
 } from '@mui/material'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  consolidateCampaignMemberships,
   createCampaign,
   createCampaignShareLink,
   createNote,
@@ -61,6 +64,7 @@ import type {
   CampaignInput,
   CampaignMembershipRole,
   CampaignMembership,
+  MembershipConsolidationSummary,
   CampaignShareLink,
   CampaignShareLinkInput,
   CampaignSummary,
@@ -107,6 +111,12 @@ interface ShareLinkDraft {
   label: string
   accessLevel: ShareAccessLevel
   frameAncestors: string
+}
+
+interface MembershipConsolidationDraft {
+  sourceMembershipId: string
+  targetMembershipId: string
+  confirmRoleMismatch: boolean
 }
 
 interface RevealedShareLink {
@@ -239,6 +249,23 @@ function createShareLinkPayload(draft: ShareLinkDraft): CampaignShareLinkInput {
     accessLevel: draft.accessLevel,
     frameAncestors: draft.frameAncestors.trim() || null,
   }
+}
+
+function createMembershipConsolidationDraft(): MembershipConsolidationDraft {
+  return {
+    sourceMembershipId: '',
+    targetMembershipId: '',
+    confirmRoleMismatch: false,
+  }
+}
+
+function describeCampaignMembership(membership: CampaignMembership) {
+  const roleLabel =
+    membership.role === 'guest' && membership.userId !== null
+      ? 'linked collaborator'
+      : membership.role
+
+  return `${membership.displayName} (${roleLabel})`
 }
 
 function deleteRecordKey<Value>(record: Record<string, Value>, key: string) {
@@ -390,6 +417,9 @@ function App() {
     createCampaignDraft,
   )
   const [shareLinkDraft, setShareLinkDraft] = useState<ShareLinkDraft>(createShareLinkDraft)
+  const [membershipConsolidationDraft, setMembershipConsolidationDraft] = useState<
+    MembershipConsolidationDraft
+  >(createMembershipConsolidationDraft)
   const [registerDraft, setRegisterDraft] = useState<OwnerRegistrationDraft>({
     displayName: '',
     email: '',
@@ -411,6 +441,10 @@ function App() {
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [isSavingCampaign, setIsSavingCampaign] = useState(false)
   const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
+  const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
+    useState(false)
+  const [isApplyingMembershipConsolidation, setIsApplyingMembershipConsolidation] =
+    useState(false)
   const [isRegisterMode, setIsRegisterMode] = useState(true)
   const [campaignFormMode, setCampaignFormMode] =
     useState<CampaignFormMode>('closed')
@@ -431,6 +465,11 @@ function App() {
     null,
   )
   const [copiedShareLinkId, setCopiedShareLinkId] = useState<string | null>(null)
+  const [membershipConsolidationPreview, setMembershipConsolidationPreview] =
+    useState<MembershipConsolidationSummary | null>(null)
+  const [membershipConsolidationNotice, setMembershipConsolidationNotice] = useState<
+    string | null
+  >(null)
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
   const noteBrowseModeRef = useRef<NoteBrowseMode>('notes')
@@ -512,6 +551,20 @@ function App() {
   )
   const draftTags = useMemo(() => normalizeTags([draft.tagsText]), [draft.tagsText])
   const tagFacets = useMemo(() => createTagFacets(notes), [notes])
+  const selectedSourceMembership = useMemo(
+    () =>
+      currentCampaignMemberships.find(
+        (membership) => membership.id === membershipConsolidationDraft.sourceMembershipId,
+      ) ?? null,
+    [currentCampaignMemberships, membershipConsolidationDraft.sourceMembershipId],
+  )
+  const selectedTargetMembership = useMemo(
+    () =>
+      currentCampaignMemberships.find(
+        (membership) => membership.id === membershipConsolidationDraft.targetMembershipId,
+      ) ?? null,
+    [currentCampaignMemberships, membershipConsolidationDraft.targetMembershipId],
+  )
   const selectedTagFacet = useMemo(
     () =>
       selectedTagFilter
@@ -519,6 +572,20 @@ function App() {
         : null,
     [selectedTagFilter, tagFacets],
   )
+  const hasValidMembershipConsolidationSelection =
+    membershipConsolidationDraft.sourceMembershipId.length > 0 &&
+    membershipConsolidationDraft.targetMembershipId.length > 0 &&
+    membershipConsolidationDraft.sourceMembershipId !==
+      membershipConsolidationDraft.targetMembershipId
+  const canApplyMembershipConsolidation =
+    membershipConsolidationPreview !== null &&
+    !membershipConsolidationPreview.applied &&
+    membershipConsolidationPreview.sourceMembership.id ===
+      membershipConsolidationDraft.sourceMembershipId &&
+    membershipConsolidationPreview.targetMembership.id ===
+      membershipConsolidationDraft.targetMembershipId &&
+    (!membershipConsolidationPreview.requiresRoleMismatchConfirmation ||
+      membershipConsolidationDraft.confirmRoleMismatch)
   const filteredNotes = useMemo(
     () =>
       selectedTagFilter
@@ -649,6 +716,14 @@ function App() {
     setCopiedShareLinkId(null)
   }, [])
 
+  const resetMembershipConsolidationState = useCallback(() => {
+    setMembershipConsolidationDraft(createMembershipConsolidationDraft())
+    setMembershipConsolidationPreview(null)
+    setMembershipConsolidationNotice(null)
+    setIsPreviewingMembershipConsolidation(false)
+    setIsApplyingMembershipConsolidation(false)
+  }, [])
+
   const resetSessionBrowserState = useCallback(() => {
     sessionAbortControllerRef.current?.abort()
     setSelectedSessionName(null)
@@ -742,17 +817,25 @@ function App() {
     setDraft(createEmptyDraft())
     setCampaignDraft(createCampaignDraft())
     setShareLinkDraft(createShareLinkDraft())
+    setMembershipConsolidationDraft(createMembershipConsolidationDraft())
     setCampaignFormMode('closed')
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setSelectedNoteTemplateId(blankNoteTemplateId)
     resetShareLinkInteractionState()
-  }, [resetActivityState, resetSessionBrowserState, resetShareLinkInteractionState])
+    resetMembershipConsolidationState()
+  }, [
+    resetActivityState,
+    resetMembershipConsolidationState,
+    resetSessionBrowserState,
+    resetShareLinkInteractionState,
+  ])
 
   const loadWorkspace = useCallback(
     async (
       sessionToken: string,
       campaignId: string,
       preferredNoteId?: string | null,
+      suppressError = false,
     ) => {
       setIsLoadingWorkspace(true)
 
@@ -834,12 +917,17 @@ function App() {
         }
 
         setError(null)
+        return true
       } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : 'Could not load the campaign workspace.',
-        )
+        if (!suppressError) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : 'Could not load the campaign workspace.',
+          )
+        }
+
+        return false
       } finally {
         setIsLoadingWorkspace(false)
       }
@@ -938,6 +1026,7 @@ function App() {
       setMemberships([])
       setShareLinks([])
       resetShareLinkInteractionState()
+      resetMembershipConsolidationState()
       return
     }
 
@@ -974,6 +1063,7 @@ function App() {
     authToken,
     canManageSelectedCampaign,
     campaignFormMode,
+    resetMembershipConsolidationState,
     resetShareLinkInteractionState,
     selectedCampaignId,
   ])
@@ -1013,6 +1103,28 @@ function App() {
     setIsCreating(false)
     setSelectedNoteTemplateId(blankNoteTemplateId)
     setDraft(createDraftFromNote(note))
+    setError(null)
+  }
+
+  const handleMembershipConsolidationDraftChange = <
+    Field extends keyof MembershipConsolidationDraft,
+  >(
+    field: Field,
+    value: MembershipConsolidationDraft[Field],
+  ) => {
+    setMembershipConsolidationDraft((currentDraft) => ({
+      ...currentDraft,
+      [field]: value,
+      ...(field === 'confirmRoleMismatch'
+        ? {}
+        : { confirmRoleMismatch: false }),
+    }))
+
+    if (field !== 'confirmRoleMismatch') {
+      setMembershipConsolidationPreview(null)
+      setMembershipConsolidationNotice(null)
+    }
+
     setError(null)
   }
 
@@ -1332,6 +1444,7 @@ function App() {
     setShareLinks([])
     setShareLinkDraft(createShareLinkDraft())
     resetShareLinkInteractionState()
+    resetMembershipConsolidationState()
     setCampaignFormMode('create')
     setError(null)
   }
@@ -1346,6 +1459,7 @@ function App() {
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setShareLinkDraft(createShareLinkDraft())
     resetShareLinkInteractionState()
+    resetMembershipConsolidationState()
     setCampaignFormMode('edit')
     setError(null)
   }
@@ -1356,6 +1470,7 @@ function App() {
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setShareLinkDraft(createShareLinkDraft())
     resetShareLinkInteractionState()
+    resetMembershipConsolidationState()
     setError(null)
   }
 
@@ -1445,6 +1560,101 @@ function App() {
     } finally {
       setIsCreatingShareLink(false)
     }
+  }
+
+  const handlePreviewMembershipConsolidation = async () => {
+    if (
+      !authToken ||
+      !selectedCampaignId ||
+      !membershipConsolidationDraft.sourceMembershipId ||
+      !membershipConsolidationDraft.targetMembershipId ||
+      membershipConsolidationDraft.sourceMembershipId ===
+        membershipConsolidationDraft.targetMembershipId
+    ) {
+      return
+    }
+
+    setError(null)
+    setMembershipConsolidationNotice(null)
+    setIsPreviewingMembershipConsolidation(true)
+
+    try {
+      const response = await consolidateCampaignMemberships(authToken, selectedCampaignId, {
+        sourceMembershipId: membershipConsolidationDraft.sourceMembershipId,
+        targetMembershipId: membershipConsolidationDraft.targetMembershipId,
+      })
+
+      setMembershipConsolidationPreview(response.consolidation)
+    } catch (consolidationError) {
+      setError(
+        consolidationError instanceof Error
+          ? consolidationError.message
+          : 'Could not preview the consolidation.',
+      )
+    } finally {
+      setIsPreviewingMembershipConsolidation(false)
+    }
+  }
+
+  const handleApplyMembershipConsolidation = async () => {
+    if (
+      !authToken ||
+      !selectedCampaignId ||
+      !membershipConsolidationPreview ||
+      membershipConsolidationPreview.applied
+    ) {
+      return
+    }
+
+    setError(null)
+    setMembershipConsolidationNotice(null)
+    setIsApplyingMembershipConsolidation(true)
+
+    let response: Awaited<
+      ReturnType<typeof consolidateCampaignMemberships>
+    >
+
+    try {
+      response = await consolidateCampaignMemberships(authToken, selectedCampaignId, {
+        sourceMembershipId: membershipConsolidationDraft.sourceMembershipId,
+        targetMembershipId: membershipConsolidationDraft.targetMembershipId,
+        confirm: true,
+        confirmRoleMismatch: membershipConsolidationDraft.confirmRoleMismatch,
+      })
+
+      setMembershipConsolidationPreview(response.consolidation)
+      setMembershipConsolidationNotice(
+        `Moved note attribution from ${response.consolidation.sourceMembership.displayName} to ${response.consolidation.targetMembership.displayName}.`,
+      )
+    } catch (consolidationError) {
+      setError(
+        consolidationError instanceof Error
+          ? consolidationError.message
+          : 'Could not apply the consolidation.',
+      )
+      setIsApplyingMembershipConsolidation(false)
+      return
+    }
+
+    setMembershipConsolidationPreview(response.consolidation)
+    setMembershipConsolidationNotice(
+      `Moved note attribution from ${response.consolidation.sourceMembership.displayName} to ${response.consolidation.targetMembership.displayName}.`,
+    )
+
+    const refreshed = await loadWorkspace(
+      authToken,
+      selectedCampaignId,
+      selectedNoteIdRef.current,
+      true,
+    )
+
+    if (!refreshed) {
+      setError(
+        'Consolidation succeeded, but the workspace could not refresh. Reload the page to see the latest note attribution.',
+      )
+    }
+
+    setIsApplyingMembershipConsolidation(false)
   }
 
   const handleRevealShareLink = async (shareLinkId: string) => {
@@ -2061,6 +2271,209 @@ function App() {
                           ))}
                         </Stack>
                       </Box>
+
+                      <Box>
+                        <Typography variant="subtitle1">
+                          Consolidate note authorship
+                        </Typography>
+                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                          Reassign note authorship and edit attribution from one
+                          membership onto another without changing note text or
+                          deleting memberships.
+                        </Typography>
+                      </Box>
+
+                      {currentCampaignMemberships.length < 2 ? (
+                        <Typography color="text.secondary">
+                          Add or link another membership before consolidating note
+                          attribution.
+                        </Typography>
+                      ) : (
+                        <Stack spacing={2}>
+                          <Stack
+                            direction={{ xs: 'column', md: 'row' }}
+                            spacing={2}
+                          >
+                            <TextField
+                              select
+                              fullWidth
+                              label="Source membership"
+                              value={membershipConsolidationDraft.sourceMembershipId}
+                              onChange={(event) =>
+                                handleMembershipConsolidationDraftChange(
+                                  'sourceMembershipId',
+                                  event.target.value,
+                                )
+                              }
+                              helperText="Move note attribution away from this membership."
+                            >
+                              {currentCampaignMemberships.map((membership) => (
+                                <MenuItem key={membership.id} value={membership.id}>
+                                  {describeCampaignMembership(membership)}
+                                </MenuItem>
+                              ))}
+                            </TextField>
+                            <TextField
+                              select
+                              fullWidth
+                              label="Target membership"
+                              value={membershipConsolidationDraft.targetMembershipId}
+                              onChange={(event) =>
+                                handleMembershipConsolidationDraftChange(
+                                  'targetMembershipId',
+                                  event.target.value,
+                                )
+                              }
+                              helperText="This membership keeps the note attribution."
+                            >
+                              {currentCampaignMemberships.map((membership) => (
+                                <MenuItem
+                                  key={membership.id}
+                                  value={membership.id}
+                                  disabled={
+                                    membership.id ===
+                                    membershipConsolidationDraft.sourceMembershipId
+                                  }
+                                >
+                                  {describeCampaignMembership(membership)}
+                                </MenuItem>
+                              ))}
+                            </TextField>
+                          </Stack>
+
+                          {selectedSourceMembership && selectedTargetMembership ? (
+                            <Typography color="text.secondary" variant="body2">
+                              Previewing moves note attribution from{' '}
+                              {selectedSourceMembership.displayName} to{' '}
+                              {selectedTargetMembership.displayName}.
+                            </Typography>
+                          ) : null}
+
+                          <Stack
+                            direction={{ xs: 'column', sm: 'row' }}
+                            spacing={1.5}
+                          >
+                            <Button
+                              variant="outlined"
+                              onClick={handlePreviewMembershipConsolidation}
+                              disabled={
+                                !hasValidMembershipConsolidationSelection ||
+                                isPreviewingMembershipConsolidation ||
+                                isApplyingMembershipConsolidation
+                              }
+                            >
+                              {isPreviewingMembershipConsolidation
+                                ? 'Previewing consolidation...'
+                                : 'Preview consolidation'}
+                            </Button>
+                            <Button
+                              variant="contained"
+                              onClick={handleApplyMembershipConsolidation}
+                              disabled={
+                                !canApplyMembershipConsolidation ||
+                                isPreviewingMembershipConsolidation ||
+                                isApplyingMembershipConsolidation
+                              }
+                            >
+                              {isApplyingMembershipConsolidation
+                                ? 'Applying consolidation...'
+                                : 'Apply consolidation'}
+                            </Button>
+                          </Stack>
+
+                          {membershipConsolidationPreview ? (
+                            <Alert
+                              severity={
+                                membershipConsolidationPreview.applied
+                                  ? 'success'
+                                  : membershipConsolidationPreview.requiresRoleMismatchConfirmation
+                                    ? 'warning'
+                                    : 'info'
+                              }
+                              sx={{ borderRadius: surfaceRadius }}
+                            >
+                              <Stack spacing={1}>
+                                <Typography variant="subtitle2">
+                                  {membershipConsolidationPreview.applied
+                                    ? 'Consolidation applied'
+                                    : 'Consolidation preview'}
+                                </Typography>
+                                <Typography variant="body2">
+                                  {describeCampaignMembership(
+                                    membershipConsolidationPreview.sourceMembership,
+                                  )}{' '}
+                                  {'->'}{' '}
+                                  {describeCampaignMembership(
+                                    membershipConsolidationPreview.targetMembership,
+                                  )}
+                                </Typography>
+                                <Typography variant="body2">
+                                  Affected notes:{' '}
+                                  {
+                                    membershipConsolidationPreview.noteChanges
+                                      .affectedNoteCount
+                                  }
+                                  . Authored:{' '}
+                                  {
+                                    membershipConsolidationPreview.noteChanges
+                                      .authoredNoteCount
+                                  }
+                                  . Edited:{' '}
+                                  {
+                                    membershipConsolidationPreview.noteChanges
+                                      .editedNoteCount
+                                  }
+                                  . Authored and edited:{' '}
+                                  {
+                                    membershipConsolidationPreview.noteChanges
+                                      .authoredAndEditedNoteCount
+                                  }
+                                  .
+                                </Typography>
+                                {membershipConsolidationPreview.warnings.length > 0 ? (
+                                  <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
+                                    {membershipConsolidationPreview.warnings.map(
+                                      (warning) => (
+                                        <Typography
+                                          component="li"
+                                          key={warning}
+                                          variant="body2"
+                                        >
+                                          {warning}
+                                        </Typography>
+                                      ),
+                                    )}
+                                  </Box>
+                                ) : null}
+                                {membershipConsolidationPreview.requiresRoleMismatchConfirmation ? (
+                                  <FormControlLabel
+                                    control={
+                                      <Checkbox
+                                        checked={
+                                          membershipConsolidationDraft.confirmRoleMismatch
+                                        }
+                                        onChange={(event) =>
+                                          handleMembershipConsolidationDraftChange(
+                                            'confirmRoleMismatch',
+                                            event.target.checked,
+                                          )
+                                        }
+                                      />
+                                    }
+                                    label={`I understand this moves ${membershipConsolidationPreview.sourceMembership.role} note attribution onto ${membershipConsolidationPreview.targetMembership.role}.`}
+                                  />
+                                ) : null}
+                              </Stack>
+                            </Alert>
+                          ) : null}
+
+                          {membershipConsolidationNotice ? (
+                            <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+                              {membershipConsolidationNotice}
+                            </Alert>
+                          ) : null}
+                        </Stack>
+                      )}
 
                       <Box>
                         <Typography variant="subtitle1">Shared links</Typography>
