@@ -75,3 +75,26 @@ Mikey initialized as Lead for the initial project squad.
 
 **Files:** Decision written to `.squad/decisions/inbox/mikey-next-lane.md`. GitHub comment added to issue #28 with thin-slice recommendation.
 📌 Team update (2026-04-13T00:04:28Z): Issue #27 COMPLETE — Frontend UI approved and merged after @copilot's revision (PR #36). Parallel lane decision on Issue #33 (activity UI) RESOLVED: Issue #33 UI unblocked post-PR-#36 merge, Issue #28 (tag facets) remains safe parallel option. PR #36 merged on main. Issue #33 queued for immediate assignment (primary: Stef, fallback: @copilot). Frontend thin slice scope: activity feed UI, collaborator filter sidebar, created/edited attribution, empty state. Backend contract stable. Regression test plan documented (RT1–RT5 gates). Awaiting product decisions on shared-workspace activity support and filter privacy. Assignment in orchestration log. No blocking architectural decisions — decided by FFMikha, Chunk, Scribe
+
+## 2026-04-13: Issue #28 Routing Review & Artifact Commit
+
+**By:** Mikey (Lead)
+
+**What:**
+Examined process state: Stef's issue #28 implementation rejected by Chunk for list/detail mismatch (can edit a note that's invisible in filtered view). Coordinator rerouted to @copilot before artifact was pushed to GitHub, creating a broken handoff risk (private rejection, no public artifact).
+
+**Action Taken:**
+1. ✅ Committed Stef's full artifact to `issue/28-tag-facets-autocomplete` with clear failure reason in commit message (commit `fc8a467`)
+2. ✅ Pushed branch to GitHub—artifact now discoverable, handoff integrity restored
+3. ✅ Verified Brand's repair path: keep artifact on branch, let @copilot revise against baseline
+4. ✅ Documented routing decision: `.squad/decisions/inbox/mikey-issue-28-routing.md`
+
+**Verdict:**
+- ✅ **Process state is correct:** rejection gate working, artifact public, routing explicit
+- ✅ **No other routing change needed:** Stef locked out (correct), @copilot owns revision, Chunk re-reviews after fix
+- ✅ **Blocker is architecturally sound:** List/detail sync is a core trust boundary; fix must reconcile `selectedNoteId` with `filteredNotes` (either retarget or clear to create state)
+
+**Recommendation:**
+Proceed with planned revision. Copilot should: (1) pick a list/detail reconciliation strategy (soft redirect or clear to create), (2) implement safety check in `handleSelectNote` or tag-filter handler, (3) add regression test, (4) rerun tests; Chunk re-reviews.
+
+---
