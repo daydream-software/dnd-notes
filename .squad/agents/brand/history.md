@@ -59,3 +59,35 @@ Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-han
 - Branches fully deleted locally and remotely to eliminate confusion
 
 **Key insight for future:** When PR is merged via GitHub squash, local feature branches with full history should not be merged back—cherry-pick only the metadata/decision consolidation commits if needed. This keeps main clean while preserving team records.
+
+## 2026-04-13: Squad Worktrees in Dedicated Folder
+
+**Requestor:** FFMikha  
+**Task:** Set up squad worktrees under `.worktrees/` folder instead of sibling folders at repo parent
+
+**Implementation:**
+1. Updated `.squad/config.json` with `worktrees: true` and `workTreesFolder: ".worktrees"`
+2. Added `.worktrees/` to `.gitignore` to keep runtime state out of version control
+3. Created `.squad/docs/worktree-setup.md` with comprehensive guide covering:
+   - Configuration explanation
+   - Folder structure and organization
+   - Usage for squad members and manual operations
+   - Rationale for the design
+
+**What it delivers:**
+- All issue worktrees now organized under `repo-root/.worktrees/{issue-number}`
+- Clean workspace — no sibling `dnd-notes-42` folders
+- Project-level configuration — no ephemeral shell-only setup
+- Example: Issue #42 worktree at `.worktrees/42/` instead of `../dnd-notes-42`
+
+**How it works:**
+- Coordinator parses `.squad/config.json` and reads `workTreesFolder: ".worktrees"`
+- When creating worktrees, Coordinator uses this path instead of default sibling behavior
+- Git itself has no path restrictions, so arbitrary relative or absolute paths work
+- `node_modules` symlink from worktree to main repo still works (Unix: `ln -s ../../node_modules`)
+
+**Limitation & follow-up:**
+- The `workTreesFolder` key is a team convention. Full automation depends on Coordinator implementation parsing the config and applying it during `Pre-Spawn: Worktree Setup`
+- Current squad.agent.md template describes sibling-folder default behavior
+- **Next step if needed:** If Coordinator doesn't yet parse `workTreesFolder`, team should test and confirm behavior, then update squad agent template path calculation logic if required
+- Documented in `.squad/decisions/inbox/brand-worktree-setup.md` with exact follow-up steps

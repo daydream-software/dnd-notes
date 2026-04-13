@@ -5,6 +5,8 @@
 .squad/sessions/
 # Squad: SubSquad activation file (local to this machine)
 .squad-workstream
+# Squad: worktrees folder (issue-specific checkouts)
+.worktrees/
 
 # Node / workspace output
 node_modules/
