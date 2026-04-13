@@ -39,6 +39,8 @@ Stef initialized as Frontend Dev for the initial project squad.
 - Keep issue #28 tag filtering in local `App.tsx` state (`selectedTagFilter`) so switching between notes, sessions, and activity does not reload the workspace or clobber in-progress drafts.
 - The tag browser should self-heal off the already loaded campaign notes: derive `tagFacets` from `notes`, reuse them for editor autocomplete, and auto-clear the active filter if the selected tag disappears after a save/delete.
 - Starting a brand-new note should clear any active tag facet in `apps/web/src/App.tsx`, so the compose flow does not inherit a browse-only filter and make the fresh note feel invisible after save; keep the regression in `apps/web/src/App.test.tsx`.
+- Issue #25 mobile note layout keeps browse controls in the left-side workspace but switches phones/tablets to an explicit single-pane `browse`/`editor` flow in `apps/web/src/App.tsx`; selecting a note or starting a new one should open the editor while desktop keeps the split layout.
+- Mobile note-layout regression coverage lives in `apps/web/src/App.test.tsx` with a `matchMedia` mock: default tests stay desktop-first, while narrow-screen tests should prove the notes list hides during editing and saved note changes are still visible when returning to browse.
 
 ## 2026-04-12: Issue #27 Backend Fixed, #32 & #23 Approved
 
@@ -51,3 +53,17 @@ Stef initialized as Frontend Dev for the initial project squad.
 📌 Team update (2026-04-13T00:04:28Z): Issue #27 UI APPROVED & MERGED by Chunk (2026-04-12T23:19:25Z). All four regression criteria retired by @copilot's revision: browse-mode state isolated from `loadWorkspace` dependency, draft preservation tested and verified, stale-response race eliminated by synchronous `useMemo` design, comprehensive regression test coverage added. PR #36 now merged on main (`9d0966b`). **Issue #33 (Recent Activity UI) now unblocked for your implementation** — assignment pending product decisions on shared-workspace activity and collaborator filter privacy. Thin slice v1 scope: read-only activity feed (notes sorted by `updatedAt`), collaborator filter sidebar (click to filter/clear), distinguish 'created' vs 'edited' actions, empty state. Non-blocking product decisions can be finalized during dev. Backend contract (`GET /api/notes/activity`) is stable. Regression test plan documented (RT1–RT5 gates in issue #33 decision). Expected delivery: 2–3 days post-PR-#36 merge. Files to modify: `App.tsx` (activity tab + filter state), `api.ts` (fetchActivity function), `types.ts` (activity response types), `App.test.tsx` (regression coverage). See `.squad/orchestration-log/2026-04-13T00:04:28Z-issue-33-ui-handoff.md` for full assignment context — decided by FFMikha (product), Chunk (reviewer), Scribe (session logger)
 
 📌 Team update (2026-04-13T07:52:28Z): LOCKOUT — Issue #28 tag facets branch rejected by Chunk (tester) due to critical list/detail mismatch blocker. When active tag filter is applied, left pane list narrows locally via `filteredNotes`, but editor still pulls from full `notes` array. Form can edit a note that no longer appears in filtered list. @copilot assigned for revision. You are locked out of this cycle. Orchestration and decision details in `.squad/log/` and `.squad/decisions.md` — decided by Chunk (reviewer), coordinator routed to copilot
+
+## 2026-04-13: Issue #30 Note Links and Backlinks
+
+- Added linkedNoteIds: string[] field to Note type in both backend and frontend
+- Backend stores linked notes as JSON array in SQLite linked_notes_json column
+- Migration adds column with default '[]' and safe parsing fallback for existing data
+- Validation ensures linked notes exist and are in same campaign on create/update
+- Frontend link editor uses Material UI Autocomplete to select notes from campaign
+- Backlinks computed client-side: notes.filter(n => n.linkedNoteIds.includes(currentNoteId))
+- Display shows both "Linked notes" (outgoing) and "Referenced by" (incoming/backlinks)
+- Links shown as clickable cards below editor, hidden during note creation
+- All existing tests pass without modification
+- Key files: apps/api/src/note-store.ts, apps/web/src/App.tsx, both types.ts
+
