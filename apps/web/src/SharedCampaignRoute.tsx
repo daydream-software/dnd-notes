@@ -32,6 +32,8 @@ import {
   registerOwner,
   updateSharedNote,
 } from './api'
+import NoteBodyEditor from './NoteBodyEditor'
+import { markdownToPlainText } from './note-excerpts'
 import { NoteBodyPreview } from './note-formatting'
 import type {
   CampaignMembership,
@@ -123,11 +125,13 @@ function formatTimestamp(value: string) {
 }
 
 function excerpt(body: string) {
-  if (body.length <= 112) {
-    return body
+  const plainText = markdownToPlainText(body)
+
+  if (plainText.length <= 112) {
+    return plainText
   }
 
-  return `${body.slice(0, 109)}...`
+  return `${plainText.slice(0, 109)}...`
 }
 
 function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
@@ -1020,9 +1024,9 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
             </Card>
 
             <Stack spacing={3}>
-              <Card sx={{ borderRadius: surfaceRadius }}>
-                <CardContent sx={{ p: 3 }}>
-                  <Stack spacing={2.5}>
+              <Card sx={{ borderRadius: surfaceRadius, minWidth: 0 }}>
+                <CardContent sx={{ p: 3, minWidth: 0 }}>
+                  <Stack spacing={2.5} sx={{ minWidth: 0 }}>
                     <Box>
                       <Typography variant="h5">
                         {isCreating ? 'Create note' : 'Note details'}
@@ -1077,35 +1081,31 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                       ))}
                     </TextField>
 
-                    <TextField
-                      label="Body"
-                      multiline
-                      minRows={12}
-                      value={draft.body}
-                      onChange={(event) =>
-                        handleDraftChange('body', event.target.value)
-                      }
-                      helperText="Supports Markdown formatting like headings, lists, emphasis, and links."
-                      slotProps={{ input: { readOnly: !canEdit } }}
-                    />
-
-                    <Stack spacing={1}>
-                      <Typography variant="subtitle1">Rendered preview</Typography>
-                      <Box
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: surfaceRadius,
-                          p: { xs: 2, sm: 2.5 },
-                        }}
-                      >
-                        <NoteBodyPreview
-                          ariaLabel="Note body preview"
-                          body={draft.body}
-                          emptyMessage="Nothing to preview yet. Headings, lists, emphasis, and links render here without changing what gets saved."
-                        />
-                      </Box>
-                    </Stack>
+                    {canEdit ? (
+                      <NoteBodyEditor
+                        body={draft.body}
+                        onChange={(value) => handleDraftChange('body', value)}
+                        surfaceRadius={surfaceRadius}
+                      />
+                    ) : (
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle1">Body</Typography>
+                        <Box
+                          sx={{
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            borderRadius: surfaceRadius,
+                            p: { xs: 2, sm: 2.5 },
+                          }}
+                        >
+                          <NoteBodyPreview
+                            ariaLabel="Note body preview"
+                            body={draft.body}
+                            emptyMessage="Nothing to preview yet."
+                          />
+                        </Box>
+                      </Stack>
+                    )}
 
                     {canEdit ? (
                       <Stack
@@ -1119,7 +1119,16 @@ function SharedCampaignRoute({ shareToken }: SharedCampaignRouteProps) {
                             : 'New notes are saved straight to this shared campaign.'}
                         </Typography>
 
-                        <Stack direction="row" spacing={1}>
+                        <Stack
+                          direction={{ xs: 'column', sm: 'row' }}
+                          spacing={1}
+                          sx={{
+                            width: { xs: '100%', sm: 'auto' },
+                            '& > *': {
+                              width: { xs: '100%', sm: 'auto' },
+                            },
+                          }}
+                        >
                           {!isCreating && selectedNote ? (
                             <Button
                               color="error"

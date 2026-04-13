@@ -1,12 +1,15 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
+import AddCircleOutlineRoundedIcon from '@mui/icons-material/AddCircleOutlineRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import ClearRoundedIcon from '@mui/icons-material/ClearRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import EventRoundedIcon from '@mui/icons-material/EventRounded'
+import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import PlaylistAddCheckCircleRoundedIcon from '@mui/icons-material/PlaylistAddCheckCircleRounded'
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
+import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
 import {
   Alert,
@@ -18,6 +21,7 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
+  Collapse,
   Container,
   FormControlLabel,
   IconButton,
@@ -66,11 +70,11 @@ import {
   noteStarterTemplates,
   type StarterNoteSeed,
 } from './templates'
-import { NoteBodyPreview } from './note-formatting'
+import { markdownToPlainText } from './note-excerpts'
+import NoteBodyEditor from './NoteBodyEditor'
 import type {
   ActivityCollaborator,
   CampaignInput,
-  CampaignMembershipRole,
   CampaignMembership,
   MembershipConsolidationSummary,
   CampaignShareLink,
@@ -329,27 +333,17 @@ function formatTimestamp(value: string) {
 }
 
 function excerpt(body: string) {
-  if (body.trim().length === 0) {
+  const normalizedBody = markdownToPlainText(body)
+
+  if (normalizedBody.length === 0) {
     return 'No details yet. Flesh this out when you have a minute.'
   }
 
-  if (body.length <= 112) {
-    return body
+  if (normalizedBody.length <= 112) {
+    return normalizedBody
   }
 
-  return `${body.slice(0, 109)}...`
-}
-
-function formatRoleLabel(role: CampaignMembershipRole) {
-  return role === 'owner' ? 'Owner' : 'Guest'
-}
-
-function formatAttribution(actor: Pick<ActivityCollaborator, 'displayName' | 'role'> | null) {
-  if (!actor) {
-    return 'Unknown'
-  }
-
-  return `${actor.displayName} (${formatRoleLabel(actor.role)})`
+  return `${normalizedBody.slice(0, 109)}...`
 }
 
 function sortActivityEntries(entries: NoteActivityEntry[]) {
@@ -362,6 +356,12 @@ const heroCardRadius = '32px'
 const surfaceRadius = '24px'
 const noteItemRadius = '20px'
 const statPillRadius = '999px'
+const singleLineTextSx = {
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as const
 const sessionNameCollator = new Intl.Collator(undefined, {
   numeric: true,
   sensitivity: 'base',
@@ -397,9 +397,13 @@ function createTagFacets(notes: Note[]): TagFacet[] {
     )
 }
 
+function formatSessionLine(sessionName: string | null) {
+  return sessionName?.trim() || 'No session'
+}
+
 function App() {
   const theme = useTheme()
-  const hasSplitNoteWorkspace = useMediaQuery(theme.breakpoints.up('lg'))
+  const canSplitNoteWorkspace = useMediaQuery(theme.breakpoints.up('lg'))
   const shareToken = useMemo(
     () =>
       typeof window === 'undefined'
@@ -429,6 +433,7 @@ function App() {
   const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null)
   const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
     useState<NarrowWorkspacePanel>('browse')
+  const [showSplitNoteWorkspace, setShowSplitNoteWorkspace] = useState(false)
   const [searchText, setSearchText] = useState('')
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
   const [tagInputValue, setTagInputValue] = useState('')
@@ -490,6 +495,7 @@ function App() {
     string | null
   >(null)
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const noteBrowseModeRef = useRef<NoteBrowseMode>('notes')
   const selectedNoteIdRef = useRef<string | null>(null)
@@ -527,6 +533,12 @@ function App() {
   useEffect(() => {
     setTagInputValue('')
   }, [draft.tagsText])
+
+  useEffect(() => {
+    if (!canSplitNoteWorkspace) {
+      setShowSplitNoteWorkspace(false)
+    }
+  }, [canSplitNoteWorkspace])
 
   const selectedNote = useMemo(
     () => notes.find((note) => note.id === selectedNoteId) ?? null,
@@ -672,10 +684,13 @@ function App() {
     () => sortActivityEntries(activityEntries),
     [activityEntries],
   )
-  const isNarrowNoteWorkspace = !hasSplitNoteWorkspace
-  const showBrowsePane = hasSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
-  const showEditorPane = hasSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
-  const mobileEditorLabel = isCreating ? 'Create note' : 'Edit note'
+  const isSinglePaneNoteWorkspace = !showSplitNoteWorkspace
+  const showBrowsePane = showSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
+  const showEditorPane = showSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
+  const workspaceEditorLabel =
+    isCreating || selectedNote === null ? 'Create note' : 'Edit note'
+  const useCompactHeader = true
+  const useCompactDesktopHeader = canSplitNoteWorkspace
 
   useEffect(() => {
     if (
@@ -1174,7 +1189,7 @@ function App() {
   }
 
   const handleSelectNote = (note: Note) => {
-    if (!hasSplitNoteWorkspace) {
+    if (!showSplitNoteWorkspace) {
       setNarrowWorkspacePanel('editor')
     }
 
@@ -1341,6 +1356,7 @@ function App() {
   }
 
   const handleStartNote = () => {
+    setShowSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('editor')
     resetSessionBrowserState()
@@ -1370,6 +1386,7 @@ function App() {
       })
 
       setQuickCaptureTitle('')
+      setIsQuickCaptureOpen(false)
       setNoteBrowseMode('notes')
       resetSessionBrowserState()
       await loadWorkspace(authToken, selectedCampaignId, createdNote.id)
@@ -1523,6 +1540,8 @@ function App() {
     }
 
     clearSession()
+    setShowSplitNoteWorkspace(false)
+    setIsQuickCaptureOpen(false)
     setError(null)
     setIsRegisterMode(false)
   }
@@ -1873,6 +1892,7 @@ function App() {
     }
 
     setCampaignFormMode('closed')
+    setShowSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
@@ -1882,6 +1902,30 @@ function App() {
     setShareLinks([])
     resetShareLinkInteractionState()
     await loadWorkspace(authToken, campaignId)
+  }
+
+  const handleShowBrowsePane = () => {
+    setShowSplitNoteWorkspace(false)
+    setNarrowWorkspacePanel('browse')
+  }
+
+  const handleShowEditorPane = () => {
+    setShowSplitNoteWorkspace(false)
+    setNarrowWorkspacePanel('editor')
+  }
+
+  const handleToggleSplitWorkspace = () => {
+    if (!canSplitNoteWorkspace) {
+      return
+    }
+
+    setShowSplitNoteWorkspace((currentValue) => {
+      if (currentValue) {
+        setNarrowWorkspacePanel(selectedNoteIdRef.current || isCreating ? 'editor' : 'browse')
+      }
+
+      return !currentValue
+    })
   }
 
   if (shareToken) {
@@ -2117,74 +2161,185 @@ function App() {
   }
 
   return (
-    <Box component="main" sx={{ minHeight: '100vh', py: { xs: 4, md: 6 } }}>
-      <Container maxWidth="xl">
-        <Stack spacing={3}>
-          <Card
+    <Box
+      component="main"
+      sx={{ minHeight: '100vh', py: { xs: 2.5, md: 4 }, width: '100%', overflowX: 'clip' }}
+    >
+      <Container maxWidth="xl" sx={{ minWidth: 0, overflowX: 'clip' }}>
+        <Stack spacing={2.5}>
+          <Box
+            aria-label="Application brand"
             sx={{
-              borderRadius: heroCardRadius,
-              overflow: 'hidden',
-              background:
-                'linear-gradient(140deg, rgba(124, 58, 237, 0.9), rgba(30, 41, 59, 0.96))',
-              border: '1px solid rgba(255, 255, 255, 0.08)',
+              display: { xs: 'none', lg: 'inline-flex' },
+              alignItems: 'center',
+              alignSelf: 'flex-start',
+              gap: 0.75,
+              px: 1.25,
+              py: 0.75,
+              borderRadius: '999px',
+              border: '1px solid',
+              borderColor: 'rgba(167, 139, 250, 0.2)',
+              bgcolor: 'rgba(15, 23, 42, 0.72)',
+              color: 'rgba(255, 255, 255, 0.78)',
+              backdropFilter: 'blur(12px)',
+              boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
+              maxWidth: '100%',
             }}
           >
-            <CardContent sx={{ p: { xs: 3, md: 4 } }}>
-              <Stack spacing={3}>
+            <StickyNote2RoundedIcon fontSize="small" />
+            <Typography
+              variant="caption"
+              sx={{
+                ...singleLineTextSx,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+              }}
+            >
+              D&amp;D Notes
+            </Typography>
+          </Box>
+          <Card
+            sx={{
+              position: 'sticky',
+              top: { xs: 8, md: 12 },
+              zIndex: 2,
+              borderRadius: surfaceRadius,
+              border: '1px solid',
+              borderColor: useCompactDesktopHeader
+                ? 'rgba(167, 139, 250, 0.14)'
+                : 'rgba(167, 139, 250, 0.2)',
+              bgcolor: useCompactDesktopHeader
+                ? 'rgba(15, 23, 42, 0.44)'
+                : 'rgba(15, 23, 42, 0.88)',
+              backdropFilter: useCompactDesktopHeader ? 'blur(12px)' : 'blur(16px)',
+              alignSelf: useCompactDesktopHeader ? 'flex-end' : 'stretch',
+              ml: useCompactDesktopHeader ? 'auto' : 0,
+              maxWidth: useCompactDesktopHeader ? 560 : 'none',
+              width: useCompactDesktopHeader ? '100%' : 'auto',
+              overflow: 'hidden',
+              boxShadow: useCompactDesktopHeader
+                ? '0 16px 40px rgba(2, 6, 23, 0.18)'
+                : '0 16px 40px rgba(2, 6, 23, 0.26)',
+              transition: theme.transitions.create(
+                ['background-color', 'border-color', 'box-shadow', 'max-width', 'margin'],
+                { duration: theme.transitions.duration.shorter },
+              ),
+              ...(useCompactDesktopHeader
+                ? {
+                    '&:hover': {
+                      bgcolor: 'rgba(15, 23, 42, 0.88)',
+                      borderColor: 'rgba(167, 139, 250, 0.22)',
+                      boxShadow: '0 18px 44px rgba(2, 6, 23, 0.28)',
+                    },
+                  }
+                : {}),
+            }}
+          >
+            <CardContent
+              sx={{
+                p: useCompactHeader
+                  ? { xs: 1.25, md: 1.5 }
+                  : { xs: 1.5, md: 2.5 },
+                maxHeight: useCompactHeader
+                  ? { xs: '20vh', md: 'none' }
+                  : 'none',
+              }}
+            >
+              <Stack spacing={useCompactHeader ? 1 : { xs: 1.25, md: 1.5 }}>
                 <Stack
                   direction={{ xs: 'column', md: 'row' }}
-                  spacing={2}
-                  sx={{ justifyContent: 'space-between' }}
+                  spacing={useCompactHeader ? 1 : 1.5}
+                  sx={{
+                    justifyContent: 'space-between',
+                    alignItems: { md: useCompactDesktopHeader ? 'flex-start' : 'center' },
+                  }}
                 >
-                  <Box sx={{ maxWidth: 760 }}>
+                  <Stack spacing={useCompactHeader ? 0.5 : 1} sx={{ minWidth: 0, maxWidth: 760 }}>
+                    {!useCompactHeader ? (
+                      <Typography
+                        variant="overline"
+                        sx={{ color: 'rgba(255, 255, 255, 0.64)', letterSpacing: '0.14em' }}
+                      >
+                        Campaign workspace
+                      </Typography>
+                    ) : null}
                     <Typography
-                      variant="overline"
-                      sx={{ color: 'rgba(255, 255, 255, 0.72)', letterSpacing: '0.18em' }}
-                    >
-                      Campaign workspace
-                    </Typography>
-                    <Typography
-                      variant="h2"
-                      sx={{ mt: 1, fontSize: { xs: '2.3rem', md: '3.4rem' } }}
+                      variant="h5"
+                      title={overview.campaign.name}
+                      sx={{
+                        ...singleLineTextSx,
+                        fontSize: useCompactHeader
+                          ? { xs: '1.05rem', md: '1.2rem' }
+                          : { xs: '1.3rem', md: '1.6rem' },
+                      }}
                     >
                       {overview.campaign.name}
                     </Typography>
-                    <Typography sx={{ mt: 2, maxWidth: 620, color: 'rgba(255, 255, 255, 0.78)' }}>
-                      {overview.campaign.tagline}
-                    </Typography>
-                    <Typography sx={{ mt: 2, color: 'rgba(255, 255, 255, 0.65)' }}>
-                      Signed in as {owner.displayName}. Notes stay scoped to the selected
-                      campaign, and owner-only settings stay tucked away when you are
-                      collaborating.
-                    </Typography>
-                    {activeMembership ? (
-                      <Chip
-                        label={
-                          activeMembership.role === 'owner'
-                            ? 'Campaign owner'
-                            : activeMembership.userId !== null
-                              ? 'Linked collaborator'
-                              : 'Guest collaborator'
-                        }
-                        color={canManageSelectedCampaign ? 'secondary' : 'default'}
-                        size="small"
-                        sx={{ mt: 2, bgcolor: 'rgba(255, 255, 255, 0.14)', color: 'white' }}
-                      />
+                    {useCompactHeader ? (
+                      <Typography
+                        color="rgba(255, 255, 255, 0.72)"
+                        variant="caption"
+                        sx={singleLineTextSx}
+                      >
+                        {overview.campaign.setting} • {overview.campaign.system} • {owner.displayName}
+                      </Typography>
+                    ) : (
+                      <Typography
+                        color="rgba(255, 255, 255, 0.76)"
+                        variant="body2"
+                        title={overview.campaign.tagline}
+                        sx={singleLineTextSx}
+                      >
+                        {overview.campaign.tagline}
+                      </Typography>
+                    )}
+                    {!useCompactHeader ? (
+                      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                        <Chip
+                          label={overview.campaign.system}
+                          size="small"
+                          sx={{ bgcolor: 'rgba(255, 255, 255, 0.08)', color: 'white' }}
+                        />
+                        <Chip
+                          label={overview.campaign.setting}
+                          size="small"
+                          sx={{ bgcolor: 'rgba(255, 255, 255, 0.08)', color: 'white' }}
+                        />
+                        <Chip
+                          label={`Signed in as ${owner.displayName}`}
+                          size="small"
+                          sx={{ bgcolor: 'rgba(255, 255, 255, 0.08)', color: 'white' }}
+                        />
+                        {activeMembership ? (
+                          <Chip
+                            label={
+                              activeMembership.role === 'owner'
+                                ? 'Campaign owner'
+                                : activeMembership.userId !== null
+                                  ? 'Linked collaborator'
+                                  : 'Guest collaborator'
+                            }
+                            color={canManageSelectedCampaign ? 'secondary' : 'default'}
+                            size="small"
+                            sx={{ bgcolor: 'rgba(255, 255, 255, 0.14)', color: 'white' }}
+                          />
+                        ) : null}
+                      </Stack>
                     ) : null}
-                  </Box>
+                  </Stack>
 
                   <Stack
-                    spacing={1.5}
+                    spacing={0.75}
                     sx={{
-                      minWidth: { md: 300 },
-                      borderRadius: surfaceRadius,
-                      p: 2.5,
-                      bgcolor: 'rgba(15, 23, 42, 0.36)',
-                      backdropFilter: 'blur(12px)',
+                      width: { xs: '100%', md: 'auto' },
+                      minWidth: 0,
+                      maxWidth: '100%',
+                      ...(useCompactDesktopHeader ? { minWidth: { md: 320 } } : {}),
                     }}
                   >
                     <TextField
                       select
+                      size="small"
                       label="Campaign"
                       value={selectedCampaignId}
                       onChange={(event) => void handleSelectCampaign(event.target.value)}
@@ -2195,40 +2350,92 @@ function App() {
                         </MenuItem>
                       ))}
                     </TextField>
-                    <Typography color="rgba(255, 255, 255, 0.72)">
-                      {overview.campaign.setting} • {overview.campaign.system}
-                    </Typography>
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                      <Button variant="contained" onClick={handleOpenCampaignCreate}>
-                        New campaign
-                      </Button>
-                      <Button
-                        variant="outlined"
-                        color="inherit"
-                        onClick={handleOpenCampaignSettings}
-                        disabled={!canManageSelectedCampaign}
+                    {useCompactHeader ? (
+                      <Stack
+                        direction="row"
+                        spacing={0.5}
+                        sx={{
+                          justifyContent: { xs: 'space-between', md: 'flex-end' },
+                          minWidth: 0,
+                        }}
                       >
-                        Campaign settings
-                      </Button>
-                    </Stack>
-                    {!canManageSelectedCampaign ? (
-                      <Typography color="rgba(255, 255, 255, 0.72)" variant="body2">
+                        <Box
+                          sx={{
+                            display: 'grid',
+                            gap: 0.5,
+                            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+                            width: '100%',
+                            minWidth: 0,
+                          }}
+                        >
+                        <IconButton
+                          aria-label="New campaign"
+                          color="inherit"
+                          size="small"
+                          onClick={handleOpenCampaignCreate}
+                        >
+                          <AddCircleOutlineRoundedIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          aria-label="Campaign settings"
+                          color="inherit"
+                          size="small"
+                          onClick={handleOpenCampaignSettings}
+                          disabled={!canManageSelectedCampaign}
+                        >
+                          <SettingsRoundedIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          aria-label="New note"
+                          color="secondary"
+                          size="small"
+                          onClick={handleStartNote}
+                        >
+                          <AddRoundedIcon fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          aria-label="Sign out"
+                          color="inherit"
+                          size="small"
+                          onClick={handleLogout}
+                        >
+                          <LogoutRoundedIcon fontSize="small" />
+                        </IconButton>
+                        </Box>
+                      </Stack>
+                    ) : (
+                      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                        <Button size="small" variant="outlined" color="inherit" onClick={handleOpenCampaignCreate}>
+                          New campaign
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="inherit"
+                          onClick={handleOpenCampaignSettings}
+                          disabled={!canManageSelectedCampaign}
+                        >
+                          Campaign settings
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="contained"
+                          color="secondary"
+                          startIcon={<AddRoundedIcon />}
+                          onClick={handleStartNote}
+                        >
+                          New note
+                        </Button>
+                        <Button size="small" variant="text" color="inherit" onClick={handleLogout}>
+                          Sign out
+                        </Button>
+                      </Stack>
+                    )}
+                    {activeMembership && !useCompactHeader ? (
+                      <Typography color="rgba(255, 255, 255, 0.64)" variant="caption">
                         Share links and campaign settings stay with the campaign owner.
                       </Typography>
                     ) : null}
-                    <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                      <Button
-                        variant="contained"
-                        color="secondary"
-                        startIcon={<AddRoundedIcon />}
-                        onClick={handleStartNote}
-                      >
-                        New note
-                      </Button>
-                      <Button variant="text" color="inherit" onClick={handleLogout}>
-                        Sign out
-                      </Button>
-                    </Stack>
                   </Stack>
                 </Stack>
               </Stack>
@@ -2882,196 +3089,211 @@ function App() {
           <Box
             sx={{
               display: 'grid',
-              gap: 3,
-              gridTemplateColumns: {
-                xs: '1fr',
-                lg: 'minmax(0, 1.2fr) minmax(0, 1fr)',
-              },
+              gap: 2,
+              minWidth: 0,
+              gridTemplateColumns: showSplitNoteWorkspace
+                ? {
+                    xs: '1fr',
+                    lg: 'minmax(0, 1.1fr) minmax(0, 1fr)',
+                  }
+                : '1fr',
             }}
           >
-            {!hasSplitNoteWorkspace ? (
-              <Card
-                sx={{
-                  borderRadius: surfaceRadius,
-                  gridColumn: '1 / -1',
-                }}
-              >
-                <CardContent sx={{ p: { xs: 2.5, sm: 3 } }}>
-                  <Stack spacing={1.5}>
-                    <Box>
-                      <Typography variant="overline" color="text.secondary">
-                        Mobile note workspace
-                      </Typography>
-                      <Typography variant="body2" color="text.secondary">
-                        Switch between browsing and editing so smaller screens stay roomy.
-                      </Typography>
-                    </Box>
-                    <Stack direction="row" spacing={1}>
+            <Card
+              sx={{
+                borderRadius: surfaceRadius,
+                gridColumn: '1 / -1',
+                minWidth: 0,
+              }}
+            >
+              <CardContent sx={{ p: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
+                <Stack
+                  direction={{ xs: 'column', md: 'row' }}
+                  spacing={1.5}
+                  sx={{ justifyContent: 'space-between', alignItems: { md: 'center' } }}
+                >
+                  <Box sx={{ minWidth: 0 }}>
+                    <Typography variant="overline" color="text.secondary">
+                      Workspace
+                    </Typography>
+                    <Typography variant="body2" color="text.secondary" sx={singleLineTextSx}>
+                      Switch between browsing and editing without stretching the page.
+                    </Typography>
+                  </Box>
+                  <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                    <Button
+                      size="small"
+                      variant={!showEditorPane || showSplitNoteWorkspace ? 'contained' : 'outlined'}
+                      onClick={handleShowBrowsePane}
+                    >
+                      Browse notes
+                    </Button>
+                    <Button
+                      size="small"
+                      variant={!showBrowsePane || showSplitNoteWorkspace ? 'contained' : 'outlined'}
+                      onClick={handleShowEditorPane}
+                    >
+                      {workspaceEditorLabel}
+                    </Button>
+                    {canSplitNoteWorkspace ? (
                       <Button
-                        fullWidth
-                        variant={showBrowsePane ? 'contained' : 'outlined'}
-                        onClick={() => setNarrowWorkspacePanel('browse')}
+                        size="small"
+                        variant={showSplitNoteWorkspace ? 'contained' : 'outlined'}
+                        onClick={handleToggleSplitWorkspace}
                       >
-                        Browse notes
+                        Split view
                       </Button>
-                      <Button
-                        fullWidth
-                        variant={showEditorPane ? 'contained' : 'outlined'}
-                        onClick={() => setNarrowWorkspacePanel('editor')}
-                      >
-                        {mobileEditorLabel}
-                      </Button>
-                    </Stack>
+                    ) : null}
                   </Stack>
-                </CardContent>
-              </Card>
-            ) : null}
+                </Stack>
+              </CardContent>
+            </Card>
 
             {showBrowsePane ? (
-              <Card sx={{ borderRadius: surfaceRadius }}>
-                <CardContent sx={{ p: 3 }}>
-                  <Stack spacing={3}>
+              <Card sx={{ borderRadius: surfaceRadius, minWidth: 0 }}>
+                <CardContent sx={{ p: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
+                  <Stack spacing={2} sx={{ minWidth: 0 }}>
                     <Stack
-                      direction={{ xs: 'column', sm: 'row' }}
-                      spacing={2}
-                      sx={{ justifyContent: 'space-between' }}
+                      direction={{ xs: 'column', md: 'row' }}
+                      spacing={1.5}
+                      sx={{ justifyContent: 'space-between', alignItems: { md: 'center' } }}
                     >
-                      <Box>
-                        <Typography variant="h5">{notePaneHeading}</Typography>
-                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="h6">{notePaneHeading}</Typography>
+                        <Typography
+                          color="text.secondary"
+                          variant="body2"
+                          title={notePaneDescription}
+                          sx={singleLineTextSx}
+                        >
                           {notePaneDescription}
                         </Typography>
                       </Box>
-                      <Stack spacing={1} sx={{ width: { xs: '100%', sm: 'auto' } }}>
-                        <Box
-                          sx={{
-                            display: 'grid',
-                            gap: 1,
-                            width: '100%',
-                            gridTemplateColumns: {
-                              xs: '1fr',
-                              sm: 'repeat(2, minmax(0, 1fr))',
-                            },
-                          }}
+                      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                        <Button
+                          size="small"
+                          variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
+                          onClick={handleOpenAllNotes}
                         >
-                          <Button
-                            variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
-                            onClick={handleOpenAllNotes}
-                          >
-                            All notes
-                          </Button>
-                          <Button
-                            variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
-                            onClick={handleOpenSessionBrowser}
-                          >
-                            Browse by session
-                          </Button>
-                          <Button
-                            variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
-                            onClick={() => void handleOpenRecentActivity()}
-                          >
-                            Recent activity
-                          </Button>
-                          <Button
-                            variant="outlined"
-                            startIcon={<AddRoundedIcon />}
-                            onClick={handleStartNote}
-                            sx={{ width: '100%' }}
-                          >
-                            New note
-                          </Button>
-                        </Box>
+                          All notes
+                        </Button>
+                        <Button
+                          size="small"
+                          variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
+                          onClick={handleOpenSessionBrowser}
+                        >
+                          Browse by session
+                        </Button>
+                        <Button
+                          size="small"
+                          variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
+                          onClick={() => void handleOpenRecentActivity()}
+                        >
+                          Recent activity
+                        </Button>
+                        <Button
+                          size="small"
+                          variant={isQuickCaptureOpen ? 'contained' : 'outlined'}
+                          startIcon={<BoltRoundedIcon />}
+                          onClick={() =>
+                            setIsQuickCaptureOpen((currentValue) => !currentValue)
+                          }
+                        >
+                          Quick capture
+                        </Button>
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          startIcon={<AddRoundedIcon />}
+                          onClick={handleStartNote}
+                        >
+                          New note
+                        </Button>
                       </Stack>
                     </Stack>
 
-                  <Stack
-                    direction={{ xs: 'column', sm: 'row' }}
-                    spacing={1}
-                    component="form"
-                    onSubmit={(event) => {
-                      event.preventDefault()
-                      void handleQuickCapture()
-                    }}
-                  >
-                    <TextField
-                      label="Quick capture"
-                      placeholder="Jot down a thought, clue, or reminder…"
-                      size="small"
-                      value={quickCaptureTitle}
-                      onChange={(event) => setQuickCaptureTitle(event.target.value)}
-                      disabled={isQuickCapturing}
-                      sx={{ flex: 1 }}
-                    />
-                    <Button
-                      type="submit"
-                      variant="contained"
-                      startIcon={<BoltRoundedIcon />}
-                      disabled={!quickCaptureTitle.trim() || isQuickCapturing}
-                    >
-                      {isQuickCapturing ? 'Capturing…' : 'Capture'}
-                    </Button>
-                  </Stack>
-
-                  <TextField
-                    label="Search notes"
-                    placeholder="Search by title, body, tags, session, or collaborator…"
-                    size="small"
-                    value={searchText}
-                    onChange={(event) => setSearchText(event.target.value)}
-                    slotProps={{
-                      input: {
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <SearchRoundedIcon />
-                          </InputAdornment>
-                        ),
-                        endAdornment: searchText ? (
-                          <InputAdornment position="end">
-                            <IconButton
-                              size="small"
-                              onClick={handleClearSearch}
-                              edge="end"
-                              aria-label="Clear search"
-                            >
-                              <ClearRoundedIcon />
-                            </IconButton>
-                          </InputAdornment>
-                        ) : null,
-                      },
-                    }}
-                    sx={{ width: '100%' }}
-                  />
-
-                  <Stack spacing={1.5}>
-                    <Stack
-                      direction={{ xs: 'column', sm: 'row' }}
-                      spacing={1}
-                      sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
-                    >
-                      <Box>
-                        <Typography variant="subtitle1">Browse by tag</Typography>
+                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
+                      <TextField
+                        label="Search notes"
+                        placeholder="Search title, body, tags, session, or collaborator…"
+                        size="small"
+                        value={searchText}
+                        onChange={(event) => setSearchText(event.target.value)}
+                        slotProps={{
+                          input: {
+                            startAdornment: (
+                              <InputAdornment position="start">
+                                <SearchRoundedIcon />
+                              </InputAdornment>
+                            ),
+                            endAdornment: searchText ? (
+                              <InputAdornment position="end">
+                                <IconButton
+                                  size="small"
+                                  onClick={handleClearSearch}
+                                  edge="end"
+                                  aria-label="Clear search"
+                                >
+                                  <ClearRoundedIcon />
+                                </IconButton>
+                              </InputAdornment>
+                            ) : null,
+                          },
+                        }}
+                        sx={{ flex: 1 }}
+                      />
+                      <Stack
+                        direction={{ xs: 'column', sm: 'row' }}
+                        spacing={1}
+                        sx={{ alignItems: { sm: 'center' }, flexWrap: 'wrap' }}
+                      >
                         <Typography color="text.secondary" variant="body2">
-                          Pick a campaign tag to narrow the note list without reloading the
-                          workspace.
+                          Tags
                         </Typography>
-                      </Box>
-                      {selectedTagFacet ? (
-                        <Stack
-                          direction={{ xs: 'column', sm: 'row' }}
-                          spacing={1}
-                          sx={{ alignItems: { sm: 'center' } }}
-                        >
-                          <Chip
-                            label={`Filtering by ${selectedTagFacet.tag} (${selectedTagFacet.count})`}
-                            color="primary"
-                            size="small"
-                          />
-                          <Button size="small" variant="text" onClick={handleClearTagFilter}>
-                            Clear filter
-                          </Button>
-                        </Stack>
-                      ) : null}
+                        {selectedTagFacet ? (
+                          <>
+                            <Chip
+                              label={`Filtering by ${selectedTagFacet.tag} (${selectedTagFacet.count})`}
+                              color="primary"
+                              size="small"
+                            />
+                            <Button size="small" variant="text" onClick={handleClearTagFilter}>
+                              Clear filter
+                            </Button>
+                          </>
+                        ) : null}
+                      </Stack>
                     </Stack>
+
+                    <Collapse in={isQuickCaptureOpen}>
+                      <Stack
+                        direction={{ xs: 'column', sm: 'row' }}
+                        spacing={1}
+                        component="form"
+                        onSubmit={(event) => {
+                          event.preventDefault()
+                          void handleQuickCapture()
+                        }}
+                      >
+                        <TextField
+                          label="Quick capture"
+                          placeholder="Jot down a clue, reminder, or scene…"
+                          size="small"
+                          value={quickCaptureTitle}
+                          onChange={(event) => setQuickCaptureTitle(event.target.value)}
+                          disabled={isQuickCapturing}
+                          sx={{ flex: 1 }}
+                        />
+                        <Button
+                          type="submit"
+                          variant="contained"
+                          startIcon={<BoltRoundedIcon />}
+                          disabled={!quickCaptureTitle.trim() || isQuickCapturing}
+                        >
+                          {isQuickCapturing ? 'Capturing…' : 'Capture'}
+                        </Button>
+                      </Stack>
+                    </Collapse>
 
                     {tagFacets.length === 0 ? (
                       <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
@@ -3089,9 +3311,7 @@ function App() {
                           <Button
                             key={tagFacet.tag}
                             size="small"
-                            variant={
-                              selectedTagFilter === tagFacet.tag ? 'contained' : 'outlined'
-                            }
+                            variant={selectedTagFilter === tagFacet.tag ? 'contained' : 'outlined'}
                             onClick={() => handleSelectTagFilter(tagFacet.tag)}
                           >
                             {tagFacet.tag} ({tagFacet.count})
@@ -3099,7 +3319,6 @@ function App() {
                         ))}
                       </Stack>
                     )}
-                  </Stack>
 
                   {noteBrowseMode === 'activity' ? (
                     <Stack spacing={2.5}>
@@ -3202,12 +3421,36 @@ function App() {
                                 disableTypography
                                 primary={
                                   <Stack
-                                    direction={{ xs: 'column', sm: 'row' }}
-                                    spacing={1}
-                                    sx={{ justifyContent: 'space-between' }}
+                                    direction="row"
+                                    spacing={1.5}
+                                    sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
                                   >
-                                    <Typography variant="h6">{activityEntry.title}</Typography>
-                                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                                    <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
+                                      <Typography
+                                        variant="subtitle1"
+                                        title={activityEntry.title}
+                                        sx={singleLineTextSx}
+                                      >
+                                        {activityEntry.title}
+                                      </Typography>
+                                      <Typography
+                                        color="text.secondary"
+                                        variant="body2"
+                                        title={excerpt(activityEntry.body)}
+                                        sx={singleLineTextSx}
+                                      >
+                                        {excerpt(activityEntry.body)}
+                                      </Typography>
+                                      <Typography
+                                        color="text.secondary"
+                                        variant="caption"
+                                        title={formatSessionLine(activityEntry.sessionName)}
+                                        sx={singleLineTextSx}
+                                      >
+                                        {formatSessionLine(activityEntry.sessionName)}
+                                      </Typography>
+                                    </Stack>
+                                    <Stack spacing={0.75} sx={{ alignItems: 'flex-end', flexShrink: 0 }}>
                                       <Chip
                                         label={activityEntry.action === 'created' ? 'Created' : 'Edited'}
                                         color={
@@ -3218,45 +3461,9 @@ function App() {
                                         size="small"
                                       />
                                       <Chip label={activityEntry.status} size="small" />
-                                    </Stack>
-                                  </Stack>
-                                }
-                                secondary={
-                                  <Stack spacing={1.25} sx={{ mt: 1.25 }}>
-                                    <Typography color="text.secondary">
-                                      {excerpt(activityEntry.body)}
-                                    </Typography>
-                                    <Typography color="text.secondary" variant="body2">
-                                      {activityEntry.sessionName
-                                        ? `${activityEntry.sessionName} • `
-                                        : ''}
-                                      {activityEntry.action === 'created' ? 'Created' : 'Updated'}{' '}
-                                      {formatTimestamp(activityEntry.updatedAt)}
-                                    </Typography>
-                                    <Stack
-                                      direction={{ xs: 'column', sm: 'row' }}
-                                      spacing={1}
-                                      useFlexGap
-                                      sx={{ flexWrap: 'wrap' }}
-                                    >
-                                      <Chip
-                                        label={`Created by ${formatAttribution(
-                                          activityEntry.createdBy,
-                                        )}`}
-                                        size="small"
-                                        variant="outlined"
-                                      />
-                                      {activityEntry.lastEditedBy &&
-                                      activityEntry.lastEditedBy.membershipId !==
-                                        activityEntry.createdBy?.membershipId ? (
-                                        <Chip
-                                          label={`Last edited by ${formatAttribution(
-                                            activityEntry.lastEditedBy,
-                                          )}`}
-                                          size="small"
-                                          variant="outlined"
-                                        />
-                                      ) : null}
+                                      <Typography color="text.secondary" variant="caption">
+                                        {formatTimestamp(activityEntry.updatedAt)}
+                                      </Typography>
                                     </Stack>
                                   </Stack>
                                 }
@@ -3295,13 +3502,30 @@ function App() {
                               disableTypography
                               primary={
                                 <Stack
-                                  direction={{ xs: 'column', sm: 'row' }}
-                                  spacing={1}
-                                  sx={{ justifyContent: 'space-between' }}
+                                  direction="row"
+                                  spacing={1.5}
+                                  sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
                                 >
-                                  <Typography variant="h6">
-                                    {sessionSummary.sessionName}
-                                  </Typography>
+                                  <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
+                                    <Typography
+                                      variant="subtitle1"
+                                      title={sessionSummary.sessionName}
+                                      sx={singleLineTextSx}
+                                    >
+                                      {sessionSummary.sessionName}
+                                    </Typography>
+                                    <Typography color="text.secondary" variant="body2" sx={singleLineTextSx}>
+                                      Open this session to review the note trail.
+                                    </Typography>
+                                    <Typography
+                                      color="text.secondary"
+                                      variant="caption"
+                                      title={formatTimestamp(sessionSummary.latestActivity)}
+                                      sx={singleLineTextSx}
+                                    >
+                                      Latest activity {formatTimestamp(sessionSummary.latestActivity)}
+                                    </Typography>
+                                  </Stack>
                                   <Chip
                                     label={`${sessionSummary.noteCount} ${
                                       sessionSummary.noteCount === 1 ? 'note' : 'notes'
@@ -3309,11 +3533,6 @@ function App() {
                                     size="small"
                                   />
                                 </Stack>
-                              }
-                              secondary={
-                                <Typography color="text.secondary" sx={{ mt: 1.25 }}>
-                                  Open this session to see the note trail in one pass.
-                                </Typography>
                               }
                             />
                           </ListItemButton>
@@ -3390,51 +3609,50 @@ function App() {
                                 disableTypography
                                 primary={
                                   <Stack
-                                    direction={{ xs: 'column', sm: 'row' }}
-                                    spacing={1}
-                                    sx={{ justifyContent: 'space-between' }}
+                                    direction="row"
+                                    spacing={1.5}
+                                    sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
                                   >
-                                    <Typography variant="h6">{note.title}</Typography>
-                                    <Chip
-                                      label={note.status}
-                                      color={
-                                        note.status === 'active'
-                                          ? 'secondary'
-                                          : note.status === 'archived'
-                                            ? 'default'
-                                            : 'primary'
-                                      }
-                                      size="small"
-                                    />
-                                  </Stack>
-                                }
-                                secondary={
-                                  <Stack spacing={1.25} sx={{ mt: 1.25 }}>
-                                    <Typography color="text.secondary">
-                                      {excerpt(note.body)}
-                                    </Typography>
-                                    <Typography color="text.secondary" variant="body2">
-                                      {note.sessionName ? `${note.sessionName} • ` : ''}
-                                      Updated {formatTimestamp(note.updatedAt)}
-                                    </Typography>
-                                    {note.createdBy && (
-                                      <Typography color="text.secondary" variant="body2">
-                                        Created by {note.createdBy.displayName}
-                                        {note.lastEditedBy &&
-                                          note.lastEditedBy.membershipId !==
-                                            note.createdBy.membershipId &&
-                                          ` • Edited by ${note.lastEditedBy.displayName}`}
+                                    <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
+                                      <Typography
+                                        variant="subtitle1"
+                                        title={note.title}
+                                        sx={singleLineTextSx}
+                                      >
+                                        {note.title}
                                       </Typography>
-                                    )}
-                                    <Stack
-                                      direction="row"
-                                      spacing={1}
-                                      useFlexGap
-                                      sx={{ flexWrap: 'wrap' }}
-                                    >
-                                      {note.tags.map((tag) => (
-                                        <Chip key={tag} label={tag} size="small" />
-                                      ))}
+                                      <Typography
+                                        color="text.secondary"
+                                        variant="body2"
+                                        title={excerpt(note.body)}
+                                        sx={singleLineTextSx}
+                                      >
+                                        {excerpt(note.body)}
+                                      </Typography>
+                                      <Typography
+                                        color="text.secondary"
+                                        variant="caption"
+                                        title={formatSessionLine(note.sessionName)}
+                                        sx={singleLineTextSx}
+                                      >
+                                        {formatSessionLine(note.sessionName)}
+                                      </Typography>
+                                    </Stack>
+                                    <Stack spacing={0.75} sx={{ alignItems: 'flex-end', flexShrink: 0 }}>
+                                      <Chip
+                                        label={note.status}
+                                        color={
+                                          note.status === 'active'
+                                            ? 'secondary'
+                                            : note.status === 'archived'
+                                              ? 'default'
+                                              : 'primary'
+                                        }
+                                        size="small"
+                                      />
+                                      <Typography color="text.secondary" variant="caption">
+                                        Updated {formatTimestamp(note.updatedAt)}
+                                      </Typography>
                                     </Stack>
                                   </Stack>
                                 }
@@ -3452,10 +3670,10 @@ function App() {
 
             {showEditorPane ? (
               <Stack spacing={3}>
-                <Card sx={{ borderRadius: surfaceRadius }}>
-                  <CardContent sx={{ p: 3 }}>
-                    <Stack spacing={2.5}>
-                      {isNarrowNoteWorkspace ? (
+                <Card sx={{ borderRadius: surfaceRadius, minWidth: 0 }}>
+                  <CardContent sx={{ p: 3, minWidth: 0 }}>
+                    <Stack spacing={2.5} sx={{ minWidth: 0 }}>
+                      {isSinglePaneNoteWorkspace ? (
                         <Button
                           variant="text"
                           size="small"
@@ -3596,34 +3814,11 @@ function App() {
                       ))}
                     </TextField>
 
-                    <TextField
-                      label="Body"
-                      multiline
-                      minRows={12}
-                      value={draft.body}
-                      onChange={(event) =>
-                        handleDraftChange('body', event.target.value)
-                      }
-                      helperText="Supports Markdown formatting like headings, lists, emphasis, and links."
+                    <NoteBodyEditor
+                      body={draft.body}
+                      onChange={(value) => handleDraftChange('body', value)}
+                      surfaceRadius={surfaceRadius}
                     />
-
-                    <Stack spacing={1}>
-                      <Typography variant="subtitle1">Rendered preview</Typography>
-                      <Box
-                        sx={{
-                          border: '1px solid',
-                          borderColor: 'divider',
-                          borderRadius: surfaceRadius,
-                          p: { xs: 2, sm: 2.5 },
-                        }}
-                      >
-                        <NoteBodyPreview
-                          ariaLabel="Note body preview"
-                          body={draft.body}
-                          emptyMessage="Nothing to preview yet. Headings, lists, emphasis, and links render here without changing what gets saved."
-                        />
-                      </Box>
-                    </Stack>
 
                     <Stack
                       direction={{ xs: 'column', sm: 'row' }}
@@ -3636,7 +3831,16 @@ function App() {
                           : 'New notes are saved straight to the selected campaign.'}
                       </Typography>
 
-                      <Stack direction="row" spacing={1}>
+                      <Stack
+                        direction={{ xs: 'column', sm: 'row' }}
+                        spacing={1}
+                        sx={{
+                          width: { xs: '100%', sm: 'auto' },
+                          '& > *': {
+                            width: { xs: '100%', sm: 'auto' },
+                          },
+                        }}
+                      >
                         {!isCreating && selectedNote ? (
                           <Button
                             color="error"
@@ -3728,36 +3932,40 @@ function App() {
                   </Card>
                 ) : null}
 
-                {hasSplitNoteWorkspace ? (
-                  <Card sx={{ borderRadius: surfaceRadius }}>
-                    <CardContent sx={{ p: 3 }}>
-                      <Stack spacing={2}>
-                        <Typography variant="h5">Recent notes</Typography>
-                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                          Keep a lightweight snapshot of the latest notes for{' '}
-                          {overview.campaign.name} within easy reach.
-                        </Typography>
-                        {overview.recentNotes.length === 0 ? (
-                          <Typography color="text.secondary">
-                            Once you save notes, the freshest ones show up here.
-                          </Typography>
-                        ) : (
-                          overview.recentNotes.map((note) => (
-                            <Stack key={note.id} spacing={0.75}>
-                              <Typography variant="subtitle1">{note.title}</Typography>
-                              <Typography color="text.secondary" variant="body2">
-                                Updated {formatTimestamp(note.updatedAt)}
-                                {note.lastEditedBy && ` by ${note.lastEditedBy.displayName}`}
-                              </Typography>
-                            </Stack>
-                          ))
-                        )}
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                ) : null}
               </Stack>
             ) : null}
+
+            <Box
+              aria-label="Application brand"
+              sx={{
+                display: { xs: 'inline-flex', lg: 'none' },
+                alignItems: 'center',
+                alignSelf: 'center',
+                gap: 0.75,
+                px: 1.25,
+                py: 0.75,
+                borderRadius: '999px',
+                border: '1px solid',
+                borderColor: 'rgba(167, 139, 250, 0.2)',
+                bgcolor: 'rgba(15, 23, 42, 0.72)',
+                color: 'rgba(255, 255, 255, 0.78)',
+                backdropFilter: 'blur(12px)',
+                boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
+                maxWidth: 'calc(100vw - 24px)',
+              }}
+            >
+              <StickyNote2RoundedIcon fontSize="small" />
+              <Typography
+                variant="caption"
+                sx={{
+                  ...singleLineTextSx,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                D&amp;D Notes
+              </Typography>
+            </Box>
           </Box>
         </Stack>
       </Container>
