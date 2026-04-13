@@ -2,9 +2,11 @@ import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
 import type { NoteStore } from './note-store.js'
 import type {
+  ActivityCollaborator,
   AuthSessionResponse,
   CampaignMembership,
   CampaignMembershipsResponse,
+  MembershipConsolidationResponse,
   CampaignShareLinkCreateResponse,
   CampaignShareLinkRevealResponse,
   CampaignShareLinksResponse,
@@ -13,10 +15,14 @@ import type {
   CurrentOwnerResponse,
   ErrorResponse,
   HealthResponse,
+  Note,
+  NoteActivityEntry,
+  NoteActivityResponse,
   NoteResponse,
   NotesOverview,
   NotesResponse,
   OwnerAccount,
+  SessionSummary,
   SessionsResponse,
   SharedJoinResponse,
   SharedMembershipClaimResponse,
@@ -27,6 +33,7 @@ import {
   validateCampaignShareLinkInput,
   validateGuestJoinInput,
   validateNoteCreateInput,
+  validateMembershipConsolidationInput,
   validateNoteInput,
   validateOwnerLoginInput,
   validateOwnerRegistrationInput,
@@ -55,6 +62,9 @@ interface ShareLinkParams extends CampaignParams {
 interface SharedNoteParams extends ShareParams {
   noteId: string
 }
+
+const defaultActivityLimit = 20
+const maxActivityLimit = 100
 
 interface CreateAppOptions {
   noteStore: NoteStore
@@ -97,6 +107,42 @@ function readRequestedCampaignId(request: Request) {
   return trimmed.length > 0 ? trimmed : null
 }
 
+function readRequestedMembershipId(request: Request) {
+  const value = request.query.membershipId
+
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function readRequestedActivityLimit(
+  request: Request,
+  response: Response<ErrorResponse>,
+) {
+  const value = request.query.limit
+
+  if (value === undefined) {
+    return defaultActivityLimit
+  }
+
+  if (typeof value !== 'string') {
+    response.status(400).json({ error: 'Activity limit must be a positive integer.' })
+    return null
+  }
+
+  const parsed = Number.parseInt(value, 10)
+
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    response.status(400).json({ error: 'Activity limit must be a positive integer.' })
+    return null
+  }
+
+  return Math.min(parsed, maxActivityLimit)
+}
+
 function buildOverview(
   noteStore: NoteStore,
   campaignId: string,
@@ -113,6 +159,104 @@ function buildOverview(
     membership,
     stats: noteStore.getStats(campaign.id),
     recentNotes: noteStore.listRecentNotes(3, campaign.id),
+  }
+}
+
+function buildSessions(noteStore: NoteStore, campaignId: string): SessionSummary[] {
+  const sessions = noteStore.listSessionNames(campaignId) as Array<string | SessionSummary>
+
+  return sessions.map((session) => {
+    if (typeof session !== 'string') {
+      return session
+    }
+
+    const notes = noteStore.getSessionNotes(campaignId, session)
+    const latestActivity = notes.reduce(
+      (latest, note) => (note.updatedAt > latest ? note.updatedAt : latest),
+      '',
+    )
+
+    return {
+      sessionName: session,
+      noteCount: notes.length,
+      latestActivity,
+    }
+  })
+}
+
+function noteMatchesActivityMembership(note: Note, membershipId: string) {
+  return (
+    note.createdBy?.membershipId === membershipId ||
+    note.lastEditedBy?.membershipId === membershipId
+  )
+}
+
+function buildActivityCollaborators(notes: Note[]): ActivityCollaborator[] {
+  const collaborators = new Map<string, ActivityCollaborator>()
+
+  for (const note of notes) {
+    const actorIds = new Set<string>()
+
+    for (const actor of [note.createdBy, note.lastEditedBy]) {
+      if (!actor || actorIds.has(actor.membershipId)) {
+        continue
+      }
+
+      actorIds.add(actor.membershipId)
+      const existing = collaborators.get(actor.membershipId)
+
+      if (existing) {
+        existing.noteCount += 1
+        continue
+      }
+
+      collaborators.set(actor.membershipId, {
+        membershipId: actor.membershipId,
+        displayName: actor.displayName,
+        role: actor.role,
+        noteCount: 1,
+      })
+    }
+  }
+
+  return [...collaborators.values()].sort((left, right) =>
+    right.noteCount !== left.noteCount
+      ? right.noteCount - left.noteCount
+      : left.displayName.localeCompare(right.displayName),
+  )
+}
+
+function buildNoteActivityEntry(note: Note): NoteActivityEntry {
+  return {
+    ...note,
+    action: note.createdAt === note.updatedAt ? 'created' : 'edited',
+  }
+}
+
+function buildNoteActivityResponse(
+  noteStore: NoteStore,
+  campaignId: string,
+  membershipId: string | null,
+  limit: number,
+): NoteActivityResponse {
+  const campaign = noteStore.getCampaign(campaignId)
+
+  if (!campaign || campaign.archivedAt !== null) {
+    throw new Error(`Campaign "${campaignId}" was not found.`)
+  }
+
+  const notes = [...noteStore.listNotes(campaignId)].sort((left, right) =>
+    right.updatedAt.localeCompare(left.updatedAt),
+  )
+
+  const activity = membershipId
+    ? notes.filter((note) => noteMatchesActivityMembership(note, membershipId))
+    : notes
+
+  return {
+    campaign,
+    collaborators: buildActivityCollaborators(notes),
+    activity: activity.slice(0, limit).map(buildNoteActivityEntry),
   }
 }
 
@@ -486,7 +630,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      response.json({ sessions: noteStore.listSessionNames(campaign.id) })
+      response.json({ sessions: buildSessions(noteStore, campaign.id) })
     },
   )
 
@@ -564,6 +708,126 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       response.json({
         memberships: noteStore.listCampaignMemberships(campaign.id),
       })
+    },
+  )
+
+  app.post(
+    '/api/campaigns/:campaignId/memberships/consolidations',
+    (
+      request: Request<CampaignParams>,
+      response: Response<MembershipConsolidationResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveOwnedCampaign(
+        noteStore,
+        owner,
+        request.params.campaignId,
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      const validation = validateMembershipConsolidationInput(request.body)
+
+      if (!validation.success) {
+        response.status(400).json({
+          error: 'Membership consolidation payload is invalid.',
+          details: validation.errors,
+        })
+        return
+      }
+
+      const preview = noteStore.previewMembershipConsolidation(
+        campaign.id,
+        validation.data.sourceMembershipId,
+        validation.data.targetMembershipId,
+        owner.id,
+      )
+
+      if (preview.status === 'forbidden') {
+        response.status(403).json({ error: 'You do not have access to this campaign.' })
+        return
+      }
+
+      if (preview.status === 'same-membership') {
+        response.status(400).json({
+          error: 'Membership consolidation requires two different memberships.',
+          details: ['Pick a distinct source membership and target membership.'],
+        })
+        return
+      }
+
+      if (preview.status === 'source-not-found') {
+        response.status(404).json({ error: 'Source membership was not found in this campaign.' })
+        return
+      }
+
+      if (preview.status === 'target-not-found') {
+        response.status(404).json({ error: 'Target membership was not found in this campaign.' })
+        return
+      }
+
+      if (!validation.data.confirm) {
+        response.json({
+          consolidation: {
+            ...preview.consolidation,
+            applied: false,
+          },
+        })
+        return
+      }
+
+      if (
+        preview.consolidation.requiresRoleMismatchConfirmation &&
+        !validation.data.confirmRoleMismatch
+      ) {
+        response.status(409).json({
+          error: 'This consolidation changes note attribution roles.',
+          details: [
+            `Confirm the ${preview.consolidation.sourceMembership.role}-to-${preview.consolidation.targetMembership.role} change before applying it.`,
+          ],
+        })
+        return
+      }
+
+      const consolidation = noteStore.consolidateMemberships(
+        campaign.id,
+        validation.data.sourceMembershipId,
+        validation.data.targetMembershipId,
+        owner.id,
+      )
+
+      if (consolidation.status === 'forbidden') {
+        response.status(403).json({ error: 'You do not have access to this campaign.' })
+        return
+      }
+
+      if (consolidation.status === 'same-membership') {
+        response.status(400).json({
+          error: 'Membership consolidation requires two different memberships.',
+          details: ['Pick a distinct source membership and target membership.'],
+        })
+        return
+      }
+
+      if (consolidation.status === 'source-not-found') {
+        response.status(404).json({ error: 'Source membership was not found in this campaign.' })
+        return
+      }
+
+      if (consolidation.status === 'target-not-found') {
+        response.status(404).json({ error: 'Target membership was not found in this campaign.' })
+        return
+      }
+
+      response.json({ consolidation: consolidation.consolidation })
     },
   )
 
@@ -798,10 +1062,10 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
   )
 
   app.get(
-    '/api/notes/:noteId',
+    '/api/notes/activity',
     (
-      request: Request<NoteParams>,
-      response: Response<NoteResponse | ErrorResponse>,
+      request: Request,
+      response: Response<NoteActivityResponse | ErrorResponse>,
     ) => {
       const owner = requireOwner(noteStore, request, response)
 
@@ -809,21 +1073,65 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.getNote(request.params.noteId)
+      const campaign = resolveAccessibleCampaign(
+        noteStore,
+        owner,
+        readRequestedCampaignId(request),
+        response,
+      )
 
-      if (!note) {
-        response
-          .status(404)
-          .json({ error: `Note "${request.params.noteId}" was not found.` })
+      if (!campaign) {
         return
       }
 
-      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
-        response.status(403).json({ error: 'You do not have access to this note.' })
+      const limit = readRequestedActivityLimit(request, response)
+
+      if (limit === null) {
         return
       }
 
-      response.json({ note })
+      const membershipId = readRequestedMembershipId(request)
+
+      if (membershipId) {
+        const membership = noteStore
+          .listCampaignMemberships(campaign.id)
+          .find((candidate) => candidate.id === membershipId)
+
+        if (!membership) {
+          response
+            .status(400)
+            .json({ error: 'Activity membership filter is invalid for this campaign.' })
+          return
+        }
+      }
+
+      response.json(
+        buildNoteActivityResponse(noteStore, campaign.id, membershipId, limit),
+      )
+    },
+  )
+
+  app.get(
+    '/api/notes/sessions',
+    (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveAccessibleCampaign(
+        noteStore,
+        owner,
+        readRequestedCampaignId(request),
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      response.json({ sessions: buildSessions(noteStore, campaign.id) })
     },
   )
 
@@ -876,6 +1184,65 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       )
 
       response.status(201).json({ note })
+    },
+  )
+
+  app.get(
+    '/api/notes/sessions/:sessionId',
+    (
+      request: Request<SessionParams>,
+      response: Response<NotesResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const campaign = resolveAccessibleCampaign(
+        noteStore,
+        owner,
+        readRequestedCampaignId(request),
+        response,
+      )
+
+      if (!campaign) {
+        return
+      }
+
+      const notes = noteStore.getSessionNotes(campaign.id, request.params.sessionId)
+
+      response.json({ notes })
+    },
+  )
+
+  app.get(
+    '/api/notes/:noteId',
+    (
+      request: Request<NoteParams>,
+      response: Response<NoteResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const note = noteStore.getNote(request.params.noteId)
+
+      if (!note) {
+        response
+          .status(404)
+          .json({ error: `Note "${request.params.noteId}" was not found.` })
+        return
+      }
+
+      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
+        response.status(403).json({ error: 'You do not have access to this note.' })
+        return
+      }
+
+      response.json({ note })
     },
   )
 
@@ -965,68 +1332,6 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
 
       noteStore.deleteNote(request.params.noteId)
       response.status(204).send()
-    },
-  )
-
-  app.get(
-    '/api/notes/sessions',
-    (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
-      const owner = requireOwner(noteStore, request, response)
-
-      if (!owner) {
-        return
-      }
-
-      const campaignId = readRequestedCampaignId(request)
-      const campaign = resolveOwnedCampaign(
-        noteStore,
-        owner,
-        campaignId,
-        response,
-      )
-
-      if (!campaign) {
-        return
-      }
-
-      const sessionNames = noteStore.listSessionNames(campaign.id)
-      const sessions = sessionNames.map((sessionName) => ({
-        sessionName,
-        noteCount: noteStore.getSessionNotes(campaign.id, sessionName).length,
-      }))
-
-      response.json({ sessions })
-    },
-  )
-
-  app.get(
-    '/api/notes/sessions/:sessionId',
-    (
-      request: Request<SessionParams>,
-      response: Response<NotesResponse | ErrorResponse>,
-    ) => {
-      const owner = requireOwner(noteStore, request, response)
-
-      if (!owner) {
-        return
-      }
-
-      const campaignId = readRequestedCampaignId(request)
-      const campaign = resolveOwnedCampaign(
-        noteStore,
-        owner,
-        campaignId,
-        response,
-      )
-
-      if (!campaign) {
-        return
-      }
-
-      const sessionName = decodeURIComponent(request.params.sessionId)
-      const notes = noteStore.getSessionNotes(campaign.id, sessionName)
-
-      response.json({ notes })
     },
   )
 
@@ -1241,7 +1546,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      response.json({ sessions: noteStore.listSessionNames(shared.campaign.id) })
+      response.json({ sessions: buildSessions(noteStore, shared.campaign.id) })
     },
   )
 

@@ -177,17 +177,27 @@ export interface SessionsResponse {
   sessions: SessionSummary[]
 }
 
-export interface NoteResponse {
-  note: Note
-}
+export type NoteActivityAction = 'created' | 'edited'
 
-export interface SessionSummary {
-  sessionName: string
+export interface ActivityCollaborator {
+  membershipId: string
+  displayName: string
+  role: CampaignMembershipRole
   noteCount: number
 }
 
-export interface SessionsResponse {
-  sessions: SessionSummary[]
+export interface NoteActivityEntry extends Note {
+  action: NoteActivityAction
+}
+
+export interface NoteActivityResponse {
+  campaign: CampaignSummary
+  collaborators: ActivityCollaborator[]
+  activity: NoteActivityEntry[]
+}
+
+export interface NoteResponse {
+  note: Note
 }
 
 export interface SharedSessionResponse {

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   noteStatuses,
   type CampaignInput,
+  type MembershipConsolidationInput,
   type CampaignShareLinkInput,
   type GuestJoinInput,
   type OwnerLoginInput,
@@ -182,6 +183,21 @@ const guestJoinSchema = z.object({
     .max(80, 'Display name must be 80 characters or fewer.'),
 })
 
+const membershipConsolidationSchema = z.object({
+  sourceMembershipId: z
+    .string()
+    .trim()
+    .min(1, 'Source membership is required.')
+    .max(120, 'Source membership must be 120 characters or fewer.'),
+  targetMembershipId: z
+    .string()
+    .trim()
+    .min(1, 'Target membership is required.')
+    .max(120, 'Target membership must be 120 characters or fewer.'),
+  confirm: z.boolean().optional().default(false),
+  confirmRoleMismatch: z.boolean().optional().default(false),
+})
+
 function mapValidationResult<T>(
   result:
     | { success: true; data: T }
@@ -250,4 +266,12 @@ export function validateGuestJoinInput(
   | { success: true; data: GuestJoinInput }
   | { success: false; errors: string[] } {
   return mapValidationResult(guestJoinSchema.safeParse(input))
+}
+
+export function validateMembershipConsolidationInput(
+  input: unknown,
+):
+  | { success: true; data: MembershipConsolidationInput }
+  | { success: false; errors: string[] } {
+  return mapValidationResult(membershipConsolidationSchema.safeParse(input))
 }

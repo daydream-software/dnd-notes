@@ -20,6 +20,7 @@ import type {
   CampaignShareLinkInput,
   CampaignMembership,
   CampaignMembershipRole,
+  MembershipConsolidationSummary,
   CampaignSummary,
   Note,
   NoteAttribution,
@@ -104,6 +105,32 @@ type ClaimGuestMembershipResult =
   | { status: 'account-already-member'; membership: CampaignMembership }
   | { status: 'not-found' }
 
+interface MembershipConsolidationCountsRow {
+  authored_note_count: number
+  edited_note_count: number
+  authored_and_edited_note_count: number
+  affected_note_count: number
+}
+
+type MembershipConsolidationPreview = Omit<
+  MembershipConsolidationSummary,
+  'applied'
+>
+
+type MembershipConsolidationPreviewResult =
+  | { status: 'ready'; consolidation: MembershipConsolidationPreview }
+  | { status: 'source-not-found' }
+  | { status: 'target-not-found' }
+  | { status: 'same-membership' }
+  | { status: 'forbidden' }
+
+type MembershipConsolidationResult =
+  | { status: 'ready'; consolidation: MembershipConsolidationSummary }
+  | { status: 'source-not-found' }
+  | { status: 'target-not-found' }
+  | { status: 'same-membership' }
+  | { status: 'forbidden' }
+
 interface CreateNoteStoreOptions {
   dbPath?: string
 }
@@ -154,12 +181,23 @@ export interface NoteStore {
   ): { membership: CampaignMembership; guestToken: string }
   getGuestMembershipByToken(token: string): CampaignMembership | null
   claimGuestMembership(membershipId: string, ownerUserId: string): ClaimGuestMembershipResult
+  previewMembershipConsolidation(
+    campaignId: string,
+    sourceMembershipId: string,
+    targetMembershipId: string,
+    ownerUserId: string,
+  ): MembershipConsolidationPreviewResult
+  consolidateMemberships(
+    campaignId: string,
+    sourceMembershipId: string,
+    targetMembershipId: string,
+    ownerUserId: string,
+  ): MembershipConsolidationResult
   getUserMembershipForCampaign(userId: string, campaignId: string): CampaignMembership | null
   getOwnerMembershipForCampaign(ownerUserId: string, campaignId: string): CampaignMembership | null
   listNotes(campaignId?: string): Note[]
   listSessionNames(campaignId?: string): SessionSummary[]
   listRecentNotes(limit: number, campaignId?: string): Note[]
-  listSessionNames(campaignId: string): string[]
   getSessionNotes(campaignId: string, sessionName: string): Note[]
   getNote(noteId: string): Note | null
   createNote(input: NoteInput, membershipId?: string): Note
@@ -209,6 +247,12 @@ function createSessionToken() {
 
 function hashSessionToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
+}
+
+function createTimestampAfter(previousTimestamp: string) {
+  const previousMs = new Date(previousTimestamp).getTime()
+  const nextMs = Math.max(Date.now(), previousMs + 1)
+  return new Date(nextMs).toISOString()
 }
 
 function mapCampaignRow(row: CampaignRow): CampaignSummary {
@@ -282,6 +326,29 @@ function mapOwnerAccountRow(row: OwnerAccountRow): OwnerAccount {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+function buildMembershipConsolidationWarnings(
+  sourceMembership: CampaignMembership,
+  targetMembership: CampaignMembership,
+) {
+  const warnings = [
+    'Only note attribution moves. Membership records, linked accounts, and guest tokens stay on their current memberships.',
+  ]
+
+  if (sourceMembership.displayName !== targetMembership.displayName) {
+    warnings.push(
+      `Affected notes will show "${targetMembership.displayName}" instead of "${sourceMembership.displayName}".`,
+    )
+  }
+
+  if (sourceMembership.role !== targetMembership.role) {
+    warnings.push(
+      `Affected notes will use the "${targetMembership.role}" role instead of "${sourceMembership.role}".`,
+    )
+  }
+
+  return warnings
 }
 
 function mapCampaignShareLinkRow(row: CampaignShareLinkRow): CampaignShareLink {
@@ -702,6 +769,21 @@ export function createNoteStore(
     WHERE id = ?
   `)
 
+  const selectMembershipByCampaignAndId = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      role,
+      display_name,
+      user_id,
+      guest_token_id,
+      created_at,
+      updated_at
+    FROM campaign_memberships
+    WHERE campaign_id = ? AND id = ?
+    LIMIT 1
+  `)
+
   const insertMembership = database.prepare(`
     INSERT INTO campaign_memberships (
       id,
@@ -971,13 +1053,6 @@ export function createNoteStore(
     WHERE notes.id = ?
   `)
 
-  const selectDistinctSessionNames = database.prepare(`
-    SELECT DISTINCT session_name
-    FROM notes
-    WHERE campaign_id = ? AND session_name IS NOT NULL
-    ORDER BY session_name ASC
-  `)
-
   const selectNotesBySessionName = database.prepare(`
     SELECT
       notes.id,
@@ -1044,6 +1119,55 @@ export function createNoteStore(
       last_edited_by_membership_id = @last_edited_by_membership_id,
       updated_at = @updated_at
     WHERE id = @id
+  `)
+
+  const selectMembershipConsolidationCounts = database.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN created_by_membership_id = @source_membership_id THEN 1 ELSE 0 END), 0) AS authored_note_count,
+      COALESCE(SUM(CASE WHEN last_edited_by_membership_id = @source_membership_id THEN 1 ELSE 0 END), 0) AS edited_note_count,
+      COALESCE(
+        SUM(
+          CASE
+            WHEN created_by_membership_id = @source_membership_id
+              AND last_edited_by_membership_id = @source_membership_id
+            THEN 1
+            ELSE 0
+          END
+        ),
+        0
+      ) AS authored_and_edited_note_count,
+      COALESCE(
+        SUM(
+          CASE
+            WHEN created_by_membership_id = @source_membership_id
+              OR last_edited_by_membership_id = @source_membership_id
+            THEN 1
+            ELSE 0
+          END
+        ),
+        0
+      ) AS affected_note_count
+    FROM notes
+    WHERE campaign_id = @campaign_id
+  `)
+
+  const reassignMembershipAttributionStatement = database.prepare(`
+    UPDATE notes
+    SET
+      created_by_membership_id = CASE
+        WHEN created_by_membership_id = @source_membership_id THEN @target_membership_id
+        ELSE created_by_membership_id
+      END,
+      last_edited_by_membership_id = CASE
+        WHEN last_edited_by_membership_id = @source_membership_id THEN @target_membership_id
+        ELSE last_edited_by_membership_id
+      END
+    WHERE
+      campaign_id = @campaign_id
+      AND (
+        created_by_membership_id = @source_membership_id
+        OR last_edited_by_membership_id = @source_membership_id
+      )
   `)
 
   const deleteNoteStatement = database.prepare(`
@@ -1342,6 +1466,103 @@ export function createNoteStore(
     },
   )
 
+  const previewMembershipConsolidation = (
+    campaignId: string,
+    sourceMembershipId: string,
+    targetMembershipId: string,
+    ownerUserId: string,
+  ): MembershipConsolidationPreviewResult => {
+    requireCampaign(campaignId)
+
+    if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+      return { status: 'forbidden' }
+    }
+
+    if (sourceMembershipId === targetMembershipId) {
+      return { status: 'same-membership' }
+    }
+
+    const sourceMembershipRow = selectMembershipByCampaignAndId.get(
+      campaignId,
+      sourceMembershipId,
+    ) as CampaignMembershipRow | undefined
+
+    if (!sourceMembershipRow) {
+      return { status: 'source-not-found' }
+    }
+
+    const targetMembershipRow = selectMembershipByCampaignAndId.get(
+      campaignId,
+      targetMembershipId,
+    ) as CampaignMembershipRow | undefined
+
+    if (!targetMembershipRow) {
+      return { status: 'target-not-found' }
+    }
+
+    const sourceMembership = mapMembershipRow(sourceMembershipRow)
+    const targetMembership = mapMembershipRow(targetMembershipRow)
+    const counts = selectMembershipConsolidationCounts.get({
+      campaign_id: campaignId,
+      source_membership_id: sourceMembership.id,
+    }) as MembershipConsolidationCountsRow
+
+    return {
+      status: 'ready',
+      consolidation: {
+        effect: 'note-attribution-only',
+        sourceMembership,
+        targetMembership,
+        noteChanges: {
+          authoredNoteCount: counts.authored_note_count,
+          editedNoteCount: counts.edited_note_count,
+          authoredAndEditedNoteCount: counts.authored_and_edited_note_count,
+          affectedNoteCount: counts.affected_note_count,
+        },
+        warnings: buildMembershipConsolidationWarnings(
+          sourceMembership,
+          targetMembership,
+        ),
+        requiresRoleMismatchConfirmation:
+          sourceMembership.role !== targetMembership.role,
+      },
+    }
+  }
+
+  const consolidateMembershipsTransaction = database.transaction(
+    (
+      campaignId: string,
+      sourceMembershipId: string,
+      targetMembershipId: string,
+      ownerUserId: string,
+    ): MembershipConsolidationResult => {
+      const preview = previewMembershipConsolidation(
+        campaignId,
+        sourceMembershipId,
+        targetMembershipId,
+        ownerUserId,
+      )
+
+      if (preview.status !== 'ready') {
+        return preview
+      }
+
+      reassignMembershipAttributionStatement.run({
+        campaign_id: campaignId,
+        source_membership_id: sourceMembershipId,
+        target_membership_id: targetMembershipId,
+      })
+
+      return {
+        status: 'ready',
+        consolidation: {
+          ...preview.consolidation,
+          applied: true,
+        },
+      }
+    },
+  )
+
   const listCampaigns = () =>
     (selectAllCampaigns.all() as CampaignRow[]).map((row) => mapCampaignRow(row))
 
@@ -1598,6 +1819,22 @@ export function createNoteStore(
     claimGuestMembership(membershipId, ownerUserId) {
       return claimGuestMembershipTransaction(membershipId, ownerUserId)
     },
+    previewMembershipConsolidation(campaignId, sourceMembershipId, targetMembershipId, ownerUserId) {
+      return previewMembershipConsolidation(
+        campaignId,
+        sourceMembershipId,
+        targetMembershipId,
+        ownerUserId,
+      )
+    },
+    consolidateMemberships(campaignId, sourceMembershipId, targetMembershipId, ownerUserId) {
+      return consolidateMembershipsTransaction(
+        campaignId,
+        sourceMembershipId,
+        targetMembershipId,
+        ownerUserId,
+      )
+    },
     getUserMembershipForCampaign(userId, campaignId) {
       const row = selectMembershipByCampaignAndUser.get(
         campaignId,
@@ -1655,12 +1892,6 @@ export function createNoteStore(
     },
     listRecentNotes(limit, campaignId) {
       return listNotes(campaignId).slice(0, limit)
-    },
-    listSessionNames(campaignId) {
-      const rows = selectDistinctSessionNames.all(campaignId) as Array<{
-        session_name: string
-      }>
-      return rows.map((row) => row.session_name)
     },
     getSessionNotes(campaignId, sessionName) {
       const rows = selectNotesBySessionName.all(
@@ -1733,7 +1964,7 @@ export function createNoteStore(
         status: input.status,
         sessionName: input.sessionName,
         lastEditedBy: editAttribution,
-        updatedAt: new Date().toISOString(),
+        updatedAt: createTimestampAfter(existing.updatedAt),
       }
 
       updateNoteStatement.run({

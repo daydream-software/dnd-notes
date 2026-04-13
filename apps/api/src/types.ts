@@ -182,17 +182,27 @@ export interface NotesResponse {
   notes: Note[]
 }
 
-export interface NoteResponse {
-  note: Note
-}
+export type NoteActivityAction = 'created' | 'edited'
 
-export interface SessionSummary {
-  sessionName: string
+export interface ActivityCollaborator {
+  membershipId: string
+  displayName: string
+  role: CampaignMembershipRole
   noteCount: number
 }
 
-export interface SessionsResponse {
-  sessions: SessionSummary[]
+export interface NoteActivityEntry extends Note {
+  action: NoteActivityAction
+}
+
+export interface NoteActivityResponse {
+  campaign: CampaignSummary
+  collaborators: ActivityCollaborator[]
+  activity: NoteActivityEntry[]
+}
+
+export interface NoteResponse {
+  note: Note
 }
 
 export interface SharedSessionResponse {
@@ -211,6 +221,34 @@ export interface SharedJoinResponse {
 export interface SharedMembershipClaimResponse {
   membership: CampaignMembership
   guestToken: string | null
+}
+
+export interface MembershipConsolidationInput {
+  sourceMembershipId: string
+  targetMembershipId: string
+  confirm?: boolean
+  confirmRoleMismatch?: boolean
+}
+
+export interface MembershipConsolidationNoteChanges {
+  authoredNoteCount: number
+  editedNoteCount: number
+  authoredAndEditedNoteCount: number
+  affectedNoteCount: number
+}
+
+export interface MembershipConsolidationSummary {
+  applied: boolean
+  effect: 'note-attribution-only'
+  sourceMembership: CampaignMembership
+  targetMembership: CampaignMembership
+  noteChanges: MembershipConsolidationNoteChanges
+  warnings: string[]
+  requiresRoleMismatchConfirmation: boolean
+}
+
+export interface MembershipConsolidationResponse {
+  consolidation: MembershipConsolidationSummary
 }
 
 export interface ErrorResponse {
