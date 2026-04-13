@@ -1227,3 +1227,50 @@ Left these open intentionally:
 For backlog hygiene, the safe rule is: close only when `main` clearly ships the user-facing outcome, or when a spike issue's recommendation has already been produced and adopted. If the repo only shows groundwork or a partial backend slice, leave the issue open and let implementation or product explicitly retire it later.
 
 **Status:** Recorded & Complete
+
+### 2026-04-13: Issue #25 Mobile Note Workspace Single-Pane Flow
+
+**By:** Stef (Frontend Dev)
+
+**What:**
+On narrow screens (`<lg`), the authenticated note workspace switches from always rendering browse + editor together to an explicit single-pane toggle: **Browse notes** or **Edit/Create note**. Desktop keeps the split browse/editor layout.
+
+**Why:**
+Stacking both surfaces vertically still forces too much scrolling and context juggling on phones and tablets. A single-pane flow keeps browse tools together, gives the editor full width, and leaves room for future browse additions (search, tag facets, sessions, activity) without reintroducing crowding.
+
+**Implementation Notes:**
+- Keep browse state local (`noteBrowseMode`, tag filter, selected session/activity filter) so switching panes does not reload workspace
+- Selecting a note or starting a new note automatically opens editor on narrow screens
+- Editor exposes direct "Browse notes" button so users move between list and form without losing draft state
+- Regression coverage in `apps/web/src/App.test.tsx` with `matchMedia`-driven narrow-screen tests
+
+**Files Changed:**
+- `apps/web/src/App.tsx`
+- `apps/web/src/App.test.tsx`
+
+**Status:** IMPLEMENTED (commit `de1b16e`)
+
+### 2026-04-13: Issue #25 Mobile Regression Bar — Note Workspace
+
+**By:** Chunk (Tester)
+
+**What:**
+Treat the note workspace as **single-pane below `lg`** and **split-pane at `lg`+**. Maintain three critical regression paths before approval:
+
+1. **Desktop dual-pane stays fast** — wide screens show note list and editor together
+2. **Mobile existing-note save stays reachable** — narrow screens can open a note, edit it, save it, and return to refreshed list
+3. **Mobile new-note launch stays direct** — tapping "New note" on narrow screens opens editor immediately and keeps save path available
+
+**Why:**
+The core mobile risk was not note rendering itself; it was forcing browse controls, note lists, and editor to live on screen at once. A narrow-screen toggle keeps list/detail workflow intact without inventing a second note system, and it leaves room for future browse additions without reintroducing complexity.
+
+**Validation:**
+- `npm run lint` ✓
+- `npm run test` ✓ (all mobile-specific regression tests)
+- `npm run build` ✓
+
+**Files:**
+- `apps/web/src/App.tsx`
+- `apps/web/src/App.test.tsx`
+
+**Status:** APPROVED
