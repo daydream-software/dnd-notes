@@ -366,6 +366,75 @@ Land Issue #33 (Activity Feature) as a single atomic commit. No split needed.
 
 ---
 
+---
+
+### 2026-04-13: PR #37 Review — Mikey Lead Approval
+
+**By:** Mikey (Lead)  
+**Date:** 2026-04-13  
+**Status:** APPROVE with merge conditions
+
+## Context
+
+PR #37 is the `@copilot` revision of Issue #28 tag facets after Chunk rejected the earlier branch for a list/detail mismatch: the note list could narrow under a tag filter while the editor still pointed at a hidden note.
+
+## Review Outcome
+
+- ✅ **Primary blocker is fixed.** `apps/web/src/App.tsx` now reconciles the selected note against the visible filtered set with `syncNoteSelectionToVisibleNotes`, and `handleSelectTagFilter()` applies that reconciliation immediately when a tag is selected.
+- ✅ **Safety net is in the right place.** The follow-up `useEffect` keeps the editor aligned when filtered notes change after edits or deletes, so the fix is not limited to the click path.
+- ✅ **Regression proof exists.** `apps/web/src/App.test.tsx` now covers the rejected case: select a non-matching note, apply a tag filter, verify the editor retargets to a visible note, then clear the filter and confirm the full list returns.
+- ✅ **Scope stays thin.** The PR remains frontend-only for Issue #28, matching the approved direction: local tag facets, local filtering, editor autocomplete reuse, no backend/schema/API sprawl.
+- ✅ **Validation is green locally.** `npm run lint && npm run test && npm run build` passed on both `main` and `pr-37-review`.
+
+## Changed Files Check
+
+- `apps/web/src/App.tsx` and `apps/web/src/App.test.tsx` contain the meaningful product change and match the previously approved repair strategy.
+- `README.md` accurately describes the shipped tag-browsing behavior.
+- `.squad/` history/decision/context file updates are consistent with the routing and review trail; no process mismatch found there.
+
+## Remaining Merge Conditions
+
+1. **Chunk QA sign-off is still required** per the documented routing plan for this revision cycle.
+2. **PR #37 is still a draft,** so it should be marked ready once the QA gate is satisfied.
+3. **Normal branch protections still apply.** GitHub did not show attached check runs on the PR during this review, so local validation is the current evidence.
+
+## Verdict
+
+**Lead approval: yes.** I do not see a remaining architecture or correctness blocker in the fix itself. Once Chunk signs off and the PR is moved out of draft, this is ready to land.
+
+---
+
+### 2026-04-13: PR #37 QA Review — Chunk Approval
+
+**By:** Chunk (Tester)  
+**Date:** 2026-04-13
+
+## What I checked
+
+- Re-reviewed the list/detail sync repair in `apps/web/src/App.tsx`, especially the eager re-selection in `handleSelectTagFilter()` and the `useEffect` safety net that reconciles `selectedNoteId` against `displayedNotes`.
+- Re-reviewed the regression coverage in `apps/web/src/App.test.tsx`, with special attention to filter switching, clearing, and preserving tag-filter behavior across adjacent flows.
+- Re-ran the repo verification bar: `npm run lint && npm run build && npm run test`.
+- Re-ran the two tag-focused web regressions directly:
+  - `syncs the selected note when a tag filter excludes the current detail pane note`
+  - `derives tag facets locally, clears the active filter for a new note, and reuses tags in the editor`
+
+## Verdict
+
+**APPROVED.** PR #37 retires the ship blocker from issue #28 and is ready to come out of draft / merge.
+
+## Why it clears QA
+
+- The original failure mode is covered now: starting from a selected non-matching note, clicking a tag facet re-targets the editor to a visible note instead of leaving the detail pane stale.
+- Switching from a single-match tag to a multi-match tag still leaves the editor aligned with the filtered list.
+- Clearing the filter restores the full list without breaking the selection state.
+- The no-fetch/local-tag-browsing behavior from the earlier slice still holds.
+
+## Non-blocking follow-up
+
+- I would still like a future explicit regression around editing or deleting the active filtered note while a tag filter remains on. The current code path looks safe because the filtered-list effect reuses the same helper as direct tag clicks, so this is hardening work, not a release blocker.
+
+---
+
 ## Archive
 
 Older decisions have been moved to `.squad/decisions/archive/` for historical reference.

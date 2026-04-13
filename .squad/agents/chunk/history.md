@@ -173,3 +173,33 @@ Review verdict (Chunk): **APPROVED** — The conflict-resolution push on PR #36 
 - **Revision routing:** @copilot should revise this slice. Stef is locked out for this revision cycle.
 
 📌 Team update (2026-04-13T07:52:28Z): Issue #28 review verdict finalized and routed to @copilot. Your rejection stands: list/detail mismatch blocker is ship-critical. Decision merged into squad decisions log. You remain the QA gate for the revision. See orchestration logs in `.squad/orchestration-log/` and full verdict in `.squad/decisions.md` — decided by Chunk (reviewer), coordinator rerouted to copilot
+
+## 2026-04-13: PR #37 QA Review — APPROVED
+
+- **Verdict:** APPROVED. The list/detail desync blocker from issue #28 is retired, and PR #37 is ready to come out of draft / merge.
+- `handleSelectTagFilter()` now eagerly reconciles the selected note against the next filtered list, so clicking a tag no longer leaves the editor pointed at a hidden note.
+- The `displayedNotes` + `selectedTagFilter` effect gives the fix a second safety net when the visible filtered set changes after edits/deletes.
+- Regression proof is materially better now: the new test starts from a non-matching selected note, switches to a single-match tag, then to a multi-match tag, then clears the filter.
+- Existing tag tests still cover the neighboring behavior that matters for ship-readiness: local facet derivation, no extra workspace fetches, and clearing the active filter when starting a new note.
+- Validation rerun was green: root `npm run lint && npm run build && npm run test`, plus targeted web reruns for the two tag-focused regressions.
+- Non-blocking hardening follow-up: add a direct regression for editing/deleting the active filtered note while the tag filter remains on, even though the shared sync helper makes the current implementation look safe.
+
+---
+
+## 2026-04-13: PR #37 Merged & Issue #28 Closed
+
+📌 **Coordinator action:** PR #37 approved by QA, moved out of draft, and merged to `main`. Issue #28 closed.
+
+**PR #37 shipping the following:**
+- List/detail sync fix via `syncNoteSelectionToVisibleNotes` and immediate reconciliation in `handleSelectTagFilter()`
+- Regression coverage verifying editor re-targets when filter excludes the selected note
+- Safety net via `useEffect` reconciliation for post-filter note changes
+- Tag facets, filtering, autocomplete reuse all now in production
+
+**Why it's safe:**
+- The original failure mode (editor pointing at hidden note after filter) is closed by immediate reconciliation
+- Filter switching and clearing tested end-to-end
+- Full test/lint/build bar passed
+- No backend/schema changes, frontend-only scope preserved
+
+**Unblocks:** Issue #24 (search foundation + advanced filters) can now proceed.
