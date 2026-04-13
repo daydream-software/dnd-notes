@@ -35,3 +35,27 @@ Rejection-path visibility risk: when a reviewer rejects and the team reroutes be
 
 **Platform action taken:**
 Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-handoff.md`. Next reviser (@copilot) has public artifact + clear blocker message ready for revision cycle.
+
+## 2026-04-13: Branch Cleanup — PR #37 and Issue #28 Consolidation
+
+**Action:** Consolidated local branches after PR #37 merged to origin/main.
+
+**What I found:**
+- Remote main (`e5bb1b6`) contained the squashed PR #37 merge with all tag facets functionality shipped
+- Local branches `pr-37-review` and `issue/28-tag-facets-autocomplete` contained full development history plus Scribe consolidation commits (PR #37 approvals from Mikey and Chunk)
+- The actual code was already on origin/main; branches diverged due to different squash strategies
+
+**What I did:**
+1. Pulled latest origin/main to local main
+2. Cherry-picked just the Scribe consolidation commit (`f990862`) from pr-37-review to preserve team decision records
+3. Deleted both local branches (`pr-37-review` and `issue/28-tag-facets-autocomplete`)
+4. Pushed main to origin to keep in sync
+5. Remote branch `issue/28-tag-facets-autocomplete` was already deleted by remote prune
+
+**Rationale:**
+- Avoided merging full development history into main (which would have added 13 commits of intermediate work)
+- Preserved important team metadata (Mikey lead approval, Chunk QA approval) via single cherry-picked commit
+- Clean main history: only shipped functionality + team decisions, no development trail noise
+- Branches fully deleted locally and remotely to eliminate confusion
+
+**Key insight for future:** When PR is merged via GitHub squash, local feature branches with full history should not be merged back—cherry-pick only the metadata/decision consolidation commits if needed. This keeps main clean while preserving team records.
