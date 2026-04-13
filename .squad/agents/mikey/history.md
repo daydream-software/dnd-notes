@@ -131,3 +131,5 @@ Lead-level review is **APPROVE**, with two remaining merge conditions: Chunk sho
 3. ✅ Safety net via `useEffect` reconciliation keeps editor aligned across note changes
 
 **Next Steps:** Issue #24 (search + filters) unblocked for implementation.
+
+- **Issue Sweep (2026-04-13):** Ran a conservative GitHub issue sweep and closed #29, #32, and #33 as forgotten-to-close work. #29's spike outcome was already decided (defer graph-style tags until later phases), #32 starter templates are shipped on `main`, and #33 recent activity is shipped on `main`. Left #23 open because the backend consolidation route exists but a clearly surfaced owner-facing pick/preview/apply flow is not obvious in the current app; #24, #25, #26, and #30 remain clearly unshipped.

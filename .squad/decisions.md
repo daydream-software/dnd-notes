@@ -1134,3 +1134,24 @@ When starting a brand-new note from a filtered list view, the active tag filter 
 - Regression coverage proves **New note** clears filter without re-fetching workspace data
 
 **Status:** Merged into implementation scope, verified via test updates
+
+### 2026-04-13: Conservative forgotten-issue sweep
+
+**By:** Mikey (Lead)
+
+**What:**
+Ran a conservative pass over open GitHub issues and only closed items whose resolution was already unambiguous from `main` or from an already-completed spike outcome:
+
+- **Closed #29** — the spike is complete and the recommendation is already recorded: defer graph-style tag relationships until after search, tag browsing, and mobile foundations.
+- **Closed #32** — built-in campaign starter templates and note templates are already shipped on `main`.
+- **Closed #33** — the recent activity API/UI flow is already shipped on `main`.
+
+Left these open intentionally:
+
+- **#23** — backend consolidation support exists, but the issue asks for an owner-facing consolidation flow and that UI is not clearly surfaced in the current app.
+- **#24, #25, #26, #30** — still represent real unfinished product work in the current repo state.
+
+**Why:**
+For backlog hygiene, the safe rule is: close only when `main` clearly ships the user-facing outcome, or when a spike issue's recommendation has already been produced and adopted. If the repo only shows groundwork or a partial backend slice, leave the issue open and let implementation or product explicitly retire it later.
+
+**Status:** Recorded & Complete
