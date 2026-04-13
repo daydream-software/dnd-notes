@@ -86,6 +86,7 @@ interface NoteDraft {
   tagsText: string
   status: NoteStatus
   sessionName: string
+  linkedNoteIds: string[]
 }
 
 interface CampaignDraft {
@@ -148,6 +149,7 @@ function createEmptyDraft(): NoteDraft {
     tagsText: '',
     status: 'draft',
     sessionName: '',
+    linkedNoteIds: [],
   }
 }
 
@@ -178,6 +180,7 @@ function createDraftFromNote(note: Note): NoteDraft {
     tagsText: createTagsText(note.tags),
     status: note.status,
     sessionName: note.sessionName ?? '',
+    linkedNoteIds: note.linkedNoteIds,
   }
 }
 
@@ -188,6 +191,7 @@ function createDraftFromStarterNote(starterNote: StarterNoteSeed): NoteDraft {
     tagsText: createTagsText(starterNote.tags),
     status: starterNote.status,
     sessionName: starterNote.sessionName ?? '',
+    linkedNoteIds: [],
   }
 }
 
@@ -201,6 +205,7 @@ function createNotePayload(
     status: draft.status,
     tags: normalizeTags([draft.tagsText]),
     sessionName: draft.sessionName.trim() || null,
+    linkedNoteIds: draft.linkedNoteIds,
     campaignId,
   }
 }
@@ -550,6 +555,20 @@ function App() {
     [activityCollaborators, selectedActivityMembershipId],
   )
   const draftTags = useMemo(() => normalizeTags([draft.tagsText]), [draft.tagsText])
+
+  const linkedNotes = useMemo(() => {
+    if (!selectedNote) {
+      return []
+    }
+    return notes.filter((note) => selectedNote.linkedNoteIds.includes(note.id))
+  }, [selectedNote, notes])
+
+  const backlinks = useMemo(() => {
+    if (!selectedNoteId) {
+      return []
+    }
+    return notes.filter((note) => note.linkedNoteIds.includes(selectedNoteId))
+  }, [selectedNoteId, notes])
   const tagFacets = useMemo(() => createTagFacets(notes), [notes])
   const selectedSourceMembership = useMemo(
     () =>
@@ -3375,6 +3394,28 @@ function App() {
                       )}
                     />
 
+                    <Autocomplete
+                      multiple
+                      disablePortal
+                      filterSelectedOptions
+                      options={notes.filter((n) => n.id !== selectedNoteId)}
+                      getOptionLabel={(option) => option.title || '(Untitled)'}
+                      value={notes.filter((n) => draft.linkedNoteIds.includes(n.id))}
+                      onChange={(_, value) => {
+                        handleDraftChange(
+                          'linkedNoteIds',
+                          value.map((n) => n.id),
+                        )
+                      }}
+                      renderInput={(params) => (
+                        <TextField
+                          {...params}
+                          label="Linked notes"
+                          helperText="Link to other notes in this campaign for easy cross-referencing."
+                        />
+                      )}
+                    />
+
                     <TextField
                       select
                       label="Status"
@@ -3435,6 +3476,73 @@ function App() {
                   </Stack>
                 </CardContent>
               </Card>
+
+              {!isCreating && (linkedNotes.length > 0 || backlinks.length > 0) && (
+                <Card sx={{ borderRadius: surfaceRadius }}>
+                  <CardContent sx={{ p: 3 }}>
+                    <Stack spacing={2}>
+                      {linkedNotes.length > 0 && (
+                        <Box>
+                          <Typography variant="h6" sx={{ mb: 1 }}>
+                            Linked notes ({linkedNotes.length})
+                          </Typography>
+                          <Stack spacing={1}>
+                            {linkedNotes.map((note) => (
+                              <Card
+                                key={note.id}
+                                variant="outlined"
+                                sx={{
+                                  cursor: 'pointer',
+                                  '&:hover': { borderColor: 'primary.main' },
+                                }}
+                                onClick={() => handleSelectNote(note)}
+                              >
+                                <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                                  <Typography variant="body1">{note.title}</Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {excerpt(note.body)}
+                                  </Typography>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </Stack>
+                        </Box>
+                      )}
+
+                      {backlinks.length > 0 && (
+                        <Box>
+                          <Typography variant="h6" sx={{ mb: 1 }}>
+                            Referenced by ({backlinks.length})
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                            These notes link to this one.
+                          </Typography>
+                          <Stack spacing={1}>
+                            {backlinks.map((note) => (
+                              <Card
+                                key={note.id}
+                                variant="outlined"
+                                sx={{
+                                  cursor: 'pointer',
+                                  '&:hover': { borderColor: 'primary.main' },
+                                }}
+                                onClick={() => handleSelectNote(note)}
+                              >
+                                <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
+                                  <Typography variant="body1">{note.title}</Typography>
+                                  <Typography variant="body2" color="text.secondary">
+                                    {excerpt(note.body)}
+                                  </Typography>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </Stack>
+                        </Box>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              )}
 
               <Card sx={{ borderRadius: surfaceRadius }}>
                 <CardContent sx={{ p: 3 }}>
