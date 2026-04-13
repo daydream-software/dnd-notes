@@ -189,7 +189,7 @@ function createDraftFromNote(note: Note): NoteDraft {
     tagsText: createTagsText(note.tags),
     status: note.status,
     sessionName: note.sessionName ?? '',
-    linkedNoteIds: note.linkedNoteIds,
+    linkedNoteIds: note.linkedNoteIds ?? [],
   }
 }
 
@@ -574,14 +574,14 @@ function App() {
     if (!selectedNote) {
       return []
     }
-    return notes.filter((note) => selectedNote.linkedNoteIds.includes(note.id))
+    return notes.filter((note) => selectedNote.linkedNoteIds?.includes(note.id))
   }, [selectedNote, notes])
 
   const backlinks = useMemo(() => {
     if (!selectedNoteId) {
       return []
     }
-    return notes.filter((note) => note.linkedNoteIds.includes(selectedNoteId))
+    return notes.filter((note) => note.linkedNoteIds?.includes(selectedNoteId))
   }, [selectedNoteId, notes])
   const tagFacets = useMemo(() => createTagFacets(notes), [notes])
   const selectedSourceMembership = useMemo(
@@ -3565,7 +3565,7 @@ function App() {
                       filterSelectedOptions
                       options={notes.filter((n) => n.id !== selectedNoteId)}
                       getOptionLabel={(option) => option.title || '(Untitled)'}
-                      value={notes.filter((n) => draft.linkedNoteIds.includes(n.id))}
+                      value={notes.filter((n) => draft.linkedNoteIds?.includes(n.id))}
                       onChange={(_, value) => {
                         handleDraftChange(
                           'linkedNoteIds',
