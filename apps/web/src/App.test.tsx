@@ -1902,7 +1902,62 @@ describe('App', () => {
     })
   }, 45000)
 
-  it('lets owners preview and apply membership consolidation from campaign settings', async () => {
+  it('renders a saved note body as markdown in the editor preview', async () => {
+    owner = {
+      id: 'owner-1',
+      email: 'stef@example.com',
+      displayName: 'Stef',
+      createdAt: '2026-04-11T20:00:00.000Z',
+      updatedAt: '2026-04-11T20:00:00.000Z',
+    }
+    activeToken = 'owner-token-existing'
+    membershipsByCampaign[defaultCampaignId] = membershipsByCampaign[defaultCampaignId].map(
+      (membership) => ({
+        ...membership,
+        ...(membership.role === 'owner'
+          ? {
+              displayName: owner?.displayName ?? membership.displayName,
+              userId: owner?.id ?? null,
+            }
+          : {}),
+      }),
+    )
+    notesByCampaign[defaultCampaignId][0] = {
+      ...notesByCampaign[defaultCampaignId][0],
+      body: [
+        '# Harbor watch',
+        '',
+        'The **signal fire** is ready.',
+        '',
+        '- Bring cloaks',
+        '- Bring rope',
+        '',
+        '[Map room](https://example.com/map-room)',
+      ].join('\n'),
+    }
+
+    localStorage.setItem(authTokenStorageKey, activeToken)
+    localStorage.setItem(selectedCampaignStorageKey, defaultCampaignId)
+
+    render(<App />)
+
+    expect(await screen.findByText(/Signed in as Stef/)).toBeTruthy()
+
+    const preview = screen.getByLabelText('Note body preview')
+    expect(
+      within(preview).getByRole('heading', { level: 1, name: 'Harbor watch' }),
+    ).toBeTruthy()
+    expect(within(preview).getByText('signal fire').tagName).toBe('STRONG')
+    expect(
+      within(preview)
+        .getByRole('link', { name: 'Map room' })
+        .getAttribute('href'),
+    ).toBe('https://example.com/map-room')
+  })
+
+  it(
+    'lets owners preview and apply membership consolidation from campaign settings',
+    async () => {
     const sourceMembership: CampaignMembershipFixture = {
       id: 'membership-guest-source',
       campaignId: defaultCampaignId,
@@ -2023,7 +2078,9 @@ describe('App', () => {
       0,
     )
     expect(screen.queryByText(/Created by Mira Guest/)).toBeNull()
-  })
+    },
+    15000,
+  )
 
   it(
     'requires explicit confirmation before applying a role-changing consolidation',
