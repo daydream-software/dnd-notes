@@ -91,3 +91,99 @@ Key patterns:
 📌 Team update: Issue #30 third revision completed by Mikey (Lead) with frontend defensive coding fix. Issue now approved and ready to merge. Stef's initial frontend implementation (pass 1) was foundation for solution.
 
 📌 Team update (2026-04-13T18:14:27Z): UX feedback review completed—phased notes UX roadmap approved (compact header + editor + inline references), Lexical editor recommended over TipTap for markdown-native alignment, backend data model strategy for qualified references finalized — decided by Mikey (Product), Stef (Frontend), Data (Backend)
+
+## 2026-04-13: Phase 2 Frontend Inspection & Recommendation
+
+### Current State Assessment
+
+**Markdown Sanitization (excerpts):**
+- ✅ Mature: `excerpt()` → `markdownToPlainText()` already strips all markdown syntax (headings, lists, emphasis, code, links, blockquotes)
+- ✅ Safe: HTML tags stripped via `/<[^>]+>/g`; escaped chars unescaped; whitespace collapsed
+- ✅ UX: Falls back to friendly "No details yet" message for empty notes
+- No API changes needed; pure client-side, reusable in note rows/activity/backlinks
+
+**Editor (formatted + raw markdown):**
+- 🔴 Unimplemented: Plain `<textarea>` with stacked preview
+- 🔴 Friction: Preview always visible; no toggle; forces vertical scrolling
+- 🟡 Recommendation: Phased approach (2a, 2b, 2c)
+  - 2a (1–2d): Add mode toggle, hide preview by default → immediate UX win
+  - 2b (4–5d): Lexical editor with markdown import/export → markdown-native editor behind existing API
+  - 2c (2–3d): Inline reference nodes (`![[id|label]]`) + reference picker → first-class inline references
+- Lexical chosen over TipTap because:
+  - Backend already stores markdown; `react-markdown` renders it
+  - Lexical keeps markdown canonical (no format conversion)
+  - Custom node system cleanly supports inline references without inventing a second document format
+  - Raw-markdown mode easy to build (toggle `contentEditable`)
+
+**Inline Note References + Discovery:**
+- ✅ Phase 1 complete: `linkedNoteIds: string[]` in schema (Issue #30 approved/merged)
+- ✅ Backlinks computed client-side: `notes.filter(n => n.linkedNoteIds.includes(currentId))`
+- ✅ UI in place: Linked notes + Referenced by cards shown below editor
+- 🟡 Gap: References not embedded in markdown body; live in separate field
+- Recommendation: Phase 2 embeds references in markdown as `![[noteId|label]]` syntax
+  - Phase 2: Editorial syntax only; no schema changes needed
+  - Phase 3: Backend extracts structured references for rename safety + graph queries
+  - Search naturally discovers inline references via body text (no special query syntax)
+
+### Code Quality Patterns
+
+- `excerpt()` at line 331 is the source of truth for body preview
+- `linkedNoteIds` editor at line 3618–3638 uses Material UI Autocomplete (reusable pattern)
+- Backlinks section at line 3720+ is clean, shows both directions (outgoing + incoming)
+- Reference nodes below editor use clickable cards (low-friction navigation)
+- No existing tests for excerpt sanitization; regression coverage needed for Phase 2
+
+### Key Decisions for Phase 2
+
+1. **Markdown is the canonical format.** Don't convert to AST or a second format; Lexical just makes editing it nicer while keeping the wire format unchanged.
+2. **Keep the API contract.** `body: string` stays; no schema additions until Phase 3 (structured references).
+3. **References in markdown, not metadata.** `![[noteId|label]]` is a semantic markdown extension, not a separate `linkedNoteIds` field (Phase 3 optimizes via extraction).
+4. **Mode toggle ships first.** Hide the stacked preview, ship immediately (1–2d), validate the rhythm before Lexical integration.
+5. **Client-side backlinks.** Backlinks computed by parsing body for `![[noteId` patterns; stays local until Phase 3 indexing.
+
+### File Locations (Phase 2 touchpoints)
+
+- Editor form: `apps/web/src/App.tsx:3655–3682` (body TextField + preview)
+- Editor state: `apps/web/src/App.tsx:91–98` (NoteDraft interface)
+- Excerpt function: `apps/web/src/App.tsx:331–343`
+- Note list rows: `apps/web/src/App.tsx:3432–3498` (using excerpt)
+- Activity feed: `apps/web/src/App.tsx:3244–3309` (using excerpt)
+- Linked notes display: `apps/web/src/App.tsx:3720–3790` (cards below editor)
+- Markdown sanitization: `apps/web/src/note-formatting.tsx:11–38` (reusable)
+- Current package: `apps/web/package.json` (needs `lexical` + `@lexical/markdown` for Phase 2b)
+
+### Regression Coverage Needed
+
+Phase 2 additions should test:
+- RT1: Mode toggle preserves draft state (show/hide preview doesn't clobber body)
+- RT2: Lexical import/export (load markdown → edit → save → reload → byte-identical)
+- RT3: Raw-markdown view matches source (toggle shows unformatted text)
+- RT4: Reference picker inserts syntax correctly
+- RT5: Backlinks update on save (if note A adds `![[B]]`, B's backlinks panel refreshes)
+- RT6: Excerpt sanitizes `![[id|label]]` to plain text (safe in rows/activity)
+- RT7: Search finds inline references (typing note title matches both title note + all notes that reference it)
+
+### Integration Points
+
+- **Mikey (Product):** Phased order (2a → 2b → 2c) locks scope; confirm timeline before Phase 2a ships
+- **Data (Backend):** Phase 2c has optional backend validation for `![[...]]` syntax; Phase 3 needs `references` schema + extraction logic
+- **Chunk (QA):** Regression coverage plan in decision file; test import/export round-trips + backlink staleness
+- **Copilot:** May handle Phase 2a (mode toggle) while Stef plans Phase 2b architecture
+
+
+## 2026-04-13: Phase 2 Frontend — Editor & Inline References Planning
+
+📌 **Orchestration complete:** Stef inspected frontend architecture for Phase 2 implementation (editor modes, inline references, markdown sanitization).
+
+**Outcome:**
+- ✅ Markdown sanitization (excerpts): **Ready to ship** — current `excerpt()` + `markdownToPlainText()` are solid; no changes needed
+- 🔴 Dual-mode editor: **Requires implementation** (phased: 2a toggle 1–2d, 2b Lexical 4–5d, 2c inline refs 2–3d)
+- 🟡 Inline references: **Designer + implementation** — editor syntax embedding + Phase 3 backend extraction
+
+**Key decisions:**
+- Keep markdown canonical (no format conversion, Lexical imports/exports markdown)
+- Use `![[noteId|label]]` syntax for inline references embedded in body
+- Phase 2a: Mode toggle (quick win) → Phase 2b: Lexical editor (markdown-native) → Phase 2c: Custom reference nodes + picker
+- No API contract changes Phase 2 (references stay in body until Phase 3 structured extraction)
+
+**Phase 2a ready to start immediately.** Stef or Copilot can begin mode toggle implementation (1–2 days).

@@ -438,3 +438,184 @@ PR #37 is the `@copilot` revision of Issue #28 tag facets after Chunk rejected t
 ## Archive
 
 Older decisions have been moved to `.squad/decisions/archive/` for historical reference.
+
+
+---
+
+### 2026-04-13: Phase 2 Implementation — Markdown Editor & Inline References (APPROVED)
+
+**Consolidated by:** Scribe (2026-04-13T19:08:05Z)  
+**Original recommendations:**
+- `stef-phase2-editor.md` — Stef (Frontend architecture)
+- `data-note-reference-phase2.md` — Data (Backend reference strategy)
+
+**Status:** APPROVED — Team aligned, green-lit for immediate execution
+
+## Overview
+
+Phase 2 adds a dual-mode markdown editor and support for inline note references. Frontend focuses on editor UX (toggle, Lexical, custom nodes); backend adds a references table for safe migration from the current `linkedNoteIds` field.
+
+## Frontend Decision: Keep Markdown Canonical
+
+**The editor and data flow remain markdown-first.**
+
+- API contract: `body: string` stores pure markdown
+- `react-markdown` + `remark-gfm` render client-side (status quo)
+- Lexical editor (Phase 2b) imports/exports markdown without conversion
+- Inline references use markdown syntax: `![[noteId|label]]`
+- Backend stores references embedded in `body` until Phase 3 (structured extraction)
+
+**Why:** No format fragmentation, no conversion bugs, Lexical node system cleanly supports custom syntax.
+
+## Backend Decision: Staged Migration to References Table
+
+**Phase 2a schema addition:** `note_references` table as single source of truth
+
+```sql
+CREATE TABLE note_references (
+  id TEXT PRIMARY KEY,
+  source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+  target_note_id TEXT NOT NULL,
+  campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+  reference_type TEXT NOT NULL,  -- 'implicit' (body-derived) | 'explicit' (linkedNoteIds)
+  position_in_body INTEGER,       -- null for explicit; char offset for implicit
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(source_note_id, target_note_id, reference_type, position_in_body)
+);
+
+CREATE INDEX idx_references_target ON note_references(target_note_id, campaign_id);
+CREATE INDEX idx_references_source ON note_references(source_note_id, campaign_id);
+```
+
+**Why this approach:**
+- Single source of truth for all link queries
+- `reference_type` splits body-derived (new) vs. explicit (old `linkedNoteIds`)
+- Safe migration window: both systems coexist, lazy sync on first read/write
+- Target ID in table (not title) means rename operations don't break references
+- Indexed for fast "what links to this note?" queries
+
+**No API breaking change:** `linkedNoteIds` field remains in responses for 1–2 major versions.
+
+## Phased Editor Implementation
+
+### Phase 2a: Mode Toggle (1–2 days, start immediately)
+
+- **What:** Add a button to hide/show the stacked markdown preview
+- **Code change:** `App.tsx` line 3655–3682, add `showPreview` state and conditional render
+- **Benefit:** Immediate UX win; ship fast; validate cadence
+- **Owner:** Stef or Copilot
+- **Blocker:** None
+
+**Backend parallel work (Phase 2a):**
+- Design `note_references` table schema
+- Implement `NoteStore.syncLinkedNotesIntoReferences()` for lazy migration
+- Write migration tests (legacy data, cross-campaign, validation)
+
+### Phase 2b: Lexical Editor (4–5 days, post-2a)
+
+- **What:** Replace plain `<textarea>` with markdown-native Lexical editor
+- **Setup:**
+  - Add `lexical` + `@lexical/markdown` to `apps/web/package.json`
+  - Create `NoteEditor.tsx` wrapping `LexicalComposer`
+  - Markdown import/export via `@lexical/markdown` config
+  - Optional raw-markdown mode (toggle to edit raw text)
+- **Scope:** Basic nodes (paragraph, heading, emphasis, code, blockquote, lists)
+- **Acceptance:** Save/load cycle preserves markdown byte-for-byte; all tests pass
+- **Owner:** Stef
+- **Blocker:** None
+
+**Backend parallel work (Phase 2b):**
+- Extend `NoteInput` with optional `inlineReferences` field
+- Modify `createNote()` and `updateNote()` to accept and normalize both `linkedNoteIds` and `inlineReferences`
+- Implement backend re-parsing of body to validate parser consistency
+
+### Phase 2c: Inline Reference Nodes (2–3 days, post-2b)
+
+- **What:** Editor support for `![[noteId|label]]` syntax with a reference picker
+- **Scope:**
+  - Custom Lexical `NoteRefNode` that parses/renders/exports reference syntax
+  - Reference picker modal (Autocomplete, current campaign notes)
+  - Inline pills in formatted view; raw syntax in markdown mode
+  - Validation on blur/save (target must exist, same campaign)
+- **Acceptance:**
+  - Editor recognizes and renders references
+  - Save preserves syntax in markdown
+  - References appear safely in excerpts (as plain text, no `![[...]]`)
+  - Backlinks auto-update if note adds a reference
+- **Owner:** Stef + Data
+- **Blocker:** None (Phase 2 embeds syntax; structured extraction is Phase 3)
+
+**Backend work (Phase 2c):**
+- Add `GET /api/notes/:noteId/references` endpoint
+- Rename `getBacklinks()` to `getIncomingReferences()`, return from table
+- Add reference-aware search (filter by `referencesOnlyTo`, `referencedBy`)
+
+## Risks & Mitigations
+
+| Risk | Severity | Mitigation |
+|------|----------|-----------|
+| Lexical bundle bloat (50KB+) | Medium | Code splitting; defer to notes route. Measure impact before Phase 2b merge. |
+| Round-trip markdown mutation | Medium | Unit tests (byte-for-byte comparison on all existing notes); regression coverage. |
+| Dual-source confusion during migration | High | Clear `reference_type` semantics; deprecation notice in API docs; update guides. |
+| Backlinks show stale data | Medium | Recompute in `loadWorkspace` effect whenever notes change; regression test coverage. |
+| Parser divergence (editor != backend) | Medium | Backend re-parses body on write; mismatch returns 400. |
+
+## Timeline
+
+| Phase | Owner | Est. | Blocker | Target Date |
+|-------|-------|------|---------|-------------|
+| 2a (toggle + schema) | Stef/Data | 1–2d | None | Week of 2026-04-14 |
+| 2b (Lexical + parser) | Stef/Data | 4–5d | Phase 2a | Week of 2026-04-21 |
+| 2c (references UI + endpoints) | Stef/Data | 2–3d | Phase 2b | Week of 2026-04-28 |
+| **Phase 2 total** | — | **7–10d** | None | **2026-05-02 (best case)** |
+
+## Acceptance Criteria for Phase 2 Complete
+
+- [ ] Mode toggle hides/shows preview without draft loss
+- [ ] Lexical editor renders all markdown formats correctly
+- [ ] Save/load cycle preserves markdown (byte-for-byte)
+- [ ] Raw markdown mode available (toggle shows source)
+- [ ] `note_references` table created, indexed, and populated
+- [ ] Legacy `linkedNoteIds` synced lazily to `note_references`
+- [ ] NoteInput accepts both old and new reference formats (backward compatible)
+- [ ] Reference picker inserts `![[noteId|label]]` syntax correctly
+- [ ] Excerpts sanitize references safely (no `![[...]]` in output)
+- [ ] Search finds notes and their references (no special syntax required)
+- [ ] All existing tests pass (26 baseline + Phase 2 regression coverage)
+- [ ] No performance regression (bundle, load, save times)
+- [ ] Backlinks panel updates when new reference added to another note
+
+## Migration Window
+
+**Minor version N:** Ship Phase 2a schema. Both `linkedNoteIds` and `inlineReferences` accepted; normalized to `note_references` table.  
+**Minor version N+1:** All reads go through `note_references` table. Deprecate `linkedNoteIds` from API response.  
+**Minor version N+2:** Remove `linkedNoteIds` field entirely.
+
+## Markdown Sanitization (Excerpts) — Status: ✅ Ready
+
+Current `excerpt()` function in `App.tsx:331` uses `markdownToPlainText()` from `note-formatting.tsx`:
+- Already strips markdown syntax (headings, emphasis, code, blockquotes)
+- Handles HTML tag stripping via `/<[^>]+>/g` regex
+- Collapses whitespace, limits to 112 chars
+- Will sanitize `![[...]]` syntax to plain text safely
+
+**No changes needed for Phase 2.** The function is solid.
+
+## Notes for Product (Mikey)
+
+- Timeline is flexible: Phase 2a can ship independently if UX validation needed
+- Recommend: Ship 2a (1–2d) → gather feedback → start 2b while settling
+- Phase 2c scope (inline references) can be refined post-2b based on user testing
+- No user-facing breaking changes; all work is additive
+
+## Next Steps
+
+1. **Immediate:** Stef begins Phase 2a (mode toggle implementation)
+2. **Parallel:** Data designs Phase 2a schema + test migration logic
+3. **Week 1:** Phase 2a PR ready for review
+4. **Week 2:** Phase 2b architecture review + Lexical setup
+5. **Week 3–4:** Phase 2b/2c execution and QA
+6. **Week 5:** Phase 2 complete (best case)
+
+---
