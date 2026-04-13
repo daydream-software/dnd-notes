@@ -641,15 +641,19 @@ Squad and all spawned agents may be running inside a **git worktree** rather tha
 When worktree mode is enabled, the coordinator creates dedicated worktrees for issue-based work. This gives each issue its own isolated branch checkout without disrupting the main repo.
 
 **Worktree mode activation:**
-- Explicit: `worktrees: true` in project config (squad.config.ts or package.json `squad` section)
+- Explicit: `worktrees: true` in project config. `.squad/config.json` is the preferred repo-local source of truth; `squad.config.ts` or the `squad` section in `package.json` remain valid equivalents.
 - Environment: `SQUAD_WORKTREES=1` set in environment variables
 - Default: `false` (backward compatibility — agents work in the main repo)
 
 **Creating worktrees:**
 - One worktree per issue number
 - Multiple agents on the same issue share a worktree
-- Path convention: `{repo-parent}/{repo-name}-{issue-number}`
-  - Example: Working on issue #42 in `C:\src\squad` → worktree at `C:\src\squad-42`
+- Path resolution:
+  1. If project config sets `workTreesFolder`, resolve the worktree under that folder.
+     - Relative values are resolved from the main repo root / team root.
+     - Example: Repo `/workspace/dnd-notes` + `workTreesFolder: ".worktrees"` + issue `42` → `/workspace/dnd-notes/.worktrees/42`
+  2. If `workTreesFolder` is absent, fall back to the legacy sibling path `{repo-parent}/{repo-name}-{issue-number}`.
+     - Example: Working on issue #42 in `C:\src\squad` with no configured folder → `C:\src\squad-42`
 - Branch: `squad/{issue-number}-{kebab-case-slug}` (created from base branch, typically `main`)
 
 **Dependency management:**
@@ -665,8 +669,8 @@ When worktree mode is enabled, the coordinator creates dedicated worktrees for i
 - Multiple agents can work in the same worktree concurrently if they modify different files
 
 **Cleanup:**
-- After a PR is merged, the worktree should be removed
-- `git worktree remove {path}` + `git branch -d {branch}`
+- After a PR is merged, remove the worktree from its resolved path
+- `git worktree remove {resolved-path}` + `git branch -d {branch}`
 - Ralph heartbeat can trigger cleanup checks for merged branches
 
 ### Orchestration Logging
@@ -683,19 +687,25 @@ When spawning an agent for issue-based work (user request references an issue nu
 
 **1. Check worktree mode:**
 - Is `SQUAD_WORKTREES=1` set in the environment?
-- Or does the project config have `worktrees: true`?
+- Or does project config enable `worktrees: true`? Prefer `.squad/config.json`; `squad.config.ts` and the `squad` section in `package.json` remain valid equivalents.
 - If neither: skip worktree setup → agent works in the main repo (existing behavior)
 
 **2. If worktrees enabled:**
 
 a. **Determine the worktree path:**
    - Parse issue number from context (e.g., `#42`, `issue 42`, GitHub issue assignment)
-   - Calculate path: `{repo-parent}/{repo-name}-{issue-number}`
-   - Example: Main repo at `C:\src\squad`, issue #42 → `C:\src\squad-42`
+   - Load project config and read `workTreesFolder` when present
+   - If `workTreesFolder` is set:
+     - Resolve relative values from the main repo root / team root
+     - Calculate path: `{team-root}/{workTreesFolder}/{issue-number}`
+     - Example: Repo `/workspace/dnd-notes` + `workTreesFolder: ".worktrees"` + issue `42` → `/workspace/dnd-notes/.worktrees/42`
+   - If `workTreesFolder` is absent:
+     - Fall back to legacy sibling path `{repo-parent}/{repo-name}-{issue-number}`
+     - Example: Main repo at `C:\src\squad`, issue #42 → `C:\src\squad-42`
 
 b. **Check if worktree already exists:**
    - Run `git worktree list` to see all active worktrees
-   - If the worktree path already exists → **reuse it**:
+   - If the resolved worktree path already exists → **reuse it**:
      - Verify the branch is correct (should be `squad/{issue-number}-*`)
      - `cd` to the worktree path
      - `git pull` to sync latest changes
@@ -704,8 +714,10 @@ b. **Check if worktree already exists:**
 c. **Create the worktree:**
    - Determine branch name: `squad/{issue-number}-{kebab-case-slug}` (derive slug from issue title if available)
    - Determine base branch (typically `main`, check default branch if needed)
+   - Ensure the parent directory exists when `workTreesFolder` points inside a dedicated folder such as `.worktrees/`
    - Run: `git worktree add {path} -b {branch} {baseBranch}`
-   - Example: `git worktree add C:\src\squad-42 -b squad/42-fix-login main`
+   - Example (project-local folder): `git worktree add /workspace/dnd-notes/.worktrees/42 -b squad/42-fix-login main`
+   - Example (fallback sibling path): `git worktree add C:\src\squad-42 -b squad/42-fix-login main`
 
 d. **Set up dependencies:**
    - Link `node_modules` from main repo to avoid reinstalling:
