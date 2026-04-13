@@ -107,3 +107,21 @@ Chunk initialized as Tester for the initial project squad.
 - 3 pre-existing test timeouts (onboarding, second campaign, starter pack) confirmed NOT caused by #28 — same tests fail on the commit before Stef's changes.
 - Lint, build both green. New test passes consistently.
 - Non-blocking gaps for later: case-sensitive tag matching (facets/filter use exact match; mixed-case legacy data could surface separate entries), `handleStartNote` doesn't clear `selectedTag` (minor UX papercut), no multi-tag AND filter yet (deferred to search foundation work).
+
+## 2026-04-13: PR #36 Conflict-Resolution Re-Review — APPROVED (remains merge-ready)
+
+Review verdict (Chunk): **APPROVED** — The conflict-resolution push on PR #36 does not introduce any real regressions. Zero-fetch session browsing coexists safely with quick capture on current main.
+
+**Verified:**
+- All 3 new session browsing web tests pass (session list, draft preservation, empty state)
+- Quick capture owner test (11th web test) passes
+- All 17 API tests pass (including 3 new session listing endpoints)
+- PR merge state: MERGEABLE / CLEAN — no conflict markers
+- Core zero-fetch behavior confirmed: sessionSummaries and displayedNotes are client-side useMemo derivations from existing notes array, no extra API call on mode toggle
+- Quick capture bar coexists in both App.tsx (owner) and SharedCampaignRoute.tsx (guest)
+- Template-related code (starter packs, sortSessionSummaries, fetchSessionNotes) properly removed during conflict resolution — no orphaned imports
+
+**Non-blocking observations:**
+- "supports creating a second campaign" test timeout is pre-existing on main (confirmed identical failure)
+- "guest join flow" web test fails in full-suite run due to state contamination from the preceding timed-out test; passes in isolation (802ms). On main, intermediate template tests buffered the contamination. Not a code regression — a test-ordering hygiene issue that predates this PR.
+- PR body claims "30 tests pass (11 web + 19 API)" — actual counts are 11 web + 17 API = 28. Minor inaccuracy in the PR description, not a code issue.
