@@ -67,3 +67,20 @@ Stef initialized as Frontend Dev for the initial project squad.
 - All existing tests pass without modification
 - Key files: apps/api/src/note-store.ts, apps/web/src/App.tsx, both types.ts
 
+
+## 2026-04-13: Issue #24 Campaign Note Search
+
+Added client-side search functionality for campaign notes in apps/web/src/App.tsx:
+- Search input with Material UI v9 slotProps for start/end adornments
+- Search filters notes by title, body, tags, session name, and collaborator display names
+- Search combines with existing tag filters using AND logic
+- Search state clears when starting new notes to avoid confusion
+- Heading and description dynamically update to show active search and result counts
+- No backend API changes needed - fully client-side implementation
+- All existing tests pass (26 tests)
+
+Key patterns:
+- Keep search close to filter logic in filteredNotes useMemo
+- Use case-insensitive substring matching for user-friendly search
+- Clear search along with other filters when entering create mode
+- Use slotProps.input for TextField adornments in MUI v9
