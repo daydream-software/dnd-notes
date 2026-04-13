@@ -39,6 +39,9 @@ Data initialized as Backend Dev for the initial project squad.
 - The recent activity payload is intentionally latest-state only: derive one `created` or `edited` event per note from `createdAt`/`updatedAt`, and pair it with collaborator summaries built from note attribution instead of adding a noisy audit table.
 - `apps/api/src/note-store.ts` now guarantees `updatedAt` moves forward on note edits, which keeps latest-activity classification deterministic even when SQLite writes happen inside the same millisecond.
 - Issue #30 note-to-note links backend complete: `linkedNoteIds` validated in create/update schemas (20-link limit), stored as JSON array in `notes.linked_notes_json`, with cross-campaign and non-existent note blocking; `getBacklinks()` method and `GET /api/notes/:noteId/backlinks` endpoint surface backlinks scoped to same campaign; all three note SELECT queries include `linked_notes_json` column; error handling wraps createNote/updateNote to return 400 for link validation failures rather than 500; legacy database migration adds column with safe default.
+- Issue #26 stayed schema-light: note bodies remain stored as plain text, while the web app now interprets that text as Markdown so old notes stay readable without migration.
+- Shared note rendering now lives in `apps/web/src/note-formatting.tsx`, which uses `react-markdown` + `remark-gfm` and is reused by both `apps/web/src/App.tsx` and `apps/web/src/SharedCampaignRoute.tsx`.
+- Rich-formatting regression coverage now lives in `apps/web/src/note-formatting.test.tsx`, with app wiring covered in `apps/web/src/App.test.tsx`.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
