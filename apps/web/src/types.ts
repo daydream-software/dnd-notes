@@ -167,6 +167,16 @@ export interface NotesResponse {
   notes: Note[]
 }
 
+export interface SessionSummary {
+  sessionName: string
+  noteCount: number
+  latestActivity: string
+}
+
+export interface SessionsResponse {
+  sessions: SessionSummary[]
+}
+
 export interface NoteResponse {
   note: Note
 }

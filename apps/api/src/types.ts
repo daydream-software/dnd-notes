@@ -168,6 +168,16 @@ export interface CampaignShareLinkRevealResponse {
   url: string
 }
 
+export interface SessionSummary {
+  sessionName: string
+  noteCount: number
+  latestActivity: string
+}
+
+export interface SessionsResponse {
+  sessions: SessionSummary[]
+}
+
 export interface NotesResponse {
   notes: Note[]
 }
