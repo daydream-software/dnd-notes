@@ -1175,15 +1175,21 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.createNote(
-        {
-          ...validation.data,
-          campaignId: campaign.id,
-        },
-        membership.id,
-      )
+      try {
+        const note = noteStore.createNote(
+          {
+            ...validation.data,
+            campaignId: campaign.id,
+          },
+          membership.id,
+        )
 
-      response.status(201).json({ note })
+        response.status(201).json({ note })
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : 'Failed to create note.',
+        })
+      }
     },
   )
 
@@ -1246,6 +1252,37 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
     },
   )
 
+  app.get(
+    '/api/notes/:noteId/backlinks',
+    (
+      request: Request<NoteParams>,
+      response: Response<NotesResponse | ErrorResponse>,
+    ) => {
+      const owner = requireOwner(noteStore, request, response)
+
+      if (!owner) {
+        return
+      }
+
+      const note = noteStore.getNote(request.params.noteId)
+
+      if (!note) {
+        response
+          .status(404)
+          .json({ error: `Note "${request.params.noteId}" was not found.` })
+        return
+      }
+
+      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
+        response.status(403).json({ error: 'You do not have access to this note.' })
+        return
+      }
+
+      const backlinks = noteStore.getBacklinks(request.params.noteId)
+      response.json({ notes: backlinks })
+    },
+  )
+
   app.put(
     '/api/notes/:noteId',
     (
@@ -1284,23 +1321,29 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.updateNote(
-        request.params.noteId,
-        {
-          ...validation.data,
-          campaignId: existingNote.campaignId,
-        },
-        membership.id,
-      )
+      try {
+        const note = noteStore.updateNote(
+          request.params.noteId,
+          {
+            ...validation.data,
+            campaignId: existingNote.campaignId,
+          },
+          membership.id,
+        )
 
-      if (!note) {
-        response
-          .status(404)
-          .json({ error: `Note "${request.params.noteId}" was not found.` })
-        return
+        if (!note) {
+          response
+            .status(404)
+            .json({ error: `Note "${request.params.noteId}" was not found.` })
+          return
+        }
+
+        response.json({ note })
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : 'Failed to update note.',
+        })
       }
-
-      response.json({ note })
     },
   )
 
