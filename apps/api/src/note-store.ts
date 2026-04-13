@@ -61,6 +61,7 @@ interface NoteRow {
   body: string
   status: Note['status']
   tags_json: string
+  linked_notes_json?: string
   session_name: string | null
   created_by_membership_id: string | null
   last_edited_by_membership_id: string | null
@@ -310,6 +311,9 @@ function mapNoteRow(row: NoteRow): Note {
     body: row.body,
     status: row.status,
     tags: JSON.parse(row.tags_json) as string[],
+    linkedNoteIds: row.linked_notes_json 
+      ? (JSON.parse(row.linked_notes_json) as string[])
+      : [],
     sessionName: row.session_name,
     createdBy,
     lastEditedBy,
@@ -455,6 +459,7 @@ export function createNoteStore(
       body TEXT NOT NULL,
       status TEXT NOT NULL,
       tags_json TEXT NOT NULL,
+      linked_notes_json TEXT NOT NULL DEFAULT '[]',
       session_name TEXT,
       created_by_membership_id TEXT REFERENCES campaign_memberships(id),
       last_edited_by_membership_id TEXT REFERENCES campaign_memberships(id),
@@ -498,6 +503,13 @@ export function createNoteStore(
       database.exec(`
         ALTER TABLE notes
         ADD COLUMN last_edited_by_membership_id TEXT REFERENCES campaign_memberships(id)
+      `)
+    }
+
+    if (!noteColumns.has('linked_notes_json')) {
+      database.exec(`
+        ALTER TABLE notes
+        ADD COLUMN linked_notes_json TEXT NOT NULL DEFAULT '[]'
       `)
     }
   })
@@ -1088,6 +1100,7 @@ export function createNoteStore(
       body,
       status,
       tags_json,
+      linked_notes_json,
       session_name,
       created_by_membership_id,
       last_edited_by_membership_id,
@@ -1100,6 +1113,7 @@ export function createNoteStore(
       @body,
       @status,
       @tags_json,
+      @linked_notes_json,
       @session_name,
       @created_by_membership_id,
       @last_edited_by_membership_id,
@@ -1115,6 +1129,7 @@ export function createNoteStore(
       body = @body,
       status = @status,
       tags_json = @tags_json,
+      linked_notes_json = @linked_notes_json,
       session_name = @session_name,
       last_edited_by_membership_id = @last_edited_by_membership_id,
       updated_at = @updated_at
@@ -1641,6 +1656,7 @@ export function createNoteStore(
       body: note.body,
       status: note.status,
       tags_json: JSON.stringify(note.tags),
+      linked_notes_json: JSON.stringify(note.linkedNoteIds),
       session_name: note.sessionName,
       created_by_membership_id: note.createdBy?.membershipId ?? null,
       last_edited_by_membership_id: note.lastEditedBy?.membershipId ?? null,
@@ -1666,6 +1682,7 @@ export function createNoteStore(
           tags: input.tags,
           status: input.status,
           sessionName: input.sessionName,
+          linkedNoteIds: input.linkedNoteIds ?? [],
           createdBy: null,
           lastEditedBy: null,
           createdAt: timestamp,
@@ -1920,6 +1937,15 @@ export function createNoteStore(
           }
         : null
 
+      // Validate linked notes exist and are in the same campaign
+      const linkedNoteIds = input.linkedNoteIds ?? []
+      for (const linkedId of linkedNoteIds) {
+        const linkedNote = this.getNote(linkedId)
+        if (!linkedNote || linkedNote.campaignId !== campaign.id) {
+          throw new Error(`Linked note "${linkedId}" not found or not in the same campaign.`)
+        }
+      }
+
       const note: Note = {
         id: randomUUID(),
         campaignId: campaign.id,
@@ -1928,6 +1954,7 @@ export function createNoteStore(
         tags: input.tags,
         status: input.status,
         sessionName: input.sessionName,
+        linkedNoteIds,
         createdBy: attribution,
         lastEditedBy: attribution,
         createdAt: timestamp,
@@ -1956,6 +1983,15 @@ export function createNoteStore(
           }
         : existing.lastEditedBy
 
+      // Validate linked notes exist and are in the same campaign
+      const linkedNoteIds = input.linkedNoteIds ?? existing.linkedNoteIds
+      for (const linkedId of linkedNoteIds) {
+        const linkedNote = this.getNote(linkedId)
+        if (!linkedNote || linkedNote.campaignId !== existing.campaignId) {
+          throw new Error(`Linked note "${linkedId}" not found or not in the same campaign.`)
+        }
+      }
+
       const nextNote: Note = {
         ...existing,
         title: input.title,
@@ -1963,6 +1999,7 @@ export function createNoteStore(
         tags: input.tags,
         status: input.status,
         sessionName: input.sessionName,
+        linkedNoteIds,
         lastEditedBy: editAttribution,
         updatedAt: createTimestampAfter(existing.updatedAt),
       }
@@ -1973,6 +2010,7 @@ export function createNoteStore(
         body: nextNote.body,
         status: nextNote.status,
         tags_json: JSON.stringify(nextNote.tags),
+        linked_notes_json: JSON.stringify(nextNote.linkedNoteIds),
         session_name: nextNote.sessionName,
         last_edited_by_membership_id: nextNote.lastEditedBy?.membershipId ?? null,
         updated_at: nextNote.updatedAt,

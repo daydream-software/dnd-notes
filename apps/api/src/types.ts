@@ -93,6 +93,7 @@ export interface Note {
   tags: string[]
   status: NoteStatus
   sessionName: string | null
+  linkedNoteIds: string[]
   createdBy: NoteAttribution | null
   lastEditedBy: NoteAttribution | null
   createdAt: string
@@ -105,6 +106,7 @@ export interface NoteInput {
   tags: string[]
   status: NoteStatus
   sessionName: string | null
+  linkedNoteIds?: string[]
   campaignId?: string | null
 }
 
