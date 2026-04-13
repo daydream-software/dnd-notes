@@ -48,6 +48,49 @@ Chunk initialized as Tester for the initial project squad.
 
 ## 2026-04-13: Issue #24 Search Acceptance & Regression Prep
 
+**What:** Drafted comprehensive QA strategy for campaign note search (text + tag/session/member filters) and completed preliminary code review of in-progress implementation.
+
+**Key Risks Identified:**
+1. **Cross-campaign bleed** (RT4): Multi-campaign users seeing notes from inactive campaigns
+2. **Workspace reload loop** (RT1): Search state triggering bootstrap re-run (issue #27/28 pattern)
+3. **Stale response race** (RT2): Overlapping requests painting wrong results (issue #27 pattern)
+4. **Selected note visibility** (RT3): Active note falling out of filtered results (issue #28 pattern)
+5. **Empty state handling** (RT5): Zero results showing blank pane instead of helpful message
+
+**Acceptance Priorities:**
+- P0 (blocking): Campaign scoping, collaborator access, no reload loop, mobile render
+- P1 (pre-merge): Stale response guard, selected note sync, empty states, special char safety
+- P2 (follow-up): Unicode support, 1000+ note performance, URL state persistence
+
+**Open Product Decisions:**
+- Empty query behavior (all notes vs zero results)?
+- Filter logic (AND vs OR for multiple filters)?
+- Case sensitivity for text search and filters?
+- State persistence strategy (URL vs localStorage vs ephemeral)?
+- Create-note behavior from filtered view (inherit filters or clean)?
+
+**Preliminary Code Review (Stef's In-Progress Work):**
+- ✅ Filtering logic added to `apps/web/src/App.tsx` with case-insensitive search across title/body/tags/session/members
+- ✅ No workspace reload loop — `searchText` not in bootstrap deps
+- ✅ AND logic between tag + search filters works correctly
+- ⚠️ Missing search UI component (users can't enter search text)
+- ⚠️ Missing test coverage (zero regression tests)
+- ⚠️ Missing empty state handling (blank pane when no results)
+- ⚠️ No selected note retarget logic (RT3 potential regression)
+
+**Review Gates:**
+- Approve: All P0+P1 pass, product decisions answered, regression coverage present, UI complete
+- Reject: Cross-campaign bleed, reload loop, race condition, zero tests, collaborator broken
+- Lockout: Rejected work requires Data (backend) or Stef (frontend) revision, not original author
+
+**Deliverables:**
+- Full QA strategy: `.squad/decisions/inbox/chunk-issue-24-qa.md`
+- Preliminary review: `.worktrees/24/PRELIMINARY_REVIEW.md`
+
+**Status:** READY — Awaiting completion (UI component + test coverage), then full validation pass.
+
+**Next:** Re-review when implementation signals completion, run `npm run lint && npm run test && npm run build`, approve or reject with evidence.
+
 📌 Team update (2026-04-13): Chunk completed comprehensive acceptance criteria and regression test matrix for Issue #24 (Campaign Note Search). This is prep-only work defining scope, edge cases, and 7 UX blockers requiring FFMikha approval before implementation. AC1–AC7 acceptance criteria + 30+ regression tests (autocomplete, empty state, special chars, concurrent count accuracy, multi-tag AND logic, state persistence, mode-switch orthogonality, #27 regression). Decision: READY FOR PRODUCT SIGN-OFF. Full spec: `.squad/decisions/inbox/chunk-issue-24-acceptance.md`
 
 ## 2026-04-12: Issue #27 & #23 Reviews Complete
@@ -203,3 +246,71 @@ Review verdict (Chunk): **APPROVED** — The conflict-resolution push on PR #36 
 - No backend/schema changes, frontend-only scope preserved
 
 **Unblocks:** Issue #24 (search foundation + advanced filters) can now proceed.
+
+## 2026-04-13: Issue #30 — Note Links & Backlinks Test Strategy Drafted
+
+**Status:** DRAFT — awaiting FFMikha approval + implementation
+
+**What I did:**
+- Drafted comprehensive test strategy for note-to-note links and backlinks (issue #30)
+- Defined 7 acceptance criteria: link creation, backlink discovery, link display, campaign scoping, attribution/access, link lifecycle, cross-feature integration
+- Identified 6 DM table trap scenarios that could break the happy path mid-session
+- Technical edge cases: self-links, duplicate links, link format/ordering, bulk operations, empty states
+- Performance and concurrency traps: 500+ notes, stale backlink counts, concurrent link creation, delete races
+- Integration regression matrix (issue #27 pattern): workspace reload on link creation, draft loss, stale-response race, mode-switch safety, tag filter interaction
+- Open questions for FFMikha: link creation UX, display location, backlink label, archive behavior, link ordering policies
+- Regression test matrix: 8 backend tests, 12 frontend tests, 5 cross-feature tests
+- Ship-gate criteria: 7 AC pass, 12+ regression tests green, full lint/test/build bar, FFMikha UX approval, zero issue #27 pattern regressions
+
+**Key files referenced:**
+- apps/api/src/note-store.ts — data model and SQLite schema (will need link table or field)
+- apps/api/src/types.ts + apps/web/src/types.ts — API contracts for links
+- apps/web/src/App.tsx — link UI and navigation (must NOT trigger workspace reload)
+- apps/api/test/app.test.ts + apps/web/src/App.test.tsx — regression coverage
+
+**Decision written:** .squad/decisions/inbox/chunk-note-links-backlinks.md
+
+**Why this matters:**
+- Issue #30 is a core relational navigation feature that DMs will rely on mid-session
+- The link chain and circular reference traps are real D&D usage patterns (NPCs, quests, factions)
+- Issue #27 regression pattern (workspace reload, draft loss, stale-response race) applies here
+- Link lifecycle (deletion, archiving) must be rock-solid or DMs lose trust in the data integrity
+- Guest access + link permissions need explicit coverage (viewer vs. editor, cross-campaign scoping)
+
+**Next step:** FFMikha to approve UX decisions (link creation flow, backlink label, etc.). Stef (or other implementer) to code with Chunk approval gate on the regression matrix.
+
+**Baseline validated:** npm run lint && npm run test && npm run build all green (21/21 tests passing, 130s runtime).
+
+## 2026-04-13: Issue #30 Implementation REJECTED
+
+**Verdict:** REJECTED — 21 of 42 tests broken, 0 of 7 acceptance criteria fully met
+
+**Critical regressions found:**
+1. **Legacy database bootstrap crash:** mapNoteRow() tries to parse undefined linked_notes_json, breaking SQLite upgrade path. Violates backward-compatibility pattern from issue #20. Affects 3 tests.
+2. **Validation schema missing linkedNoteIds:** noteCreateSchema and noteUpdateSchema in apps/api/src/validation.ts do not include the new field. All note create/update endpoints return 500. Affects 18 tests.
+3. **Backlink discovery not implemented:** AC2 requires "when viewing note B, users can see that note A links to it." Current implementation only stores forward links (linkedNoteIds on note A), no backlink query or UI exists.
+4. **Zero regression test coverage:** No tests for cross-campaign link rejection, delete/archive lifecycle, guest permissions, self-links, duplicate links, or workspace reload trap.
+5. **Frontend workspace reload risk:** New Autocomplete widget for links updates draft state; must verify it does NOT trigger loadWorkspace() re-run (issue #27 pattern).
+6. **No empty state handling:** Backlink UI missing entirely.
+
+**Test results:**
+- Before: 21/21 passing
+- After: 21 failures (10 web + 11 API)
+- Build: passes
+- Lint: passes
+- Tests: FAILED
+
+**Acceptance criteria status:** 0/7 fully met. AC1 blocked by validation bug, AC2 not implemented, AC4-AC7 untested.
+
+**Blocking fixes required:**
+1. Fix mapNoteRow() to handle undefined linked_notes_json (default to [])
+2. Add linkedNoteIds to validation schemas in apps/api/src/validation.ts
+3. Implement backlink discovery (compute reverse links from linkedNoteIds)
+4. Add 6+ regression tests (cross-campaign, guest permissions, lifecycle)
+5. Add workspace reload regression test (RT-F1)
+
+**Reviewer lockout:** Stef locked out per charter. Recommend copilot or Data for backend fixes, then Stef can return for backlink UI in follow-on PR.
+
+**Decision written:** .squad/decisions/inbox/chunk-issue-30-rejection.md
+
+**Next step:** Coordinator to assign new agent for blocking fixes. Re-review after all tests green.
