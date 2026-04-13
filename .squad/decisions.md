@@ -2326,3 +2326,103 @@ Per squad charter: "On rejection, I may require a different agent to revise (not
 - When tools accept file paths directly, prefer explicit paths under `WORKTREE_PATH` over cwd-relative paths.
 **Why:** Live smoke test for issue `#23` created `.worktrees/23` correctly and passed `WORKTREE_PATH`, but the spawned verification agent still reported its cwd as the main repo root.
 
+---
+
+### 2026-04-13: Issue #30 Third Revision — Frontend Defensive Coding for linkedNoteIds
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-13  
+**Type:** Frontend Implementation Fix
+
+## Context
+
+Issue #30 (note-to-note links + backlinks) reached its third revision after two rejections. Data's second implementation completed the backend contract safely (migrations, validation, backlink queries), but Chunk flagged a frontend crash: `TypeError: Cannot read properties of undefined (reading 'includes')` when `linkedNoteIds` is undefined in legacy note states.
+
+## Problem
+
+The frontend type system declares `linkedNoteIds: string[]` as **required** in the Note interface (`apps/web/src/types.ts:96`), but runtime notes could have undefined values:
+- Pre-migration legacy notes before the `linked_notes_json` column is added
+- Draft states created from malformed or incomplete API responses
+- Trust boundary gap: TypeScript claims safety, but runtime crashes prove otherwise
+
+**Crash Points:**
+1. `apps/web/src/App.tsx:563` — `selectedNote.linkedNoteIds.includes(note.id)`
+2. `apps/web/src/App.tsx:570` — `note.linkedNoteIds.includes(selectedNoteId)`
+3. `apps/web/src/App.tsx:3403` — `draft.linkedNoteIds.includes(n.id)`
+4. `apps/web/src/App.tsx:183` — `createDraftFromNote` copying without fallback
+
+All 21 web tests were failing with uncaught TypeErrors during render.
+
+## Decision
+
+Add **optional chaining (`?.`) and nullish coalescing (`??`)** at all four crash points:
+- Lines 563, 570, 3403: change `.linkedNoteIds.includes(...)` → `.linkedNoteIds?.includes(...)`
+- Line 183: change `note.linkedNoteIds` → `note.linkedNoteIds ?? []`
+
+## Rationale
+
+**Why this approach:**
+1. **Surgical fix:** Defensive guards at the consumer sites, no ripple effects across the codebase
+2. **Backward compatible:** Handles pre-migration notes, malformed API responses, and edge cases gracefully
+3. **Maintains type contract:** We don't force `linkedNoteIds?: string[]` everywhere, which would cascade through all consumers
+4. **Explicit trust boundary:** Frontend now matches backend safety (backend already defaults to `[]` at note-store.ts:315-317)
+
+**Alternative considered and rejected:**
+- Change the frontend type to `linkedNoteIds?: string[]` — would require changes in 20+ places where notes are consumed, forced null-checks everywhere, and breaks type alignment with API contract
+
+## Validation
+
+- ✅ All 21 web tests pass (were 0/21 crashing before fix)
+- ✅ All 28 API tests pass
+- ✅ Build clean, lint clean
+- ✅ Commit `3d5b3ef` pushed to `squad/30-note-links-backlinks`
+
+## Implications
+
+- **Frontend team:** This defensive pattern should be standard for any new optional backend fields — prefer `?.` and `??` at consumer sites over making types optional everywhere
+- **Type system:** We accept a small type/runtime mismatch (`linkedNoteIds` marked required, but guarded as optional) to avoid cascading complexity
+- **Issue #30:** Ready for Chunk's final review; if approved, closes the issue
+
+---
+
+### 2026-04-13: Issue #30 Final Approval — Defensive Coding Pattern Endorsed
+**Decided by:** Chunk (Tester)  
+**Date:** 2026-04-13  
+**Type:** QA Approval & Pattern Endorsement
+
+## Context
+
+Mikey's third revision of issue #30 applied defensive coding using optional chaining (`?.`) and nullish coalescing (`??`) to handle undefined `linkedNoteIds` in frontend code. Final QA validation shows all tests passing.
+
+## Decision
+
+**Approved:** Defensive use of optional chaining and nullish coalescing in frontend code when accessing `linkedNoteIds` field.
+
+**Validation Results:**
+- ✅ 49 tests passing (21 web + 28 API)
+- ✅ Build clean
+- ✅ Lint clean
+- ✅ All four frontend crash points fixed
+- ✅ No regressions introduced
+
+## Rationale
+
+The backend API type system marks `linkedNoteIds` as required, but the backend safely defaults to `[]` when the database column is NULL. This creates a trust gap for:
+
+1. Legacy notes from databases before the `linked_notes_json` column existed
+2. Draft states during construction or race conditions
+3. Any deserialization edge cases
+
+Frontend defensive coding at four hotspots prevents crashes without cascading type changes throughout the codebase.
+
+## Pattern Endorsement
+
+**Scope:** This pattern should be used wherever we access fields that might be undefined due to legacy data or migration states, even if the type system marks them as required.
+
+**Standard:** For any new optional backend fields introduced in the future, prefer defensive coding at consumer sites (`?.` and `??`) over making types optional throughout the codebase.
+
+**Test Coverage:** Legacy database migration test in app.test.ts validates safe upgrade path.
+
+## Issue Status
+
+**Issue #30 APPROVED** — Ready to merge. All acceptance criteria met.
+
