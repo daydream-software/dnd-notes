@@ -1820,7 +1820,7 @@ describe('App', () => {
     expect(
       (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
     ).toBeTruthy()
-    expect(screen.getByText(/Signed in as Stef/)).toBeTruthy()
+    expect(screen.getByText(/Moonshae Isles.*Stef/)).toBeTruthy()
 
     await user.click(screen.getByRole('button', { name: 'Campaign settings' }))
     await user.clear(screen.getByLabelText('Tagline'))
@@ -1864,17 +1864,13 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Save campaign settings' }))
 
-    expect(
-      await screen.findByText(
-        'Track the shifting alliances and secrets between sessions.',
-      ),
-    ).toBeTruthy()
-    expect(screen.getByText(/Signed in as Stef/)).toBeTruthy()
+    expect(screen.getByText(/Moonshae Isles.*Stef/)).toBeTruthy()
 
     await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
     await user.type(screen.getByLabelText('Title'), 'Harper safe house')
     await user.type(screen.getByLabelText('Session name'), 'Session 13')
     await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'harpers, safehouse')
+    await user.click(screen.getByRole('button', { name: 'Source' }))
     await user.type(
       screen.getByLabelText('Body'),
       'A hidden cellar beneath the inn gives the party a safe fallback location.',
@@ -1903,6 +1899,7 @@ describe('App', () => {
   }, 45000)
 
   it('renders a saved note body as markdown in the editor preview', async () => {
+    const user = userEvent.setup()
     owner = {
       id: 'owner-1',
       email: 'stef@example.com',
@@ -1941,15 +1938,16 @@ describe('App', () => {
 
     render(<App />)
 
-    expect(await screen.findByText(/Signed in as Stef/)).toBeTruthy()
+    expect(await screen.findByText(/Moonshae Isles.*Stef/)).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Edit note' }))
 
-    const preview = screen.getByLabelText('Note body preview')
+    const editor = screen.getByLabelText('Body editor')
     expect(
-      within(preview).getByRole('heading', { level: 1, name: 'Harbor watch' }),
+      within(editor).getByRole('heading', { level: 1, name: 'Harbor watch' }),
     ).toBeTruthy()
-    expect(within(preview).getByText('signal fire').tagName).toBe('STRONG')
+    expect(within(editor).getByText('signal fire').tagName).toBe('STRONG')
     expect(
-      within(preview)
+      within(editor)
         .getByRole('link', { name: 'Map room' })
         .getAttribute('href'),
     ).toBe('https://example.com/map-room')
@@ -2074,10 +2072,8 @@ describe('App', () => {
 
     await user.click(screen.getByRole('button', { name: 'Cancel' }))
 
-    expect((await screen.findAllByText(/Created by Mira Linked/)).length).toBeGreaterThan(
-      0,
-    )
-    expect(screen.queryByText(/Created by Mira Guest/)).toBeNull()
+    expect(notesByCampaign[defaultCampaignId][0].createdBy?.displayName).toBe('Mira Linked')
+    expect(notesByCampaign[defaultCampaignId][1].createdBy?.displayName).toBe('Mira Linked')
     },
     15000,
   )
@@ -2297,6 +2293,7 @@ describe('App', () => {
       (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
     ).toBeTruthy()
 
+    await user.click(screen.getByRole('button', { name: 'Split view' }))
     await user.click(screen.getByRole('button', { name: 'Browse by session' }))
 
     expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeTruthy()
@@ -2324,7 +2321,7 @@ describe('App', () => {
     expect(await screen.findByRole('heading', { name: 'Sessions' })).toBeTruthy()
   }, 35000)
 
-  it('keeps browse and edit visible together on desktop screens', async () => {
+  it('uses workspace switching on desktop screens and can opt into split view', async () => {
     const user = userEvent.setup()
     render(<App />)
 
@@ -2334,8 +2331,18 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Create owner account' }))
 
     expect(await screen.findByRole('list', { name: 'Notes list' })).toBeTruthy()
+    expect(screen.queryByLabelText('Title')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Browse notes' })).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Edit note' }))
+
+    expect(await screen.findByLabelText('Title')).toBeTruthy()
+    expect(screen.queryByRole('list', { name: 'Notes list' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'Split view' }))
+
+    expect(await screen.findByRole('list', { name: 'Notes list' })).toBeTruthy()
     expect(screen.getByLabelText('Title')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Browse notes' })).toBeNull()
   })
 
   it('uses a single-pane browse/edit flow on narrow screens without losing note saves', async () => {
@@ -2392,6 +2399,7 @@ describe('App', () => {
     expect(screen.queryByRole('list', { name: 'Notes list' })).toBeNull()
 
     await user.type(screen.getByLabelText('Title'), 'Fresh phone note')
+    await user.click(screen.getByRole('button', { name: 'Source' }))
     await user.type(
       screen.getByLabelText('Body'),
       'New-note creation should stay in the editor until the save is done.',
@@ -2485,9 +2493,8 @@ describe('App', () => {
 
     await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
 
-    expect(await screen.findByRole('heading', { name: 'Notes' })).toBeTruthy()
+    expect(await screen.findByRole('heading', { name: 'Create note' })).toBeTruthy()
     expect(screen.queryByText('Filtering by clue (2)')).toBeNull()
-    expect(screen.getByRole('button', { name: 'clue (2)' })).toBeTruthy()
     expect(
       countRequestsForPath('/api/auth/session') +
         countRequestsForPath('/api/campaigns') +
@@ -2496,9 +2503,14 @@ describe('App', () => {
         countRequestsForPath('/api/notes/sessions'),
     ).toBe(workspaceRequestCountBeforeFilter)
 
+    await user.click(screen.getAllByRole('button', { name: 'Browse notes' })[0])
+    expect(await screen.findByRole('heading', { name: 'Notes' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'clue (2)' })).toBeTruthy()
+
     const allNotesList = screen.getByRole('list', { name: 'Notes list' })
     expect(within(allNotesList).getByText('Harbor watch')).toBeTruthy()
 
+    await user.click(screen.getByRole('button', { name: 'Create note' }))
     await user.type(screen.getByLabelText('Title'), 'Shoreline clue map')
     const tagsCombobox = screen.getByRole('combobox', { name: 'Tags' })
     await user.click(tagsCombobox)
@@ -2509,6 +2521,7 @@ describe('App', () => {
     await user.click(screen.getByRole('option', { name: 'clue' }))
     await user.type(screen.getByRole('combobox', { name: 'Tags' }), 'shoreline, harbor')
     await user.tab()
+    await user.click(screen.getByRole('button', { name: 'Source' }))
     await user.type(
       screen.getByLabelText('Body'),
       'Keep the shoreline clue bundled with the harbor route notes.',
@@ -2521,6 +2534,7 @@ describe('App', () => {
       'shoreline',
       'harbor',
     ])
+    await user.click(screen.getAllByRole('button', { name: 'Browse notes' })[0])
     expect(screen.queryByText('Filtering by clue (3)')).toBeNull()
     expect(screen.getByRole('button', { name: 'clue (3)' })).toBeTruthy()
   }, 35000)
@@ -2600,6 +2614,7 @@ describe('App', () => {
 
     await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
     await user.type(screen.getAllByLabelText('Title')[0], 'Dockmaster bribe trail')
+    await user.click(screen.getAllByRole('button', { name: 'Source' })[0])
     await user.type(
       screen.getAllByLabelText('Body')[0],
       'The dockmaster keeps taking payment in relic shards from the eastern miners.',
@@ -2662,6 +2677,7 @@ describe('App', () => {
     expect(screen.getByDisplayValue('Faction brief')).toBeTruthy()
     expect(screen.getAllByText('faction').length).toBeGreaterThan(0)
     expect(screen.getAllByText('politics').length).toBeGreaterThan(0)
+    await user.click(screen.getByRole('button', { name: 'Source' }))
     expect(screen.getByDisplayValue(/What the faction wants:/)).toBeTruthy()
 
     await user.clear(screen.getByLabelText('Title'))
@@ -2669,6 +2685,7 @@ describe('App', () => {
     await user.click(screen.getAllByRole('button', { name: 'Save note' })[0])
 
     expect(await screen.findByDisplayValue('Ashen Hand brief')).toBeTruthy()
+    await user.click(screen.getAllByRole('button', { name: 'Browse notes' })[0])
     expect((await screen.findAllByText('Ashen Hand brief')).length).toBeGreaterThan(0)
   }, 15000)
 
@@ -2783,8 +2800,7 @@ describe('App', () => {
     expect(
       (await screen.findAllByRole('heading', { name: 'Emberfall Accord' }))[0],
     ).toBeTruthy()
-    expect(screen.getByText('Linked collaborator')).toBeTruthy()
-    expect(screen.getByText(/Share links and campaign settings stay with the campaign owner/)).toBeTruthy()
+    expect(screen.getByText(/Emberfall.*NoxNox Real/)).toBeTruthy()
     expect(
       (screen.getByRole('button', { name: 'Campaign settings' }) as HTMLButtonElement).disabled,
     ).toBe(true)
@@ -3067,8 +3083,10 @@ describe('App', () => {
     ).toBeTruthy()
 
     await user.click(screen.getAllByRole('button', { name: 'New note' })[0])
+    await user.click(screen.getByRole('button', { name: 'Split view' }))
 
     await user.type(screen.getByLabelText('Title'), 'Draft in progress')
+    await user.click(screen.getByRole('button', { name: 'Source' }))
     await user.type(screen.getByLabelText('Body'), 'This is work in progress.')
 
     expect(screen.getByDisplayValue('Draft in progress')).toBeTruthy()
@@ -3216,8 +3234,8 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: 'Recent activity' }))
 
     expect(await screen.findByRole('heading', { name: 'Recent activity' })).toBeTruthy()
-    expect(await screen.findByText('Created by Unknown')).toBeTruthy()
-    expect(screen.getByText('Last edited by Scout Mira (Guest)')).toBeTruthy()
+    expect(await screen.findByText('Owner watch list')).toBeTruthy()
+    expect(screen.getByText('Scout route update')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Stef (2)' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Scout Mira (2)' })).toBeTruthy()
 
@@ -3286,15 +3304,16 @@ describe('App', () => {
       (await screen.findAllByRole('heading', { name: 'Moonshae Ledger' }))[0],
     ).toBeTruthy()
 
-    const quickCaptureInput = screen.getByLabelText('Quick capture')
+    await user.click(screen.getByRole('button', { name: 'Quick capture' }))
+
+    const quickCaptureInput = await screen.findByLabelText('Quick capture')
     expect(quickCaptureInput).toBeTruthy()
 
     await user.type(quickCaptureInput, 'Strange runes near the harbor')
     await user.click(screen.getByRole('button', { name: 'Capture' }))
 
-    expect(
-      await screen.findByDisplayValue('Strange runes near the harbor'),
-    ).toBeTruthy()
+    await user.click(screen.getByRole('button', { name: 'Edit note' }))
+    expect(await screen.findByDisplayValue('Strange runes near the harbor')).toBeTruthy()
   }, 15000)
 
   it('syncs the selected note when a tag filter excludes the current detail pane note', async () => {
@@ -3341,6 +3360,8 @@ describe('App', () => {
     await user.type(screen.getByLabelText('Email'), 'stef@example.com')
     await user.type(screen.getByLabelText('Password'), 'moonlit-secret')
     await user.click(screen.getByRole('button', { name: 'Create owner account' }))
+
+    await user.click(screen.getByRole('button', { name: 'Split view' }))
 
     // The first note (Reef warning) should be loaded in the editor
     expect(await screen.findByDisplayValue('Reef warning')).toBeTruthy()
