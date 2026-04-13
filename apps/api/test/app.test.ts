@@ -1850,3 +1850,247 @@ test('shared session listing endpoint returns sessions for guest members', async
   )
   assert.equal(unauthenticatedResponse.status, 401)
 })
+
+test('note-to-note links support validation, cross-campaign blocking, and backlink discovery', async () => {
+  const { app, cleanup } = await createTestApp()
+  const { token: token1 } = await registerOwner(request(app), { email: 'user1@example.com' })
+  const { token: token2 } = await registerOwner(request(app), { email: 'user2@example.com' })
+  const authed1 = withAuth(request(app), token1)
+  const authed2 = withAuth(request(app), token2)
+
+  try {
+    // Create notes in campaign 1
+    const note1Response = await authed1.post('/api/notes').send({
+      title: 'The Ancient Ruins',
+      body: 'Strange markings found on the walls.',
+      tags: ['location'],
+      status: 'active',
+      campaignId: defaultCampaignId,
+    })
+    assert.equal(note1Response.status, 201)
+    const note1Id = note1Response.body.note.id as string
+
+    const note2Response = await authed1.post('/api/notes').send({
+      title: 'The Mysterious Artifact',
+      body: 'An artifact found in the ruins.',
+      tags: ['item'],
+      status: 'active',
+      campaignId: defaultCampaignId,
+      linkedNoteIds: [note1Id],
+    })
+    assert.equal(note2Response.status, 201)
+    const note2Id = note2Response.body.note.id as string
+    assert.deepEqual(note2Response.body.note.linkedNoteIds, [note1Id])
+
+    // Create note 3 linking to both note 1 and note 2
+    const note3Response = await authed1.post('/api/notes').send({
+      title: 'Quest: Investigate the Ruins',
+      body: 'Find out what happened at the ruins.',
+      tags: ['quest'],
+      status: 'active',
+      campaignId: defaultCampaignId,
+      linkedNoteIds: [note1Id, note2Id],
+    })
+    assert.equal(note3Response.status, 201)
+    const note3Id = note3Response.body.note.id as string
+    assert.deepEqual(note3Response.body.note.linkedNoteIds, [note1Id, note2Id])
+
+    // Get backlinks for note1 - should include note2 and note3
+    const backlinks1Response = await authed1.get(`/api/notes/${note1Id}/backlinks`)
+    assert.equal(backlinks1Response.status, 200)
+    const backlinks1 = backlinks1Response.body.notes as Array<{ id: string; title: string }>
+    assert.equal(backlinks1.length, 2)
+    const backlinkIds = backlinks1.map((n) => n.id).sort()
+    assert.deepEqual(backlinkIds, [note2Id, note3Id].sort())
+
+    // Get backlinks for note2 - should include note3
+    const backlinks2Response = await authed1.get(`/api/notes/${note2Id}/backlinks`)
+    assert.equal(backlinks2Response.status, 200)
+    const backlinks2 = backlinks2Response.body.notes as Array<{ id: string }>
+    assert.equal(backlinks2.length, 1)
+    assert.equal(backlinks2[0].id, note3Id)
+
+    // Get backlinks for note3 - should be empty
+    const backlinks3Response = await authed1.get(`/api/notes/${note3Id}/backlinks`)
+    assert.equal(backlinks3Response.status, 200)
+    assert.equal(backlinks3Response.body.notes.length, 0)
+
+    // Update note to remove a link
+    const updateResponse = await authed1.put(`/api/notes/${note3Id}`).send({
+      title: 'Quest: Investigate the Ruins',
+      body: 'Find out what happened at the ruins.',
+      tags: ['quest'],
+      status: 'active',
+      sessionName: null,
+      linkedNoteIds: [note1Id],
+    })
+    assert.equal(updateResponse.status, 200)
+    assert.deepEqual(updateResponse.body.note.linkedNoteIds, [note1Id])
+
+    // Verify backlinks updated
+    const updatedBacklinks2Response = await authed1.get(`/api/notes/${note2Id}/backlinks`)
+    assert.equal(updatedBacklinks2Response.status, 200)
+    assert.equal(updatedBacklinks2Response.body.notes.length, 0)
+
+    // Try to link to non-existent note - should fail
+    const badLinkResponse = await authed1.post('/api/notes').send({
+      title: 'Bad Link Test',
+      body: 'This should fail.',
+      tags: [],
+      status: 'draft',
+      campaignId: defaultCampaignId,
+      linkedNoteIds: ['non-existent-id'],
+    })
+    assert.equal(badLinkResponse.status, 400)
+    // Error should be in .error field
+    const errorText = JSON.stringify(badLinkResponse.body).toLowerCase()
+    assert.ok(errorText.includes('not found'))
+
+    // Create a second campaign and note in it
+    const campaign2Response = await authed2.post('/api/campaigns').send({
+      name: 'Another Campaign',
+      tagline: 'A different story',
+      system: 'D&D 5e',
+      setting: 'Eberron',
+    })
+    assert.equal(campaign2Response.status, 201)
+    const campaign2Id = campaign2Response.body.campaign.id as string
+
+    const campaign2NoteResponse = await authed2.post('/api/notes').send({
+      title: 'Campaign 2 Note',
+      body: 'A note in a different campaign.',
+      tags: [],
+      status: 'draft',
+      campaignId: campaign2Id,
+    })
+    assert.equal(campaign2NoteResponse.status, 201)
+    const campaign2NoteId = campaign2NoteResponse.body.note.id as string
+
+    // Try to link across campaigns - should fail
+    const crossCampaignLinkResponse = await authed1.post('/api/notes').send({
+      title: 'Cross Campaign Link',
+      body: 'This should fail.',
+      tags: [],
+      status: 'draft',
+      campaignId: defaultCampaignId,
+      linkedNoteIds: [campaign2NoteId],
+    })
+    assert.equal(crossCampaignLinkResponse.status, 400)
+    const crossErrorText = JSON.stringify(crossCampaignLinkResponse.body).toLowerCase()
+    assert.ok(crossErrorText.includes('not found') || crossErrorText.includes('same campaign'))
+
+    // Backlinks require auth and campaign access
+    const unauthBacklinksResponse = await request(app).get(`/api/notes/${note1Id}/backlinks`)
+    assert.equal(unauthBacklinksResponse.status, 401)
+
+    const wrongUserBacklinksResponse = await authed2.get(`/api/notes/${note1Id}/backlinks`)
+    assert.equal(wrongUserBacklinksResponse.status, 403)
+
+    // Backlinks return 404 for non-existent notes
+    const notFoundBacklinksResponse = await authed1.get('/api/notes/fake-id/backlinks')
+    assert.equal(notFoundBacklinksResponse.status, 404)
+
+    // Validation rejects too many links
+    const tooManyLinksResponse = await authed1.post('/api/notes').send({
+      title: 'Too Many Links',
+      body: 'This has too many links.',
+      tags: [],
+      status: 'draft',
+      campaignId: defaultCampaignId,
+      linkedNoteIds: Array(21).fill('some-id'),
+    })
+    assert.equal(tooManyLinksResponse.status, 400)
+    assert.ok(
+      tooManyLinksResponse.body.details.some((err: string) =>
+        err.includes('Cannot link more than 20 notes'),
+      ),
+    )
+  } finally {
+    await cleanup()
+  }
+})
+
+test('legacy databases without linked_notes_json column are upgraded safely', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-api-'))
+  const dbPath = join(directory, 'notes.sqlite')
+
+  try {
+    // Create initial app and note
+    const noteStore1 = createNoteStore({ dbPath })
+    const app1 = createApp({ noteStore: noteStore1 })
+    const { token } = await registerOwner(request(app1))
+    const authed = withAuth(request(app1), token)
+
+    const noteResponse = await authed.post('/api/notes').send({
+      title: 'Test Note',
+      body: 'Original content.',
+      tags: ['test'],
+      status: 'draft',
+      campaignId: defaultCampaignId,
+    })
+    assert.equal(noteResponse.status, 201)
+    const noteId = noteResponse.body.note.id as string
+
+    // Close the first app
+    noteStore1.close()
+
+    // Directly manipulate the database to simulate legacy schema
+    const db = new Database(dbPath)
+    const columns = db.pragma('table_info(notes)') as Array<{ name: string }>
+    const hasLinkedNotesJson = columns.some((col) => col.name === 'linked_notes_json')
+
+    if (hasLinkedNotesJson) {
+      // Recreate table without linked_notes_json to simulate legacy database
+      db.exec('ALTER TABLE notes RENAME TO notes_old')
+      db.exec(`
+        CREATE TABLE notes (
+          id TEXT PRIMARY KEY,
+          campaign_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          status TEXT NOT NULL,
+          tags_json TEXT NOT NULL,
+          session_name TEXT,
+          created_by_membership_id TEXT,
+          last_edited_by_membership_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        )
+      `)
+      db.exec(`
+        INSERT INTO notes 
+        SELECT id, campaign_id, title, body, status, tags_json, session_name, 
+               created_by_membership_id, last_edited_by_membership_id, created_at, updated_at
+        FROM notes_old
+      `)
+      db.exec('DROP TABLE notes_old')
+    }
+    db.close()
+
+    // Recreate the app - should trigger migration
+    const noteStore2 = createNoteStore({ dbPath })
+    const app2 = createApp({ noteStore: noteStore2 })
+
+    // Verify the note can be read and has empty linkedNoteIds
+    const getResponse = await withAuth(request(app2), token).get(`/api/notes/${noteId}`)
+    assert.equal(getResponse.status, 200)
+    assert.ok(Array.isArray(getResponse.body.note.linkedNoteIds))
+    assert.equal(getResponse.body.note.linkedNoteIds.length, 0)
+
+    // Verify we can create notes with links after migration
+    const linkedNoteResponse = await withAuth(request(app2), token).post('/api/notes').send({
+      title: 'Linked Note',
+      body: 'Links to the test note.',
+      tags: [],
+      status: 'draft',
+      campaignId: defaultCampaignId,
+      linkedNoteIds: [noteId],
+    })
+    assert.equal(linkedNoteResponse.status, 201)
+    assert.deepEqual(linkedNoteResponse.body.note.linkedNoteIds, [noteId])
+
+    noteStore2.close()
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})

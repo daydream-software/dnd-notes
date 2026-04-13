@@ -61,6 +61,7 @@ const noteCreateSchema = z.object({
   tags: noteTags.default([]),
   sessionName: nullableTrimmedString('Session name', 120),
   campaignId: nullableTrimmedString('Campaign id', 120),
+  linkedNoteIds: z.array(z.string().trim().min(1)).max(20, 'Cannot link more than 20 notes.').default([]),
 })
 
 const noteUpdateSchema = z.object({
@@ -69,6 +70,7 @@ const noteUpdateSchema = z.object({
   status: z.enum(noteStatuses),
   tags: noteTags,
   sessionName: nullableTrimmedString('Session name', 120),
+  linkedNoteIds: z.array(z.string().trim().min(1)).max(20, 'Cannot link more than 20 notes.').optional(),
 })
 
 const campaignPayloadSchema = z.object({

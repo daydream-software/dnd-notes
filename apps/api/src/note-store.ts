@@ -201,6 +201,7 @@ export interface NoteStore {
   listRecentNotes(limit: number, campaignId?: string): Note[]
   getSessionNotes(campaignId: string, sessionName: string): Note[]
   getNote(noteId: string): Note | null
+  getBacklinks(noteId: string): Note[]
   createNote(input: NoteInput, membershipId?: string): Note
   updateNote(noteId: string, input: NoteInput, membershipId?: string): Note | null
   deleteNote(noteId: string): boolean
@@ -1022,6 +1023,7 @@ export function createNoteStore(
       notes.body,
       notes.status,
       notes.tags_json,
+      notes.linked_notes_json,
       notes.session_name,
       notes.created_by_membership_id,
       notes.last_edited_by_membership_id,
@@ -1048,6 +1050,7 @@ export function createNoteStore(
       notes.body,
       notes.status,
       notes.tags_json,
+      notes.linked_notes_json,
       notes.session_name,
       notes.created_by_membership_id,
       notes.last_edited_by_membership_id,
@@ -1073,6 +1076,7 @@ export function createNoteStore(
       notes.body,
       notes.status,
       notes.tags_json,
+      notes.linked_notes_json,
       notes.session_name,
       notes.created_by_membership_id,
       notes.last_edited_by_membership_id,
@@ -1920,6 +1924,14 @@ export function createNoteStore(
     getNote(noteId) {
       const row = selectNoteById.get(noteId) as NoteRow | undefined
       return row ? mapNoteRow(row) : null
+    },
+    getBacklinks(noteId) {
+      const targetNote = this.getNote(noteId)
+      if (!targetNote) {
+        return []
+      }
+      const allNotes = listNotes(targetNote.campaignId)
+      return allNotes.filter((note) => note.linkedNoteIds.includes(noteId))
     },
     createNote(input, membershipId) {
       const campaign = requireCampaign(input.campaignId)
