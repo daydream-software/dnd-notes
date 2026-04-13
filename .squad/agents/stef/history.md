@@ -36,6 +36,8 @@ Stef initialized as Frontend Dev for the initial project squad.
 - Issue #28 tag discovery can stay fully client-side in `apps/web/src/App.tsx`: derive tag facets and counts from the loaded campaign notes, then filter the existing note list locally instead of adding a new API contract.
 - Tag entry now works best as a free-solo Material UI `Autocomplete` backed by loaded note tags, with blur/Enter committing comma-separated input so quick capture stays fast.
 - Frontend regression coverage for the tag slice lives in `apps/web/src/App.test.tsx`, and the README should mention tag facets/autocomplete as an existing campaign-browsing capability.
+- Keep issue #28 tag filtering in local `App.tsx` state (`selectedTagFilter`) so switching between notes, sessions, and activity does not reload the workspace or clobber in-progress drafts.
+- The tag browser should self-heal off the already loaded campaign notes: derive `tagFacets` from `notes`, reuse them for editor autocomplete, and auto-clear the active filter if the selected tag disappears after a save/delete.
 
 ## 2026-04-12: Issue #27 Backend Fixed, #32 & #23 Approved
 

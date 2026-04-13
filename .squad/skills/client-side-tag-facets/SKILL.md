@@ -19,10 +19,13 @@ Use this when tags already exist on loaded records, but the product needs faster
 - Treat a selected tag as a lightweight folder/filter, not a forced parent-child taxonomy.
 - Reuse the same tag facet list as the source for note-editor autocomplete.
 - If the editor allows free-form tags, commit partially typed input on blur/Enter so quick capture does not lose tags.
+- Keep the selected tag filter in local UI state so switching browse modes does not reload note data or clobber draft edits.
+- Auto-clear an active tag filter if refreshed note data no longer includes that tag, so the view heals after saves or deletes.
 
 ## Examples
 - `apps/web/src/App.tsx` computes `tagFacets` from loaded notes, renders a tag list with counts, and filters the note list locally when a tag is selected.
 - `apps/web/src/App.tsx` uses Material UI `Autocomplete` with `freeSolo` + `multiple` for tag entry, while normalizing comma-separated input into deduped tag values.
+- `apps/web/src/App.tsx` keeps `selectedTagFilter` separate from workspace loading state, so tag browsing survives mode switches without repeating `/api/notes` fetches.
 - `apps/web/src/App.test.tsx` covers both browsing by tag and reusing an existing tag through the editor.
 
 ## Anti-Patterns
