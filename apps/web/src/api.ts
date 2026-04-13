@@ -11,6 +11,8 @@ import type {
   CurrentOwnerResponse,
   ErrorResponse,
   GuestJoinInput,
+  MembershipConsolidationInput,
+  MembershipConsolidationResponse,
   NoteActivityResponse,
   NoteInput,
   NoteResponse,
@@ -147,6 +149,23 @@ export async function fetchCampaignMemberships(
   )
 
   return readJson<CampaignMembershipsResponse>(response)
+}
+
+export async function consolidateCampaignMemberships(
+  authToken: string,
+  campaignId: string,
+  input: MembershipConsolidationInput,
+) {
+  const response = await fetch(
+    `${apiBaseUrl}/api/campaigns/${campaignId}/memberships/consolidations`,
+    {
+      method: 'POST',
+      headers: createHeaders(authToken, true),
+      body: JSON.stringify(input),
+    },
+  )
+
+  return readJson<MembershipConsolidationResponse>(response)
 }
 
 export async function fetchCampaignShareLinks(
