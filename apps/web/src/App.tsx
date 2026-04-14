@@ -2733,83 +2733,92 @@ function App() {
       <Container maxWidth="xl" sx={{ minWidth: 0, position: 'relative' }}>
         <Stack spacing={2.5}>
           <Box
-            aria-label="Application brand"
             sx={{
-              display: { xs: 'none', lg: 'inline-flex' },
-              position: { xs: 'static', lg: 'absolute' },
-              top: { lg: 0 },
-              left: { lg: 0 },
+              display: 'flex',
+              justifyContent: { xs: 'center', lg: 'space-between' },
+              alignItems: 'flex-start',
+              gap: 2,
+              width: '100%',
+              position: { xs: 'static', lg: 'sticky' },
+              top: { lg: 12 },
               zIndex: { lg: 3 },
-              alignItems: 'center',
-              alignSelf: 'flex-start',
-              flexShrink: 0,
-              gap: 0.75,
-              px: 1.25,
-              py: 0.75,
-              borderRadius: '999px',
-              border: '1px solid',
-              borderColor: 'rgba(167, 139, 250, 0.2)',
-              bgcolor: 'rgba(15, 23, 42, 0.72)',
-              color: 'rgba(255, 255, 255, 0.78)',
-              backdropFilter: 'blur(12px)',
-              boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
-              maxWidth: '100%',
             }}
           >
-            <StickyNote2RoundedIcon fontSize="small" />
-            <Typography
-              variant="caption"
+            <Box
+              aria-label="Application brand"
               sx={{
-                ...singleLineTextSx,
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase',
+                display: { xs: 'none', lg: 'inline-flex' },
+                alignItems: 'center',
+                flexShrink: 0,
+                gap: 0.75,
+                px: 1.25,
+                py: 0.75,
+                borderRadius: '999px',
+                border: '1px solid',
+                borderColor: 'rgba(167, 139, 250, 0.2)',
+                bgcolor: 'rgba(15, 23, 42, 0.72)',
+                color: 'rgba(255, 255, 255, 0.78)',
+                backdropFilter: 'blur(12px)',
+                boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
+                maxWidth: '100%',
               }}
             >
-              D&amp;D Notes
-            </Typography>
+              <StickyNote2RoundedIcon fontSize="small" />
+              <Typography
+                variant="caption"
+                sx={{
+                  ...singleLineTextSx,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                }}
+              >
+                D&amp;D Notes
+              </Typography>
+            </Box>
+            <CampaignWorkspaceHeader
+              campaignName={resolvedCampaign?.name ?? overview.campaign.name}
+              mobileSubtitle={`${resolvedCampaign?.setting ?? overview.campaign.setting} • ${resolvedCampaign?.system ?? overview.campaign.system}`}
+              desktopSubtitle={resolvedDesktopSubtitle}
+              selectedCampaignId={resolvedSelectedCampaignId ?? overview.campaign.id}
+              campaignOptions={resolvedCampaignOptions}
+              onSelectCampaign={(campaignId) => {
+                if (!isSharedMode) {
+                  void handleSelectCampaign(campaignId)
+                }
+              }}
+              actions={[
+                {
+                  ariaLabel: 'New campaign',
+                  color: 'inherit',
+                  icon: <AddCircleOutlineRoundedIcon fontSize="small" />,
+                  onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate,
+                },
+                {
+                  ariaLabel: 'Campaign settings',
+                  color: 'inherit',
+                  icon: <SettingsRoundedIcon fontSize="small" />,
+                  onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings,
+                  disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign,
+                },
+                {
+                  ariaLabel: 'New note',
+                  color: 'secondary',
+                  icon: <AddRoundedIcon fontSize="small" />,
+                  onClick: handleStartNote,
+                  disabled: !canEditWorkspace,
+                },
+                {
+                  ariaLabel: 'Sign out',
+                  color: 'inherit',
+                  icon: <LogoutRoundedIcon fontSize="small" />,
+                  onClick: handleLogout,
+                },
+              ]}
+              surfaceRadius={surfaceRadius}
+              compactDesktop={useCompactDesktopHeader}
+              stickyDesktop={false}
+            />
           </Box>
-          <CampaignWorkspaceHeader
-            campaignName={resolvedCampaign?.name ?? overview.campaign.name}
-            mobileSubtitle={`${resolvedCampaign?.setting ?? overview.campaign.setting} • ${resolvedCampaign?.system ?? overview.campaign.system}`}
-            desktopSubtitle={resolvedDesktopSubtitle}
-            selectedCampaignId={resolvedSelectedCampaignId ?? overview.campaign.id}
-            campaignOptions={resolvedCampaignOptions}
-            onSelectCampaign={(campaignId) => {
-              if (!isSharedMode) {
-                void handleSelectCampaign(campaignId)
-              }
-            }}
-            actions={[
-              {
-                ariaLabel: 'New campaign',
-                color: 'inherit',
-                icon: <AddCircleOutlineRoundedIcon fontSize="small" />,
-                onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate,
-              },
-              {
-                ariaLabel: 'Campaign settings',
-                color: 'inherit',
-                icon: <SettingsRoundedIcon fontSize="small" />,
-                onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings,
-                disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign,
-              },
-              {
-                ariaLabel: 'New note',
-                color: 'secondary',
-                icon: <AddRoundedIcon fontSize="small" />,
-                onClick: handleStartNote,
-                disabled: !canEditWorkspace,
-              },
-              {
-                ariaLabel: 'Sign out',
-                color: 'inherit',
-                icon: <LogoutRoundedIcon fontSize="small" />,
-                onClick: handleLogout,
-              },
-            ]}
-            surfaceRadius={surfaceRadius}
-            compactDesktop={useCompactDesktopHeader}
-          />
 
           {error ? (
             <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
