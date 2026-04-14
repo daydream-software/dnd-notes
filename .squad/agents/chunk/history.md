@@ -325,3 +325,7 @@ Review verdict (Chunk): **APPROVED** — The conflict-resolution push on PR #36 
 
 ## 2026-04-13T16:07:01Z
 ✅ Issue #30 final gate approved: Validated Mikey's third revision with 49 passing tests, clean build/lint. All four frontend crash points fixed. Backend layer stable. Issue ready to merge. Decisions merged to squad/decisions.md and orchestration logs recorded.
+
+## 2026-04-14: Web Test Infrastructure P1 — Scope & Reviewer Gate Approval
+
+📌 Team update (2026-04-14T15:52:31Z): Web test infrastructure cleanup approved by Mikey (Lead) as a scoped investigation into vitest 4.1.4 hang + fallback path (downgrade or skip App.test.tsx); Brand to lead investigation + CI wiring, Chunk to validate fallback option. Root scripts in `package.json` fix the workspace-path bug in `.github/workflows/web-test.yml`. Decision merged to `.squad/decisions.md`. — Scribe

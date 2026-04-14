@@ -22,6 +22,7 @@ Brand initialized as Platform Dev for the initial project squad.
 - Treat `.squad/config.json` as the preferred worktree path source of truth: if `workTreesFolder` is set, resolve it from the repo root; if not, document the sibling-path fallback consistently across governance, lifecycle docs, and workflow skills.
 - Initial squad setup complete.
 - GitHub Actions refs in active `.github/workflows/` files and source `.squad/templates/workflows/` templates need SHA pins for orgs that enforce immutable action references; keep the current major visible with inline comments for maintainability.
+- **Squad upgrade workflow audit (2026-04-14):** After `squad upgrade`, treat `.squad/templates/workflows/` as the source of truth for synced squad workflows, then verify `.github/workflows/` only keeps repo-fit automations. For this app, keep `sync-squad-labels`, `squad-triage`, `squad-heartbeat`, `squad-issue-assign`, `squad-label-enforce`, and `web-test`; remove upgrade-added docs/release/preview/insider/test workflows that assume Squad CLI branches, docs, or root `test/*.test.js`.
 - Guest account linking now runs through `POST /api/shared/:shareToken/membership/claim`, with the shared-route UI handling register/sign-in plus claim in `apps/web/src/SharedCampaignRoute.tsx`.
 - Same-browser guest claims should attach `campaign_memberships.user_id` on the existing guest membership and leave that membership's ID/display name intact so note attribution stays stable across account upgrades.
 
@@ -98,3 +99,25 @@ Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-han
 ---
 
 **2026-04-13T13:26:28Z — Scribe Session:** Task completed. Decision merged to `.squad/decisions.md`. Orchestration and session logs created.
+
+## 2026-04-14: Squad Upgrade Cleanup — Orchestration Dispatch
+
+**Requested by:** FFMikha  
+**Type:** Background agent spawn
+
+**Work delegated to Brand:**
+- Audit `.github/workflows/` post-squad-upgrade for floating-tag refs and repo topology fit
+- Restore SHA pinning on kept workflows (sync-squad-labels, squad-triage, squad-heartbeat, squad-issue-assign, squad-label-enforce, web-test)
+- Remove upgrade-added workflows that target different repo structure
+- Validate with `npm run lint`, `npm run build`, `npm test`
+
+**Decisions created:**
+- `brand-fix-upgrade-pinning.md`: Post-upgrade workflow audit strategy documented
+- `brand-web-test-infra.md`: Web CI fixed via root workspace scripts + focused smoke lane
+
+**Scribe actions:**
+- Orchestration log written: `.squad/orchestration-log/2026-04-14T15-52-31Z-brand-upgrade-cleanup.md`
+- Session log written: `.squad/log/2026-04-14T15-52-31Z-upgrade-cleanup.md`
+- Decision inbox merged to `.squad/decisions.md`
+
+📌 Team update (2026-04-14T15:52:31Z): Squad upgrade cleanup delegated to Brand; workflows pinning and repo-fit audit underway — Scribe

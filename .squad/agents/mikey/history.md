@@ -320,3 +320,18 @@ Brand will give you a decision (fix, downgrade, or skip to E2E). You validate it
 **CI coverage before this pass:** None (no web test workflow)
 
 **Decision:** Boring incremental fix (downgrade or isolate) rather than test framework rewrite.
+
+## 2026-04-14: Web Test Infrastructure Approval & Web CI Fix
+
+Web test infrastructure P1 approved for Brand + Chunk execution:
+- Investigation lead (Brand): vitest 4.1.4 hang root cause OR fallback selection (downgrade/isolate)
+- CI wiring (Brand): `.github/workflows/web-test.yml` routed through new root scripts (`npm run test:web`)
+- Validation (Chunk): Fallback path tested locally; `npm run lint && build && test` passing
+- QA gate (Chunk): sign-off before merge
+- Lead gate (Mikey): Architecture verified, scope confirmed thin
+
+**Root cause of current CI no-op:** `.github/workflows/web-test.yml` calls `npm run test --workspace web`, but this repo uses npm 7 workspaces with directory paths (`apps/web`), not shorthand names. New scripts in `package.json` expose `npm run test:web` routed to `apps/web/`. Focused smoke lane (CampaignSearch, NoteBodyEditor, note-formatting) is the thinnest useful CI slice, proves plumbing works end-to-end.
+
+**Decisions in queue:** `brand-fix-upgrade-pinning.md` (post-upgrade audit), `brand-web-test-infra.md` (root scripts), `chunk-web-regression.md` (smoke suite strategy), `copilot-directive-2026-04-14T15-13-34Z.md` (signed commits required), `mikey-web-test-scope.md` (this gate).
+
+Decision merged to `.squad/decisions.md`. Awaiting Brand background agent start. — Scribe

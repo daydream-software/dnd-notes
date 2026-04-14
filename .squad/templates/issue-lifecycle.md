@@ -133,13 +133,11 @@ git checkout main && git pull && git checkout -b squad/{issue-number}-{slug}
 
 **Worktree (parallel multi-agent):**
 ```bash
-git worktree add .worktrees/{issue-number} -b squad/{issue-number}-{slug}
-cd .worktrees/{issue-number}
+git worktree add ../worktrees/{issue-number} -b squad/{issue-number}-{slug}
+cd ../worktrees/{issue-number}
 ```
 
-> This is the preferred repo-local layout when `.squad/config.json` sets `workTreesFolder: ".worktrees"`.
-> If `workTreesFolder` is absent, fall back to the legacy sibling path:
-> `git worktree add ../{repo-name}-{issue-number} -b squad/{issue-number}-{slug}`
+> **Note:** Worktree support is in progress (#525). Current implementation uses standard checkout.
 
 ### 3. Implementation & Commit
 
@@ -268,7 +266,7 @@ az repos pr update --id {pr-id} --status completed --delete-source-branch true
 1. Issue automatically closes (if "Closes #{number}" is in PR description)
 2. Feature branch is deleted
 3. Squad board state transitions to `done`
-4. Worktree cleanup (if worktree was used)
+4. Worktree cleanup (if worktree was used — #525)
 
 ### 7. Cleanup
 
@@ -279,13 +277,11 @@ git pull
 git branch -d squad/{issue-number}-{slug}
 ```
 
-**Worktree cleanup:**
+**Worktree cleanup (future, #525):**
 ```bash
-cd {team-root}
-git worktree remove {resolved-worktree-path}
+cd {original-cwd}
+git worktree remove ../worktrees/{issue-number}
 ```
-
-> With `workTreesFolder: ".worktrees"`, the resolved path is `.worktrees/{issue-number}`. Without it, fall back to `../{repo-name}-{issue-number}`.
 
 ## Spawn Prompt Additions for Issue Work
 
@@ -388,10 +384,10 @@ Research documented → Research PR merged → Implementation issue created →
 Implementation agent spawned → Feature built → PR merged
 ```
 
-### Pattern 4: Parallel Multi-Agent
+### Pattern 4: Parallel Multi-Agent (Future, #525)
 ```
 Epic issue created → Decomposed into sub-issues → Each sub-issue assigned → 
-Multiple agents work in parallel configured worktrees → PRs opened concurrently → 
+Multiple agents work in parallel worktrees → PRs opened concurrently → 
 All PRs reviewed → All PRs merged → Epic closed
 ```
 
@@ -413,4 +409,4 @@ All PRs reviewed → All PRs merged → Epic closed
 - Worktree cleanup added to post-merge flow
 - `TEAM_ROOT` passing to agents to support worktree-aware state resolution
 
-Use `.squad/config.json` to set `workTreesFolder` when you want repo-local worktrees such as `.worktrees/`; otherwise Squad falls back to the legacy sibling-path layout.
+This template will be updated as worktree lifecycle support lands in #525.

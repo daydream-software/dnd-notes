@@ -323,19 +323,14 @@ prompt: |
   **Requested by:** {current user name}
   
   {% if WORKTREE_MODE %}
-  **WORKTREE:** Working in `{WORKTREE_PATH}`.
-  - Resolve code and app files from `{WORKTREE_PATH}`.
-  - Resolve `.squad/` state from `{team_root}`.
-  - Runtime workaround: if a shell or task starts in the repo root, run commands as `cd "{WORKTREE_PATH}" && ...` instead of relying on the starting cwd.
-  - When a tool accepts explicit paths, prefer paths under `{WORKTREE_PATH}` over cwd-relative paths.
-  - Do NOT switch branches.
+  **WORKTREE:** Working in `{WORKTREE_PATH}`. All operations relative to this path. Do NOT switch branches.
   {% endif %}
 
   TASK: {specific task description}
   TARGET FILE(S): {exact file path(s)}
 
   Do the work. Keep it focused.
-  If you made a meaningful decision, write to {team_root}/.squad/decisions/inbox/{name}-{brief-slug}.md
+  If you made a meaningful decision, write to .squad/decisions/inbox/{name}-{brief-slug}.md
 
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a plain text summary as FINAL output.
@@ -646,19 +641,15 @@ Squad and all spawned agents may be running inside a **git worktree** rather tha
 When worktree mode is enabled, the coordinator creates dedicated worktrees for issue-based work. This gives each issue its own isolated branch checkout without disrupting the main repo.
 
 **Worktree mode activation:**
-- Explicit: `worktrees: true` in project config. `.squad/config.json` is the preferred repo-local source of truth; `squad.config.ts` or the `squad` section in `package.json` remain valid equivalents.
+- Explicit: `worktrees: true` in project config (squad.config.ts or package.json `squad` section)
 - Environment: `SQUAD_WORKTREES=1` set in environment variables
 - Default: `false` (backward compatibility — agents work in the main repo)
 
 **Creating worktrees:**
 - One worktree per issue number
 - Multiple agents on the same issue share a worktree
-- Path resolution:
-  1. If project config sets `workTreesFolder`, resolve the worktree under that folder.
-     - Relative values are resolved from the main repo root / team root.
-     - Example: Repo `/workspace/dnd-notes` + `workTreesFolder: ".worktrees"` + issue `42` → `/workspace/dnd-notes/.worktrees/42`
-  2. If `workTreesFolder` is absent, fall back to the legacy sibling path `{repo-parent}/{repo-name}-{issue-number}`.
-     - Example: Working on issue #42 in `C:\src\squad` with no configured folder → `C:\src\squad-42`
+- Path convention: `{repo-parent}/{repo-name}-{issue-number}`
+  - Example: Working on issue #42 in `C:\src\squad` → worktree at `C:\src\squad-42`
 - Branch: `squad/{issue-number}-{kebab-case-slug}` (created from base branch, typically `main`)
 
 **Dependency management:**
@@ -674,8 +665,8 @@ When worktree mode is enabled, the coordinator creates dedicated worktrees for i
 - Multiple agents can work in the same worktree concurrently if they modify different files
 
 **Cleanup:**
-- After a PR is merged, remove the worktree from its resolved path
-- `git worktree remove {resolved-path}` + `git branch -d {branch}`
+- After a PR is merged, the worktree should be removed
+- `git worktree remove {path}` + `git branch -d {branch}`
 - Ralph heartbeat can trigger cleanup checks for merged branches
 
 ### Orchestration Logging
@@ -692,25 +683,19 @@ When spawning an agent for issue-based work (user request references an issue nu
 
 **1. Check worktree mode:**
 - Is `SQUAD_WORKTREES=1` set in the environment?
-- Or does project config enable `worktrees: true`? Prefer `.squad/config.json`; `squad.config.ts` and the `squad` section in `package.json` remain valid equivalents.
+- Or does the project config have `worktrees: true`?
 - If neither: skip worktree setup → agent works in the main repo (existing behavior)
 
 **2. If worktrees enabled:**
 
 a. **Determine the worktree path:**
    - Parse issue number from context (e.g., `#42`, `issue 42`, GitHub issue assignment)
-   - Load project config and read `workTreesFolder` when present
-   - If `workTreesFolder` is set:
-     - Resolve relative values from the main repo root / team root
-     - Calculate path: `{team-root}/{workTreesFolder}/{issue-number}`
-     - Example: Repo `/workspace/dnd-notes` + `workTreesFolder: ".worktrees"` + issue `42` → `/workspace/dnd-notes/.worktrees/42`
-   - If `workTreesFolder` is absent:
-     - Fall back to legacy sibling path `{repo-parent}/{repo-name}-{issue-number}`
-     - Example: Main repo at `C:\src\squad`, issue #42 → `C:\src\squad-42`
+   - Calculate path: `{repo-parent}/{repo-name}-{issue-number}`
+   - Example: Main repo at `C:\src\squad`, issue #42 → `C:\src\squad-42`
 
 b. **Check if worktree already exists:**
    - Run `git worktree list` to see all active worktrees
-   - If the resolved worktree path already exists → **reuse it**:
+   - If the worktree path already exists → **reuse it**:
      - Verify the branch is correct (should be `squad/{issue-number}-*`)
      - `cd` to the worktree path
      - `git pull` to sync latest changes
@@ -719,10 +704,8 @@ b. **Check if worktree already exists:**
 c. **Create the worktree:**
    - Determine branch name: `squad/{issue-number}-{kebab-case-slug}` (derive slug from issue title if available)
    - Determine base branch (typically `main`, check default branch if needed)
-   - Ensure the parent directory exists when `workTreesFolder` points inside a dedicated folder such as `.worktrees/`
    - Run: `git worktree add {path} -b {branch} {baseBranch}`
-   - Example (project-local folder): `git worktree add /workspace/dnd-notes/.worktrees/42 -b squad/42-fix-login main`
-   - Example (fallback sibling path): `git worktree add C:\src\squad-42 -b squad/42-fix-login main`
+   - Example: `git worktree add C:\src\squad-42 -b squad/42-fix-login main`
 
 d. **Set up dependencies:**
    - Link `node_modules` from main repo to avoid reinstalling:
@@ -791,20 +774,17 @@ prompt: |
   
   {% if WORKTREE_MODE %}
   **WORKTREE:** You are working in a dedicated worktree at `{WORKTREE_PATH}`.
-  - Resolve code and app files from `{WORKTREE_PATH}`
-  - Resolve `.squad/` state from `{team_root}`
-  - Runtime workaround: if a shell or task starts in the repo root, run commands as `cd "{WORKTREE_PATH}" && ...`
-  - When a tool accepts explicit paths, prefer paths under `{WORKTREE_PATH}` over cwd-relative paths
+  - All file operations should be relative to this path
   - Do NOT switch branches — the worktree IS your branch (`{branch_name}`)
   - Build and test in the worktree, not the main repo
   - Commit and push from the worktree
   {% endif %}
   
-  Read {team_root}/.squad/agents/{name}/history.md (your project knowledge).
-  Read {team_root}/.squad/decisions.md (team decisions to respect).
-  If {team_root}/.squad/identity/wisdom.md exists, read it before starting work.
-  If {team_root}/.squad/identity/now.md exists, read it at spawn time.
-  If {team_root}/.squad/skills/ has relevant SKILL.md files, read them before working.
+  Read .squad/agents/{name}/history.md (your project knowledge).
+  Read .squad/decisions.md (team decisions to respect).
+  If .squad/identity/wisdom.md exists, read it before starting work.
+  If .squad/identity/now.md exists, read it at spawn time.
+  If .squad/skills/ has relevant SKILL.md files, read them before working.
   
   {only if MCP tools detected — omit entirely if none:}
   MCP TOOLS: {service}: ✅ ({tools}) | ❌. Fall back to CLI when unavailable.
@@ -821,12 +801,12 @@ prompt: |
   ⚠️ OUTPUT: Report outcomes in human terms. Never expose tool internals or SQL.
   
   AFTER work:
-  1. APPEND to {team_root}/.squad/agents/{name}/history.md under "## Learnings":
+  1. APPEND to .squad/agents/{name}/history.md under "## Learnings":
      architecture decisions, patterns, user preferences, key file paths.
   2. If you made a team-relevant decision, write to:
-     {team_root}/.squad/decisions/inbox/{name}-{brief-slug}.md
+     .squad/decisions/inbox/{name}-{brief-slug}.md
   3. SKILL EXTRACTION: If you found a reusable pattern, write/update
-     {team_root}/.squad/skills/{skill-name}/SKILL.md (read {team_root}/.squad/templates/skill.md for format).
+     .squad/skills/{skill-name}/SKILL.md (read templates/skill.md for format).
   
   ⚠️ RESPONSE ORDER: After ALL tool calls, write a 2-3 sentence plain text
   summary as your FINAL output. No tool calls after this summary.
