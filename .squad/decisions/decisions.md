@@ -439,6 +439,21 @@ PR #37 is the `@copilot` revision of Issue #28 tag facets after Chunk rejected t
 
 Older decisions have been moved to `.squad/decisions/archive/` for historical reference.
 
+---
+
+### 2026-04-14: Future repo-specific docs/preview/release workflows are in scope
+
+**By:** FFMikha (via Copilot)
+**Date:** 2026-04-14
+
+## Decision
+
+`dnd-notes` may eventually add docs, preview, and release workflows, but they must be built for this repo's actual branch strategy, build/test commands, deploy targets, and SHA-pinning policy. Do not restore the stock Squad CLI release/docs/preview templates as-is.
+
+## Why
+
+The user is interested in those lanes long-term, but the upgrade-added versions target the Squad CLI product repo rather than this app repo. Their assumptions around `preview` / `insider` branches, `CHANGELOG.md`, root `test/*.test.js`, and a dedicated docs site make them misleading noise until they are rewritten for `dnd-notes`.
+
 
 ---
 
@@ -619,3 +634,214 @@ Current `excerpt()` function in `App.tsx:331` uses `markdownToPlainText()` from 
 6. **Week 5:** Phase 2 complete (best case)
 
 ---
+
+---
+
+### 2026-04-14: Squad upgrade workflow syncs must be audited for repo fit and SHA pinning
+
+**By:** Brand (Platform Dev)
+
+## Context
+
+Running `squad upgrade` in this repo reintroduced floating-tag GitHub Actions refs in existing squad workflows and also dropped in several new active workflows aimed at Squad CLI release/docs branches (`dev`, `preview`, `insider`, root `test/*.test.js`, `docs/`, `CHANGELOG.md`). Those additions do not match this app repo's structure or release flow.
+
+## Decision
+
+1. Treat `.squad/templates/workflows/` as the source of truth for synced squad workflows.
+2. After every `squad upgrade`, audit active `.github/workflows/` for:
+   - commit-SHA pinning on every `uses:` reference
+   - repo fit (branches, directories, commands, and release assumptions)
+3. Keep only the workflow set that fits this repo today:
+   - `sync-squad-labels.yml`
+   - `squad-triage.yml`
+   - `squad-heartbeat.yml`
+   - `squad-issue-assign.yml`
+   - `squad-label-enforce.yml`
+   - `web-test.yml`
+4. Remove upgrade-added active workflows when they clearly target a different project shape instead of pinning them and carrying dead automation.
+
+## Rationale
+
+- Pinning alone is not enough if the workflow itself assumes the wrong repo topology.
+- Using the mirrored template as the sync source avoids one-off drift in the squad-managed files we do keep.
+- Pruning clearly wrong release/docs workflows keeps the repo moving without silently adopting brittle automation.
+
+## Files
+
+- `.github/workflows/`
+- `.squad/templates/workflows/`
+- `.squad/agents/brand/history.md`
+
+
+### 2026-04-14: Web test infrastructure should route through root workspace scripts and focused smoke CI
+
+**By:** Brand (Platform Dev)
+
+## Context
+
+The existing `.github/workflows/web-test.yml` was not giving real coverage because it called `npm run ... --workspace web`, but this repo defines workspaces by path (`apps/web`, `apps/api`). The workflow therefore failed before lint, test, or build work even started.
+
+At the same time, the practical blocker for Issue #24 follow-up work was not "no way to run any web tests" anymore — focused Vitest runs like `CampaignSearch.test.tsx` execute cleanly when invoked correctly. What was missing was a stable, discoverable entrypoint for that focused slice and a CI lane that exercised it.
+
+## Decision
+
+1. Add root-level web entrypoint scripts in `package.json`:
+   - `lint:web`
+   - `build:web`
+   - `test:web`
+   - `test:web:focused`
+2. Keep the full web suite available via `npm run test:web`.
+3. Point `.github/workflows/web-test.yml` at the new root scripts and keep the CI lane intentionally focused on the fast smoke slice (`note-formatting`, `NoteBodyEditor`, `CampaignSearch`) instead of the long all-in-one `App.test.tsx` suite.
+
+## Rationale
+
+- Root scripts remove guesswork and avoid repeating brittle workspace selectors across workflow files.
+- Using `apps/web` matches the actual npm workspace layout and fixes the current CI no-op/failure mode.
+- A focused smoke lane is the thinnest useful CI slice for this batch: it proves lint/build/test plumbing end-to-end and gives immediate regression coverage for the active web search work without pretending the full integration suite is fast enough for every PR gate.
+
+## Files
+
+- `package.json`
+- `.github/workflows/web-test.yml`
+
+
+# Chunk — Web regression test decision
+
+## Decision
+Keep apps/web/src/App.test.tsx as a narrow smoke suite and move deeper behavior coverage into focused feature files.
+
+## Why
+The old monolithic App integration file was the flaky surface: it blocked the suite while smaller App mounts and focused campaign-search tests ran cleanly. A tiny smoke path still proves the app can render, authenticate, and reopen a saved workspace, while dedicated files like apps/web/src/CampaignSearch.test.tsx cover search behavior without reintroducing that instability.
+
+## Impact
+- apps/web/src/App.test.tsx should protect only the minimal app-boot smoke path.
+- New frontend regressions should prefer dedicated test files with endpoint-scoped fetch mocks.
+- Search coverage now explicitly includes session-name and collaborator-name matching alongside title/body/tag behavior.
+
+
+### 2026-04-14T15:13:34Z: User directive
+**By:** FFMikha (via Copilot)
+**What:** Never skip signing; rewrite unsigned local commits into a signed commit before continuing.
+**Why:** User request — captured for team memory
+
+
+# Web Test Infrastructure P1 — Scope & Reviewer Gate
+
+**Date:** 2026-04-14  
+**Owner:** Mikey (Lead)  
+**Status:** ACTIVE — Work assigned to Brand & Chunk
+
+## Problem Statement
+
+- **vitest 4.1.4 hangs indefinitely** when running tests that render the App component
+- **No CI workflow** exists to catch web test failures
+- **Regression coverage blocked** for all feature work touching UI
+- **Impact:** Issue #24 merged without test validation; future features at risk
+
+## Thinnest Slice for Success (This Pass)
+
+This pass focuses on **restoring test infrastructure**, not rewriting the entire test stack.
+
+### 1. **Root Cause Investigation** (Brand — Tester)
+**Goal:** Determine if vitest 4.1.4 is genuinely incompatible, or if there's a fixable configuration issue.
+
+**Definition of Done:**
+- [ ] Isolate the hang: Create minimal reproduction (e.g., simple React component + vitest)
+- [ ] Test matrix: Confirm whether simple components test fine, only App.tsx hangs
+- [ ] Configuration audit: Check `vite.config.ts` for pool/timeout/environment issues
+- [ ] Upstream research: Check vitest 4.1.4 + React 19 + MUI 9 known issues
+- [ ] Decision: **Either (a) fixable config tweak, (b) downgrade to vitest 3.x, or (c) switch test runner**
+
+**Risk boundary:** Investigation must complete in 2–4 hours. If root cause unclear, recommend fallback (see below).
+
+---
+
+### 2. **Fallback Test Runner Path** (Chunk — QA)
+**Trigger:** If vitest 4.1.4 cannot be fixed in investigation.
+
+**Option A: Downgrade to vitest 3.x**
+- Safest path if vitest 4.x is a genuine regression
+- Tests for smaller components (CampaignSearch, NoteBodyEditor) already pass in current vitest
+- Downgrade + re-run all tests to confirm coverage
+- **Time estimate:** 1–2 hours
+
+**Option B: Stay with vitest 4.1.4 but skip App.test.tsx**
+- Move App component full-integration tests to Playwright (out of scope for this pass)
+- Run unit/component tests (CampaignSearch, NoteBodyEditor, note-formatting) in CI
+- Document that full-stack App tests require E2E framework
+- **Time estimate:** 1–2 hours
+
+**Definition of Done (for chosen option):**
+- [ ] New test configuration validated locally (all working tests pass)
+- [ ] CI workflow created: `web-test.yml` runs `npm run test` in `apps/web/`
+- [ ] Workflow succeeds on main
+- [ ] README updated with test expectations (which tests run in CI, which are E2E-only)
+
+---
+
+### 3. **CI Workflow** (Brand — Tester)
+**Parallel to investigation; can start immediately.**
+
+**Goal:** Create `web-test.yml` that runs web tests on PR/merge.
+
+**Definition of Done:**
+- [ ] Workflow file: `.github/workflows/web-test.yml`
+- [ ] Trigger: On PR `opened`, `synchronize`, and on `push` to `main`
+- [ ] Job: `npm run lint --workspace web` + `npm run test --workspace web` (with 30–45s timeout per test)
+- [ ] Artifact: Publish test results (or fail loudly if tests timeout)
+- [ ] Tested: Merge a dummy commit to trigger workflow; verify it passes
+- [ ] **No action pinning required yet** — use major version refs for this pass (Brand will handle pinning separately per existing decision)
+
+---
+
+## Reviewer Gate & Handoff
+
+### For Brand (Tester)
+**Before merge to main:**
+1. Investigation complete: vitest 4.1.4 root cause identified OR fallback option chosen
+2. CI workflow passes: `web-test.yml` runs successfully on main
+3. Test suite stable: No timeouts, all expected tests passing
+4. **Approval from:** Chunk (QA)
+
+### For Chunk (QA)  
+**Before merge to main:**
+1. Validate fallback path if taken: Downgrade or skip App.test.tsx works as documented
+2. Run full `npm run test && npm run lint && npm run build` locally; all pass
+3. Review test expectations against implementation reality
+4. **Approval from:** Mikey (Lead)
+
+### Mikey (Lead) Gate
+- [ ] Problem is solved (tests either fixed or moved to E2E)
+- [ ] CI is wired and reporting correctly
+- [ ] Scope stayed thin (no sweeping refactor)
+- [ ] README updated for team clarity
+- [ ] **APPROVE for merge only if all above completed**
+
+---
+
+## Non-Goals (Explicitly Out of Scope)
+
+- Full App.test.tsx rewrite (defer to Playwright E2E suite post-Phase 2)
+- Upgrading vitest beyond investigating 4.1.4 compatibility
+- Adding new test coverage (focus on restoring existing tests)
+- Refactoring mock setup patterns (document in README if needed)
+
+---
+
+## Success Metrics
+
+At end of this pass:
+1. ✅ Web tests run without hanging (or hang is documented as E2E-only)
+2. ✅ CI catches web test failures
+3. ✅ All simple component tests (CampaignSearch, NoteBodyEditor) run in CI
+4. ✅ Team knows what to expect from web test coverage going forward
+
+---
+
+## Decision Log
+
+- **Decided:** 2026-04-14 by Mikey
+- **Routing:** Brand (investigation + CI) + Chunk (validation + fallback)
+- **Timeline:** 1 pass (est. 4–6 hours for investigation + CI + validation)
+- **Approval path:** Brand → Chunk → Mikey
+
