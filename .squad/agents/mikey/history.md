@@ -188,3 +188,135 @@ Lead-level review is **APPROVE**, with two remaining merge conditions: Chunk sho
 - **Product:** Phase 2 timeline approved; scope flexible post-2b for user testing
 
 **Phase 2 is green-lit. Immediate actions: Stef begins Phase 2a; Data designs schema.**
+
+## 2026-04-14: Web Test Infrastructure P1 — Scope Definition & CI Workflow
+
+📌 **Status:** P1 blocker diagnosed and scoped; CI workflow created; work assigned to Brand & Chunk.
+
+**Problem:** vitest 4.1.4 hangs when running App.test.tsx (full integration test). No CI coverage for web tests. Issue #24 (search) merged without test validation.
+
+**Thinnest Slice Decision:**
+1. **Brand (Tester):** Root cause investigation (vitest 4.1.4 + React 19 + MUI 9 compatibility)
+2. **Chunk (QA):** Fallback path validation (either downgrade to 3.x OR skip App.test.tsx, move to Playwright E2E)
+3. **Mikey:** Created reviewer gate with clear approval conditions
+
+**Scope Boundaries:**
+- ✅ Fix or isolate test infrastructure
+- ✅ Create CI workflow for web tests
+- ✅ Update README with test expectations
+- ❌ Full App.test.tsx rewrite (defer to E2E)
+- ❌ Sweeping test stack migration (boring/incremental preference)
+
+**Deliverables:**
+- ✅ `.squad/decisions/inbox/mikey-web-test-scope.md` — full scope doc with reviewer gate
+- ✅ `.github/workflows/web-test.yml` — boring CI workflow (runs existing tests, no new test writing)
+
+**Reviewer Gate:** Brand → Chunk → Mikey. No merge without all conditions met.
+
+**Key principle:** Restore working test coverage incrementally. Don't block other work. E2E testing (Playwright) for App component is a Phase 2 follow-up.
+
+**Files modified:**
+- Created: `.squad/decisions/inbox/mikey-web-test-scope.md`
+- Created: `.github/workflows/web-test.yml`
+
+## 2026-04-14: HANDOFF TO BRAND & CHUNK — DETAILED WORK PLAN
+
+**Status:** Scope locked, CI skeleton ready, work ready to start.
+
+### For Brand (Platform Dev)
+
+**Your task:** Root cause investigation (2–4 hours)
+
+**What's the problem?**
+vitest 4.1.4 hangs indefinitely when tests render App.test.tsx. Simple components (CampaignSearch, NoteBodyEditor) test fine. The hang happens in the test worker pool, not in the app logic.
+
+**Your checklist:**
+1. Create minimal vitest repro: simple React 19 component + vitest + jsdom
+2. Test matrix: Does vitest 4.1.4 work for small components? Only App.tsx hangs?
+3. Audit vite.config.ts: Check pool setting, timeout, environment config
+4. Upstream research: Known issues with vitest 4.1.4 + React 19 + MUI 9?
+5. **Decide:** Either (a) config fix, (b) downgrade to vitest 3.x, or (c) skip App.test.tsx to Playwright
+
+**What not to do:**
+- Don't rewrite App.test.tsx (that's a Playwright E2E task in Phase 2)
+- Don't try every vitest version (focus on 3.x as fallback only)
+- Don't add new test coverage (restore existing first)
+
+**When you're done:**
+- Tell Chunk which path to take (a/b/c above)
+- Update CI workflow if config changes are needed
+- No approval needed; Chunk waits for your decision
+
+### For Chunk (Tester)
+
+**Your task:** Validation + fallback (1–2 hours, after Brand decides)
+
+**What's your job?**
+Brand will give you a decision (fix, downgrade, or skip to E2E). You validate it works, then sign off.
+
+**Your checklist (after Brand's decision):**
+1. Apply the chosen fix: update vite.config.ts OR downgrade package.json OR mark App.test.tsx as E2E-only
+2. Run locally: `npm run lint && npm run test && npm run build`
+3. Verify: All expected tests pass (no timeouts, no hangs)
+4. Update README: Document which tests run in CI vs E2E
+5. Sign off: "All tests pass, fallback stable"
+
+**The fallback paths:**
+- **Option A (downgrade to 3.x):** Remove ^4.1.4, install latest 3.x, re-run all tests, confirm no hangs
+- **Option B (skip App.test.tsx):** Document that App full-integration tests move to Playwright E2E, keep unit tests in CI
+- **Option C (config fix):** Apply Brand's fix to vite.config.ts, re-run all tests
+
+**When you're done:**
+- Tell Mikey: "Tests pass, ready to review"
+- No action on CI workflow (Brand owns that)
+
+### For Mikey (Lead)
+
+**Your role:** Reviewer gate (final sign-off)
+
+**Approval conditions:**
+- ✅ Brand identified root cause (fix OR fallback)
+- ✅ Chunk validated chosen path (local tests pass)
+- ✅ CI workflow runs successfully on the branch
+- ✅ README updated with test expectations
+- ✅ Scope stayed thin (no test rewrites, no surprises)
+- ✅ Chunk + Brand both signed off
+
+**When you approve:**
+- Review the actual changes (vite config OR package downgrade OR README notes)
+- Verify CI workflow passes
+- Merge to main
+- Unblock Phase 2 work (Stef can now rely on passing tests)
+
+### Timeline
+
+- **T+0:** Brand starts investigation
+- **T+2-4h:** Brand decides path
+- **T+2-6h:** Chunk validates (parallel or sequential based on Brand's decision)
+- **T+4-8h:** Mikey reviews + approves
+- **T+8h:** Merge, unblock main lane
+
+**Target:** Complete by end of next session (4–6 hours total)
+
+### Key Principle
+
+**Restore working test coverage incrementally.** Don't block other work. Don't oversimplify. E2E testing (Playwright) for App component is a Phase 2 follow-up, not this pass.
+
+---
+
+## Architecture Notes (For Future Reference)
+
+**Test stack current state:**
+- vitest 4.1.4: Hangs on App.test.tsx (full integration test)
+- Simple component tests: Pass fine (CampaignSearch, NoteBodyEditor, note-formatting)
+- Hang symptom: Tests stuck in `[queued]` state, never execute
+- Root: Likely worker pool deadlock or jsdom environment conflict with React 19 + MUI 9
+
+**What works:**
+- API tests: All 26 tests in apps/api pass
+- Lint + build: All pass
+- Individual component tests: Pass within 1–7 seconds
+
+**CI coverage before this pass:** None (no web test workflow)
+
+**Decision:** Boring incremental fix (downgrade or isolate) rather than test framework rewrite.

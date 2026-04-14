@@ -2452,3 +2452,15 @@ Recommend Lexical for the editor layer, wrapped in MUI chrome, with markdown imp
 
 ---
 
+### 2026-04-14: Never skip commit signing
+**By:** FFMikha (via Copilot)
+
+**What:**
+- Signed commits are required for this repo.
+- Agents must never bypass signing with `--no-gpg-sign`.
+- When signing needs an interactive passphrase, the correct workflow is to stage the work and hand the user the exact `git commit -S ...` command before treating the commit as complete.
+
+**Why:**
+Background agent work created unsigned local commits even though signing is required. The team needs an explicit, durable rule that preserves signing and keeps the user in the loop when interactive signing is needed.
+
+---
