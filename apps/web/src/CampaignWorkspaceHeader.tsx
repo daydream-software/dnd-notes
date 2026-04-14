@@ -42,6 +42,7 @@ interface CampaignWorkspaceHeaderProps {
   actions: readonly WorkspaceHeaderAction[]
   surfaceRadius: string
   compactDesktop?: boolean
+  stickyDesktop?: boolean
 }
 
 export default function CampaignWorkspaceHeader({
@@ -54,6 +55,7 @@ export default function CampaignWorkspaceHeader({
   actions,
   surfaceRadius,
   compactDesktop = false,
+  stickyDesktop = true,
 }: CampaignWorkspaceHeaderProps) {
   const theme = useTheme()
   const useNarrowFloatingHeader = useMediaQuery(theme.breakpoints.down('md'))
@@ -114,7 +116,7 @@ export default function CampaignWorkspaceHeader({
   return (
     <Card
       sx={{
-        position: 'sticky',
+        position: stickyDesktop ? 'sticky' : { xs: 'sticky', lg: 'static' },
         top: { xs: 8, md: 12 },
         zIndex: 2,
         alignSelf: { xs: 'center', lg: 'flex-end' },
