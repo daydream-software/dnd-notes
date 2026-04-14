@@ -359,6 +359,11 @@ Team consensus on phased product roadmap addresses user requests from FFMikha (I
 **Why:**
 Aligns team around sustainable feature velocity. Search and mobile UX unlock immediate user value and foundation for more complex features. Membership consolidation and collaborator navigation cleanup strengthen core data models and UX flows. Graph-style tags become powerful visualization and relationship exploration once users can efficiently search and filter content.
 
+### 2026-04-14T17:06:37Z: User directive
+**By:** FFMikha (via Copilot)
+**What:** Splitting the shared-link experience into a separate page was a mistake. Shared links should display the same workspace surface as the main app, conditioned only by the logged-in user state and the shared link access level.
+**Why:** User request — captured for team memory
+
 **Status:** ACTIVE — shapes all near-term feature prioritization and scope
 
 **Files affected:**

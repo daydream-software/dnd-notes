@@ -132,6 +132,7 @@ Key patterns:
 - Backlinks section at line 3720+ is clean, shows both directions (outgoing + incoming)
 - Reference nodes below editor use clickable cards (low-friction navigation)
 - No existing tests for excerpt sanitization; regression coverage needed for Phase 2
+- In `apps/web/src/App.tsx`, keep the sticky campaign header in its own desktop flex wrapper so logo alignment changes do not pull the campaign context out of the top-right position; let the wrapper stack naturally on mobile.
 
 ### Key Decisions for Phase 2
 
@@ -187,3 +188,19 @@ Phase 2 additions should test:
 - No API contract changes Phase 2 (references stay in body until Phase 3 structured extraction)
 
 **Phase 2a ready to start immediately.** Stef or Copilot can begin mode toggle implementation (1–2 days).
+
+📌 Team update (2026-04-14T16:17:28Z): Authenticated workspace header alignment shipped in `apps/web/src/App.tsx`; desktop now keeps the logo left and campaign header right, while mobile stacks the shell header more cleanly without changing the authenticated workspace structure — implemented by Stef
+
+- Authenticated workspace header layout in `apps/web/src/App.tsx` should keep brand and campaign context as separate responsive groups: horizontal split on desktop, clean vertical stack on smaller screens.
+- In `apps/web/src/App.tsx`, preserve real sticky behavior by keeping the authenticated campaign card outside the short shell-header row; desktop can still align logo left and campaign context right with a separate wrapper.
+- In `apps/web/src/App.tsx`, keep the standalone D&D Notes brand pill desktop-only so the owner workspace mobile header reads as one straight sticky surface while desktop retains the split logo/card composition.
+- In `apps/web/src/App.tsx`, extend the owner workspace compact selector-plus-icon sticky header through `md` so phones and narrow desktop panes share the same short header mode before the full desktop header returns.
+- Shared campaign route polish in `apps/web/src/SharedCampaignRoute.tsx` should keep the mobile hero compact and let action controls stack before quick-capture content can force horizontal overflow.
+- In `apps/web/src/SharedCampaignRoute.tsx`, mobile shared headers can swap the tall action panel for a compact inline action block below `md` to cut hero height without affecting desktop layout.
+- When owner and shared routes reuse the same workspace surface, keep every flex pane shell on `minWidth: 0` and avoid intrinsic editor widths so narrow-screen editor mode cannot push the page wider than the viewport.
+
+📌 Team update (2026-04-14T17:15:07Z): Shared-link users now render through the same workspace shell structure as the main app; access/login state controls viewer/editor gating, guest versus linked-collaborator bootstrap, and owner-only controls inside the unified surface — implemented by Stef
+
+📌 Team update (2026-04-14T17:28:20Z): Shared campaign note rows in `apps/web/src/SharedCampaignRoute.tsx` now match the owner workspace compact note-row layout, replacing the older large-card treatment with the same title/excerpt/session-left plus status/updated-right structure — implemented by Stef
+
+📌 Team update (2026-04-14T17:42:26Z): Shared owner/editor mode no longer overflows horizontally on narrow screens after constraining the common workspace pane shells and editor width behavior across the shared and authenticated workspace surfaces — implemented by Stef

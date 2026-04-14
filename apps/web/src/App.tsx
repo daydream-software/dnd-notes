@@ -2,13 +2,11 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import AddCircleOutlineRoundedIcon from '@mui/icons-material/AddCircleOutlineRounded'
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
-import ClearRoundedIcon from '@mui/icons-material/ClearRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import EventRoundedIcon from '@mui/icons-material/EventRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import PlaylistAddCheckCircleRoundedIcon from '@mui/icons-material/PlaylistAddCheckCircleRounded'
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
-import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
 import {
@@ -21,11 +19,8 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
-  Collapse,
   Container,
   FormControlLabel,
-  IconButton,
-  InputAdornment,
   List,
   ListItemButton,
   ListItemText,
@@ -38,12 +33,15 @@ import {
 import { useTheme } from '@mui/material/styles'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  claimSharedMembership,
   consolidateCampaignMemberships,
   createCampaign,
   createCampaignShareLink,
   createNote,
-  fetchCampaignShareLinks,
+  createSharedNote,
   deleteNote,
+  deleteSharedNote,
+  fetchCampaignShareLinks,
   fetchCampaignMemberships,
   fetchCampaigns,
   fetchNoteActivity,
@@ -52,6 +50,10 @@ import {
   fetchOwnerSession,
   fetchSessionNotes,
   fetchSessions,
+  fetchSharedNotes,
+  fetchSharedOverview,
+  fetchSharedSession,
+  joinSharedCampaign,
   loginOwner,
   logoutOwner,
   revealCampaignShareLink,
@@ -59,6 +61,7 @@ import {
   revokeCampaignShareLink,
   updateCampaign,
   updateNote,
+  updateSharedNote,
 } from './api'
 import {
   blankCampaignTemplateId,
@@ -70,8 +73,11 @@ import {
   noteStarterTemplates,
   type StarterNoteSeed,
 } from './templates'
+import CampaignWorkspaceHeader from './CampaignWorkspaceHeader'
 import { markdownToPlainText } from './note-excerpts'
 import NoteBodyEditor from './NoteBodyEditor'
+import NotesBrowsePane from './NotesBrowsePane'
+import { NoteBodyPreview } from './note-formatting'
 import type {
   ActivityCollaborator,
   CampaignInput,
@@ -80,6 +86,7 @@ import type {
   CampaignShareLink,
   CampaignShareLinkInput,
   CampaignSummary,
+  GuestJoinInput,
   Note,
   NoteActivityEntry,
   NoteInput,
@@ -90,7 +97,7 @@ import type {
   ShareAccessLevel,
 } from './types'
 import { noteStatuses } from './types'
-import SharedCampaignRoute from './SharedCampaignRoute'
+import WorkspacePane from './WorkspacePane'
 
 interface NoteDraft {
   title: string
@@ -148,7 +155,10 @@ type NarrowWorkspacePanel = 'browse' | 'editor'
 
 const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
+const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
 const recentActivityLimit = 20
+const defaultNotesPaneDescription =
+  'The note workflow now runs inside the selected campaign.'
 
 function getShareTokenFromPath(pathname: string) {
   const match = pathname.match(/^\/share\/([^/]+)\/?$/)
@@ -397,6 +407,87 @@ function createTagFacets(notes: Note[]): TagFacet[] {
     )
 }
 
+function createSessionSummariesFromNotes(notes: readonly Note[]): SessionSummary[] {
+  const sessionMap = new Map<string, SessionSummary>()
+
+  for (const note of notes) {
+    const sessionName = note.sessionName?.trim()
+    if (!sessionName) {
+      continue
+    }
+
+    const existingSummary = sessionMap.get(sessionName)
+    if (!existingSummary) {
+      sessionMap.set(sessionName, {
+        sessionName,
+        noteCount: 1,
+        latestActivity: note.updatedAt,
+      })
+      continue
+    }
+
+    sessionMap.set(sessionName, {
+      sessionName,
+      noteCount: existingSummary.noteCount + 1,
+      latestActivity:
+        existingSummary.latestActivity > note.updatedAt
+          ? existingSummary.latestActivity
+          : note.updatedAt,
+    })
+  }
+
+  return sortSessionSummaries([...sessionMap.values()])
+}
+
+function toSharedActivityEntry(note: Note): NoteActivityEntry {
+  return {
+    ...note,
+    action:
+      note.lastEditedBy !== null && note.updatedAt !== note.createdAt ? 'edited' : 'created',
+  }
+}
+
+function getActivityAttribution(entry: NoteActivityEntry) {
+  return entry.action === 'created'
+    ? (entry.createdBy ?? entry.lastEditedBy)
+    : (entry.lastEditedBy ?? entry.createdBy)
+}
+
+function createActivityCollaboratorsFromEntries(
+  entries: readonly NoteActivityEntry[],
+): ActivityCollaborator[] {
+  const collaboratorMap = new Map<string, ActivityCollaborator>()
+
+  for (const entry of entries) {
+    const attribution = getActivityAttribution(entry)
+    if (!attribution) {
+      continue
+    }
+
+    const existingCollaborator = collaboratorMap.get(attribution.membershipId)
+    if (!existingCollaborator) {
+      collaboratorMap.set(attribution.membershipId, {
+        membershipId: attribution.membershipId,
+        displayName: attribution.displayName,
+        role: attribution.role,
+        noteCount: 1,
+      })
+      continue
+    }
+
+    collaboratorMap.set(attribution.membershipId, {
+      ...existingCollaborator,
+      noteCount: existingCollaborator.noteCount + 1,
+    })
+  }
+
+  return [...collaboratorMap.values()].sort((leftCollaborator, rightCollaborator) =>
+    rightCollaborator.noteCount !== leftCollaborator.noteCount
+      ? rightCollaborator.noteCount - leftCollaborator.noteCount
+      : leftCollaborator.displayName.localeCompare(rightCollaborator.displayName),
+  )
+}
+
 function formatSessionLine(sessionName: string | null) {
   return sessionName?.trim() || 'No session'
 }
@@ -411,12 +502,18 @@ function App() {
         : getShareTokenFromPath(window.location.pathname),
     [],
   )
+  const isSharedMode = shareToken !== null
+  const guestStorageKey = shareToken ? `${guestTokenStoragePrefix}${shareToken}` : null
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [owner, setOwner] = useState<OwnerAccount | null>(null)
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [memberships, setMemberships] = useState<CampaignMembership[]>([])
   const [shareLinks, setShareLinks] = useState<CampaignShareLink[]>([])
+  const [sharedCampaign, setSharedCampaign] = useState<CampaignSummary | null>(null)
+  const [shareLink, setShareLink] = useState<CampaignShareLink | null>(null)
+  const [sharedMembership, setSharedMembership] = useState<CampaignMembership | null>(null)
+  const [guestToken, setGuestToken] = useState<string | null>(null)
   const [overview, setOverview] = useState<NotesOverview | null>(null)
   const [notes, setNotes] = useState<Note[]>([])
   const [noteBrowseMode, setNoteBrowseMode] = useState<NoteBrowseMode>('notes')
@@ -463,6 +560,8 @@ function App() {
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
+  const [isJoining, setIsJoining] = useState(false)
+  const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [isSavingCampaign, setIsSavingCampaign] = useState(false)
   const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
   const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
@@ -479,6 +578,7 @@ function App() {
     blankNoteTemplateId,
   )
   const [shareLinkNotice, setShareLinkNotice] = useState<string | null>(null)
+  const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const [revealedShareLinks, setRevealedShareLinks] = useState<
     Record<string, RevealedShareLink>
   >({})
@@ -494,6 +594,7 @@ function App() {
   const [membershipConsolidationNotice, setMembershipConsolidationNotice] = useState<
     string | null
   >(null)
+  const [joinDraft, setJoinDraft] = useState<GuestJoinInput>({ displayName: '' })
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -552,6 +653,13 @@ function App() {
       null,
     [campaigns, overview, selectedCampaignId],
   )
+  const resolvedCampaign = isSharedMode
+    ? sharedCampaign ?? overview?.campaign ?? null
+    : selectedCampaign
+  const resolvedMembership = isSharedMode
+    ? sharedMembership ?? overview?.membership ?? null
+    : overview?.membership ?? null
+  const canEditWorkspace = isSharedMode ? shareLink?.accessLevel === 'editor' : true
 
   const currentCampaignMemberships = useMemo(
     () =>
@@ -566,19 +674,39 @@ function App() {
     selectedCampaignTemplateId,
   )
   const selectedNoteTemplate = getNoteStarterTemplate(selectedNoteTemplateId)
-  const selectedSessionSummary = useMemo(
+  const sharedSessionSummaries = useMemo(() => createSessionSummariesFromNotes(notes), [notes])
+  const sharedSessionNotes = useMemo(
     () =>
-      sessionSummaries.find(
+      selectedSessionName
+        ? notes.filter((note) => note.sessionName?.trim() === selectedSessionName)
+        : [],
+    [notes, selectedSessionName],
+  )
+  const sharedActivityEntries = useMemo(
+    () => notes.map((note) => toSharedActivityEntry(note)),
+    [notes],
+  )
+  const sharedActivityCollaborators = useMemo(
+    () => createActivityCollaboratorsFromEntries(sharedActivityEntries),
+    [sharedActivityEntries],
+  )
+  const resolvedSessionSummaries = isSharedMode ? sharedSessionSummaries : sessionSummaries
+  const resolvedSelectedSessionSummary = useMemo(
+    () =>
+      resolvedSessionSummaries.find(
         (sessionSummary) => sessionSummary.sessionName === selectedSessionName,
       ) ?? null,
-    [selectedSessionName, sessionSummaries],
+    [resolvedSessionSummaries, selectedSessionName],
   )
-  const selectedActivityCollaborator = useMemo(
+  const resolvedActivityCollaborators = isSharedMode
+    ? sharedActivityCollaborators
+    : activityCollaborators
+  const resolvedSelectedActivityCollaborator = useMemo(
     () =>
-      activityCollaborators.find(
+      resolvedActivityCollaborators.find(
         (collaborator) => collaborator.membershipId === selectedActivityMembershipId,
       ) ?? null,
-    [activityCollaborators, selectedActivityMembershipId],
+    [resolvedActivityCollaborators, selectedActivityMembershipId],
   )
   const draftTags = useMemo(() => normalizeTags([draft.tagsText]), [draft.tagsText])
 
@@ -674,23 +802,50 @@ function App() {
   const displayedNotes = useMemo(
     () =>
       noteBrowseMode === 'sessions' && selectedSessionName
-        ? sessionNotes
+        ? isSharedMode
+          ? sharedSessionNotes
+          : sessionNotes
         : noteBrowseMode === 'notes'
           ? filteredNotes
           : notes,
-    [filteredNotes, noteBrowseMode, notes, selectedSessionName, sessionNotes],
+    [filteredNotes, isSharedMode, noteBrowseMode, notes, selectedSessionName, sessionNotes, sharedSessionNotes],
   )
   const sortedActivityEntries = useMemo(
-    () => sortActivityEntries(activityEntries),
-    [activityEntries],
+    () =>
+      sortActivityEntries(
+        isSharedMode
+          ? selectedActivityMembershipId
+            ? sharedActivityEntries.filter(
+                (entry) =>
+                  getActivityAttribution(entry)?.membershipId === selectedActivityMembershipId,
+              )
+            : sharedActivityEntries
+          : activityEntries,
+      ),
+    [activityEntries, isSharedMode, selectedActivityMembershipId, sharedActivityEntries],
   )
   const isSinglePaneNoteWorkspace = !showSplitNoteWorkspace
   const showBrowsePane = showSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
   const showEditorPane = showSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
   const workspaceEditorLabel =
-    isCreating || selectedNote === null ? 'Create note' : 'Edit note'
-  const useCompactHeader = true
+    !canEditWorkspace
+      ? 'View note'
+      : isCreating || selectedNote === null
+        ? 'Create note'
+        : 'Edit note'
   const useCompactDesktopHeader = canSplitNoteWorkspace
+  const resolvedCampaignOptions =
+    isSharedMode && resolvedCampaign
+      ? [{ id: resolvedCampaign.id, name: resolvedCampaign.name }]
+      : campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))
+  const resolvedSelectedCampaignId = isSharedMode
+    ? resolvedCampaign?.id ?? null
+    : selectedCampaignId ?? overview?.campaign.id ?? null
+  const resolvedDesktopSubtitle = resolvedCampaign
+    ? `${resolvedCampaign.setting} • ${resolvedCampaign.system} • ${
+        isSharedMode ? resolvedMembership?.displayName ?? 'Guest' : owner?.displayName ?? ''
+      }`
+    : ''
 
   useEffect(() => {
     if (
@@ -780,8 +935,8 @@ function App() {
           : 'Notes'
   const notePaneDescription =
     noteBrowseMode === 'activity'
-      ? selectedActivityCollaborator
-        ? `See the latest notes created or edited by ${selectedActivityCollaborator.displayName} without digging through the full archive.`
+      ? resolvedSelectedActivityCollaborator
+        ? `See the latest notes created or edited by ${resolvedSelectedActivityCollaborator.displayName} without digging through the full archive.`
         : 'See which notes changed recently and who touched them, without turning the workspace into a full audit log.'
       : noteBrowseMode === 'sessions'
         ? selectedSessionName
@@ -794,8 +949,8 @@ function App() {
             : selectedTagFacet
               ? `Showing ${selectedTagFacet.count} ${
                   selectedTagFacet.count === 1 ? 'note' : 'notes'
-                } tagged ${selectedTagFacet.tag} in ${overview?.campaign.name ?? 'this campaign'}.`
-              : 'The note workflow now runs inside the selected owner campaign.'
+                } tagged ${selectedTagFacet.tag} in ${resolvedCampaign?.name ?? 'this campaign'}.`
+              : defaultNotesPaneDescription
 
   const resetShareLinkInteractionState = useCallback(() => {
     setShareLinkNotice(null)
@@ -1025,6 +1180,68 @@ function App() {
     [],
   )
 
+  const loadSharedWorkspace = useCallback(
+    async (
+      activeGuestToken: string,
+      preferredNoteId?: string | null,
+      accessLevel?: CampaignShareLink['accessLevel'],
+    ) => {
+      setIsLoadingWorkspace(true)
+
+      try {
+        const [nextOverview, notesResponse] = await Promise.all([
+          fetchSharedOverview(shareToken as string, activeGuestToken),
+          fetchSharedNotes(shareToken as string, activeGuestToken),
+        ])
+
+        setOverview(nextOverview)
+        setSharedCampaign(nextOverview.campaign)
+        setSelectedCampaignId(nextOverview.campaign.id)
+        setCampaigns([nextOverview.campaign])
+        setNotes(notesResponse.notes)
+
+        const fallbackNoteId = notesResponse.notes[0]?.id ?? null
+        const currentSelection = selectedNoteIdRef.current
+        const nextSelectedId =
+          preferredNoteId !== undefined
+            ? preferredNoteId
+            : currentSelection && notesResponse.notes.some((note) => note.id === currentSelection)
+              ? currentSelection
+              : fallbackNoteId
+
+        const activeNote =
+          nextSelectedId !== null
+            ? notesResponse.notes.find((note) => note.id === nextSelectedId) ?? null
+            : null
+
+        if (activeNote) {
+          setSelectedNoteId(activeNote.id)
+          setIsCreating(false)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createDraftFromNote(activeNote))
+        } else {
+          setSelectedNoteId(null)
+          setIsCreating((accessLevel ?? shareLink?.accessLevel) === 'editor')
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createEmptyDraft())
+        }
+
+        setError(null)
+        return true
+      } catch (loadError) {
+        setError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Could not load the shared campaign workspace.',
+        )
+        return false
+      } finally {
+        setIsLoadingWorkspace(false)
+      }
+    },
+    [shareLink?.accessLevel, shareToken],
+  )
+
   const loadCampaigns = useCallback(
     async (
       sessionToken: string,
@@ -1068,6 +1285,10 @@ function App() {
   )
 
   useEffect(() => {
+    if (isSharedMode) {
+      return
+    }
+
     const storedToken = localStorage.getItem(authTokenStorageKey)
 
     if (!storedToken) {
@@ -1104,9 +1325,80 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [clearSession, loadCampaigns])
+  }, [clearSession, isSharedMode, loadCampaigns])
 
   useEffect(() => {
+    if (!isSharedMode || !shareToken || !guestStorageKey) {
+      return
+    }
+
+    let cancelled = false
+
+    const bootstrapSharedSession = async () => {
+      const storedGuestToken = localStorage.getItem(guestStorageKey)
+
+      try {
+        const session = await fetchSharedSession(shareToken, storedGuestToken)
+
+        if (cancelled) {
+          return
+        }
+
+        setSharedCampaign(session.campaign)
+        setShareLink(session.shareLink)
+        setSharedMembership(session.membership)
+        setSelectedCampaignId(session.campaign.id)
+        setCampaigns([session.campaign])
+        setError(null)
+
+        if (session.membership && storedGuestToken) {
+          setGuestToken(storedGuestToken)
+          setRegisterDraft((currentDraft) =>
+            currentDraft.displayName.trim().length > 0
+              ? currentDraft
+              : {
+                  ...currentDraft,
+                  displayName: session.membership?.displayName ?? '',
+                },
+          )
+          await loadSharedWorkspace(storedGuestToken, undefined, session.shareLink.accessLevel)
+        } else {
+          localStorage.removeItem(guestStorageKey)
+          setGuestToken(null)
+          setOverview(null)
+          setNotes([])
+          setSelectedNoteId(null)
+          setIsCreating(false)
+          setDraft(createEmptyDraft())
+          setAccountNotice(null)
+        }
+      } catch (sessionError) {
+        if (!cancelled) {
+          setError(
+            sessionError instanceof Error
+              ? sessionError.message
+              : 'Could not load the shared campaign.',
+          )
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapping(false)
+        }
+      }
+    }
+
+    void bootstrapSharedSession()
+
+    return () => {
+      cancelled = true
+    }
+  }, [guestStorageKey, isSharedMode, loadSharedWorkspace, shareToken])
+
+  useEffect(() => {
+    if (isSharedMode) {
+      return
+    }
+
     if (
       !authToken ||
       campaignFormMode !== 'edit' ||
@@ -1153,6 +1445,7 @@ function App() {
     authToken,
     canManageSelectedCampaign,
     campaignFormMode,
+    isSharedMode,
     resetMembershipConsolidationState,
     resetShareLinkInteractionState,
     selectedCampaignId,
@@ -1261,6 +1554,14 @@ function App() {
   }
 
   const handleOpenRecentActivity = async () => {
+    if (isSharedMode) {
+      setNoteBrowseMode('activity')
+      setNarrowWorkspacePanel('browse')
+      resetSessionBrowserState()
+      setError(null)
+      return
+    }
+
     if (!authToken || !selectedCampaignId) {
       return
     }
@@ -1277,6 +1578,12 @@ function App() {
   }
 
   const handleSelectActivityCollaborator = async (membershipId: string | null) => {
+    if (isSharedMode) {
+      setSelectedActivityMembershipId(membershipId)
+      setError(null)
+      return
+    }
+
     if (!authToken || !selectedCampaignId) {
       return
     }
@@ -1287,6 +1594,14 @@ function App() {
   }
 
   const handleSelectSession = async (sessionName: string) => {
+    if (isSharedMode) {
+      setNoteBrowseMode('sessions')
+      setSelectedSessionName(sessionName)
+      setNarrowWorkspacePanel('browse')
+      setError(null)
+      return
+    }
+
     if (!authToken || !selectedCampaignId) {
       return
     }
@@ -1356,6 +1671,10 @@ function App() {
   }
 
   const handleStartNote = () => {
+    if (!canEditWorkspace) {
+      return
+    }
+
     setShowSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('editor')
@@ -1371,6 +1690,32 @@ function App() {
 
   const handleQuickCapture = async () => {
     const trimmedTitle = quickCaptureTitle.trim()
+
+    if (isSharedMode) {
+      if (!guestToken || !trimmedTitle || !canEditWorkspace) {
+        return
+      }
+
+      setError(null)
+      setIsQuickCapturing(true)
+
+      try {
+        const createdNote = await createSharedNote(shareToken as string, guestToken, {
+          title: trimmedTitle,
+        })
+        setQuickCaptureTitle('')
+        await loadSharedWorkspace(guestToken, createdNote.id)
+        setNarrowWorkspacePanel('editor')
+      } catch (captureError) {
+        setError(
+          captureError instanceof Error ? captureError.message : 'Could not capture the note.',
+        )
+      } finally {
+        setIsQuickCapturing(false)
+      }
+
+      return
+    }
 
     if (!authToken || !selectedCampaignId || !trimmedTitle) {
       return
@@ -1398,6 +1743,87 @@ function App() {
       )
     } finally {
       setIsQuickCapturing(false)
+    }
+  }
+
+  const handleJoinSharedCampaign = async () => {
+    if (!shareToken || !guestStorageKey) {
+      return
+    }
+
+    setError(null)
+    setAccountNotice(null)
+    setIsJoining(true)
+
+    try {
+      const response = await joinSharedCampaign(shareToken, joinDraft)
+
+      localStorage.setItem(guestStorageKey, response.guestToken)
+      setGuestToken(response.guestToken)
+      setSharedCampaign(response.campaign)
+      setShareLink(response.shareLink)
+      setSharedMembership(response.membership)
+      setSelectedCampaignId(response.campaign.id)
+      setCampaigns([response.campaign])
+      setNoteBrowseMode('notes')
+      setSelectedSessionName(null)
+      setSelectedActivityMembershipId(null)
+      setRegisterDraft((currentDraft) =>
+        currentDraft.displayName.trim().length > 0
+          ? currentDraft
+          : {
+              ...currentDraft,
+              displayName: response.membership.displayName,
+            },
+      )
+      await loadSharedWorkspace(response.guestToken, undefined, response.shareLink.accessLevel)
+    } catch (joinError) {
+      setError(
+        joinError instanceof Error ? joinError.message : 'Could not join the shared campaign.',
+      )
+    } finally {
+      setIsJoining(false)
+    }
+  }
+
+  const handleLinkSharedMembership = async () => {
+    if (!shareToken || !guestToken || !sharedMembership || !guestStorageKey) {
+      return
+    }
+
+    setError(null)
+    setAccountNotice(null)
+    setIsLinkingAccount(true)
+
+    try {
+      const session = isRegisterMode
+        ? await registerOwner(registerDraft)
+        : await loginOwner(loginDraft)
+
+      localStorage.setItem(authTokenStorageKey, session.token)
+
+      const claimedMembership = await claimSharedMembership(shareToken, session.token, guestToken)
+
+      if (claimedMembership.guestToken) {
+        localStorage.setItem(guestStorageKey, claimedMembership.guestToken)
+        setGuestToken(claimedMembership.guestToken)
+      }
+
+      localStorage.setItem(selectedCampaignStorageKey, claimedMembership.membership.campaignId)
+      setSharedMembership(claimedMembership.membership)
+      setAccountNotice(
+        isRegisterMode
+          ? `Account created and linked to ${session.owner.displayName}.`
+          : `Linked to ${session.owner.displayName}.`,
+      )
+    } catch (linkError) {
+      setError(
+        linkError instanceof Error
+          ? linkError.message
+          : 'Could not link this guest membership to a real account.',
+      )
+    } finally {
+      setIsLinkingAccount(false)
     }
   }
 
@@ -1430,6 +1856,40 @@ function App() {
   }
 
   const handleSaveNote = async () => {
+    if (isSharedMode) {
+      if (!guestToken || !selectedCampaignId || !canEditWorkspace) {
+        return
+      }
+
+      setError(null)
+      setIsSaving(true)
+
+      try {
+        const payload = createNotePayload(draft, null)
+
+        if (isCreating || !selectedNoteId) {
+          const createdNote = await createSharedNote(shareToken as string, guestToken, payload)
+          await loadSharedWorkspace(guestToken, createdNote.id)
+        } else {
+          const updatedNote = await updateSharedNote(
+            shareToken as string,
+            guestToken,
+            selectedNoteId,
+            payload,
+          )
+          await loadSharedWorkspace(guestToken, updatedNote.id)
+        }
+      } catch (saveError) {
+        setError(
+          saveError instanceof Error ? saveError.message : 'Could not save the shared note.',
+        )
+      } finally {
+        setIsSaving(false)
+      }
+
+      return
+    }
+
     if (!authToken || !selectedCampaignId) {
       return
     }
@@ -1467,6 +1927,31 @@ function App() {
   }
 
   const handleDeleteNote = async () => {
+    if (isSharedMode) {
+      if (!guestToken || !selectedNoteId || !canEditWorkspace) {
+        return
+      }
+
+      setError(null)
+      setIsDeleting(true)
+
+      try {
+        await deleteSharedNote(shareToken as string, guestToken, selectedNoteId)
+        await loadSharedWorkspace(guestToken, null)
+        setNarrowWorkspacePanel('browse')
+      } catch (deleteError) {
+        setError(
+          deleteError instanceof Error
+            ? deleteError.message
+            : 'Could not delete the shared note.',
+        )
+      } finally {
+        setIsDeleting(false)
+      }
+
+      return
+    }
+
     if (!authToken || !selectedCampaignId || !selectedNoteId) {
       return
     }
@@ -1531,6 +2016,26 @@ function App() {
   }
 
   const handleLogout = async () => {
+    if (isSharedMode) {
+      const storedAuthToken = localStorage.getItem(authTokenStorageKey)
+
+      if (storedAuthToken) {
+        try {
+          await logoutOwner(storedAuthToken)
+        } catch {
+          // Intentionally ignore logout failures because local sign-out should still work.
+        }
+      }
+
+      localStorage.removeItem(authTokenStorageKey)
+      localStorage.removeItem(selectedCampaignStorageKey)
+      if (guestStorageKey) {
+        localStorage.removeItem(guestStorageKey)
+      }
+      window.location.assign('/')
+      return
+    }
+
     if (authToken) {
       try {
         await logoutOwner(authToken)
@@ -1928,22 +2433,80 @@ function App() {
     })
   }
 
-  if (shareToken) {
-    return <SharedCampaignRoute shareToken={shareToken} />
-  }
-
   if (isBootstrapping) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
         <Stack spacing={2} sx={{ alignItems: 'center' }}>
           <CircularProgress />
-          <Typography color="text.secondary">Loading owner workspace...</Typography>
+          <Typography color="text.secondary">
+            {isSharedMode ? 'Loading shared campaign...' : 'Loading owner workspace...'}
+          </Typography>
         </Stack>
       </Box>
     )
   }
 
-  if (!owner || !authToken) {
+  if (isSharedMode && (!sharedCampaign || !shareLink)) {
+    return (
+      <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: 3 }}>
+        <Container maxWidth="sm">
+          <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
+            {error ?? 'This shared campaign could not be loaded.'}
+          </Alert>
+        </Container>
+      </Box>
+    )
+  }
+
+  if (isSharedMode && !sharedMembership) {
+    return (
+      <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: 3 }}>
+        <Container maxWidth="sm">
+          <Stack spacing={3}>
+            <Card sx={{ borderRadius: heroCardRadius }}>
+              <CardContent sx={{ p: { xs: 3, md: 4 } }}>
+                <Stack spacing={3}>
+                  <Box>
+                    <Typography
+                      variant="overline"
+                      sx={{ color: 'text.secondary', letterSpacing: '0.18em' }}
+                    >
+                      Shared campaign access
+                    </Typography>
+                    <Typography variant="h3" sx={{ mt: 1 }}>
+                      Join {sharedCampaign?.name}
+                    </Typography>
+                    <Typography color="text.secondary" sx={{ mt: 2 }}>
+                      Pick the name you want this campaign to use for you. You can return with
+                      the same shared link and keep this guest identity.
+                    </Typography>
+                  </Box>
+
+                  {error ? (
+                    <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
+                      {error}
+                    </Alert>
+                  ) : null}
+
+                  <TextField
+                    label="Display name"
+                    value={joinDraft.displayName}
+                    onChange={(event) => setJoinDraft({ displayName: event.target.value })}
+                  />
+
+                  <Button variant="contained" onClick={handleJoinSharedCampaign} disabled={isJoining}>
+                    {isJoining ? 'Joining campaign...' : 'Join campaign'}
+                  </Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Stack>
+        </Container>
+      </Box>
+    )
+  }
+
+  if (!isSharedMode && (!owner || !authToken)) {
     return (
       <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: 3 }}>
         <Container maxWidth="sm">
@@ -2061,7 +2624,7 @@ function App() {
     )
   }
 
-  if (campaigns.length === 0 || (!selectedCampaignId && campaignFormMode === 'create')) {
+  if (!isSharedMode && (campaigns.length === 0 || (!selectedCampaignId && campaignFormMode === 'create'))) {
     return (
       <Box component="main" sx={{ minHeight: '100vh', py: { xs: 4, md: 6 } }}>
         <Container maxWidth="md">
@@ -2149,12 +2712,14 @@ function App() {
     )
   }
 
-  if (isLoadingWorkspace || !overview || !selectedCampaign) {
+  if (isLoadingWorkspace || !overview || (!isSharedMode && !selectedCampaign)) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
         <Stack spacing={2} sx={{ alignItems: 'center' }}>
           <CircularProgress />
-          <Typography color="text.secondary">Loading campaign workspace...</Typography>
+          <Typography color="text.secondary">
+            {isSharedMode ? 'Loading shared notes...' : 'Loading campaign workspace...'}
+          </Typography>
         </Stack>
       </Box>
     )
@@ -2163,16 +2728,21 @@ function App() {
   return (
     <Box
       component="main"
-      sx={{ minHeight: '100vh', py: { xs: 2.5, md: 4 }, width: '100%', overflowX: 'clip' }}
+      sx={{ minHeight: '100vh', py: { xs: 2.5, md: 4 }, width: '100%' }}
     >
-      <Container maxWidth="xl" sx={{ minWidth: 0, overflowX: 'clip' }}>
+      <Container maxWidth="xl" sx={{ minWidth: 0, position: 'relative' }}>
         <Stack spacing={2.5}>
           <Box
             aria-label="Application brand"
             sx={{
               display: { xs: 'none', lg: 'inline-flex' },
+              position: { xs: 'static', lg: 'absolute' },
+              top: { lg: 0 },
+              left: { lg: 0 },
+              zIndex: { lg: 3 },
               alignItems: 'center',
               alignSelf: 'flex-start',
+              flexShrink: 0,
               gap: 0.75,
               px: 1.25,
               py: 0.75,
@@ -2198,249 +2768,48 @@ function App() {
               D&amp;D Notes
             </Typography>
           </Box>
-          <Card
-            sx={{
-              position: 'sticky',
-              top: { xs: 8, md: 12 },
-              zIndex: 2,
-              borderRadius: surfaceRadius,
-              border: '1px solid',
-              borderColor: useCompactDesktopHeader
-                ? 'rgba(167, 139, 250, 0.14)'
-                : 'rgba(167, 139, 250, 0.2)',
-              bgcolor: useCompactDesktopHeader
-                ? 'rgba(15, 23, 42, 0.44)'
-                : 'rgba(15, 23, 42, 0.88)',
-              backdropFilter: useCompactDesktopHeader ? 'blur(12px)' : 'blur(16px)',
-              alignSelf: useCompactDesktopHeader ? 'flex-end' : 'stretch',
-              ml: useCompactDesktopHeader ? 'auto' : 0,
-              maxWidth: useCompactDesktopHeader ? 560 : 'none',
-              width: useCompactDesktopHeader ? '100%' : 'auto',
-              overflow: 'hidden',
-              boxShadow: useCompactDesktopHeader
-                ? '0 16px 40px rgba(2, 6, 23, 0.18)'
-                : '0 16px 40px rgba(2, 6, 23, 0.26)',
-              transition: theme.transitions.create(
-                ['background-color', 'border-color', 'box-shadow', 'max-width', 'margin'],
-                { duration: theme.transitions.duration.shorter },
-              ),
-              ...(useCompactDesktopHeader
-                ? {
-                    '&:hover': {
-                      bgcolor: 'rgba(15, 23, 42, 0.88)',
-                      borderColor: 'rgba(167, 139, 250, 0.22)',
-                      boxShadow: '0 18px 44px rgba(2, 6, 23, 0.28)',
-                    },
-                  }
-                : {}),
+          <CampaignWorkspaceHeader
+            campaignName={resolvedCampaign?.name ?? overview.campaign.name}
+            mobileSubtitle={`${resolvedCampaign?.setting ?? overview.campaign.setting} • ${resolvedCampaign?.system ?? overview.campaign.system}`}
+            desktopSubtitle={resolvedDesktopSubtitle}
+            selectedCampaignId={resolvedSelectedCampaignId ?? overview.campaign.id}
+            campaignOptions={resolvedCampaignOptions}
+            onSelectCampaign={(campaignId) => {
+              if (!isSharedMode) {
+                void handleSelectCampaign(campaignId)
+              }
             }}
-          >
-            <CardContent
-              sx={{
-                p: useCompactHeader
-                  ? { xs: 1.25, md: 1.5 }
-                  : { xs: 1.5, md: 2.5 },
-                maxHeight: useCompactHeader
-                  ? { xs: '20vh', md: 'none' }
-                  : 'none',
-              }}
-            >
-              <Stack spacing={useCompactHeader ? 1 : { xs: 1.25, md: 1.5 }}>
-                <Stack
-                  direction={{ xs: 'column', md: 'row' }}
-                  spacing={useCompactHeader ? 1 : 1.5}
-                  sx={{
-                    justifyContent: 'space-between',
-                    alignItems: { md: useCompactDesktopHeader ? 'flex-start' : 'center' },
-                  }}
-                >
-                  <Stack spacing={useCompactHeader ? 0.5 : 1} sx={{ minWidth: 0, maxWidth: 760 }}>
-                    {!useCompactHeader ? (
-                      <Typography
-                        variant="overline"
-                        sx={{ color: 'rgba(255, 255, 255, 0.64)', letterSpacing: '0.14em' }}
-                      >
-                        Campaign workspace
-                      </Typography>
-                    ) : null}
-                    <Typography
-                      variant="h5"
-                      title={overview.campaign.name}
-                      sx={{
-                        ...singleLineTextSx,
-                        fontSize: useCompactHeader
-                          ? { xs: '1.05rem', md: '1.2rem' }
-                          : { xs: '1.3rem', md: '1.6rem' },
-                      }}
-                    >
-                      {overview.campaign.name}
-                    </Typography>
-                    {useCompactHeader ? (
-                      <Typography
-                        color="rgba(255, 255, 255, 0.72)"
-                        variant="caption"
-                        sx={singleLineTextSx}
-                      >
-                        {overview.campaign.setting} • {overview.campaign.system} • {owner.displayName}
-                      </Typography>
-                    ) : (
-                      <Typography
-                        color="rgba(255, 255, 255, 0.76)"
-                        variant="body2"
-                        title={overview.campaign.tagline}
-                        sx={singleLineTextSx}
-                      >
-                        {overview.campaign.tagline}
-                      </Typography>
-                    )}
-                    {!useCompactHeader ? (
-                      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                        <Chip
-                          label={overview.campaign.system}
-                          size="small"
-                          sx={{ bgcolor: 'rgba(255, 255, 255, 0.08)', color: 'white' }}
-                        />
-                        <Chip
-                          label={overview.campaign.setting}
-                          size="small"
-                          sx={{ bgcolor: 'rgba(255, 255, 255, 0.08)', color: 'white' }}
-                        />
-                        <Chip
-                          label={`Signed in as ${owner.displayName}`}
-                          size="small"
-                          sx={{ bgcolor: 'rgba(255, 255, 255, 0.08)', color: 'white' }}
-                        />
-                        {activeMembership ? (
-                          <Chip
-                            label={
-                              activeMembership.role === 'owner'
-                                ? 'Campaign owner'
-                                : activeMembership.userId !== null
-                                  ? 'Linked collaborator'
-                                  : 'Guest collaborator'
-                            }
-                            color={canManageSelectedCampaign ? 'secondary' : 'default'}
-                            size="small"
-                            sx={{ bgcolor: 'rgba(255, 255, 255, 0.14)', color: 'white' }}
-                          />
-                        ) : null}
-                      </Stack>
-                    ) : null}
-                  </Stack>
-
-                  <Stack
-                    spacing={0.75}
-                    sx={{
-                      width: { xs: '100%', md: 'auto' },
-                      minWidth: 0,
-                      maxWidth: '100%',
-                      ...(useCompactDesktopHeader ? { minWidth: { md: 320 } } : {}),
-                    }}
-                  >
-                    <TextField
-                      select
-                      size="small"
-                      label="Campaign"
-                      value={selectedCampaignId}
-                      onChange={(event) => void handleSelectCampaign(event.target.value)}
-                    >
-                      {campaigns.map((campaign) => (
-                        <MenuItem key={campaign.id} value={campaign.id}>
-                          {campaign.name}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                    {useCompactHeader ? (
-                      <Stack
-                        direction="row"
-                        spacing={0.5}
-                        sx={{
-                          justifyContent: { xs: 'space-between', md: 'flex-end' },
-                          minWidth: 0,
-                        }}
-                      >
-                        <Box
-                          sx={{
-                            display: 'grid',
-                            gap: 0.5,
-                            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-                            width: '100%',
-                            minWidth: 0,
-                          }}
-                        >
-                        <IconButton
-                          aria-label="New campaign"
-                          color="inherit"
-                          size="small"
-                          onClick={handleOpenCampaignCreate}
-                        >
-                          <AddCircleOutlineRoundedIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          aria-label="Campaign settings"
-                          color="inherit"
-                          size="small"
-                          onClick={handleOpenCampaignSettings}
-                          disabled={!canManageSelectedCampaign}
-                        >
-                          <SettingsRoundedIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          aria-label="New note"
-                          color="secondary"
-                          size="small"
-                          onClick={handleStartNote}
-                        >
-                          <AddRoundedIcon fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          aria-label="Sign out"
-                          color="inherit"
-                          size="small"
-                          onClick={handleLogout}
-                        >
-                          <LogoutRoundedIcon fontSize="small" />
-                        </IconButton>
-                        </Box>
-                      </Stack>
-                    ) : (
-                      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                        <Button size="small" variant="outlined" color="inherit" onClick={handleOpenCampaignCreate}>
-                          New campaign
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color="inherit"
-                          onClick={handleOpenCampaignSettings}
-                          disabled={!canManageSelectedCampaign}
-                        >
-                          Campaign settings
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="contained"
-                          color="secondary"
-                          startIcon={<AddRoundedIcon />}
-                          onClick={handleStartNote}
-                        >
-                          New note
-                        </Button>
-                        <Button size="small" variant="text" color="inherit" onClick={handleLogout}>
-                          Sign out
-                        </Button>
-                      </Stack>
-                    )}
-                    {activeMembership && !useCompactHeader ? (
-                      <Typography color="rgba(255, 255, 255, 0.64)" variant="caption">
-                        Share links and campaign settings stay with the campaign owner.
-                      </Typography>
-                    ) : null}
-                  </Stack>
-                </Stack>
-              </Stack>
-            </CardContent>
-          </Card>
+            actions={[
+              {
+                ariaLabel: 'New campaign',
+                color: 'inherit',
+                icon: <AddCircleOutlineRoundedIcon fontSize="small" />,
+                onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate,
+              },
+              {
+                ariaLabel: 'Campaign settings',
+                color: 'inherit',
+                icon: <SettingsRoundedIcon fontSize="small" />,
+                onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings,
+                disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign,
+              },
+              {
+                ariaLabel: 'New note',
+                color: 'secondary',
+                icon: <AddRoundedIcon fontSize="small" />,
+                onClick: handleStartNote,
+                disabled: !canEditWorkspace,
+              },
+              {
+                ariaLabel: 'Sign out',
+                color: 'inherit',
+                icon: <LogoutRoundedIcon fontSize="small" />,
+                onClick: handleLogout,
+              },
+            ]}
+            surfaceRadius={surfaceRadius}
+            compactDesktop={useCompactDesktopHeader}
+          />
 
           {error ? (
             <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
@@ -2448,7 +2817,93 @@ function App() {
             </Alert>
           ) : null}
 
-          {campaignFormMode !== 'closed' ? (
+          {isSharedMode && resolvedMembership?.userId === null ? (
+            <Card sx={{ borderRadius: surfaceRadius }}>
+              <CardContent sx={{ p: 3 }}>
+                <Stack spacing={2.5}>
+                  <Box>
+                    <Typography variant="h5">Link this guest membership</Typography>
+                    <Typography color="text.secondary" sx={{ mt: 0.75 }}>
+                      Create or connect a real account without changing the membership that
+                      already owns your shared note history. For this first release, the claim
+                      must happen from the same browser that joined the campaign.
+                    </Typography>
+                  </Box>
+
+                  {accountNotice ? (
+                    <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+                      {accountNotice}
+                    </Alert>
+                  ) : null}
+
+                  {isRegisterMode ? (
+                    <TextField
+                      label="Account display name"
+                      value={registerDraft.displayName}
+                      onChange={(event) =>
+                        setRegisterDraft((currentDraft) => ({
+                          ...currentDraft,
+                          displayName: event.target.value,
+                        }))
+                      }
+                    />
+                  ) : null}
+
+                  <TextField
+                    label="Email"
+                    type="email"
+                    value={isRegisterMode ? registerDraft.email : loginDraft.email}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      if (isRegisterMode) {
+                        setRegisterDraft((currentDraft) => ({ ...currentDraft, email: value }))
+                      } else {
+                        setLoginDraft((currentDraft) => ({ ...currentDraft, email: value }))
+                      }
+                    }}
+                  />
+
+                  <TextField
+                    label="Password"
+                    type="password"
+                    value={isRegisterMode ? registerDraft.password : loginDraft.password}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      if (isRegisterMode) {
+                        setRegisterDraft((currentDraft) => ({ ...currentDraft, password: value }))
+                      } else {
+                        setLoginDraft((currentDraft) => ({ ...currentDraft, password: value }))
+                      }
+                    }}
+                  />
+
+                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                    <Button variant="contained" onClick={handleLinkSharedMembership} disabled={isLinkingAccount}>
+                      {isLinkingAccount
+                        ? isRegisterMode
+                          ? 'Creating and linking...'
+                          : 'Linking account...'
+                        : isRegisterMode
+                          ? 'Create and link account'
+                          : 'Sign in and link account'}
+                    </Button>
+                    <Button
+                      variant="text"
+                      onClick={() => {
+                        setAccountNotice(null)
+                        setError(null)
+                        setIsRegisterMode((current) => !current)
+                      }}
+                    >
+                      {isRegisterMode
+                        ? 'Already have an account? Sign in'
+                        : 'Need an account? Create one'}
+                    </Button>
+                  </Stack>
+                </Stack>
+              </CardContent>
+            </Card>
+          ) : !isSharedMode && campaignFormMode !== 'closed' ? (
             <Card sx={{ borderRadius: surfaceRadius }}>
               <CardContent sx={{ p: 3 }}>
                 <Stack spacing={2.5}>
@@ -3099,228 +3554,111 @@ function App() {
                 : '1fr',
             }}
           >
-            <Card
-              sx={{
-                borderRadius: surfaceRadius,
-                gridColumn: '1 / -1',
-                minWidth: 0,
-              }}
-            >
-              <CardContent sx={{ p: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
-                <Stack
-                  direction={{ xs: 'column', md: 'row' }}
-                  spacing={1.5}
-                  sx={{ justifyContent: 'space-between', alignItems: { md: 'center' } }}
-                >
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="overline" color="text.secondary">
-                      Workspace
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary" sx={singleLineTextSx}>
-                      Switch between browsing and editing without stretching the page.
-                    </Typography>
-                  </Box>
-                  <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
-                    <Button
-                      size="small"
-                      variant={!showEditorPane || showSplitNoteWorkspace ? 'contained' : 'outlined'}
-                      onClick={handleShowBrowsePane}
-                    >
-                      Browse notes
-                    </Button>
-                    <Button
-                      size="small"
-                      variant={!showBrowsePane || showSplitNoteWorkspace ? 'contained' : 'outlined'}
-                      onClick={handleShowEditorPane}
-                    >
-                      {workspaceEditorLabel}
-                    </Button>
-                    {canSplitNoteWorkspace ? (
-                      <Button
-                        size="small"
-                        variant={showSplitNoteWorkspace ? 'contained' : 'outlined'}
-                        onClick={handleToggleSplitWorkspace}
-                      >
-                        Split view
-                      </Button>
-                    ) : null}
-                  </Stack>
-                </Stack>
-              </CardContent>
-            </Card>
+            <WorkspacePane
+              showBrowsePane={showBrowsePane}
+              showEditorPane={showEditorPane}
+              showSplitNoteWorkspace={showSplitNoteWorkspace}
+              canSplitNoteWorkspace={canSplitNoteWorkspace}
+              onShowBrowsePane={handleShowBrowsePane}
+              onShowEditorPane={handleShowEditorPane}
+              onToggleSplitWorkspace={handleToggleSplitWorkspace}
+              workspaceEditorLabel={workspaceEditorLabel}
+              surfaceRadius={surfaceRadius}
+              cardSx={{ gridColumn: '1 / -1' }}
+            />
 
             {showBrowsePane ? (
-              <Card sx={{ borderRadius: surfaceRadius, minWidth: 0 }}>
-                <CardContent sx={{ p: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
-                  <Stack spacing={2} sx={{ minWidth: 0 }}>
-                    <Stack
-                      direction={{ xs: 'column', md: 'row' }}
-                      spacing={1.5}
-                      sx={{ justifyContent: 'space-between', alignItems: { md: 'center' } }}
+              <NotesBrowsePane
+                heading={notePaneHeading}
+                description={notePaneDescription}
+                actions={
+                  <>
+                    <Button
+                      size="small"
+                      variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
+                      onClick={handleOpenAllNotes}
                     >
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="h6">{notePaneHeading}</Typography>
-                        <Typography
-                          color="text.secondary"
-                          variant="body2"
-                          title={notePaneDescription}
-                          sx={singleLineTextSx}
-                        >
-                          {notePaneDescription}
-                        </Typography>
-                      </Box>
-                      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
+                      All notes
+                    </Button>
+                    <Button
+                      size="small"
+                      variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
+                      onClick={handleOpenSessionBrowser}
+                    >
+                      Browse by session
+                    </Button>
+                    <Button
+                      size="small"
+                      variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
+                      onClick={() => void handleOpenRecentActivity()}
+                    >
+                      Recent activity
+                    </Button>
+                    <Button
+                      size="small"
+                      variant={isQuickCaptureOpen ? 'contained' : 'outlined'}
+                      startIcon={<BoltRoundedIcon />}
+                      onClick={() => setIsQuickCaptureOpen((currentValue) => !currentValue)}
+                      disabled={!canEditWorkspace}
+                    >
+                      Quick capture
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      startIcon={<AddRoundedIcon />}
+                      onClick={handleStartNote}
+                      disabled={!canEditWorkspace}
+                    >
+                      New note
+                    </Button>
+                  </>
+                }
+                searchText={searchText}
+                onSearchTextChange={setSearchText}
+                onClearSearch={handleClearSearch}
+                selectedTagLabel={
+                  selectedTagFacet
+                    ? `Filtering by ${selectedTagFacet.tag} (${selectedTagFacet.count})`
+                    : null
+                }
+                onClearTagFilter={handleClearTagFilter}
+                quickCapture={{
+                  isOpen: isQuickCaptureOpen,
+                  value: quickCaptureTitle,
+                  onValueChange: setQuickCaptureTitle,
+                  onSubmit: () => void handleQuickCapture(),
+                  isSubmitting: isQuickCapturing || !canEditWorkspace,
+                }}
+                tagFilters={
+                  tagFacets.length === 0 ? (
+                    <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                      No tagged notes yet. Add tags to a note to browse the campaign this way.
+                    </Alert>
+                  ) : (
+                    <Stack
+                      direction="row"
+                      spacing={1}
+                      useFlexGap
+                      aria-label="Tag filter list"
+                      sx={{ flexWrap: 'wrap' }}
+                    >
+                      {tagFacets.map((tagFacet) => (
                         <Button
+                          key={tagFacet.tag}
                           size="small"
-                          variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
-                          onClick={handleOpenAllNotes}
+                          variant={selectedTagFilter === tagFacet.tag ? 'contained' : 'outlined'}
+                          onClick={() => handleSelectTagFilter(tagFacet.tag)}
                         >
-                          All notes
+                          {tagFacet.tag} ({tagFacet.count})
                         </Button>
-                        <Button
-                          size="small"
-                          variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
-                          onClick={handleOpenSessionBrowser}
-                        >
-                          Browse by session
-                        </Button>
-                        <Button
-                          size="small"
-                          variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
-                          onClick={() => void handleOpenRecentActivity()}
-                        >
-                          Recent activity
-                        </Button>
-                        <Button
-                          size="small"
-                          variant={isQuickCaptureOpen ? 'contained' : 'outlined'}
-                          startIcon={<BoltRoundedIcon />}
-                          onClick={() =>
-                            setIsQuickCaptureOpen((currentValue) => !currentValue)
-                          }
-                        >
-                          Quick capture
-                        </Button>
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          startIcon={<AddRoundedIcon />}
-                          onClick={handleStartNote}
-                        >
-                          New note
-                        </Button>
-                      </Stack>
+                      ))}
                     </Stack>
-
-                    <Stack direction={{ xs: 'column', md: 'row' }} spacing={1}>
-                      <TextField
-                        label="Search notes"
-                        placeholder="Search title, body, tags, session, or collaborator…"
-                        size="small"
-                        value={searchText}
-                        onChange={(event) => setSearchText(event.target.value)}
-                        slotProps={{
-                          input: {
-                            startAdornment: (
-                              <InputAdornment position="start">
-                                <SearchRoundedIcon />
-                              </InputAdornment>
-                            ),
-                            endAdornment: searchText ? (
-                              <InputAdornment position="end">
-                                <IconButton
-                                  size="small"
-                                  onClick={handleClearSearch}
-                                  edge="end"
-                                  aria-label="Clear search"
-                                >
-                                  <ClearRoundedIcon />
-                                </IconButton>
-                              </InputAdornment>
-                            ) : null,
-                          },
-                        }}
-                        sx={{ flex: 1 }}
-                      />
-                      <Stack
-                        direction={{ xs: 'column', sm: 'row' }}
-                        spacing={1}
-                        sx={{ alignItems: { sm: 'center' }, flexWrap: 'wrap' }}
-                      >
-                        <Typography color="text.secondary" variant="body2">
-                          Tags
-                        </Typography>
-                        {selectedTagFacet ? (
-                          <>
-                            <Chip
-                              label={`Filtering by ${selectedTagFacet.tag} (${selectedTagFacet.count})`}
-                              color="primary"
-                              size="small"
-                            />
-                            <Button size="small" variant="text" onClick={handleClearTagFilter}>
-                              Clear filter
-                            </Button>
-                          </>
-                        ) : null}
-                      </Stack>
-                    </Stack>
-
-                    <Collapse in={isQuickCaptureOpen}>
-                      <Stack
-                        direction={{ xs: 'column', sm: 'row' }}
-                        spacing={1}
-                        component="form"
-                        onSubmit={(event) => {
-                          event.preventDefault()
-                          void handleQuickCapture()
-                        }}
-                      >
-                        <TextField
-                          label="Quick capture"
-                          placeholder="Jot down a clue, reminder, or scene…"
-                          size="small"
-                          value={quickCaptureTitle}
-                          onChange={(event) => setQuickCaptureTitle(event.target.value)}
-                          disabled={isQuickCapturing}
-                          sx={{ flex: 1 }}
-                        />
-                        <Button
-                          type="submit"
-                          variant="contained"
-                          startIcon={<BoltRoundedIcon />}
-                          disabled={!quickCaptureTitle.trim() || isQuickCapturing}
-                        >
-                          {isQuickCapturing ? 'Capturing…' : 'Capture'}
-                        </Button>
-                      </Stack>
-                    </Collapse>
-
-                    {tagFacets.length === 0 ? (
-                      <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                        No tagged notes yet. Add tags to a note to browse the campaign this way.
-                      </Alert>
-                    ) : (
-                      <Stack
-                        direction="row"
-                        spacing={1}
-                        useFlexGap
-                        aria-label="Tag filter list"
-                        sx={{ flexWrap: 'wrap' }}
-                      >
-                        {tagFacets.map((tagFacet) => (
-                          <Button
-                            key={tagFacet.tag}
-                            size="small"
-                            variant={selectedTagFilter === tagFacet.tag ? 'contained' : 'outlined'}
-                            onClick={() => handleSelectTagFilter(tagFacet.tag)}
-                          >
-                            {tagFacet.tag} ({tagFacet.count})
-                          </Button>
-                        ))}
-                      </Stack>
-                    )}
-
-                  {noteBrowseMode === 'activity' ? (
+                  )
+                }
+                surfaceRadius={surfaceRadius}
+              >
+                {noteBrowseMode === 'activity' ? (
                     <Stack spacing={2.5}>
                       <Stack spacing={1.5}>
                         <Typography variant="subtitle1">Filter by collaborator</Typography>
@@ -3340,7 +3678,7 @@ function App() {
                           >
                             All collaborators
                           </Button>
-                          {activityCollaborators.map((collaborator) => (
+                          {resolvedActivityCollaborators.map((collaborator) => (
                             <Button
                               key={collaborator.membershipId}
                               variant={
@@ -3359,14 +3697,14 @@ function App() {
                             </Button>
                           ))}
                         </Stack>
-                        {selectedActivityCollaborator ? (
+                        {resolvedSelectedActivityCollaborator ? (
                           <Stack
                             direction={{ xs: 'column', sm: 'row' }}
                             spacing={1}
                             sx={{ alignItems: { sm: 'center' } }}
                           >
                             <Chip
-                              label={`Filtering by ${selectedActivityCollaborator.displayName}`}
+                              label={`Filtering by ${resolvedSelectedActivityCollaborator.displayName}`}
                               size="small"
                               color="primary"
                             />
@@ -3381,7 +3719,7 @@ function App() {
                         ) : null}
                       </Stack>
 
-                      {isLoadingActivity ? (
+                      {!isSharedMode && isLoadingActivity ? (
                         <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
                           <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                             <CircularProgress size={28} />
@@ -3392,8 +3730,8 @@ function App() {
                         </Box>
                       ) : sortedActivityEntries.length === 0 ? (
                         <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                          {selectedActivityCollaborator
-                            ? `No recent notes for ${selectedActivityCollaborator.displayName} yet.`
+                          {resolvedSelectedActivityCollaborator
+                            ? `No recent notes for ${resolvedSelectedActivityCollaborator.displayName} yet.`
                             : 'No notes in this campaign yet. Create your first note to get started.'}
                         </Alert>
                       ) : (
@@ -3473,8 +3811,8 @@ function App() {
                         </List>
                       )}
                     </Stack>
-                  ) : noteBrowseMode === 'sessions' && !selectedSessionName ? (
-                    sessionSummaries.length === 0 ? (
+                ) : noteBrowseMode === 'sessions' && !selectedSessionName ? (
+                    resolvedSessionSummaries.length === 0 ? (
                       <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
                         No session-linked notes yet. Add a session name to notes when you want
                         a quick “what happened in this session?” view.
@@ -3485,7 +3823,7 @@ function App() {
                         aria-label="Session list"
                         sx={{ display: 'grid', gap: 1.5 }}
                       >
-                        {sessionSummaries.map((sessionSummary) => (
+                        {resolvedSessionSummaries.map((sessionSummary) => (
                           <ListItemButton
                             key={sessionSummary.sessionName}
                             onClick={() =>
@@ -3539,7 +3877,7 @@ function App() {
                         ))}
                       </List>
                     )
-                  ) : (
+                ) : (
                     <Stack spacing={2}>
                       {noteBrowseMode === 'sessions' && selectedSessionName ? (
                         <Stack
@@ -3552,9 +3890,9 @@ function App() {
                           </Button>
                           <Chip
                             label={`${
-                              selectedSessionSummary?.noteCount ?? displayedNotes.length
+                              resolvedSelectedSessionSummary?.noteCount ?? displayedNotes.length
                             } ${
-                              (selectedSessionSummary?.noteCount ?? displayedNotes.length) === 1
+                              (resolvedSelectedSessionSummary?.noteCount ?? displayedNotes.length) === 1
                                 ? 'note'
                                 : 'notes'
                             } in ${selectedSessionName}`}
@@ -3563,7 +3901,7 @@ function App() {
                         </Stack>
                       ) : null}
 
-                      {isLoadingSessionNotes ? (
+                      {!isSharedMode && isLoadingSessionNotes ? (
                         <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
                           <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                             <CircularProgress size={28} />
@@ -3662,15 +4000,13 @@ function App() {
                         </List>
                       )}
                     </Stack>
-                  )}
-                  </Stack>
-                </CardContent>
-              </Card>
+                )}
+              </NotesBrowsePane>
             ) : null}
 
             {showEditorPane ? (
-              <Stack spacing={3}>
-                <Card sx={{ borderRadius: surfaceRadius, minWidth: 0 }}>
+              <Stack spacing={3} sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}>
+                <Card sx={{ borderRadius: surfaceRadius, minWidth: 0, width: '100%', maxWidth: '100%' }}>
                   <CardContent sx={{ p: 3, minWidth: 0 }}>
                     <Stack spacing={2.5} sx={{ minWidth: 0 }}>
                       {isSinglePaneNoteWorkspace ? (
@@ -3687,16 +4023,22 @@ function App() {
 
                       <Box>
                         <Typography variant="h5">
-                          {isCreating ? 'Create note' : 'Edit note'}
+                          {!canEditWorkspace
+                            ? 'Note details'
+                            : isCreating
+                              ? 'Create note'
+                              : 'Edit note'}
                         </Typography>
                         <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                          {noteBrowseMode === 'sessions' && selectedSessionName
-                            ? `Every save is scoped to ${overview.campaign.name}. You are currently reviewing ${selectedSessionName}.`
-                            : `Every save is scoped to ${overview.campaign.name}, so each campaign can keep its own note trail.`}
+                          {!canEditWorkspace
+                            ? 'Viewer links can read shared notes but cannot change them.'
+                            : noteBrowseMode === 'sessions' && selectedSessionName
+                              ? `Every save is scoped to ${resolvedCampaign?.name ?? overview.campaign.name}. You are currently reviewing ${selectedSessionName}.`
+                              : `Every save is scoped to ${resolvedCampaign?.name ?? overview.campaign.name}, so each campaign can keep its own note trail.`}
                         </Typography>
                       </Box>
 
-                    {isCreating ? (
+                    {isCreating && canEditWorkspace ? (
                       <Stack spacing={1.5}>
                         <TextField
                           select
@@ -3728,6 +4070,7 @@ function App() {
                       onChange={(event) =>
                         handleDraftChange('title', event.target.value)
                       }
+                      slotProps={{ input: { readOnly: !canEditWorkspace } }}
                     />
 
                     <TextField
@@ -3737,67 +4080,74 @@ function App() {
                         handleDraftChange('sessionName', event.target.value)
                       }
                       helperText="Optional. Use this when a note belongs to a specific session."
+                      slotProps={{ input: { readOnly: !canEditWorkspace } }}
                     />
 
-                    <Autocomplete
-                      multiple
-                      freeSolo
-                      disablePortal
-                      filterSelectedOptions
-                      options={tagFacets.map((tagFacet) => tagFacet.tag)}
-                      value={draftTags}
-                      inputValue={tagInputValue}
-                      onInputChange={(_, value, reason) => {
-                        if (reason === 'reset') {
-                          return
-                        }
+                    {canEditWorkspace ? (
+                      <Autocomplete
+                        multiple
+                        freeSolo
+                        disablePortal
+                        filterSelectedOptions
+                        options={tagFacets.map((tagFacet) => tagFacet.tag)}
+                        value={draftTags}
+                        inputValue={tagInputValue}
+                        onInputChange={(_, value, reason) => {
+                          if (reason === 'reset') {
+                            return
+                          }
 
-                        setTagInputValue(value)
-                      }}
-                      onChange={(_, value) => {
-                        handleDraftTagsChange(value)
-                        setTagInputValue('')
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Tags"
-                          helperText="Reuse existing tags or type new ones. Press Enter, comma, or blur to commit."
-                          onBlur={commitPendingTagInput}
-                          onKeyDown={(event) => {
-                            if (
-                              (event.key === 'Enter' || event.key === ',') &&
-                              tagInputValue.trim()
-                            ) {
-                              event.preventDefault()
-                              commitPendingTagInput()
-                            }
-                          }}
-                        />
-                      )}
-                    />
+                          setTagInputValue(value)
+                        }}
+                        onChange={(_, value) => {
+                          handleDraftTagsChange(value)
+                          setTagInputValue('')
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            label="Tags"
+                            helperText="Reuse existing tags or type new ones. Press Enter, comma, or blur to commit."
+                            onBlur={commitPendingTagInput}
+                            onKeyDown={(event) => {
+                              if (
+                                (event.key === 'Enter' || event.key === ',') &&
+                                tagInputValue.trim()
+                              ) {
+                                event.preventDefault()
+                                commitPendingTagInput()
+                              }
+                            }}
+                          />
+                        )}
+                      />
+                    ) : (
+                      <TextField label="Tags" value={createTagsText(draftTags)} slotProps={{ input: { readOnly: true } }} />
+                    )}
 
-                    <Autocomplete
-                      multiple
-                      disablePortal
-                      filterSelectedOptions
-                      options={notes.filter((n) => n.id !== selectedNoteId)}
-                      getOptionLabel={(option) => option.title || '(Untitled)'}
-                      value={notes.filter((n) => draft.linkedNoteIds?.includes(n.id))}
-                      onChange={(_, value) => {
-                        handleDraftChange(
-                          'linkedNoteIds',
-                          value.map((n) => n.id),
-                        )
-                      }}
-                      renderInput={(params) => (
-                        <TextField
-                          {...params}
-                          label="Linked notes"
-                          helperText="Link to other notes in this campaign for easy cross-referencing."
-                        />
-                      )}
-                    />
+                    {canEditWorkspace ? (
+                      <Autocomplete
+                        multiple
+                        disablePortal
+                        filterSelectedOptions
+                        options={notes.filter((n) => n.id !== selectedNoteId)}
+                        getOptionLabel={(option) => option.title || '(Untitled)'}
+                        value={notes.filter((n) => draft.linkedNoteIds?.includes(n.id))}
+                        onChange={(_, value) => {
+                          handleDraftChange(
+                            'linkedNoteIds',
+                            value.map((n) => n.id),
+                          )
+                        }}
+                        renderInput={(params) => (
+                          <TextField
+                            {...params}
+                            label="Linked notes"
+                            helperText="Link to other notes in this campaign for easy cross-referencing."
+                          />
+                        )}
+                      />
+                    ) : null}
 
                     <TextField
                       select
@@ -3806,6 +4156,7 @@ function App() {
                       onChange={(event) =>
                         handleDraftChange('status', event.target.value as NoteStatus)
                       }
+                      disabled={!canEditWorkspace}
                     >
                       {noteStatuses.map((status) => (
                         <MenuItem key={status} value={status}>
@@ -3814,11 +4165,20 @@ function App() {
                       ))}
                     </TextField>
 
-                    <NoteBodyEditor
-                      body={draft.body}
-                      onChange={(value) => handleDraftChange('body', value)}
-                      surfaceRadius={surfaceRadius}
-                    />
+                    {canEditWorkspace ? (
+                      <NoteBodyEditor
+                        body={draft.body}
+                        onChange={(value) => handleDraftChange('body', value)}
+                        surfaceRadius={surfaceRadius}
+                      />
+                    ) : (
+                      <Stack spacing={1}>
+                        <Typography variant="subtitle1">Body</Typography>
+                        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: surfaceRadius, p: { xs: 2, sm: 2.5 } }}>
+                          <NoteBodyPreview ariaLabel="Note body preview" body={draft.body} emptyMessage="Nothing to preview yet." />
+                        </Box>
+                      </Stack>
+                    )}
 
                     <Stack
                       direction={{ xs: 'column', sm: 'row' }}
@@ -3828,7 +4188,9 @@ function App() {
                       <Typography color="text.secondary" variant="body2">
                         {selectedNote && !isCreating
                           ? `Last updated ${formatTimestamp(selectedNote.updatedAt)}`
-                          : 'New notes are saved straight to the selected campaign.'}
+                          : canEditWorkspace
+                            ? `New notes are saved straight to the selected campaign.`
+                            : 'Viewer links can read shared notes but cannot save changes.'}
                       </Typography>
 
                       <Stack
@@ -3841,7 +4203,7 @@ function App() {
                           },
                         }}
                       >
-                        {!isCreating && selectedNote ? (
+                        {canEditWorkspace && !isCreating && selectedNote ? (
                           <Button
                             color="error"
                             variant="outlined"
@@ -3851,14 +4213,16 @@ function App() {
                             {isDeleting ? 'Deleting...' : 'Delete note'}
                           </Button>
                         ) : null}
-                        <Button
-                          variant="contained"
-                          startIcon={<SaveRoundedIcon />}
-                          onClick={handleSaveNote}
-                          disabled={isSaving || isDeleting}
-                        >
-                          {isSaving ? 'Saving...' : 'Save note'}
-                        </Button>
+                        {canEditWorkspace ? (
+                          <Button
+                            variant="contained"
+                            startIcon={<SaveRoundedIcon />}
+                            onClick={handleSaveNote}
+                            disabled={isSaving || isDeleting}
+                          >
+                            {isSaving ? 'Saving...' : 'Save note'}
+                          </Button>
+                        ) : null}
                       </Stack>
                     </Stack>
                   </Stack>
