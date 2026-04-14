@@ -66,4 +66,22 @@ describe('NoteBodyEditor', () => {
       )
     })
   })
+
+  it('keeps focus on the toggle when returning to editor mode', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <ControlledNoteBodyEditor initialBody={['Before the break', '', '---', '', 'After the break'].join('\n')} />,
+    )
+    const editorScope = within(container)
+    const sourceButton = editorScope.getByRole('button', { name: 'Source' })
+    const editorButton = editorScope.getByRole('button', { name: 'Editor' })
+
+    await user.click(sourceButton)
+    await user.click(editorButton)
+
+    await waitFor(() => {
+      expect(editorScope.getByLabelText('Body editor')).toBeTruthy()
+      expect(document.activeElement).toBe(editorButton)
+    })
+  })
 })
