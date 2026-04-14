@@ -84,7 +84,9 @@ const dividerTransformer: ElementTransformer = {
       parentNode.insertBefore(dividerNode)
     }
 
-    dividerNode.selectNext()
+    if (!isImport) {
+      dividerNode.selectNext()
+    }
   },
   type: 'element',
 }
