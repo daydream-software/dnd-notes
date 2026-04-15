@@ -85,6 +85,22 @@ export interface NoteAttribution {
   role: CampaignMembershipRole
 }
 
+export const noteReferenceTypes = ['linked', 'inline'] as const
+export type NoteReferenceType = (typeof noteReferenceTypes)[number]
+
+export interface NoteReference {
+  id: string
+  sourceNoteId: string
+  targetNoteId: string
+  campaignId: string
+  referenceType: NoteReferenceType
+  label: string | null
+  qualifier: string | null
+  positionInBody: number | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface Note {
   id: string
   campaignId: string
@@ -94,6 +110,7 @@ export interface Note {
   status: NoteStatus
   sessionName: string | null
   linkedNoteIds: string[]
+  references: NoteReference[]
   createdBy: NoteAttribution | null
   lastEditedBy: NoteAttribution | null
   createdAt: string

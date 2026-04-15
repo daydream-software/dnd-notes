@@ -14,6 +14,7 @@ import {
   defaultCampaignId,
   defaultOwnerDisplayName,
 } from './campaign.js'
+import { parseInlineNoteReferences } from './note-references.js'
 import type {
   CampaignInput,
   CampaignShareLink,
@@ -25,6 +26,8 @@ import type {
   Note,
   NoteAttribution,
   NoteInput,
+  NoteReference,
+  NoteReferenceType,
   NoteStats,
   OwnerAccount,
   OwnerRegistrationInput,
@@ -71,6 +74,47 @@ interface NoteRow {
   last_edited_by_role: string | null
   created_at: string
   updated_at: string
+}
+
+interface NoteReferenceRow {
+  id: string
+  source_note_id: string
+  target_note_id: string
+  campaign_id: string
+  reference_type: NoteReferenceType
+  label: string | null
+  qualifier: string | null
+  position_in_body: number | null
+  created_at: string
+  updated_at: string
+}
+
+interface NoteIdentityRow {
+  id: string
+  campaign_id: string
+}
+
+interface NoteRecord {
+  id: string
+  campaignId: string
+  title: string
+  body: string
+  tags: string[]
+  status: Note['status']
+  sessionName: string | null
+  explicitLinkedNoteIds: string[]
+  createdBy: NoteAttribution | null
+  lastEditedBy: NoteAttribution | null
+  createdAt: string
+  updatedAt: string
+}
+
+interface PendingReference {
+  targetNoteId: string
+  referenceType: NoteReferenceType
+  label: string | null
+  qualifier: string | null
+  positionInBody: number | null
 }
 
 interface OwnerAccountRow {
@@ -284,7 +328,7 @@ function mapMembershipRow(row: CampaignMembershipRow): CampaignMembership {
   }
 }
 
-function mapNoteRow(row: NoteRow): Note {
+function mapNoteRow(row: NoteRow): NoteRecord {
   let createdBy: NoteAttribution | null = null
 
   if (row.created_by_membership_id && row.created_by_display_name && row.created_by_role) {
@@ -312,7 +356,7 @@ function mapNoteRow(row: NoteRow): Note {
     body: row.body,
     status: row.status,
     tags: JSON.parse(row.tags_json) as string[],
-    linkedNoteIds: row.linked_notes_json 
+    explicitLinkedNoteIds: row.linked_notes_json
       ? (JSON.parse(row.linked_notes_json) as string[])
       : [],
     sessionName: row.session_name,
@@ -320,6 +364,69 @@ function mapNoteRow(row: NoteRow): Note {
     lastEditedBy,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+function mapNoteReferenceRow(row: NoteReferenceRow): NoteReference {
+  return {
+    id: row.id,
+    sourceNoteId: row.source_note_id,
+    targetNoteId: row.target_note_id,
+    campaignId: row.campaign_id,
+    referenceType: row.reference_type,
+    label: row.label,
+    qualifier: row.qualifier,
+    positionInBody: row.position_in_body,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function buildCompatibleLinkedNoteIds(explicitLinkedNoteIds: string[], references: NoteReference[]) {
+  const linkedReferenceTargets = new Set(
+    references
+      .filter((reference) => reference.referenceType === 'linked')
+      .map((reference) => reference.targetNoteId),
+  )
+  const linkedNoteIds: string[] = []
+  const seen = new Set<string>()
+
+  for (const targetNoteId of explicitLinkedNoteIds) {
+    if (!linkedReferenceTargets.has(targetNoteId) || seen.has(targetNoteId)) {
+      continue
+    }
+
+    linkedNoteIds.push(targetNoteId)
+    seen.add(targetNoteId)
+  }
+
+  for (const reference of references) {
+    if (seen.has(reference.targetNoteId)) {
+      continue
+    }
+
+    linkedNoteIds.push(reference.targetNoteId)
+    seen.add(reference.targetNoteId)
+  }
+
+  return linkedNoteIds
+}
+
+function composeNote(record: NoteRecord, references: NoteReference[]): Note {
+  return {
+    id: record.id,
+    campaignId: record.campaignId,
+    title: record.title,
+    body: record.body,
+    status: record.status,
+    tags: record.tags,
+    linkedNoteIds: buildCompatibleLinkedNoteIds(record.explicitLinkedNoteIds, references),
+    references,
+    sessionName: record.sessionName,
+    createdBy: record.createdBy,
+    lastEditedBy: record.lastEditedBy,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
   }
 }
 
@@ -470,6 +577,25 @@ export function createNoteStore(
 
     CREATE INDEX IF NOT EXISTS idx_notes_campaign_updated_at
     ON notes(campaign_id, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS note_references (
+      id TEXT PRIMARY KEY,
+      source_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+      target_note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+      campaign_id TEXT NOT NULL REFERENCES campaigns(id),
+      reference_type TEXT NOT NULL,
+      label TEXT,
+      qualifier TEXT,
+      position_in_body INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_note_references_target
+    ON note_references(target_note_id, campaign_id);
+
+    CREATE INDEX IF NOT EXISTS idx_note_references_source
+    ON note_references(source_note_id, campaign_id);
   `)
 
   const ensureNotesAttributionColumns = database.transaction(() => {
@@ -1095,6 +1221,95 @@ export function createNoteStore(
     ORDER BY notes.created_at ASC
   `)
 
+  const selectNoteIdentityById = database.prepare(`
+    SELECT id, campaign_id
+    FROM notes
+    WHERE id = ?
+  `)
+
+  const selectNoteReferencesByCampaignId = database.prepare(`
+    SELECT
+      id,
+      source_note_id,
+      target_note_id,
+      campaign_id,
+      reference_type,
+      label,
+      qualifier,
+      position_in_body,
+      created_at,
+      updated_at
+    FROM note_references
+    WHERE campaign_id = ?
+    ORDER BY
+      source_note_id ASC,
+      CASE reference_type WHEN 'linked' THEN 0 ELSE 1 END ASC,
+      COALESCE(position_in_body, -1) ASC,
+      created_at ASC
+  `)
+
+  const selectNoteReferencesBySourceNoteId = database.prepare(`
+    SELECT
+      id,
+      source_note_id,
+      target_note_id,
+      campaign_id,
+      reference_type,
+      label,
+      qualifier,
+      position_in_body,
+      created_at,
+      updated_at
+    FROM note_references
+    WHERE source_note_id = ?
+    ORDER BY
+      CASE reference_type WHEN 'linked' THEN 0 ELSE 1 END ASC,
+      COALESCE(position_in_body, -1) ASC,
+      created_at ASC
+  `)
+
+  const selectStoredNotesForReferenceSync = database.prepare(`
+    SELECT
+      id,
+      campaign_id,
+      body,
+      linked_notes_json,
+      created_at,
+      updated_at
+    FROM notes
+  `)
+
+  const deleteNoteReferencesBySourceNoteId = database.prepare(`
+    DELETE FROM note_references
+    WHERE source_note_id = ?
+  `)
+
+  const insertNoteReference = database.prepare(`
+    INSERT INTO note_references (
+      id,
+      source_note_id,
+      target_note_id,
+      campaign_id,
+      reference_type,
+      label,
+      qualifier,
+      position_in_body,
+      created_at,
+      updated_at
+    ) VALUES (
+      @id,
+      @source_note_id,
+      @target_note_id,
+      @campaign_id,
+      @reference_type,
+      @label,
+      @qualifier,
+      @position_in_body,
+      @created_at,
+      @updated_at
+    )
+  `)
+
 
   const insertNote = database.prepare(`
     INSERT INTO notes (
@@ -1645,14 +1860,194 @@ export function createNoteStore(
     return campaign
   }
 
-  const listNotes = (campaignId?: string) => {
-    const campaign = requireCampaign(campaignId)
-    return (selectNotesByCampaignId.all(campaign.id) as NoteRow[]).map((row) =>
-      mapNoteRow(row),
-    )
+  const groupReferencesBySource = (rows: NoteReferenceRow[]) => {
+    const referencesBySource = new Map<string, NoteReference[]>()
+
+    for (const row of rows) {
+      const reference = mapNoteReferenceRow(row)
+      const existingReferences = referencesBySource.get(reference.sourceNoteId)
+
+      if (existingReferences) {
+        existingReferences.push(reference)
+      } else {
+        referencesBySource.set(reference.sourceNoteId, [reference])
+      }
+    }
+
+    return referencesBySource
   }
 
-  const insertPersistedNote = (note: Note) => {
+  const validateReferenceTarget = (targetNoteId: string, campaignId: string) => {
+    const targetNote = selectNoteIdentityById.get(targetNoteId) as NoteIdentityRow | undefined
+
+    if (!targetNote) {
+      throw new Error(`Referenced note "${targetNoteId}" was not found.`)
+    }
+
+    if (targetNote.campaign_id !== campaignId) {
+      throw new Error(`Referenced note "${targetNoteId}" must be in the same campaign.`)
+    }
+  }
+
+  const buildPendingReferences = (
+    body: string,
+    explicitLinkedNoteIds: string[],
+    campaignId: string,
+    options: { allowInvalidReferences: boolean } = {
+      allowInvalidReferences: false,
+    },
+  ) => {
+    let inlineReferences: ReturnType<typeof parseInlineNoteReferences> = []
+
+    try {
+      inlineReferences = parseInlineNoteReferences(body)
+    } catch (error) {
+      if (!options.allowInvalidReferences) {
+        throw error
+      }
+    }
+
+    const references: PendingReference[] = []
+    const explicitTargetIds = new Set<string>()
+
+    for (const linkedNoteId of explicitLinkedNoteIds) {
+      const targetNoteId = linkedNoteId.trim()
+
+      if (targetNoteId.length === 0 || explicitTargetIds.has(targetNoteId)) {
+        continue
+      }
+
+      try {
+        validateReferenceTarget(targetNoteId, campaignId)
+      } catch (error) {
+        if (!options.allowInvalidReferences) {
+          throw error
+        }
+
+        continue
+      }
+
+      explicitTargetIds.add(targetNoteId)
+      references.push({
+        targetNoteId,
+        referenceType: 'linked',
+        label: null,
+        qualifier: null,
+        positionInBody: null,
+      })
+    }
+
+    for (const reference of inlineReferences) {
+      try {
+        validateReferenceTarget(reference.targetNoteId, campaignId)
+      } catch (error) {
+        if (!options.allowInvalidReferences) {
+          throw error
+        }
+
+        continue
+      }
+
+      references.push({
+        targetNoteId: reference.targetNoteId,
+        referenceType: 'inline',
+        label: reference.label,
+        qualifier: reference.qualifier,
+        positionInBody: reference.positionInBody,
+      })
+    }
+
+    return references
+  }
+
+  const replaceNoteReferences = (
+    noteId: string,
+    campaignId: string,
+    body: string,
+    explicitLinkedNoteIds: string[],
+    timestamp: string,
+    options?: { allowInvalidReferences: boolean },
+  ) => {
+    const references = buildPendingReferences(body, explicitLinkedNoteIds, campaignId, options)
+    const persistedReferences: NoteReference[] = []
+
+    deleteNoteReferencesBySourceNoteId.run(noteId)
+
+    for (const reference of references) {
+      const id = randomUUID()
+      const persistedReference = mapNoteReferenceRow({
+        id,
+        source_note_id: noteId,
+        target_note_id: reference.targetNoteId,
+        campaign_id: campaignId,
+        reference_type: reference.referenceType,
+        label: reference.label,
+        qualifier: reference.qualifier,
+        position_in_body: reference.positionInBody,
+        created_at: timestamp,
+        updated_at: timestamp,
+      })
+
+      insertNoteReference.run({
+        id,
+        source_note_id: persistedReference.sourceNoteId,
+        target_note_id: persistedReference.targetNoteId,
+        campaign_id: persistedReference.campaignId,
+        reference_type: persistedReference.referenceType,
+        label: persistedReference.label,
+        qualifier: persistedReference.qualifier,
+        position_in_body: persistedReference.positionInBody,
+        created_at: persistedReference.createdAt,
+        updated_at: persistedReference.updatedAt,
+      })
+
+      persistedReferences.push(persistedReference)
+    }
+
+    return persistedReferences
+  }
+
+  const syncNoteReferencesTransaction = database.transaction(
+    (options: { allowInvalidReferences: boolean } = { allowInvalidReferences: true }) => {
+      const noteRows = selectStoredNotesForReferenceSync.all() as Array<{
+        id: string
+        campaign_id: string
+        body: string
+        linked_notes_json: string | null
+        created_at: string
+        updated_at: string
+      }>
+
+      for (const row of noteRows) {
+        const explicitLinkedNoteIds = row.linked_notes_json
+          ? (JSON.parse(row.linked_notes_json) as string[])
+          : []
+
+        replaceNoteReferences(
+          row.id,
+          row.campaign_id,
+          row.body,
+          explicitLinkedNoteIds,
+          row.updated_at ?? row.created_at,
+          options,
+        )
+      }
+    },
+  )
+
+  const listNotes = (campaignId?: string) => {
+    const campaign = requireCampaign(campaignId)
+    const notes = (selectNotesByCampaignId.all(campaign.id) as NoteRow[]).map((row) =>
+      mapNoteRow(row),
+    )
+    const referencesBySource = groupReferencesBySource(
+      selectNoteReferencesByCampaignId.all(campaign.id) as NoteReferenceRow[],
+    )
+
+    return notes.map((note) => composeNote(note, referencesBySource.get(note.id) ?? []))
+  }
+
+  const insertPersistedNote = (note: NoteRecord) => {
     insertNote.run({
       id: note.id,
       campaign_id: note.campaignId,
@@ -1660,7 +2055,7 @@ export function createNoteStore(
       body: note.body,
       status: note.status,
       tags_json: JSON.stringify(note.tags),
-      linked_notes_json: JSON.stringify(note.linkedNoteIds),
+      linked_notes_json: JSON.stringify(note.explicitLinkedNoteIds),
       session_name: note.sessionName,
       created_by_membership_id: note.createdBy?.membershipId ?? null,
       last_edited_by_membership_id: note.lastEditedBy?.membershipId ?? null,
@@ -1675,10 +2070,9 @@ export function createNoteStore(
       deleteNotesByCampaignIdStatement.run(campaign.id)
 
       const baseTimestamp = Date.now()
-
-      return inputs.map((input, index) => {
+      const notes = inputs.map((input, index) => {
         const timestamp = new Date(baseTimestamp - index).toISOString()
-        const note: Note = {
+        const note: NoteRecord = {
           id: randomUUID(),
           campaignId: campaign.id,
           title: input.title,
@@ -1686,7 +2080,7 @@ export function createNoteStore(
           tags: input.tags,
           status: input.status,
           sessionName: input.sessionName,
-          linkedNoteIds: input.linkedNoteIds ?? [],
+          explicitLinkedNoteIds: input.linkedNoteIds ?? [],
           createdBy: null,
           lastEditedBy: null,
           createdAt: timestamp,
@@ -1696,10 +2090,133 @@ export function createNoteStore(
         insertPersistedNote(note)
         return note
       })
+
+      for (const note of notes) {
+        replaceNoteReferences(
+          note.id,
+          note.campaignId,
+          note.body,
+          note.explicitLinkedNoteIds,
+          note.updatedAt,
+          { allowInvalidReferences: false },
+        )
+      }
+
+      return notes.map((note) =>
+        composeNote(
+          note,
+          (selectNoteReferencesBySourceNoteId.all(note.id) as NoteReferenceRow[]).map(
+            mapNoteReferenceRow,
+          ),
+        ),
+      )
+    },
+  )
+
+  const createNoteTransaction = database.transaction((input: NoteInput, membershipId?: string) => {
+    const campaign = requireCampaign(input.campaignId)
+    const timestamp = new Date().toISOString()
+
+    const membership = membershipId
+      ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
+      : undefined
+
+    const attribution: NoteAttribution | null = membership
+      ? {
+          membershipId: membership.id,
+          displayName: membership.display_name,
+          role: membership.role as CampaignMembershipRole,
+        }
+      : null
+
+    const note: NoteRecord = {
+      id: randomUUID(),
+      campaignId: campaign.id,
+      title: input.title,
+      body: input.body,
+      tags: input.tags,
+      status: input.status,
+      sessionName: input.sessionName,
+      explicitLinkedNoteIds: input.linkedNoteIds ?? [],
+      createdBy: attribution,
+      lastEditedBy: attribution,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    }
+
+    insertPersistedNote(note)
+    const references = replaceNoteReferences(
+      note.id,
+      note.campaignId,
+      note.body,
+      note.explicitLinkedNoteIds,
+      note.updatedAt,
+      { allowInvalidReferences: false },
+    )
+
+    return composeNote(note, references)
+  })
+
+  const updateNoteTransaction = database.transaction(
+    (noteId: string, input: NoteInput, membershipId?: string) => {
+      const existingRow = selectNoteById.get(noteId) as NoteRow | undefined
+
+      if (!existingRow) {
+        return null
+      }
+
+      const existing = mapNoteRow(existingRow)
+      const membership = membershipId
+        ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
+        : undefined
+
+      const editAttribution: NoteAttribution | null = membership
+        ? {
+            membershipId: membership.id,
+            displayName: membership.display_name,
+            role: membership.role as CampaignMembershipRole,
+          }
+        : existing.lastEditedBy
+
+      const nextNote: NoteRecord = {
+        ...existing,
+        title: input.title,
+        body: input.body,
+        tags: input.tags,
+        status: input.status,
+        sessionName: input.sessionName,
+        explicitLinkedNoteIds: input.linkedNoteIds ?? existing.explicitLinkedNoteIds,
+        lastEditedBy: editAttribution,
+        updatedAt: createTimestampAfter(existing.updatedAt),
+      }
+
+      updateNoteStatement.run({
+        id: nextNote.id,
+        title: nextNote.title,
+        body: nextNote.body,
+        status: nextNote.status,
+        tags_json: JSON.stringify(nextNote.tags),
+        linked_notes_json: JSON.stringify(nextNote.explicitLinkedNoteIds),
+        session_name: nextNote.sessionName,
+        last_edited_by_membership_id: nextNote.lastEditedBy?.membershipId ?? null,
+        updated_at: nextNote.updatedAt,
+      })
+
+      const references = replaceNoteReferences(
+        nextNote.id,
+        nextNote.campaignId,
+        nextNote.body,
+        nextNote.explicitLinkedNoteIds,
+        nextNote.updatedAt,
+        { allowInvalidReferences: false },
+      )
+
+      return composeNote(nextNote, references)
     },
   )
 
   ensureDefaultCampaignTransaction()
+  syncNoteReferencesTransaction()
 
   return {
     listCampaigns,
@@ -1919,11 +2436,27 @@ export function createNoteStore(
         campaignId,
         sessionName,
       ) as NoteRow[]
-      return rows.map(mapNoteRow)
+      const referencesBySource = groupReferencesBySource(
+        selectNoteReferencesByCampaignId.all(campaignId) as NoteReferenceRow[],
+      )
+
+      return rows.map((row) => {
+        const note = mapNoteRow(row)
+        return composeNote(note, referencesBySource.get(note.id) ?? [])
+      })
     },
     getNote(noteId) {
       const row = selectNoteById.get(noteId) as NoteRow | undefined
-      return row ? mapNoteRow(row) : null
+      if (!row) {
+        return null
+      }
+
+      const note = mapNoteRow(row)
+      const references = (selectNoteReferencesBySourceNoteId.all(noteId) as NoteReferenceRow[]).map(
+        mapNoteReferenceRow,
+      )
+
+      return composeNote(note, references)
     },
     getBacklinks(noteId) {
       const targetNote = this.getNote(noteId)
@@ -1934,101 +2467,10 @@ export function createNoteStore(
       return allNotes.filter((note) => note.linkedNoteIds.includes(noteId))
     },
     createNote(input, membershipId) {
-      const campaign = requireCampaign(input.campaignId)
-      const timestamp = new Date().toISOString()
-
-      const membership = membershipId
-        ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
-        : undefined
-
-      const attribution: NoteAttribution | null = membership
-        ? {
-            membershipId: membership.id,
-            displayName: membership.display_name,
-            role: membership.role as CampaignMembershipRole,
-          }
-        : null
-
-      // Validate linked notes exist and are in the same campaign
-      const linkedNoteIds = input.linkedNoteIds ?? []
-      for (const linkedId of linkedNoteIds) {
-        const linkedNote = this.getNote(linkedId)
-        if (!linkedNote || linkedNote.campaignId !== campaign.id) {
-          throw new Error(`Linked note "${linkedId}" not found or not in the same campaign.`)
-        }
-      }
-
-      const note: Note = {
-        id: randomUUID(),
-        campaignId: campaign.id,
-        title: input.title,
-        body: input.body,
-        tags: input.tags,
-        status: input.status,
-        sessionName: input.sessionName,
-        linkedNoteIds,
-        createdBy: attribution,
-        lastEditedBy: attribution,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-      }
-
-      insertPersistedNote(note)
-      return note
+      return createNoteTransaction(input, membershipId)
     },
     updateNote(noteId, input, membershipId) {
-      const existing = this.getNote(noteId)
-
-      if (!existing) {
-        return null
-      }
-
-      const membership = membershipId
-        ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
-        : undefined
-
-      const editAttribution: NoteAttribution | null = membership
-        ? {
-            membershipId: membership.id,
-            displayName: membership.display_name,
-            role: membership.role as CampaignMembershipRole,
-          }
-        : existing.lastEditedBy
-
-      // Validate linked notes exist and are in the same campaign
-      const linkedNoteIds = input.linkedNoteIds ?? existing.linkedNoteIds
-      for (const linkedId of linkedNoteIds) {
-        const linkedNote = this.getNote(linkedId)
-        if (!linkedNote || linkedNote.campaignId !== existing.campaignId) {
-          throw new Error(`Linked note "${linkedId}" not found or not in the same campaign.`)
-        }
-      }
-
-      const nextNote: Note = {
-        ...existing,
-        title: input.title,
-        body: input.body,
-        tags: input.tags,
-        status: input.status,
-        sessionName: input.sessionName,
-        linkedNoteIds,
-        lastEditedBy: editAttribution,
-        updatedAt: createTimestampAfter(existing.updatedAt),
-      }
-
-      updateNoteStatement.run({
-        id: nextNote.id,
-        title: nextNote.title,
-        body: nextNote.body,
-        status: nextNote.status,
-        tags_json: JSON.stringify(nextNote.tags),
-        linked_notes_json: JSON.stringify(nextNote.linkedNoteIds),
-        session_name: nextNote.sessionName,
-        last_edited_by_membership_id: nextNote.lastEditedBy?.membershipId ?? null,
-        updated_at: nextNote.updatedAt,
-      })
-
-      return nextNote
+      return updateNoteTransaction(noteId, input, membershipId)
     },
     deleteNote(noteId) {
       const result = deleteNoteStatement.run(noteId)

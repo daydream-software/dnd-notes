@@ -1,5 +1,13 @@
+import { stripInlineNoteReferenceSyntax } from './note-references'
+
+function getWikiLinkDisplayText(reference: string) {
+  const [noteId, label] = reference.split('|', 3)
+
+  return label?.trim() || noteId.trim()
+}
+
 export function markdownToPlainText(markdown: string) {
-  return markdown
+  return stripInlineNoteReferenceSyntax(markdown)
     .replace(/\r\n?/g, '\n')
     .replace(/```[\s\S]*?```/g, (block) =>
       block.replace(/^```[^\n]*\n?/, '').replace(/\n?```$/, ''),
@@ -7,8 +15,7 @@ export function markdownToPlainText(markdown: string) {
     .replace(/`([^`]+)`/g, '$1')
     .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/!\[\[([^|\]]+\|)?([^\]]+)\]\]/g, '$2')
-    .replace(/\[\[([^|\]]+\|)?([^\]]+)\]\]/g, '$2')
+    .replace(/\[\[([^\]]+)\]\]/g, (_, reference: string) => getWikiLinkDisplayText(reference))
     .replace(/^>\s?/gm, '')
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/gm, '')

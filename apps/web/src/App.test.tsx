@@ -60,7 +60,7 @@ const notes = [
     id: 'vault-sigils',
     campaignId: campaign.id,
     title: 'Vault sigils mapped',
-    body: 'Three sigils point toward the western reef.',
+    body: 'Three sigils point toward the western reef and ![[storm-ledger|Storm ledger updated|searching for]].',
     tags: ['clue', 'sigils'],
     linkedNoteIds: [],
     status: 'active',
@@ -198,5 +198,88 @@ describe('App smoke path', () => {
     expect(screen.getByLabelText('Search notes')).toBeTruthy()
     expect(screen.getAllByText('Moonshae Ledger').length).toBeGreaterThan(0)
     expect(getVisibleNotes()).toHaveLength(2)
+  })
+
+  it('shows inline body references in the backlinks panel', async () => {
+    const user = userEvent.setup()
+
+    await registerOwnerAndLoadWorkspace(user)
+    const stormLedgerHeading = within(
+      screen.getByRole('list', { name: 'Notes list' }),
+    ).getByText('Storm ledger updated')
+    const stormLedgerButton = stormLedgerHeading.closest('[role="button"]')
+
+    expect(stormLedgerButton).toBeTruthy()
+    await user.click(stormLedgerButton!)
+
+    expect(screen.getByText('Referenced by (1)')).toBeTruthy()
+    expect(
+      screen.getByText('Vault sigils mapped searching for Storm ledger updated'),
+    ).toBeTruthy()
+    expect(screen.queryByLabelText('Linked notes')).toBeNull()
+  })
+
+  it('shows inline link qualifiers in the linked notes panel', async () => {
+    const user = userEvent.setup()
+
+    await registerOwnerAndLoadWorkspace(user)
+    const vaultSigilsHeading = within(
+      screen.getByRole('list', { name: 'Notes list' }),
+    ).getByText('Vault sigils mapped')
+    const vaultSigilsButton = vaultSigilsHeading.closest('[role="button"]')
+
+    expect(vaultSigilsButton).toBeTruthy()
+    await user.click(vaultSigilsButton!)
+
+    expect(screen.getByText('Linked notes (1)')).toBeTruthy()
+    expect(
+      screen.getByText('Vault sigils mapped searching for Storm ledger updated'),
+    ).toBeTruthy()
+  })
+
+  it('keeps the followed linked note selected while search is active', async () => {
+    const user = userEvent.setup()
+
+    await registerOwnerAndLoadWorkspace(user)
+    await user.type(screen.getByLabelText('Search notes'), 'vault')
+
+    await user.click(
+      within(screen.getByRole('list', { name: 'Notes list' })).getByText('Vault sigils mapped'),
+    )
+
+    const linkedRelationship = screen.getByText(
+      'Vault sigils mapped searching for Storm ledger updated',
+    )
+    const linkedNoteCard = linkedRelationship.closest('.MuiCard-root')
+
+    expect(linkedNoteCard).toBeTruthy()
+    await user.click(linkedNoteCard!)
+
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+      'Storm ledger updated',
+    )
+  })
+
+  it('keeps the followed linked note selected while tag filters are active', async () => {
+    const user = userEvent.setup()
+
+    await registerOwnerAndLoadWorkspace(user)
+    await user.type(screen.getByLabelText('Search notes'), 'vault')
+    await user.click(screen.getAllByRole('button', { name: /sigils/ })[0])
+    await user.click(
+      within(screen.getByRole('list', { name: 'Notes list' })).getByText('Vault sigils mapped'),
+    )
+
+    const linkedRelationship = screen.getByText(
+      'Vault sigils mapped searching for Storm ledger updated',
+    )
+    const linkedNoteCard = linkedRelationship.closest('.MuiCard-root')
+
+    expect(linkedNoteCard).toBeTruthy()
+    await user.click(linkedNoteCard!)
+
+    expect((screen.getByLabelText('Title') as HTMLInputElement).value).toBe(
+      'Storm ledger updated',
+    )
   })
 })

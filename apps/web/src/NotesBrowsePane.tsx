@@ -117,25 +117,23 @@ function NotesBrowsePane({
               }}
               sx={{ flex: 1 }}
             />
-            <Stack
-              direction={{ xs: 'column', sm: 'row' }}
-              spacing={1}
-              sx={{ alignItems: { sm: 'center' }, flexWrap: 'wrap' }}
-            >
-              <Typography color="text.secondary" variant="body2">
-                Tags
-              </Typography>
-              {selectedTagLabel ? (
-                <>
-                  <Chip label={selectedTagLabel} color="primary" size="small" />
-                  {onClearTagFilter ? (
-                    <Button size="small" variant="text" onClick={onClearTagFilter}>
-                      Clear filter
-                    </Button>
-                  ) : null}
-                </>
-              ) : null}
-            </Stack>
+            {selectedTagLabel ? (
+              <Stack
+                direction={{ xs: 'column', sm: 'row' }}
+                spacing={1}
+                sx={{ alignItems: { sm: 'center' }, flexWrap: 'wrap' }}
+              >
+                <Typography color="text.secondary" variant="body2">
+                  Tags
+                </Typography>
+                <Chip label={selectedTagLabel} color="primary" size="small" />
+                {onClearTagFilter ? (
+                  <Button size="small" variant="text" onClick={onClearTagFilter}>
+                    Clear filter
+                  </Button>
+                ) : null}
+              </Stack>
+            ) : null}
           </Stack>
 
           {quickCapture ? (
