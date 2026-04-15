@@ -1,4 +1,4 @@
-name: Web Focused CI
+name: Web Workspace CI
 
 on:
   push:
@@ -23,6 +23,8 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout code
@@ -37,11 +39,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Lint focused web slice
+      - name: Lint web workspace
         run: npm run lint:web
 
-      - name: Run focused web tests
-        run: npm run test:web:focused
+      - name: Run web tests
+        run: npm run test:web
 
       - name: Build web workspace
         run: npm run build:web

@@ -1,6 +1,6 @@
 ---
 name: "workspace-smoke-ci"
-description: "Use root workspace scripts plus a focused smoke lane to make monorepo CI reliable without overcommitting to slow suites."
+description: "Use root workspace scripts to make monorepo CI reliable, and keep narrow smoke lanes only while the broader suite is genuinely unstable."
 domain: "testing"
 confidence: "high"
 source: "earned"
@@ -11,20 +11,21 @@ tools:
 ---
 
 ## Context
-Apply this when a monorepo has real tests, but CI either points at the wrong workspace or tries to run a slow suite that is not the right first gate. The goal is to make the path to reliable coverage obvious and reusable.
+Apply this when a monorepo has real tests, but CI either points at the wrong workspace or lacks a durable path through lint, test, and build. Start with the narrowest trustworthy lane when needed, then retire that fallback once the broader suite is healthy again.
 
 ## Patterns
 - Put durable workspace entrypoints in the repo root `package.json` instead of hard-coding `npm run ... --workspace ...` strings in multiple workflows.
 - Use explicit workspace paths like `apps/web` when the repo is configured that way; shorthand names can fail even when package names look obvious.
-- Keep two lanes when needed: a full suite entrypoint for local investigation and a smaller smoke entrypoint for fast CI confidence.
+- Keep two lanes only when needed: a full suite entrypoint for normal validation and a smaller smoke entrypoint for temporary CI confidence while the broader suite is still unstable.
 - Have workflows call the root scripts, not ad hoc commands, so local and CI execution stay aligned.
 
 ## Examples
 - `package.json`: `test:web` wraps `npm run test --workspace apps/web --`
-- `package.json`: `test:web:focused` targets stable smoke files such as `CampaignSearch.test.tsx`
-- `.github/workflows/web-test.yml`: `npm run lint:web`, `npm run test:web:focused`, `npm run build:web`
+- `.github/workflows/web-test.yml`: `npm run lint:web`, `npm run test:web`, `npm run build:web`
+- `.github/workflows/ci.yml`: `npm run lint`, `npm test`, `npm run build`
 
 ## Anti-Patterns
 - Using guessed workspace selectors like `--workspace web` in a repo that actually defines `apps/web`
 - Making the first CI gate depend on the slowest, broadest integration file when a smaller regression slice would prove the tooling path
+- Keeping a focused-only fallback after the full suite is stable again
 - Duplicating raw workspace commands in every workflow instead of centralizing them in root scripts
