@@ -14,7 +14,6 @@
     "lint:web": "npm run lint --workspace apps/web",
     "build:web": "npm run build --workspace apps/web",
     "test:web": "npm run test --workspace apps/web --",
-    "test:web:focused": "npm run test:web -- src/note-formatting.test.tsx src/NoteBodyEditor.test.tsx src/CampaignSearch.test.tsx --reporter=dot",
     "seed:data": "npm run seed:data --workspace apps/api",
     "reset:data": "npm run reset:data --workspace apps/api",
     "build": "npm run build --workspaces --if-present",
