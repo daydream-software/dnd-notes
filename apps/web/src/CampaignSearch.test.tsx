@@ -101,7 +101,7 @@ const notes = [
     id: 'note-3',
     campaignId: campaign.id,
     title: 'Mysterious Artifact',
-    body: 'Discovered an ancient artifact with dragon runes',
+    body: 'Discovered an ancient artifact with dragon runes beside ![[note-1|Dragon Encounter|searching for]].',
     tags: ['artifact', 'mystery'],
     linkedNoteIds: [],
     status: 'active',
@@ -250,6 +250,33 @@ describe('Campaign note search regressions', () => {
     expect(screen.getByText('Goblin Camp')).toBeTruthy()
   })
 
+  it('filters notes by inline reference labels stored in the markdown body', async () => {
+    const user = userEvent.setup()
+
+    await registerAndOpenWorkspace(user)
+    await user.type(screen.getByLabelText('Search notes'), 'dragon encounter')
+
+    await waitFor(() => {
+      expect(getVisibleNoteButtons()).toHaveLength(2)
+    })
+
+    expect(screen.getByText('Dragon Encounter')).toBeTruthy()
+    expect(screen.getByText('Mysterious Artifact')).toBeTruthy()
+  })
+
+  it('filters notes by inline reference qualifiers stored in the markdown body', async () => {
+    const user = userEvent.setup()
+
+    await registerAndOpenWorkspace(user)
+    await user.type(screen.getByLabelText('Search notes'), 'searching for')
+
+    await waitFor(() => {
+      expect(getVisibleNoteButtons()).toHaveLength(1)
+    })
+
+    expect(screen.getByText('Mysterious Artifact')).toBeTruthy()
+  })
+
   it('filters notes by session name', async () => {
     const user = userEvent.setup()
 
@@ -324,7 +351,7 @@ describe('Campaign note search regressions', () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          'Showing 3 notes matching "dragon" across titles, body, tags, sessions, and collaborators.',
+          'Showing 3 notes matching "dragon" across titles, body, link relationships, tags, sessions, and collaborators.',
         ),
       ).toBeTruthy()
     })

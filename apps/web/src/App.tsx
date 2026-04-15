@@ -31,7 +31,14 @@ import {
   useMediaQuery,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import {
   claimSharedMembership,
   consolidateCampaignMemberships,
@@ -78,6 +85,7 @@ import { markdownToPlainText } from './note-excerpts'
 import NoteBodyEditor from './NoteBodyEditor'
 import NotesBrowsePane from './NotesBrowsePane'
 import { NoteBodyPreview } from './note-formatting'
+import { extractInlineNoteReferences } from './note-references'
 import type {
   ActivityCollaborator,
   CampaignInput,
@@ -147,6 +155,16 @@ interface RevealedShareLink {
 interface TagFacet {
   tag: string
   count: number
+}
+
+interface ResolvedNoteLink {
+  targetNoteId: string
+  qualifiers: string[]
+}
+
+interface NoteLinkPanelItem {
+  note: Note
+  qualifiers: string[]
 }
 
 type CampaignFormMode = 'closed' | 'create' | 'edit'
@@ -356,6 +374,104 @@ function excerpt(body: string) {
   return `${normalizedBody.slice(0, 109)}...`
 }
 
+function getResolvedNoteLinks(note: Note): ResolvedNoteLink[] {
+  const qualifiersByTargetId = new Map<string, Set<string>>()
+
+  const ensureTarget = (targetNoteId: string) => {
+    const existingQualifiers = qualifiersByTargetId.get(targetNoteId)
+
+    if (existingQualifiers) {
+      return existingQualifiers
+    }
+
+    const nextQualifiers = new Set<string>()
+    qualifiersByTargetId.set(targetNoteId, nextQualifiers)
+    return nextQualifiers
+  }
+
+  for (const linkedNoteId of note.linkedNoteIds ?? []) {
+    ensureTarget(linkedNoteId)
+  }
+
+  const structuredReferences = Array.isArray(note.references) ? note.references : null
+
+  if (structuredReferences && structuredReferences.length > 0) {
+    for (const reference of structuredReferences) {
+      const qualifiers = ensureTarget(reference.targetNoteId)
+
+      if (reference.qualifier) {
+        qualifiers.add(reference.qualifier)
+      }
+    }
+  } else {
+    for (const reference of extractInlineNoteReferences(note.body)) {
+      const qualifiers = ensureTarget(reference.noteId)
+
+      if (reference.qualifier) {
+        qualifiers.add(reference.qualifier)
+      }
+    }
+  }
+
+  return Array.from(qualifiersByTargetId, ([targetNoteId, qualifiers]) => ({
+    targetNoteId,
+    qualifiers: Array.from(qualifiers).sort((left, right) => left.localeCompare(right)),
+  }))
+}
+
+function getNoteDisplayTitle(note: Pick<Note, 'title' | 'id'>) {
+  return note.title.trim() || note.id
+}
+
+function formatResolvedRelationshipText(
+  originTitle: string,
+  qualifiers: readonly string[],
+  targetTitle: string,
+) {
+  if (qualifiers.length === 0) {
+    return null
+  }
+
+  return `${originTitle} ${qualifiers.join(' / ')} ${targetTitle}`
+}
+
+function getNoteRelationshipSearchText(
+  note: Note,
+  noteTitleById: ReadonlyMap<string, string>,
+) {
+  const originTitle = getNoteDisplayTitle(note)
+
+  return getResolvedNoteLinks(note)
+    .flatMap((reference) => {
+      const targetTitle = noteTitleById.get(reference.targetNoteId) ?? reference.targetNoteId
+      const relationshipText = formatResolvedRelationshipText(
+        originTitle,
+        reference.qualifiers,
+        targetTitle,
+      )
+
+      return relationshipText ? [relationshipText] : []
+    })
+    .join(' ')
+}
+
+function createNoteSearchText(
+  note: Note,
+  noteTitleById: ReadonlyMap<string, string>,
+) {
+  return [
+    getNoteDisplayTitle(note),
+    markdownToPlainText(note.body),
+    getNoteRelationshipSearchText(note, noteTitleById),
+    note.tags.join(' '),
+    note.sessionName ?? '',
+    note.createdBy?.displayName ?? '',
+    note.lastEditedBy?.displayName ?? '',
+  ]
+    .join('\n')
+    .toLowerCase()
+}
+
 function sortActivityEntries(entries: NoteActivityEntry[]) {
   return [...entries].sort((leftEntry, rightEntry) =>
     rightEntry.updatedAt.localeCompare(leftEntry.updatedAt),
@@ -532,6 +648,7 @@ function App() {
     useState<NarrowWorkspacePanel>('browse')
   const [showSplitNoteWorkspace, setShowSplitNoteWorkspace] = useState(false)
   const [searchText, setSearchText] = useState('')
+  const deferredSearchText = useDeferredValue(searchText)
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
   const [tagInputValue, setTagInputValue] = useState('')
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
@@ -709,19 +826,62 @@ function App() {
     [resolvedActivityCollaborators, selectedActivityMembershipId],
   )
   const draftTags = useMemo(() => normalizeTags([draft.tagsText]), [draft.tagsText])
+  const noteLinkOptions = useMemo(
+    () =>
+      notes
+        .filter((note) => note.id !== selectedNoteId)
+        .map((note) => ({
+          id: note.id,
+          title: note.title || '(Untitled)',
+        })),
+    [notes, selectedNoteId],
+  )
+  const noteTitlesById = useMemo(
+    () => new Map(notes.map((note) => [note.id, getNoteDisplayTitle(note)])),
+    [notes],
+  )
+  const noteSearchEntries = useMemo(
+    () =>
+      notes.map((note) => ({
+        note,
+        searchText: createNoteSearchText(note, noteTitlesById),
+      })),
+    [noteTitlesById, notes],
+  )
 
-  const linkedNotes = useMemo(() => {
+  const linkedNotes = useMemo<NoteLinkPanelItem[]>(() => {
     if (!selectedNote) {
       return []
     }
-    return notes.filter((note) => selectedNote.linkedNoteIds?.includes(note.id))
+
+    const linkedNoteMap = new Map(
+      getResolvedNoteLinks(selectedNote).map((reference) => [
+        reference.targetNoteId,
+        reference.qualifiers,
+      ]),
+    )
+
+    return notes.flatMap((note) => {
+      const qualifiers = linkedNoteMap.get(note.id)
+
+      return qualifiers ? [{ note, qualifiers }] : []
+    })
   }, [selectedNote, notes])
 
-  const backlinks = useMemo(() => {
+  const backlinks = useMemo<NoteLinkPanelItem[]>(() => {
     if (!selectedNoteId) {
       return []
     }
-    return notes.filter((note) => note.linkedNoteIds?.includes(selectedNoteId))
+
+    return notes.flatMap((note) => {
+      const matchingReference = getResolvedNoteLinks(note).find(
+        (reference) => reference.targetNoteId === selectedNoteId,
+      )
+
+      return matchingReference
+        ? [{ note, qualifiers: matchingReference.qualifiers }]
+        : []
+    })
   }, [selectedNoteId, notes])
   const tagFacets = useMemo(() => createTagFacets(notes), [notes])
   const selectedSourceMembership = useMemo(
@@ -760,45 +920,22 @@ function App() {
     (!membershipConsolidationPreview.requiresRoleMismatchConfirmation ||
       membershipConsolidationDraft.confirmRoleMismatch)
   const filteredNotes = useMemo(() => {
-    let result = notes
+    let entries = noteSearchEntries
 
-    // Filter by tag if selected
     if (selectedTagFilter) {
-      result = result.filter((note) => note.tags.includes(selectedTagFilter))
+      entries = entries.filter(({ note }) => note.tags.includes(selectedTagFilter))
     }
 
-    // Filter by search text
-    if (searchText.trim()) {
-      const searchLower = searchText.toLowerCase()
-      result = result.filter((note) => {
-        const titleMatch = note.title.toLowerCase().includes(searchLower)
-        const bodyMatch = note.body.toLowerCase().includes(searchLower)
-        const tagMatch = note.tags.some((tag) =>
-          tag.toLowerCase().includes(searchLower),
-        )
-        const sessionMatch = note.sessionName
-          ?.toLowerCase()
-          .includes(searchLower)
-        const creatorMatch = note.createdBy?.displayName
-          .toLowerCase()
-          .includes(searchLower)
-        const editorMatch = note.lastEditedBy?.displayName
-          .toLowerCase()
-          .includes(searchLower)
+    const normalizedSearchText = deferredSearchText.trim().toLowerCase()
 
-        return (
-          titleMatch ||
-          bodyMatch ||
-          tagMatch ||
-          sessionMatch ||
-          creatorMatch ||
-          editorMatch
-        )
-      })
+    if (normalizedSearchText) {
+      entries = entries.filter(({ searchText }) =>
+        searchText.includes(normalizedSearchText),
+      )
     }
 
-    return result
-  }, [notes, selectedTagFilter, searchText])
+    return entries.map(({ note }) => note)
+  }, [deferredSearchText, noteSearchEntries, selectedTagFilter])
   const displayedNotes = useMemo(
     () =>
       noteBrowseMode === 'sessions' && selectedSessionName
@@ -856,45 +993,6 @@ function App() {
     }
   }, [selectedTagFilter, tagFacets])
 
-  // Keep the selected note in sync with the displayed note list so the
-  // detail pane never shows a note that is not visible in the list.
-  const syncNoteSelectionToVisibleNotes = useCallback(
-    (visibleNotes: Note[]) => {
-      if (!selectedNoteId || isCreating) {
-        return
-      }
-
-      const stillVisible = visibleNotes.some(
-        (note) => note.id === selectedNoteId,
-      )
-
-      if (!stillVisible) {
-        const fallback = visibleNotes[0] ?? null
-
-        if (fallback) {
-          setSelectedNoteId(fallback.id)
-          setIsCreating(false)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createDraftFromNote(fallback))
-        } else {
-          setSelectedNoteId(null)
-          setIsCreating(true)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createEmptyDraft())
-        }
-      }
-    },
-    [isCreating, selectedNoteId],
-  )
-
-  useEffect(() => {
-    if (noteBrowseMode !== 'notes' || !selectedTagFilter) {
-      return
-    }
-
-    syncNoteSelectionToVisibleNotes(displayedNotes)
-  }, [displayedNotes, noteBrowseMode, selectedTagFilter, syncNoteSelectionToVisibleNotes])
-
   const statCards = useMemo(() => {
     if (!overview) {
       return []
@@ -945,7 +1043,7 @@ function App() {
         : searchText.trim() && selectedTagFacet
           ? `Showing ${filteredNotes.length} ${filteredNotes.length === 1 ? 'note' : 'notes'} matching "${searchText}" in ${selectedTagFacet.tag}.`
           : searchText.trim()
-            ? `Showing ${filteredNotes.length} ${filteredNotes.length === 1 ? 'note' : 'notes'} matching "${searchText}" across titles, body, tags, sessions, and collaborators.`
+            ? `Showing ${filteredNotes.length} ${filteredNotes.length === 1 ? 'note' : 'notes'} matching "${searchText}" across titles, body, link relationships, tags, sessions, and collaborators.`
             : selectedTagFacet
               ? `Showing ${selectedTagFacet.count} ${
                   selectedTagFacet.count === 1 ? 'note' : 'notes'
@@ -1529,11 +1627,6 @@ function App() {
     const nextTag = selectedTagFilter === tag ? null : tag
     setSelectedTagFilter(nextTag)
     setError(null)
-
-    if (nextTag) {
-      const filtered = notes.filter((note) => note.tags.includes(nextTag))
-      syncNoteSelectionToVisibleNotes(filtered)
-    }
   }
 
   const handleClearTagFilter = () => {
@@ -4134,30 +4227,6 @@ function App() {
                       <TextField label="Tags" value={createTagsText(draftTags)} slotProps={{ input: { readOnly: true } }} />
                     )}
 
-                    {canEditWorkspace ? (
-                      <Autocomplete
-                        multiple
-                        disablePortal
-                        filterSelectedOptions
-                        options={notes.filter((n) => n.id !== selectedNoteId)}
-                        getOptionLabel={(option) => option.title || '(Untitled)'}
-                        value={notes.filter((n) => draft.linkedNoteIds?.includes(n.id))}
-                        onChange={(_, value) => {
-                          handleDraftChange(
-                            'linkedNoteIds',
-                            value.map((n) => n.id),
-                          )
-                        }}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            label="Linked notes"
-                            helperText="Link to other notes in this campaign for easy cross-referencing."
-                          />
-                        )}
-                      />
-                    ) : null}
-
                     <TextField
                       select
                       label="Status"
@@ -4179,6 +4248,7 @@ function App() {
                         body={draft.body}
                         onChange={(value) => handleDraftChange('body', value)}
                         surfaceRadius={surfaceRadius}
+                        noteOptions={noteLinkOptions}
                       />
                     ) : (
                       <Stack spacing={1}>
@@ -4248,7 +4318,7 @@ function App() {
                               Linked notes ({linkedNotes.length})
                             </Typography>
                             <Stack spacing={1}>
-                              {linkedNotes.map((note) => (
+                              {linkedNotes.map(({ note, qualifiers }) => (
                                 <Card
                                   key={note.id}
                                   variant="outlined"
@@ -4259,7 +4329,25 @@ function App() {
                                   onClick={() => handleSelectNote(note)}
                                 >
                                   <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                                    <Typography variant="body1">{note.title}</Typography>
+                                    <Typography variant="body1">{getNoteDisplayTitle(note)}</Typography>
+                                    {selectedNote &&
+                                    formatResolvedRelationshipText(
+                                      getNoteDisplayTitle(selectedNote),
+                                      qualifiers,
+                                      getNoteDisplayTitle(note),
+                                    ) ? (
+                                      <Typography
+                                        variant="caption"
+                                        color="text.secondary"
+                                        sx={{ display: 'block', mb: 0.5 }}
+                                      >
+                                        {formatResolvedRelationshipText(
+                                          getNoteDisplayTitle(selectedNote),
+                                          qualifiers,
+                                          getNoteDisplayTitle(note),
+                                        )}
+                                      </Typography>
+                                    ) : null}
                                     <Typography variant="body2" color="text.secondary">
                                       {excerpt(note.body)}
                                     </Typography>
@@ -4279,7 +4367,7 @@ function App() {
                               These notes link to this one.
                             </Typography>
                             <Stack spacing={1}>
-                              {backlinks.map((note) => (
+                              {backlinks.map(({ note, qualifiers }) => (
                                 <Card
                                   key={note.id}
                                   variant="outlined"
@@ -4290,7 +4378,25 @@ function App() {
                                   onClick={() => handleSelectNote(note)}
                                 >
                                   <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                                    <Typography variant="body1">{note.title}</Typography>
+                                    <Typography variant="body1">{getNoteDisplayTitle(note)}</Typography>
+                                    {selectedNote &&
+                                    formatResolvedRelationshipText(
+                                      getNoteDisplayTitle(note),
+                                      qualifiers,
+                                      getNoteDisplayTitle(selectedNote),
+                                    ) ? (
+                                      <Typography
+                                        variant="caption"
+                                        color="text.secondary"
+                                        sx={{ display: 'block', mb: 0.5 }}
+                                      >
+                                        {formatResolvedRelationshipText(
+                                          getNoteDisplayTitle(note),
+                                          qualifiers,
+                                          getNoteDisplayTitle(selectedNote),
+                                        )}
+                                      </Typography>
+                                    ) : null}
                                     <Typography variant="body2" color="text.secondary">
                                       {excerpt(note.body)}
                                     </Typography>

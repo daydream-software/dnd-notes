@@ -1628,15 +1628,21 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.createNote(
-        {
-          ...validation.data,
-          campaignId: shared.campaign.id,
-        },
-        membership.id,
-      )
+      try {
+        const note = noteStore.createNote(
+          {
+            ...validation.data,
+            campaignId: shared.campaign.id,
+          },
+          membership.id,
+        )
 
-      response.status(201).json({ note })
+        response.status(201).json({ note })
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : 'Failed to create note.',
+        })
+      }
     },
   )
 
@@ -1682,21 +1688,27 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
         return
       }
 
-      const note = noteStore.updateNote(
-        request.params.noteId,
-        {
-          ...validation.data,
-          campaignId: shared.campaign.id,
-        },
-        membership.id,
-      )
+      try {
+        const note = noteStore.updateNote(
+          request.params.noteId,
+          {
+            ...validation.data,
+            campaignId: shared.campaign.id,
+          },
+          membership.id,
+        )
 
-      if (!note) {
-        response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
-        return
+        if (!note) {
+          response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
+          return
+        }
+
+        response.json({ note })
+      } catch (error) {
+        response.status(400).json({
+          error: error instanceof Error ? error.message : 'Failed to update note.',
+        })
       }
-
-      response.json({ note })
     },
   )
 

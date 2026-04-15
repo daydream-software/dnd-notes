@@ -2036,6 +2036,7 @@ test('legacy databases without linked_notes_json column are upgraded safely', as
 
     // Directly manipulate the database to simulate legacy schema
     const db = new Database(dbPath)
+    db.exec('DROP TABLE IF EXISTS note_references')
     const columns = db.pragma('table_info(notes)') as Array<{ name: string }>
     const hasLinkedNotesJson = columns.some((col) => col.name === 'linked_notes_json')
 
