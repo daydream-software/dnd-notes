@@ -1,6 +1,8 @@
 # Current Focus
 
-- **Updated:** 2026-04-13T15:58:35Z
-- **Latest completed issue:** #24 (Campaign note search UI and filters) — approved for merge
-- **Focus:** Issue #24 session completed; team approved search implementation for merge after handling web test infrastructure blocker (Data diagnosed as pre-existing, Chunk approved despite hang)
-- **Next likely task:** Investigate and fix web test infrastructure (vitest 4.1.4 hang with React 19 + MUI 9) as separate P1 issue; establish CI workflow for web tests
+- **Updated:** 2026-04-16T16:11:48Z
+- **Active slice:** Auth/API hardening implementation — explicit API-side origin policy + security headers + regression coverage
+- **Lanes:** Data implementing | Chunk testing | Mikey scoping
+- **Prerequisite shipped:** PUBLIC_WEB_URL + buildSharedUrl() handoff (2026-04-16)
+- **Scope boundary:** Bearer/localStorage auth transport remains unchanged this slice
+- **Next likely task:** Security header policy formalization; origin allowlist validation tests
