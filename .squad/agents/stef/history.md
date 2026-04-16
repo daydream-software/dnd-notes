@@ -214,3 +214,50 @@ Phase 2 additions should test:
 
 📌 Team update (2026-04-14T17:42:26Z): Shared owner/editor mode no longer overflows horizontally on narrow screens after constraining the common workspace pane shells and editor width behavior across the shared and authenticated workspace surfaces — implemented by Stef
 📌 Team update (2026-04-16T15:30:33Z): Origin-model audit completed. Frontend ready for split-origin deployment. Backend: add PUBLIC_WEB_ORIGIN env var to buildSharedUrl(). Platform: same-origin reverse proxy recommended for prod. — decided by Stef, Data, Brand, Mikey
+
+## 2026-04-11: First App.tsx Refactor Slice for Issue #44
+
+**Context:** Working in dedicated worktree at `/home/appuser/.copilot/session-state/aba00af1-b083-4cbb-9c94-a20ed4147108/files/worktrees/44-app-shell-refactor` on branch `squad/44-app-shell-refactor`.
+
+**Chosen Seam:** Note editor action toolbar — the save/delete buttons with timestamp display at the bottom of the note editor panel.
+
+**What I Extracted:**
+- Created `apps/web/src/NoteEditorActions.tsx` with the full presentation layer for save/delete actions
+- Moved the two-stack layout (info text + button group) into a focused component
+- Kept `formatTimestamp` helper local to the new component (no shared util file needed yet)
+- Props surface: `canEditWorkspace`, `isCreating`, `isSaving`, `isDeleting`, `selectedNoteUpdatedAt`, `onSave`, `onDelete`
+- All action handlers and state management remain inside `App.tsx`
+
+**Validation:**
+- `npm run lint:web` — passed
+- `npm run test:web` — all 32 tests passed (6 test files)
+- Line count reduced from 4670 to 4635 lines in `App.tsx`
+
+**Learnings:**
+- The note editor toolbar was a clean extraction boundary — pure presentation with minimal coupling
+- Passing `selectedNote?.updatedAt` as an optional string instead of the full note object kept the component lightweight
+- No Material UI theme or custom styling needed beyond what was already inline
+- Tests didn't break because the component behavior stayed identical from the user's perspective
+
+**Recommended Next Slices (in priority order):**
+1. **Campaign form UI** — extract the create/edit campaign modal with its form state wiring
+2. **Share link management panel** — extract the share link creation, reveal, and revoke UI from the admin/sharing section
+3. **Session browse pane** — extract the session list/selection UI from the notes browse mode
+
+**Architecture Insight:**
+The key to safe App.tsx refactoring is lifting only the presentation boundary while keeping event handlers and state hooks inside `App.tsx`. This avoids cascading rewrites to prop threading or context wiring. Once enough presentation boundaries are extracted, we can consider lifting state into custom hooks.
+
+**Commit:** `7bf3b6c` — `refactor(web): extract note editor actions toolbar #44`
+
+---
+
+## Issue #44 Session Summary (2026-04-16T21:54:33Z)
+
+📌 **Status:** Completed and ready for merge
+
+Completed the `NoteEditorActions.tsx` extraction as a low-risk, mechanical component extraction. The toolbar now lives in a separate, memoizable component that maintains 100% behavioral parity with the original inline JSX in `App.tsx`.
+
+- **Files changed:** Created `apps/web/src/NoteEditorActions.tsx`, updated `apps/web/src/App.tsx` to import and use the new component
+- **Validation:** `npm run lint:web` ✅, `npm run test:web` ✅
+- **Regression risk:** Zero—extraction preserves all event handlers, icons, tooltips, and conditional rendering
+- **Next opportunity:** Similar extraction pattern applies to campaign form, share-link management, and session browse UI

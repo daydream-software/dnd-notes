@@ -6,3 +6,11 @@
 - **Tracked issues:** #44 (`squad:stef`), #46 (`squad:data`)
 - **Production context still active:** same-origin deployment default, admin backup/restore now shipped, WAL/restore-concurrency/provisioning follow-ups tracked in #39–#43
 - **Next likely task:** continue `#46` by moving the remaining note-reference synchronization helpers and note write transactions behind the new notes module, or peel the next statement/transaction bundle with the same bounded pattern
+
+## 2026-04-11 21:53 UTC — First App.tsx Refactor Slice Landed
+
+**Lane:** Frontend shell extraction (`#44`)
+
+**Progress:** Extracted note editor action toolbar into `NoteEditorActions.tsx`, validated, committed to `squad/44-app-shell-refactor` worktree branch.
+
+**Next:** Continue extracting bounded presentation components from `App.tsx` — campaign form, share link panel, or session browser.
