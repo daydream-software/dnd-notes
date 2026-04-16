@@ -70,6 +70,7 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 ## API
 
 - `GET /health`
+- `GET /api/admin/backup`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/session`
@@ -107,6 +108,9 @@ All `/api/campaigns`, `/api/overview`, and `/api/notes` routes require an
 Any linked campaign membership can open the authenticated workspace, while
 campaign management routes such as settings, memberships, and share links stay
 owner-only.
+
+`GET /api/admin/backup` is site-admin-only. It returns a SQLite snapshot as a
+downloadable attachment and is intended for operational backup workflows.
 
 `POST /api/campaigns/:campaignId/memberships/consolidations` is also owner-only.
 Send `sourceMembershipId` and `targetMembershipId` to preview the note-attribution

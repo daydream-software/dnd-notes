@@ -1,3 +1,7 @@
+import { createReadStream } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
 import type { NoteStore } from './note-store.js'
@@ -65,6 +69,41 @@ interface SharedNoteParams extends ShareParams {
 
 const defaultActivityLimit = 20
 const maxActivityLimit = 100
+
+interface RateLimitPolicy {
+  maxRequests: number
+  windowMs: number
+  errorMessage: string
+}
+
+interface RateLimitBucket {
+  count: number
+  resetAt: number
+}
+
+const registerRateLimitPolicy: RateLimitPolicy = {
+  maxRequests: 5,
+  windowMs: 1000 * 60 * 15,
+  errorMessage: 'Too many registration attempts. Please wait before trying again.',
+}
+
+const loginRateLimitPolicy: RateLimitPolicy = {
+  maxRequests: 5,
+  windowMs: 1000 * 60 * 15,
+  errorMessage: 'Too many login attempts. Please wait before trying again.',
+}
+
+const sharedJoinRateLimitPolicy: RateLimitPolicy = {
+  maxRequests: 10,
+  windowMs: 1000 * 60 * 10,
+  errorMessage: 'Too many guest join attempts. Please wait before trying again.',
+}
+
+const sharedClaimRateLimitPolicy: RateLimitPolicy = {
+  maxRequests: 5,
+  windowMs: 1000 * 60 * 15,
+  errorMessage: 'Too many membership claim attempts. Please wait before trying again.',
+}
 
 interface CreateAppOptions {
   noteStore: NoteStore
@@ -260,7 +299,7 @@ function buildNoteActivityResponse(
   }
 }
 
-function requireOwner(
+function requireAuthenticatedAccount(
   noteStore: NoteStore,
   request: Request,
   response: Response<ErrorResponse>,
@@ -276,6 +315,25 @@ function requireOwner(
 
   if (!owner) {
     response.status(401).json({ error: 'Owner session is invalid or expired.' })
+    return null
+  }
+
+  return owner
+}
+
+function requireSiteAdmin(
+  noteStore: NoteStore,
+  request: Request,
+  response: Response<ErrorResponse>,
+) {
+  const owner = requireAuthenticatedAccount(noteStore, request, response)
+
+  if (!owner) {
+    return null
+  }
+
+  if (!owner.isSiteAdmin) {
+    response.status(403).json({ error: 'Site-admin access is required.' })
     return null
   }
 
@@ -432,8 +490,56 @@ function buildSharedUrl(request: Request, shareToken: string) {
   return `${request.protocol}://${request.get('host')}/share/${shareToken}`
 }
 
+function readRateLimitClientId(request: Request) {
+  return request.ip || request.socket.remoteAddress || 'unknown'
+}
+
 export function createApp({ noteStore }: CreateAppOptions): Express {
   const app = express()
+  const rateLimitBuckets = new Map<string, RateLimitBucket>()
+
+  function isRateLimited(
+    request: Request,
+    response: Response<ErrorResponse>,
+    policyKey: string,
+    policy: RateLimitPolicy,
+    scopeKey?: string,
+  ) {
+    const now = Date.now()
+
+    for (const [key, bucket] of rateLimitBuckets) {
+      if (bucket.resetAt <= now) {
+        rateLimitBuckets.delete(key)
+      }
+    }
+
+    const bucketKey = [
+      policyKey,
+      readRateLimitClientId(request),
+      scopeKey ?? '',
+    ].join(':')
+    const existingBucket = rateLimitBuckets.get(bucketKey)
+
+    if (!existingBucket || existingBucket.resetAt <= now) {
+      rateLimitBuckets.set(bucketKey, {
+        count: 1,
+        resetAt: now + policy.windowMs,
+      })
+      return false
+    }
+
+    if (existingBucket.count >= policy.maxRequests) {
+      response.set(
+        'Retry-After',
+        Math.max(1, Math.ceil((existingBucket.resetAt - now) / 1000)).toString(),
+      )
+      response.status(429).json({ error: policy.errorMessage })
+      return true
+    }
+
+    existingBucket.count += 1
+    return false
+  }
 
   app.use(cors())
   app.use(express.json())
@@ -442,12 +548,76 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
     response.json({ status: 'ok', service: 'dnd-notes-api' })
   })
 
+  app.get(
+    '/api/admin/backup',
+    async (
+      request: Request,
+      response: Response<ErrorResponse>,
+    ) => {
+      const siteAdmin = requireSiteAdmin(noteStore, request, response)
+
+      if (!siteAdmin) {
+        return
+      }
+
+      const backupDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-backup-'))
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
+      const backupFileName = `dnd-notes-backup-${timestamp}.sqlite`
+      const backupPath = join(backupDirectory, backupFileName)
+
+      try {
+        await noteStore.backupDatabase(backupPath)
+      } catch {
+        await rm(backupDirectory, { recursive: true, force: true })
+        response.status(500).json({ error: 'Could not create the admin backup.' })
+        return
+      }
+
+      response.setHeader('Content-Type', 'application/octet-stream')
+      response.setHeader(
+        'Content-Disposition',
+        `attachment; filename="${backupFileName}"`,
+      )
+
+      const stream = createReadStream(backupPath)
+      let cleanedUp = false
+
+      const cleanupBackup = () => {
+        if (cleanedUp) {
+          return
+        }
+
+        cleanedUp = true
+        void rm(backupDirectory, { recursive: true, force: true })
+      }
+
+      stream.on('error', () => {
+        cleanupBackup()
+
+        if (!response.headersSent) {
+          response.status(500).json({ error: 'Could not stream the admin backup.' })
+          return
+        }
+
+        response.destroy()
+      })
+
+      response.on('finish', cleanupBackup)
+      response.on('close', cleanupBackup)
+      stream.pipe(response)
+    },
+  )
+
   app.post(
     '/api/auth/register',
     (
       request: Request,
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
+      if (isRateLimited(request, response, 'auth-register', registerRateLimitPolicy)) {
+        return
+      }
+
       const validation = validateOwnerRegistrationInput(request.body)
 
       if (!validation.success) {
@@ -478,6 +648,10 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
+      if (isRateLimited(request, response, 'auth-login', loginRateLimitPolicy)) {
+        return
+      }
+
       const validation = validateOwnerLoginInput(request.body)
 
       if (!validation.success) {
@@ -509,7 +683,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<CurrentOwnerResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -543,7 +717,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<CampaignsResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -559,7 +733,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -586,7 +760,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<CampaignParams>,
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -613,7 +787,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<CampaignParams>,
       response: Response<SessionsResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -640,7 +814,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<CampaignParams>,
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -688,7 +862,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<CampaignParams>,
       response: Response<CampaignMembershipsResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -717,7 +891,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<CampaignParams>,
       response: Response<MembershipConsolidationResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -837,7 +1011,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<CampaignParams>,
       response: Response<CampaignShareLinksResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -866,7 +1040,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<CampaignParams>,
       response: Response<CampaignShareLinkCreateResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -918,7 +1092,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<ShareLinkParams>,
       response: Response<CampaignShareLinkRevealResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -969,7 +1143,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<ShareLinkParams>,
       response: Response<undefined | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1007,7 +1181,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<NotesOverview | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1040,7 +1214,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1067,7 +1241,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<NoteActivityResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1114,7 +1288,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
   app.get(
     '/api/notes/sessions',
     (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1141,7 +1315,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1199,7 +1373,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<SessionParams>,
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1228,7 +1402,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<NoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1258,7 +1432,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<NoteParams>,
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1289,7 +1463,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<NoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1353,7 +1527,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<NoteParams>,
       response: Response<undefined | ErrorResponse>,
     ) => {
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -1406,6 +1580,18 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<ShareParams>,
       response: Response<SharedJoinResponse | ErrorResponse>,
     ) => {
+      if (
+        isRateLimited(
+          request,
+          response,
+          'shared-join',
+          sharedJoinRateLimitPolicy,
+          request.params.shareToken,
+        )
+      ) {
+        return
+      }
+
       const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
@@ -1444,6 +1630,18 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       request: Request<ShareParams>,
       response: Response<SharedMembershipClaimResponse | ErrorResponse>,
     ) => {
+      if (
+        isRateLimited(
+          request,
+          response,
+          'shared-claim',
+          sharedClaimRateLimitPolicy,
+          request.params.shareToken,
+        )
+      ) {
+        return
+      }
+
       const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
@@ -1452,7 +1650,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const owner = requireOwner(noteStore, request, response)
+      const owner = requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
