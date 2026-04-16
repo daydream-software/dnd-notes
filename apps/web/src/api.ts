@@ -1,4 +1,5 @@
 import type {
+  AdminAccountsResponse,
   AdminOverviewResponse,
   AuthSessionResponse,
   CampaignInput,
@@ -144,6 +145,16 @@ export async function fetchAdminOverview(authToken: string, signal?: AbortSignal
 
   const data = await readJson<AdminOverviewResponse>(response)
   return data.overview
+}
+
+export async function fetchAdminAccounts(authToken: string, signal?: AbortSignal) {
+  const response = await fetch(`${apiBaseUrl}/api/admin/accounts`, {
+    headers: createHeaders(authToken),
+    signal,
+  })
+
+  const data = await readJson<AdminAccountsResponse>(response)
+  return data.accounts
 }
 
 function readAttachmentFilename(contentDisposition: string | null, fallback: string) {

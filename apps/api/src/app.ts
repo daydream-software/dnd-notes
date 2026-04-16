@@ -7,6 +7,7 @@ import express, { type Express, type Request, type Response } from 'express'
 import type { NoteStore } from './note-store.js'
 import type {
   ActivityCollaborator,
+  AdminAccountsResponse,
   AuthSessionResponse,
   AdminOverviewResponse,
   CampaignMembership,
@@ -548,6 +549,22 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json({ status: 'ok', service: 'dnd-notes-api' })
   })
+
+  app.get(
+    '/api/admin/accounts',
+    (
+      request: Request,
+      response: Response<AdminAccountsResponse | ErrorResponse>,
+    ) => {
+      const siteAdmin = requireSiteAdmin(noteStore, request, response)
+
+      if (!siteAdmin) {
+        return
+      }
+
+      response.json({ accounts: noteStore.listOwnerAccounts() })
+    },
+  )
 
   app.get(
     '/api/admin/overview',

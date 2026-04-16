@@ -109,6 +109,24 @@ const adminOverview = {
   },
 }
 
+const adminAccounts = [
+  {
+    ...siteAdminOwner,
+    campaignMembershipCount: 1,
+    ownedCampaignCount: 1,
+  },
+  {
+    id: 'owner-2',
+    email: 'ally@example.com',
+    displayName: 'Ally Observer',
+    isSiteAdmin: false,
+    createdAt: '2026-04-14T00:00:00.000Z',
+    updatedAt: '2026-04-14T00:00:00.000Z',
+    campaignMembershipCount: 2,
+    ownedCampaignCount: 0,
+  },
+]
+
 function createJsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -164,6 +182,10 @@ describe('App smoke path', () => {
 
       if (path === '/api/admin/overview' && method === 'GET') {
         return createJsonResponse({ overview: adminOverview })
+      }
+
+      if (path === '/api/admin/accounts' && method === 'GET') {
+        return createJsonResponse({ accounts: adminAccounts })
       }
 
       if (path === '/api/overview' && method === 'GET') {
@@ -234,6 +256,8 @@ describe('App smoke path', () => {
 
     expect(await screen.findByRole('heading', { name: 'Site admin panel' })).toBeTruthy()
     expect(screen.getByText('Site admins 1')).toBeTruthy()
+    expect(screen.getByText('ally@example.com')).toBeTruthy()
+    expect(screen.getByText('Owned campaigns 1')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Refresh admin metrics' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Download SQLite backup' })).toBeTruthy()
   })
