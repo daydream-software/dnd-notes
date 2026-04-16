@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -8,7 +8,7 @@ import Database from 'better-sqlite3'
 import request, { type SuperTest, type Test } from 'supertest'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
-import { createNoteStore } from '../src/note-store.js'
+import { createNoteStore, restoreNoteStoreFromBackup } from '../src/note-store.js'
 
 async function createTestApp(
   options: {
@@ -19,11 +19,18 @@ async function createTestApp(
 ) {
   const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-api-'))
   const dbPath = join(directory, 'notes.sqlite')
-  const noteStore = createNoteStore({ dbPath, siteAdminEmails: options.siteAdminEmails })
-  const app = createApp({ 
-    noteStore, 
+  let noteStore = createNoteStore({ dbPath, siteAdminEmails: options.siteAdminEmails })
+  const app = createApp({
+    noteStore,
     publicWebUrl: options.publicWebUrl,
     allowedOrigins: options.allowedOrigins,
+    restoreNoteStore(sourcePath) {
+      noteStore = restoreNoteStoreFromBackup(sourcePath, {
+        dbPath,
+        siteAdminEmails: options.siteAdminEmails,
+      })
+      return noteStore
+    },
   })
 
   return {
@@ -148,6 +155,109 @@ test('site admins can download a SQLite backup and non-admins cannot', async (t)
   assert.equal(backupResponse.headers['content-type'], 'application/octet-stream')
   assert.ok(Buffer.isBuffer(backupResponse.body))
   assert.equal(backupResponse.body.subarray(0, 15).toString('utf8'), 'SQLite format 3')
+})
+
+test('site admins can restore a SQLite backup and invalid uploads are rejected', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    siteAdminEmails: ['site-admin@example.com'],
+  })
+  t.after(cleanup)
+
+  const nonAdmin = await registerOwner(request(app), {
+    email: 'not-admin@example.com',
+  })
+  const forbiddenRestoreResponse = await withAuth(request(app), nonAdmin.token)
+    .post('/api/admin/restore')
+    .set('Content-Type', 'application/octet-stream')
+    .send(Buffer.from('SQLite format 3\0forbidden'))
+  assert.equal(forbiddenRestoreResponse.status, 403)
+  assert.equal(
+    forbiddenRestoreResponse.body.error,
+    'Site-admin access is required.',
+  )
+
+  const siteAdmin = await registerOwner(request(app), {
+    displayName: 'Site Admin',
+    email: 'site-admin@example.com',
+    password: 'current-password',
+  })
+  const siteAdminAuthed = withAuth(request(app), siteAdmin.token)
+
+  const invalidRestoreResponse = await siteAdminAuthed
+    .post('/api/admin/restore')
+    .set('Content-Type', 'application/octet-stream')
+    .send(Buffer.from('not-a-sqlite-backup'))
+  assert.equal(invalidRestoreResponse.status, 400)
+  assert.equal(
+    invalidRestoreResponse.body.error,
+    'The uploaded file is not a valid SQLite backup.',
+  )
+
+  const sourceDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-restore-source-'))
+  t.after(async () => {
+    await rm(sourceDirectory, { recursive: true, force: true })
+  })
+
+  const sourceDbPath = join(sourceDirectory, 'notes.sqlite')
+  const sourceBackupPath = join(sourceDirectory, 'restore.sqlite')
+  const sourceStore = createNoteStore({
+    dbPath: sourceDbPath,
+    siteAdminEmails: ['site-admin@example.com'],
+  })
+
+  try {
+    const restoredOwner = sourceStore.createOwnerAccount({
+      displayName: 'Restored Admin',
+      email: 'site-admin@example.com',
+      password: 'restored-password',
+    })
+    assert.ok(restoredOwner)
+
+    sourceStore.createNote({
+      title: 'Restored note',
+      body: 'Loaded from a restored admin backup.',
+      tags: ['restore'],
+      status: 'active',
+      sessionName: null,
+      linkedNoteIds: [],
+      campaignId: defaultCampaignId,
+    })
+
+    await sourceStore.backupDatabase(sourceBackupPath)
+  } finally {
+    sourceStore.close()
+  }
+
+  const restoreSnapshot = await readFile(sourceBackupPath)
+  const restoreResponse = await siteAdminAuthed
+    .post('/api/admin/restore')
+    .set('Content-Type', 'application/octet-stream')
+    .send(restoreSnapshot)
+  assert.equal(restoreResponse.status, 200)
+  assert.equal(restoreResponse.body.message, 'Backup restored successfully.')
+  assert.equal(restoreResponse.body.overview.notes.total, 1)
+  assert.equal(restoreResponse.body.overview.accounts.siteAdmins, 1)
+
+  const expiredSessionResponse = await siteAdminAuthed.get('/api/auth/session')
+  assert.equal(expiredSessionResponse.status, 401)
+  assert.equal(
+    expiredSessionResponse.body.error,
+    'Owner session is invalid or expired.',
+  )
+
+  const restoredLoginResponse = await request(app).post('/api/auth/login').send({
+    email: 'site-admin@example.com',
+    password: 'restored-password',
+  })
+  assert.equal(restoredLoginResponse.status, 200)
+  assert.equal(restoredLoginResponse.body.owner.displayName, 'Restored Admin')
+
+  const restoredOverviewResponse = await withAuth(
+    request(app),
+    restoredLoginResponse.body.token as string,
+  ).get('/api/admin/overview')
+  assert.equal(restoredOverviewResponse.status, 200)
+  assert.equal(restoredOverviewResponse.body.overview.notes.total, 1)
 })
 
 test('site admins can read admin overview metrics and non-admins cannot', async (t) => {

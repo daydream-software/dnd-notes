@@ -106,6 +106,7 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 - `GET /api/admin/accounts`
 - `GET /api/admin/overview`
 - `GET /api/admin/backup`
+- `POST /api/admin/restore`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/session`
@@ -167,12 +168,20 @@ The API implements several security hardening measures:
 - **Authentication:** Owner routes use Bearer tokens in `Authorization` headers. Guest
   routes use guest tokens in `X-Guest-Token` headers. No cookies are used for auth.
 
-`GET /api/admin/accounts`, `GET /api/admin/overview`, and `GET /api/admin/backup`
-are site-admin-only. `/api/admin/accounts` returns the real-account directory plus
-current site-admin assignments. `/api/admin/overview` returns aggregate account,
-campaign, membership, share-link, and note counts for the admin surface.
-`/api/admin/backup` returns a SQLite snapshot as a downloadable attachment for
-operational backup workflows.
+`GET /api/admin/accounts`, `GET /api/admin/overview`, `GET /api/admin/backup`,
+and `POST /api/admin/restore` are site-admin-only. `/api/admin/accounts`
+returns the real-account directory plus current site-admin assignments.
+`/api/admin/overview` returns aggregate account, campaign, membership,
+share-link, and note counts for the admin surface. `/api/admin/backup`
+returns a SQLite snapshot as a downloadable attachment for operational backup
+workflows. `POST /api/admin/restore` accepts a raw SQLite upload
+(`application/octet-stream`) and replaces the live database after validating
+that the snapshot looks like a restorable dnd-notes database.
+
+For restore operations, use the site-admin panel upload flow and keep a freshly
+downloaded backup nearby. A successful restore may invalidate the current owner
+session if the restored snapshot contains different session rows, so the UI may
+require signing in again immediately afterward.
 
 `POST /api/campaigns/:campaignId/memberships/consolidations` is also owner-only.
 Send `sourceMembershipId` and `targetMembershipId` to preview the note-attribution

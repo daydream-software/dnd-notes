@@ -1,5 +1,6 @@
 import type {
   AdminAccountsResponse,
+  AdminRestoreResponse,
   AdminOverviewResponse,
   AuthSessionResponse,
   CampaignInput,
@@ -194,6 +195,19 @@ export async function downloadAdminBackup(authToken: string) {
       'dnd-notes-backup.sqlite',
     ),
   }
+}
+
+export async function restoreAdminBackup(authToken: string, backupFile: Blob) {
+  const headers = createHeaders(authToken)
+  headers.set('Content-Type', backupFile.type || 'application/octet-stream')
+
+  const response = await fetch(`${apiBaseUrl}/api/admin/restore`, {
+    method: 'POST',
+    headers,
+    body: backupFile,
+  })
+
+  return readJson<AdminRestoreResponse>(response)
 }
 
 export async function fetchCampaignMemberships(

@@ -188,6 +188,14 @@ describe('App smoke path', () => {
         return createJsonResponse({ accounts: adminAccounts })
       }
 
+      if (path === '/api/admin/restore' && method === 'POST') {
+        return createJsonResponse({
+          message: 'Backup restored successfully.',
+          restoredAt: '2026-04-16T18:00:00.000Z',
+          overview: adminOverview,
+        })
+      }
+
       if (path === '/api/overview' && method === 'GET') {
         return createJsonResponse({
           campaign,
@@ -260,6 +268,70 @@ describe('App smoke path', () => {
     expect(screen.getByText('Owned campaigns 1')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Refresh admin metrics' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Download SQLite backup' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Restore SQLite backup' })).toBeTruthy()
+  })
+
+  it('requires confirmation before restoring a site backup', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const fetchMock = vi.mocked(globalThis.fetch)
+    activeOwner = siteAdminOwner
+
+    await registerOwnerAndLoadWorkspace(user)
+
+    const backupInput = screen.getByLabelText('Select SQLite backup to restore')
+    const backupFile = new File(['SQLite format 3\0restore'], 'restore.sqlite', {
+      type: 'application/octet-stream',
+    })
+
+    await user.upload(backupInput, backupFile)
+
+    expect(confirmSpy).toHaveBeenCalledWith(
+      'Restore "restore.sqlite"? This will replace the current SQLite database.',
+    )
+    expect(
+      fetchMock.mock.calls.filter(([input, init]) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
+        const method = init?.method?.toUpperCase() ?? 'GET'
+        return url.endsWith('/api/admin/restore') && method === 'POST'
+      }),
+    ).toHaveLength(0)
+  })
+
+  it('restores a site backup from the admin panel', async () => {
+    const user = userEvent.setup()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const fetchMock = vi.mocked(globalThis.fetch)
+    activeOwner = siteAdminOwner
+
+    await registerOwnerAndLoadWorkspace(user)
+
+    const backupInput = screen.getByLabelText('Select SQLite backup to restore')
+    const backupFile = new File(['SQLite format 3\0restore'], 'restore.sqlite', {
+      type: 'application/octet-stream',
+    })
+
+    await user.upload(backupInput, backupFile)
+
+    expect(confirmSpy).toHaveBeenCalled()
+    expect(
+      fetchMock.mock.calls.filter(([input, init]) => {
+        const url =
+          typeof input === 'string'
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url
+        const method = init?.method?.toUpperCase() ?? 'GET'
+        return url.endsWith('/api/admin/restore') && method === 'POST'
+      }),
+    ).toHaveLength(1)
+    expect(await screen.findByText('Backup restored successfully.')).toBeTruthy()
   })
 
   it('restores a saved owner session into the selected campaign workspace', async () => {

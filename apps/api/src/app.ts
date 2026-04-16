@@ -1,13 +1,15 @@
 import { createReadStream } from 'node:fs'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
 import type { NoteStore } from './note-store.js'
+import { InvalidBackupDatabaseError } from './note-store.js'
 import type {
   ActivityCollaborator,
   AdminAccountsResponse,
+  AdminRestoreResponse,
   AuthSessionResponse,
   AdminOverviewResponse,
   CampaignMembership,
@@ -111,7 +113,10 @@ interface CreateAppOptions {
   noteStore: NoteStore
   publicWebUrl?: string
   allowedOrigins?: string
+  restoreNoteStore?: (sourcePath: string) => NoteStore
 }
+
+const sqliteFileHeader = Buffer.from('SQLite format 3\0')
 
 function normalizePublicWebUrl(publicWebUrl?: string) {
   if (!publicWebUrl) {
@@ -537,8 +542,14 @@ function readRateLimitClientId(request: Request) {
   return request.ip || request.socket.remoteAddress || 'unknown'
 }
 
-export function createApp({ noteStore, publicWebUrl: configuredPublicWebUrl, allowedOrigins: configuredAllowedOrigins }: CreateAppOptions): Express {
+export function createApp({
+  noteStore: initialNoteStore,
+  publicWebUrl: configuredPublicWebUrl,
+  allowedOrigins: configuredAllowedOrigins,
+  restoreNoteStore,
+}: CreateAppOptions): Express {
   const app = express()
+  let noteStore = initialNoteStore
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
   const publicWebUrl = normalizePublicWebUrl(configuredPublicWebUrl)
 
@@ -725,6 +736,100 @@ export function createApp({ noteStore, publicWebUrl: configuredPublicWebUrl, all
       response.on('finish', cleanupBackup)
       response.on('close', cleanupBackup)
       stream.pipe(response)
+    },
+  )
+
+  app.post(
+    '/api/admin/restore',
+    express.raw({
+      type: [
+        'application/octet-stream',
+        'application/vnd.sqlite3',
+        'application/x-sqlite3',
+      ],
+      limit: '50mb',
+    }),
+    async (
+      request: Request,
+      response: Response<AdminRestoreResponse | ErrorResponse>,
+    ) => {
+      const siteAdmin = requireSiteAdmin(noteStore, request, response)
+
+      if (!siteAdmin) {
+        return
+      }
+
+      if (!restoreNoteStore) {
+        response.status(500).json({ error: 'Admin restore is not configured.' })
+        return
+      }
+
+      if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
+        response.status(400).json({ error: 'A SQLite backup file is required.' })
+        return
+      }
+
+      if (
+        request.body.length < sqliteFileHeader.length ||
+        !request.body.subarray(0, sqliteFileHeader.length).equals(sqliteFileHeader)
+      ) {
+        response
+          .status(400)
+          .json({ error: 'The uploaded file is not a valid SQLite backup.' })
+        return
+      }
+
+      const restoreDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-restore-'))
+      const uploadPath = join(restoreDirectory, 'uploaded-backup.sqlite')
+      const rollbackPath = join(restoreDirectory, 'rollback.sqlite')
+
+      try {
+        await writeFile(uploadPath, request.body)
+        await noteStore.backupDatabase(rollbackPath)
+      } catch {
+        await rm(restoreDirectory, { recursive: true, force: true })
+        response
+          .status(500)
+          .json({ error: 'Could not prepare the current database for restore.' })
+        return
+      }
+
+      noteStore.close()
+
+      try {
+        noteStore = restoreNoteStore(uploadPath)
+      } catch (restoreError) {
+        try {
+          noteStore = restoreNoteStore(rollbackPath)
+        } catch {
+          await rm(restoreDirectory, { recursive: true, force: true })
+          response.status(500).json({
+            error:
+              'Restore failed and the original database could not be reopened.',
+          })
+          return
+        }
+
+        await rm(restoreDirectory, { recursive: true, force: true })
+
+        if (restoreError instanceof InvalidBackupDatabaseError) {
+          response.status(400).json({
+            error: 'The uploaded file is not a valid dnd-notes SQLite backup.',
+          })
+          return
+        }
+
+        response.status(500).json({ error: 'Could not restore the admin backup.' })
+        return
+      }
+
+      await rm(restoreDirectory, { recursive: true, force: true })
+
+      response.json({
+        message: 'Backup restored successfully.',
+        restoredAt: new Date().toISOString(),
+        overview: noteStore.getAdminOverview(),
+      })
     },
   )
 
