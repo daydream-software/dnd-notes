@@ -85,6 +85,7 @@ import {
   type StarterNoteSeed,
 } from './templates'
 import CampaignWorkspaceHeader from './CampaignWorkspaceHeader'
+import { formatTimestamp } from './formatTimestamp'
 import { markdownToPlainText } from './note-excerpts'
 import NoteBodyEditor from './NoteBodyEditor'
 import NotesBrowsePane from './NotesBrowsePane'
@@ -353,19 +354,6 @@ async function copyTextToClipboard(value: string) {
   }
 
   throw new Error('Clipboard access is unavailable. Reveal the link and copy it manually.')
-}
-
-function formatTimestamp(value: string) {
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)
 }
 
 function excerpt(body: string) {

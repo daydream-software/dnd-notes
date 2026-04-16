@@ -1,5 +1,6 @@
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import { Button, Stack, Typography } from '@mui/material'
+import { formatTimestamp } from './formatTimestamp.js'
 
 interface NoteEditorActionsProps {
   canEditWorkspace: boolean
@@ -9,19 +10,6 @@ interface NoteEditorActionsProps {
   selectedNoteUpdatedAt?: string
   onSave: () => void
   onDelete: () => void
-}
-
-function formatTimestamp(value: string) {
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)
 }
 
 export default function NoteEditorActions({
