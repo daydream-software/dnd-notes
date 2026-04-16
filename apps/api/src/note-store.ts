@@ -16,6 +16,7 @@ import {
 } from './campaign.js'
 import { parseInlineNoteReferences } from './note-references.js'
 import type {
+  AdminAccountSummary,
   CampaignInput,
   CampaignShareLink,
   CampaignShareLinkInput,
@@ -128,6 +129,17 @@ interface OwnerAccountRow {
   updated_at: string
 }
 
+interface AdminAccountSummaryRow {
+  id: string
+  email: string
+  display_name: string
+  is_site_admin: number
+  created_at: string
+  updated_at: string
+  membership_count: number
+  owned_campaign_count: number
+}
+
 interface CampaignShareLinkRow {
   id: string
   campaign_id: string
@@ -222,6 +234,7 @@ export interface NoteStore {
   createOwnerAccount(input: OwnerRegistrationInput): OwnerAccount | null
   authenticateOwner(email: string, password: string): OwnerAccount | null
   getOwnerBySessionToken(token: string): OwnerAccount | null
+  listOwnerAccounts(): AdminAccountSummary[]
   createOwnerSession(ownerUserId: string): string
   deleteOwnerSession(token: string): void
   createCampaignShareLink(
@@ -460,6 +473,19 @@ function mapOwnerAccountRow(row: OwnerAccountRow): OwnerAccount {
     isSiteAdmin: row.is_site_admin === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+  }
+}
+
+function mapAdminAccountSummaryRow(row: AdminAccountSummaryRow): AdminAccountSummary {
+  return {
+    id: row.id,
+    email: row.email,
+    displayName: row.display_name,
+    isSiteAdmin: row.is_site_admin === 1,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    campaignMembershipCount: row.membership_count,
+    ownedCampaignCount: row.owned_campaign_count,
   }
 }
 
@@ -1093,6 +1119,33 @@ export function createNoteStore(
       updated_at
     FROM owner_accounts
     WHERE email = ?
+  `)
+
+  const selectAdminAccounts = database.prepare(`
+    SELECT
+      owner_accounts.id,
+      owner_accounts.email,
+      owner_accounts.display_name,
+      owner_accounts.is_site_admin,
+      owner_accounts.created_at,
+      owner_accounts.updated_at,
+      COUNT(DISTINCT campaign_memberships.id) AS membership_count,
+      COUNT(
+        DISTINCT CASE
+          WHEN campaign_memberships.role = 'owner' THEN campaign_memberships.campaign_id
+        END
+      ) AS owned_campaign_count
+    FROM owner_accounts
+    LEFT JOIN campaign_memberships
+      ON campaign_memberships.user_id = owner_accounts.id
+    GROUP BY
+      owner_accounts.id,
+      owner_accounts.email,
+      owner_accounts.display_name,
+      owner_accounts.is_site_admin,
+      owner_accounts.created_at,
+      owner_accounts.updated_at
+    ORDER BY owner_accounts.is_site_admin DESC, owner_accounts.email ASC
   `)
 
   const insertOwnerAccount = database.prepare(`
@@ -2373,6 +2426,10 @@ export function createNoteStore(
       ) as OwnerAccountRow | undefined
 
       return row ? mapOwnerAccountRow(row) : null
+    },
+    listOwnerAccounts() {
+      const rows = selectAdminAccounts.all() as AdminAccountSummaryRow[]
+      return rows.map(mapAdminAccountSummaryRow)
     },
     createOwnerSession(ownerUserId) {
       const owner = selectOwnerAccountById.get(ownerUserId) as OwnerAccountRow | undefined

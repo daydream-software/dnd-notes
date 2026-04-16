@@ -179,6 +179,15 @@ export interface AdminOverviewResponse {
   overview: AdminOverview
 }
 
+export interface AdminAccountSummary extends OwnerAccount {
+  campaignMembershipCount: number
+  ownedCampaignCount: number
+}
+
+export interface AdminAccountsResponse {
+  accounts: AdminAccountSummary[]
+}
+
 export interface AuthSessionResponse {
   token: string
   owner: OwnerAccount

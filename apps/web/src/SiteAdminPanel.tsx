@@ -11,9 +11,10 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
-import type { AdminOverview } from './types'
+import type { AdminAccountSummary, AdminOverview } from './types'
 
 interface SiteAdminPanelProps {
+  accounts: AdminAccountSummary[]
   overview: AdminOverview | null
   isLoading: boolean
   isDownloadingBackup: boolean
@@ -77,6 +78,7 @@ function formatGeneratedAt(generatedAt: string) {
 }
 
 export default function SiteAdminPanel({
+  accounts,
   overview,
   isLoading,
   isDownloadingBackup,
@@ -174,6 +176,67 @@ export default function SiteAdminPanel({
               ))}
             </Stack>
           ) : null}
+
+          <Stack spacing={1.5}>
+            <Box>
+              <Typography variant="h6">Account directory</Typography>
+              <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+                Review real accounts and current site-admin assignments before any
+                write-side admin tools land.
+              </Typography>
+            </Box>
+
+            {accounts.length > 0 ? (
+              <Stack spacing={1.5}>
+                {accounts.map((account) => (
+                  <Card
+                    key={account.id}
+                    variant="outlined"
+                    sx={{ borderRadius: surfaceRadius }}
+                  >
+                    <CardContent sx={{ p: 2 }}>
+                      <Stack
+                        direction={{ xs: 'column', md: 'row' }}
+                        spacing={1.5}
+                        sx={{ justifyContent: 'space-between' }}
+                      >
+                        <Box>
+                          <Typography variant="subtitle1">{account.displayName}</Typography>
+                          <Typography color="text.secondary" variant="body2">
+                            {account.email}
+                          </Typography>
+                        </Box>
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          useFlexGap
+                          sx={{ flexWrap: 'wrap', justifyContent: { md: 'flex-end' } }}
+                        >
+                          <Chip
+                            label={account.isSiteAdmin ? 'Site admin' : 'Standard account'}
+                            color={account.isSiteAdmin ? 'secondary' : 'default'}
+                            size="small"
+                          />
+                          <Chip
+                            label={`Owned campaigns ${account.ownedCampaignCount}`}
+                            size="small"
+                          />
+                          <Chip
+                            label={`Memberships ${account.campaignMembershipCount}`}
+                            size="small"
+                          />
+                        </Stack>
+                      </Stack>
+                    </CardContent>
+                  </Card>
+                ))}
+              </Stack>
+            ) : (
+              <Typography color="text.secondary">
+                No owner accounts have been created yet.
+              </Typography>
+            )}
+          </Stack>
         </Stack>
       </CardContent>
     </Card>

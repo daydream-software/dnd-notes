@@ -208,6 +208,47 @@ test('site admins can read admin overview metrics and non-admins cannot', async 
   assert.equal(overviewResponse.body.overview.notes.archived, 0)
 })
 
+test('site admins can read the admin account directory and non-admins cannot', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    siteAdminEmails: ['site-admin@example.com'],
+  })
+  t.after(cleanup)
+
+  const nonAdmin = await registerOwner(request(app), {
+    displayName: 'Observer',
+    email: 'observer@example.com',
+  })
+  const nonAdminDirectoryResponse = await withAuth(request(app), nonAdmin.token).get(
+    '/api/admin/accounts',
+  )
+  assert.equal(nonAdminDirectoryResponse.status, 403)
+  assert.equal(nonAdminDirectoryResponse.body.error, 'Site-admin access is required.')
+
+  const siteAdmin = await registerOwner(request(app), {
+    displayName: 'Site Admin',
+    email: 'site-admin@example.com',
+  })
+  const siteAdminAuthed = withAuth(request(app), siteAdmin.token)
+  const createdCampaignResponse = await siteAdminAuthed.post('/api/campaigns').send({
+    name: 'Admin Directory Campaign',
+    tagline: 'Created to verify account ownership counts.',
+    system: 'Dungeons & Dragons 2024',
+    setting: 'Neverwinter',
+    nextSession: null,
+  })
+  assert.equal(createdCampaignResponse.status, 201)
+
+  const directoryResponse = await siteAdminAuthed.get('/api/admin/accounts')
+  assert.equal(directoryResponse.status, 200)
+  assert.equal(directoryResponse.body.accounts.length, 2)
+  assert.equal(directoryResponse.body.accounts[0].email, 'site-admin@example.com')
+  assert.equal(directoryResponse.body.accounts[0].isSiteAdmin, true)
+  assert.equal(directoryResponse.body.accounts[0].ownedCampaignCount, 1)
+  assert.equal(directoryResponse.body.accounts[0].campaignMembershipCount, 1)
+  assert.equal(directoryResponse.body.accounts[1].email, 'observer@example.com')
+  assert.equal(directoryResponse.body.accounts[1].isSiteAdmin, false)
+})
+
 test('owner auth and campaign endpoints support the management workflow', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)

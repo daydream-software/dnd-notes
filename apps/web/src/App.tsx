@@ -46,6 +46,7 @@ import {
   createCampaignShareLink,
   createNote,
   downloadAdminBackup,
+  fetchAdminAccounts,
   createSharedNote,
   deleteNote,
   deleteSharedNote,
@@ -90,6 +91,7 @@ import { NoteBodyPreview } from './note-formatting'
 import { extractInlineNoteReferences } from './note-references'
 import type {
   ActivityCollaborator,
+  AdminAccountSummary,
   AdminOverview,
   CampaignInput,
   CampaignMembership,
@@ -702,6 +704,7 @@ function App() {
   )
   const [shareLinkNotice, setShareLinkNotice] = useState<string | null>(null)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
+  const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [adminNotice, setAdminNotice] = useState<string | null>(null)
   const [adminError, setAdminError] = useState<string | null>(null)
@@ -1160,6 +1163,7 @@ function App() {
     setMemberships([])
     setShareLinks([])
     setOverview(null)
+    setAdminAccounts([])
     setAdminOverview(null)
     setAdminNotice(null)
     setAdminError(null)
@@ -1402,14 +1406,18 @@ function App() {
     setIsLoadingAdminOverview(true)
 
     try {
-      const nextOverview = await fetchAdminOverview(authToken)
+      const [nextOverview, nextAccounts] = await Promise.all([
+        fetchAdminOverview(authToken),
+        fetchAdminAccounts(authToken),
+      ])
       setAdminOverview(nextOverview)
+      setAdminAccounts(nextAccounts)
       setAdminError(null)
     } catch (loadError) {
       setAdminError(
         loadError instanceof Error
           ? loadError.message
-          : 'Could not load site-admin metrics.',
+          : 'Could not load site-admin data.',
       )
     } finally {
       setIsLoadingAdminOverview(false)
@@ -1493,6 +1501,7 @@ function App() {
 
   useEffect(() => {
     if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
+      setAdminAccounts([])
       setAdminOverview(null)
       setAdminNotice(null)
       setAdminError(null)
@@ -1506,12 +1515,16 @@ function App() {
       setIsLoadingAdminOverview(true)
 
       try {
-        const nextOverview = await fetchAdminOverview(authToken)
+        const [nextOverview, nextAccounts] = await Promise.all([
+          fetchAdminOverview(authToken),
+          fetchAdminAccounts(authToken),
+        ])
 
         if (cancelled) {
           return
         }
 
+        setAdminAccounts(nextAccounts)
         setAdminOverview(nextOverview)
         setAdminError(null)
       } catch (loadError) {
@@ -1519,11 +1532,12 @@ function App() {
           return
         }
 
+        setAdminAccounts([])
         setAdminOverview(null)
         setAdminError(
           loadError instanceof Error
             ? loadError.message
-            : 'Could not load site-admin metrics.',
+            : 'Could not load site-admin data.',
         )
       } finally {
         if (!cancelled) {
@@ -2838,6 +2852,7 @@ function App() {
           <Stack spacing={3}>
             {owner?.isSiteAdmin ? (
               <SiteAdminPanel
+                accounts={adminAccounts}
                 overview={adminOverview}
                 isLoading={isLoadingAdminOverview}
                 isDownloadingBackup={isDownloadingAdminBackup}
@@ -3047,6 +3062,7 @@ function App() {
 
           {!isSharedMode && owner?.isSiteAdmin ? (
             <SiteAdminPanel
+              accounts={adminAccounts}
               overview={adminOverview}
               isLoading={isLoadingAdminOverview}
               isDownloadingBackup={isDownloadingAdminBackup}
