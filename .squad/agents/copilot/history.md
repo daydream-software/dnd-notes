@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-16T15:11:43Z): PRODUCTION ROADMAP DIRECTION — Product direction now assumes: (1) add explicit public site URL config for production link generation, (2) keep embed support limited to `/share/...` and governed by per-link `frame-ancestors`, (3) treat CORS separately and only tighten it if frontend/API deploy cross-origin, (4) defer concrete deployment artifacts until hosting target is chosen, (5) keep backup/restore in the core production path, and (6) research a dynamic per-customer provisioning model where each customer may receive an isolated SQLite-backed instance. Dynamic provisioning economics and lifecycle are now an explicit research track, not a rejected idea.
+
 📌 Team update (2026-04-16T14:27:08Z): DIRECT COMMIT DIRECTIVE — After finishing and validating a coherent set of modifications, stage and commit it immediately instead of leaving completed work uncommitted, unless the user explicitly asked to wait. Keep using signed commits; if signing needs interaction, leave the work staged and hand the user the exact `git commit -S ...` command. Use conventional commit messages.
 
 📌 Team update (2026-04-16T14:23:49Z): PERSISTENT PLANNING DIRECTIVE — For any Copilot task spanning multiple phases, files, or sessions, create/update the session `plan.md` early, but never rely on session chat or CLI-only SQL state as the sole record. Mirror the durable handoff in this file whenever work starts, materially changes, or pauses unfinished so future sessions can recover the active plan without reconstructing it from scratch. Requested by FFMikha after losing prior admin-panel planning context.
