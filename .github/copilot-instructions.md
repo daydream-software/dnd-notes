@@ -64,3 +64,5 @@ When creating git commits for this repo:
 4. When a coherent set of changes is complete and validated, stage it and commit it immediately unless the user asked not to commit yet.
 5. Use a conventional commit message when creating that commit.
 6. The repo enforces Conventional Commits locally through Husky + commitlint, so do not rely on memory alone for commit message format.
+7. When a commit relates to a GitHub issue, include the issue reference (`#123`) in the commit message every time.
+8. If the commit is the final one that closes the issue, use closing language in the commit message such as `fixes #123`.
