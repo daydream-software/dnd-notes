@@ -13,5 +13,15 @@ export default defineConfig([
       sourceType: 'module',
       globals: globals.node,
     },
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            ":matches(ImportDeclaration, ExportNamedDeclaration[source], ExportAllDeclaration)[source.value=/^\\.{1,2}\\//]:not([source.value=/\\.js$/])",
+          message: 'Use .js on relative imports in apps/api.',
+        },
+      ],
+    },
   },
 ])
