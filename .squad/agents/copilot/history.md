@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-16T17:26:32Z): COMMIT MESSAGE ENFORCEMENT — The repo now provisions Husky via the root `prepare` script and enforces Conventional Commits with a `commit-msg` hook backed by commitlint. This complements the existing direct-commit directive: once a coherent change set is validated, commit it immediately, and the local hook now rejects non-conforming commit messages before they land.
+
 📌 Team update (2026-04-16T16:21:11Z): RESTART CHECKPOINT — The next implementation slice after `PUBLIC_WEB_URL` is the auth/API hardening slice: explicit API-side origin policy + security headers + regression coverage, while intentionally keeping bearer/localStorage auth transport unchanged. At restart time, `impl-auth-api-hardening` was still in progress, `impl-auth-api-hardening-tests` and `impl-auth-api-hardening-docs` were still pending, and the live working tree already showed edits in `apps/api/.env.example`, `apps/api/src/app.ts`, `apps/api/test/app.test.ts`, plus a new `apps/api/test/security-headers.test.ts`. `scripts/copilot-yolo.sh` was also dirty but not part of this slice.
 
 📌 Team update (2026-04-16T15:18:08Z): ROADMAP URL/ORIGIN HANDOFF — The public URL/origin lane is now complete. Recommendation: treat **same-origin** as the default production model for this repo, add explicit API-side `PUBLIC_WEB_URL` configuration for canonical share-link generation, and stop deriving production share URLs from request origin/host. `VITE_API_BASE_URL` already covers intentional split-origin web→API calls; CORS allowlisting should only be introduced if deployment intentionally uses different web and API origins.

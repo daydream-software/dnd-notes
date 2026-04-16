@@ -19,7 +19,8 @@
     "reset:data": "npm run reset:data --workspace apps/api",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "prepare": "husky"
   },
   "repository": {
     "type": "git",
@@ -34,6 +35,9 @@
     "node": ">=22.21.1 <23"
   },
   "devDependencies": {
-    "concurrently": "^9.2.1"
+    "@commitlint/cli": "^20.5.0",
+    "@commitlint/config-conventional": "^20.5.0",
+    "concurrently": "^9.2.1",
+    "husky": "^9.1.7"
   }
 }

@@ -63,3 +63,4 @@ When creating git commits for this repo:
 3. If a signing passphrase or interactive confirmation is needed, stage the work and hand the user the exact `git commit -S ...` command before expecting the commit to be finalized.
 4. When a coherent set of changes is complete and validated, stage it and commit it immediately unless the user asked not to commit yet.
 5. Use a conventional commit message when creating that commit.
+6. The repo enforces Conventional Commits locally through Husky + commitlint, so do not rely on memory alone for commit message format.
