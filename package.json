@@ -30,7 +30,7 @@
   },
   "homepage": "https://github.com/daydream-software/dnd-notes#readme",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.21.1 <23"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

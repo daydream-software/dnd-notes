@@ -140,6 +140,74 @@ test('site admins can download a SQLite backup and non-admins cannot', async (t)
   assert.equal(backupResponse.body.subarray(0, 15).toString('utf8'), 'SQLite format 3')
 })
 
+test('site admins can read admin overview metrics and non-admins cannot', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    siteAdminEmails: ['site-admin@example.com'],
+  })
+  t.after(cleanup)
+
+  const nonAdmin = await registerOwner(request(app), {
+    email: 'observer@example.com',
+  })
+  const nonAdminOverviewResponse = await withAuth(request(app), nonAdmin.token).get(
+    '/api/admin/overview',
+  )
+  assert.equal(nonAdminOverviewResponse.status, 403)
+  assert.equal(nonAdminOverviewResponse.body.error, 'Site-admin access is required.')
+
+  const siteAdmin = await registerOwner(request(app), {
+    displayName: 'Site Admin',
+    email: 'site-admin@example.com',
+  })
+
+  const siteAdminAuthed = withAuth(request(app), siteAdmin.token)
+  const createdCampaignResponse = await siteAdminAuthed.post('/api/campaigns').send({
+    name: 'Observability Test Campaign',
+    tagline: 'Track admin overview counts.',
+    system: 'Dungeons & Dragons 2024',
+    setting: 'Waterdeep',
+    nextSession: null,
+  })
+  assert.equal(createdCampaignResponse.status, 201)
+
+  const createdCampaignId = createdCampaignResponse.body.campaign.id as string
+  const shareLinkResponse = await siteAdminAuthed
+    .post(`/api/campaigns/${createdCampaignId}/share-links`)
+    .send({
+      label: 'Overview link',
+      accessLevel: 'editor',
+      frameAncestors: null,
+    })
+  assert.equal(shareLinkResponse.status, 201)
+
+  const noteResponse = await siteAdminAuthed.post('/api/notes').send({
+    campaignId: createdCampaignId,
+    title: 'Observability note',
+    body: 'Used to make admin metrics non-zero.',
+    tags: ['admin'],
+    status: 'active',
+    sessionName: null,
+  })
+  assert.equal(noteResponse.status, 201)
+
+  const overviewResponse = await siteAdminAuthed.get('/api/admin/overview')
+  assert.equal(overviewResponse.status, 200)
+  assert.match(overviewResponse.body.overview.generatedAt, /^\d{4}-\d{2}-\d{2}T/)
+  assert.equal(overviewResponse.body.overview.accounts.total, 2)
+  assert.equal(overviewResponse.body.overview.accounts.siteAdmins, 1)
+  assert.equal(overviewResponse.body.overview.campaigns.total, 2)
+  assert.equal(overviewResponse.body.overview.campaigns.archived, 0)
+  assert.equal(overviewResponse.body.overview.memberships.total, 2)
+  assert.equal(overviewResponse.body.overview.memberships.linkedAccounts, 2)
+  assert.equal(overviewResponse.body.overview.memberships.guests, 0)
+  assert.equal(overviewResponse.body.overview.shareLinks.active, 1)
+  assert.equal(overviewResponse.body.overview.shareLinks.revoked, 0)
+  assert.equal(overviewResponse.body.overview.notes.total, 1)
+  assert.equal(overviewResponse.body.overview.notes.draft, 0)
+  assert.equal(overviewResponse.body.overview.notes.active, 1)
+  assert.equal(overviewResponse.body.overview.notes.archived, 0)
+})
+
 test('owner auth and campaign endpoints support the management workflow', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
