@@ -329,3 +329,15 @@ Review verdict (Chunk): **APPROVED** — The conflict-resolution push on PR #36 
 ## 2026-04-14: Web Test Infrastructure P1 — Scope & Reviewer Gate Approval
 
 📌 Team update (2026-04-14T15:52:31Z): Web test infrastructure cleanup approved by Mikey (Lead) as a scoped investigation into vitest 4.1.4 hang + fallback path (downgrade or skip App.test.tsx); Brand to lead investigation + CI wiring, Chunk to validate fallback option. Root scripts in `package.json` fix the workspace-path bug in `.github/workflows/web-test.yml`. Decision merged to `.squad/decisions.md`. — Scribe
+
+## 2026-04-16: Issue #44 Advisory Review Session
+
+📌 **Status:** Issue #44 App Shell Refactor completed
+
+Conducted advisory QA review for Stef's `NoteEditorActions.tsx` extraction work. Extracted toolbar is low-risk: stateless button container with prop-based event callbacks. Identified test seams and recommended regression coverage strategy.
+
+- **Validation gates identified:** Button click handlers, icon/label consistency, conditional rendering, accessibility (aria-label, tooltips, keyboard focus)
+- **Recommended test file:** `apps/web/src/NoteEditorActions.test.tsx` with focused unit tests for each button's click handler and conditional rendering based on note state
+- **Memoization opportunity:** Component is a good candidate for `React.memo()` to prevent re-renders when parent App updates unrelated state
+- **Risk assessment:** Zero behavioral changes; extraction preserves all existing behavior and event handling
+- **Ready for merge:** Lint/build/test all pass; no regressions detected

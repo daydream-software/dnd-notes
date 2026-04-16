@@ -13,6 +13,7 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 ## Recent Updates
 
 📌 Team update (2026-04-16T21:55:14Z): ISSUE #46 SECOND SLICE LANDED — `apps/api/src/note-store-notes.ts` now owns the note-specific prepared statements, row types, note/reference mappers, and note composition helpers that used to live inside `apps/api/src/note-store.ts`. The store entrypoint still owns the public API and transactions, but the note SQL/mapping block is now local to a dedicated module, which makes the next `#46` slice safer to target around note-reference synchronization or another transaction bundle.
+📌 Team update (2026-04-16T21:42:57Z): WORKTREE FLOW ENABLED — Parallel work now has dedicated worktrees: `squad/46-store-refactor` at `/home/appuser/.copilot/session-state/aba00af1-b083-4cbb-9c94-a20ed4147108/files/worktrees/46-store-refactor` and `squad/44-app-shell-refactor` at `/home/appuser/.copilot/session-state/aba00af1-b083-4cbb-9c94-a20ed4147108/files/worktrees/44-app-shell-refactor`. GitHub API auth is available with push access for this repo, so PR creation is feasible from those branches. Copilot code review is confirmed as a GitHub UI / ruleset flow: request **Copilot** from the PR Reviewers menu or enable automatic Copilot review in repository rulesets.
 
 📌 Team update (2026-04-16T21:40:06Z): ISSUE #46 STARTED — The first persistence-modularization slice is in. `apps/api/src/note-store-bootstrap.ts` now owns SQLite schema creation, lightweight legacy-column migrations, share-link reveal-token upgrade, and configured site-admin elevation. `createNoteStore()` still opens the database and wires the store API, but its startup path is smaller and the next `#46` seam can focus on query/transaction clusters instead of bootstrap plumbing.
 
@@ -57,3 +58,25 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 📌 Team update (2026-04-13T00:04:28Z): Issue #27 UI COMPLETED & MERGED. Your revision successfully retired all four rejection criteria: browse-mode state isolated from `loadWorkspace` dependency (synchronous state management), draft preservation tested, stale-response race eliminated by `useMemo` design, comprehensive regression test coverage added (3 web + 3 API tests). PR #36 merged on main (`9d0966b`). **Potential FALLBACK ASSIGNMENT: Issue #33 (Recent Activity UI)** — Primary owner is Stef (frontend); if Stef is unavailable, you're the fallback. Thin slice v1 scope: read-only activity feed UI (notes sorted by `updatedAt`), collaborator filter sidebar, distinguish 'created' vs 'edited' actions with attribution, empty state handling. Backend contract stable (`GET /api/notes/activity`). Regression test plan documented (RT1–RT5 gates). Expected delivery: 2–3 days. Files: `App.tsx` (tab + filter state), `api.ts` (fetchActivity), `types.ts` (activity types), `App.test.tsx` (tests). See `.squad/orchestration-log/2026-04-13T00:04:28Z-issue-33-ui-handoff.md` for full context — decided by FFMikha (product), Chunk (reviewer)
 
 📌 Team update (2026-04-13T07:52:28Z): ASSIGNMENT — Issue #28 Frontend Tag Facets Revision. Stef's implementation pass was rejected by Chunk (tester) due to critical list/detail mismatch blocker: when active tag filter is applied, the left pane list narrows locally via `filteredNotes`, but the editor still pulls from full `notes` array via `selectedNoteId`. This creates a dangerous state where the form can edit a note that no longer appears in the filtered list. Revision scope: reconcile `selectedNoteId`, `isCreating`, `draft` with filtered note list when `handleSelectTagFilter()` runs. Either retarget editor to first matching note OR clear to safe create/empty state. Add regression test proving list/detail sync. Stef is locked out for this cycle. Orchestration logs in `.squad/orchestration-log/`. Full verdict in `.squad/decisions.md` — decided by Chunk (reviewer), rerouted by coordinator
+
+## 2026-04-11: Issue #44 First Slice — Note Editor Actions Extraction
+
+**Task:** Extract first safe refactor slice from `apps/web/src/App.tsx` for issue #44.
+
+**Branch:** `squad/44-app-shell-refactor` in dedicated worktree
+
+**What Was Extracted:**
+- Created `apps/web/src/NoteEditorActions.tsx` — the save/delete toolbar at the bottom of the note editor
+- Reduced `App.tsx` from 4670 to 4635 lines
+- Clean seam: props for state/handlers, component owns only presentation
+
+**Validation:** Lint passed, all 32 web tests passed
+
+**Commit:** `7bf3b6c` — `refactor(web): extract note editor actions toolbar #44`
+
+**Next Recommended Slices:**
+1. Campaign form UI (create/edit modal)
+2. Share link management panel
+3. Session browse pane
+
+**Strategy Note:** Lift presentation boundaries first while keeping handlers/state in `App.tsx`, avoiding cascading prop rewrites.

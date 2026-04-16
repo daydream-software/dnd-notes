@@ -3024,3 +3024,324 @@ Treat production shared-link generation as a backend-owned canonical URL problem
 - Same-origin should be the preferred production posture today.
 - CORS allowlisting is only required when the browser-served web app and API are intentionally on different origins, or when additional browser origins must call authenticated API routes.
 - Deployment artifacts (nginx/docker/proxy wiring) stay deferred until hosting is chosen.
+
+---
+
+## 2026-04-16: Brand copilot_yolo launcher
+
+### Decision
+
+Use the repo root as the Docker build context for `.copilot_here/docker/Dockerfile`, and keep the developer-facing launcher at `scripts/copilot-yolo.sh` with a matching root `package.json` script.
+
+### Why
+
+The Dockerfile uses `COPY docker/shared/entrypoint.sh`, `COPY docker/shared/entrypoint-airlock.sh`, and `COPY docker/session-info.sh`, so the only coherent in-repo build context is the repository root. The repo did not contain those paths yet, so Brand vendored the minimal helper scripts under `docker/` to make the custom image buildable without hidden external assets.
+
+### Impact
+
+- Developers can run one command to refresh the image only when the Dockerfile inputs change and then launch `copilot_yolo` against that image.
+- The image cache key is stable and local: `.nvmrc`, the custom Dockerfile, and the copied helper scripts feed the fingerprint stored on the Docker image label itself.
+- The custom image stays tied to repo-tracked inputs instead of an undocumented external Docker context.
+
+---
+
+## 2026-04-16: Auth Hardening Slice — APPROVED
+
+### Decided by
+Chunk (Tester)
+
+### Decision
+
+**APPROVE** the auth hardening slice for merge.
+
+### What Was Validated
+
+**Implementation Coverage:**
+1. **Explicit CORS policy** — `ALLOWED_ORIGINS` env var replaced permissive `cors()` with origin allowlist
+2. **Security headers middleware** — All responses get `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, and `Referrer-Policy`
+3. **Share-link frame policy** — `Content-Security-Policy: frame-ancestors` per share-link correctly overrides global `X-Frame-Options: DENY`
+4. **Documentation** — README and .env.example clearly explain the new security model
+
+**Test Coverage:**
+- ✅ 13/13 dedicated security-headers tests pass
+- ✅ 40/40 API tests pass (including 5 new auth hardening regression tests)
+- ✅ Lint clean
+- ✅ Build successful
+
+### Behavior Now Covered
+
+**CORS Policy:**
+- **Allowlist enforcement:** Only origins in `ALLOWED_ORIGINS` can access the API from browsers
+- **No-origin passthrough:** Requests without `Origin` header (mobile apps, curl, Postman) are allowed
+- **Rejection handling:** Non-whitelisted origins get explicit CORS error
+- **Preflight support:** OPTIONS requests work correctly with CORS headers
+
+---
+
+## 2026-04-13: Security Header & CORS Hardening Regression Coverage
+
+**Decided by:** Data (Backend Dev)
+
+### Decision
+
+Regression test suite for CORS origin allowlisting and security headers is complete and ship-safe.
+
+### What
+
+Comprehensive test coverage for API security hardening (CORS origin allowlist + security headers) that preserves all existing auth flows.
+
+### Scope
+
+- CORS origin allowlist validation (whitelisted vs rejected origins)
+- Security headers verification (X-Content-Type-Options, X-Frame-Options, X-XSS-Protection, Referrer-Policy)
+- CSP frame-ancestors preservation for /share routes
+- Owner Bearer token auth flow (unchanged)
+- Guest X-Guest-Token auth flow (unchanged)
+- Site admin access (unchanged)
+- No-origin requests (mobile apps, curl, Postman) allowed
+- OPTIONS preflight request handling
+
+### Test Coverage (13 new tests in `apps/api/test/security-headers.test.ts`)
+
+1. ✅ CORS headers present for authenticated requests (whitelisted origin)
+2. ✅ CORS headers present for guest shared-link requests
+3. ✅ CSP frame-ancestors applied for shared-link session endpoint
+4. ✅ CSP frame-ancestors defaults to 'none' when not specified
+5. ✅ Site admin access works with CORS headers
+6. ✅ Unauthenticated requests fail gracefully with CORS
+7. ✅ Public health endpoint returns CORS headers
+8. ✅ Guest cannot access owner-only routes (even with CORS)
+9. ✅ CSP frame-ancestors applied to all shared session endpoints
+10. ✅ OPTIONS preflight requests include CORS headers
+11. ✅ CORS rejects non-whitelisted origins
+12. ✅ Requests without Origin header allowed (non-browser clients)
+
+---
+
+## 2026-04-16: Agent-friendly architecture refactor lane
+
+### Decision
+
+Add a dedicated roadmap lane for architecture refactors that make the repo easier to change safely in parallel by humans and coding agents.
+
+### Why
+
+- The current codebase has a few clear hotspots where file size and mixed responsibilities force large-context edits for small tasks.
+- Those hotspots increase merge conflicts, make reviews noisier, and reduce the amount of work the squad can safely do in parallel.
+- The goal is not abstraction for its own sake; it is to create clearer feature/domain boundaries so roadmap work lands in smaller, safer slices.
+
+### Hotspots
+
+- `apps/web/src/App.tsx` — large frontend shell/orchestrator
+- `apps/api/src/app.ts` — large route/middleware composition root
+- `apps/api/src/note-store.ts` — mixed schema, migration, query, and ops storage logic
+- `apps/api/test/app.test.ts` and `apps/web/src/App.test.tsx` — growing monolithic specs
+
+### Initial roadmap slices
+
+1. Split the web app shell into feature-scoped hooks/components.
+2. Modularize Express route registration and policy helpers.
+3. Break persistence into schema/migrations, repositories, and ops services.
+4. Extract shared web/API test harnesses and shrink mixed-purpose specs.
+
+---
+
+## 2026-04-16: Consolidate repo validation onto `ci.yml`
+
+### Decision
+
+Use `.github/workflows/ci.yml` as the single authoritative validation workflow and remove the redundant `.github/workflows/web-test.yml` lane.
+
+### Why
+
+- `ci.yml` already runs the full repo validation path: `npm run lint`, `npm test`, and `npm run build`.
+- A duplicate web-only workflow adds noise and maintenance cost without adding a distinct protection boundary.
+- While consolidating, repo validation exposed a broken API test script glob in `apps/api/package.json`; fixing that makes the single CI lane trustworthy again.
+
+### Impact
+
+- Contributors have one clear CI status to watch.
+- Workflow maintenance gets simpler as admin, hardening, and backup work land across both workspaces.
+- Future optimization can still split jobs inside `ci.yml` if runtime becomes an issue, without returning to duplicate top-level workflows.
+
+---
+
+## 2026-04-16: Conventional commit enforcement in local git hooks
+
+### Decision
+
+Enforce Conventional Commits locally with Husky + commitlint at the repo root.
+`npm install` provisions the hooks through the root `prepare` script, and the
+`commit-msg` hook rejects non-conforming commit messages before the commit is
+created.
+
+### Why
+
+- It turns an implicit workflow rule into a local guardrail for every contributor.
+- It reduces the chance that validated work is committed with an invalid message.
+- It complements the existing policy to commit coherent validated slices immediately instead of leaving them uncommitted.
+
+### Follow-up
+
+- Keep commit messages in conventional format for all future signed commits.
+- If commit rules ever expand beyond Conventional Commits, update `commitlint.config.cjs` and the contributor docs together.
+
+---
+
+## 2026-04-14T21:10:00Z: User directive — Visual parity for shared/regular workspace UI
+
+**By:** FFMikha (via Copilot)
+
+### What
+Avoid duplicated UI rendering paths for the same surface; shared and regular workspace UI should come from one source of truth so visual drift is easier to trace.
+
+### Why
+Repeated UI drift and difficult debugging caused by duplicated implementations.
+
+---
+
+## 2026-04-14: Retire the focused-only web CI fallback
+
+**By:** Copilot
+
+### Context
+
+The repo previously kept a focused web smoke lane because the full Vitest workspace suite was considered too unstable for CI. On the current branch, that assumption no longer holds: `npm run lint && npm test && npm run build` passes from the repo root, including the full `apps/web` test suite and the `App.test.tsx` path that used to be treated as the blocker.
+
+### Decision
+
+1. Keep the root workspace entrypoints (`lint:web`, `test:web`, `build:web`) as the stable way to address the web workspace.
+2. Remove the temporary `test:web:focused` fallback from the root scripts.
+3. Update `.github/workflows/web-test.yml` to run the full web workspace test suite with `npm run test:web`.
+4. Add a repo-wide `.github/workflows/ci.yml` workflow that runs `npm run lint`, `npm test`, and `npm run build` on pushes and pull requests to `main`.
+
+### Why
+
+- The current tree can support full web-suite validation, so keeping the focused-only fallback would hide regressions rather than reduce noise.
+- Root entrypoints are still the right abstraction because they keep local and CI execution aligned.
+- Repo-wide CI closes the larger gap: lint, test, and build now have an always-on gate for both the web and API workspaces.
+
+---
+
+## 2026-04-14T21:45:00Z: Guest UI gating scope
+
+**By:** FFMikha (via Copilot)
+
+### What
+In the shared-link workspace, only the settings button and guest login/link panel should be conditioned specifically on guest-user state; other workspace actions and browse options should stay aligned with the regular workspace unless access level itself requires a restriction.
+
+### Why
+Product drift on shared links made UI regressions hard to detect and debug.
+
+---
+
+## 2026-04-15: Inline note references backend shape
+
+### Decision
+
+- Added a normalized `note_references` table as additive storage beside `notes.linked_notes_json`.
+- `body` remains canonical markdown; backend now extracts `![[noteId]]`, `![[noteId|label]]`, and `![[noteId|label|qualifier]]` into structured rows on write.
+- `linkedNoteIds` stays in the API for compatibility, but reads now merge legacy linked IDs with extracted inline references so backlinks and older consumers keep working during migration.
+- Startup sync repopulates `note_references` from stored note bodies and legacy `linkedNoteIds`, skipping invalid legacy references instead of failing app boot.
+
+---
+
+## 2026-04-16: Production roadmap direction and provisioning research
+
+### Decision
+
+Use the following production roadmap direction until replaced by a more specific deployment decision:
+
+1. Add explicit public site URL configuration for production link generation.
+2. Keep embedding limited to `/share/...` routes only, with `frame-ancestors` controlled per share link.
+3. Treat CORS as a separate browser API concern; tighten it only when deployment uses different frontend and API origins.
+4. Defer concrete deployment artifacts until the hosting target is selected.
+5. Keep backup and restore in the core production readiness path.
+6. Explore dynamic per-customer provisioning as a serious option, with isolated SQLite-backed app instances per customer.
+
+### Why
+
+- It keeps production work moving without prematurely choosing a hosting platform.
+- It preserves the current product model where only explicit share links are embeddable.
+- It avoids forcing a database migration before the deployment model is understood.
+- It opens a potentially lower-cost operating model by provisioning instances only when customers exist.
+
+### Follow-up research
+
+- instance lifecycle automation;
+- persistent volume and backup strategy for SQLite-backed instances;
+- upgrade and migration rollout across many isolated instances;
+- domain and bootstrap configuration per provisioned instance;
+- operational and licensing economics compared with a shared multi-tenant deployment.
+
+---
+
+## 2026-04-16: Route registrar pattern for API modularization
+
+### Decision
+
+Use a shared `apps/api/src/route-support.ts` module plus feature-scoped registrar modules under `apps/api/src/routes/` for the `#45` Express refactor.
+
+### Why
+
+`apps/api/src/app.ts` had both route wiring and route-specific behavior mixed with reusable auth/access helpers. Pulling the shared helpers into one support module lets future route extractions reuse the same contracts without duplicating auth guards, shared-link policy behavior, rate-limit policies, or request-param parsing.
+
+Keeping each extracted cluster as a `register...Routes(app, context)` module preserves the current Express ordering explicitly in `createApp()`, which matters for overlapping paths like the notes/session routes. This keeps the refactor boring: the route definitions move, but registration order and runtime behavior stay readable from the top-level app composition.
+
+---
+
+## 2026-04-16: Bootstrap global site admins from config, persist as account state
+
+### Decision
+
+Bootstrap initial global site-admin access from the `SITE_ADMIN_EMAILS` environment variable, then persist site-admin membership on owner accounts via an `is_site_admin` database flag.
+
+### Why
+
+- The product needs a true global admin panel, but the existing auth model had no global admin concept.
+- Using config for the initial admins keeps first-run setup simple and avoids hard-coding a single bootstrap account.
+- Persisting the flag in the database creates a stable foundation for future user-management features to grant additional site admins without depending on config forever.
+
+### Implementation notes
+
+- `SITE_ADMIN_EMAILS` accepts a comma-separated list of owner-account emails.
+- Matching accounts are promoted during registration and again on API startup for existing databases.
+- Auth and session responses now expose `owner.isSiteAdmin` so the future admin UI can gate itself without reworking the auth contract.
+
+---
+
+## 2026-04-16: API Exposure Hardening Implementation
+
+**Implementer:** Data (Backend Dev)
+
+### Decision
+
+Implemented explicit CORS policy, security headers, and comprehensive regression coverage for API exposure hardening.
+
+### Context
+
+The API previously used fully permissive CORS (`cors()` with no configuration) and lacked standard security headers. The recent `PUBLIC_WEB_URL` slice established explicit URL generation, and this slice completes the backend hardening without changing auth transport or localStorage strategies.
+
+### What Was Implemented
+
+**Explicit CORS Configuration**
+
+Location: `apps/api/src/app.ts` lines 588-620
+
+- Replaced `app.use(cors())` with explicit origin allowlist
+- New `ALLOWED_ORIGINS` environment variable (comma-separated list)
+- Default: `http://localhost:5173,http://localhost:3000`
+- Requests with no origin header (mobile apps, curl, Postman) always allowed
+- Requests from non-allowlisted origins rejected during CORS preflight
+- Can be overridden via `createApp({ allowedOrigins })` parameter for testing
+
+**Why:** Explicit allowlist prevents unintended cross-origin access in production while remaining backward-compatible for local development.
+
+---
+
+## 2026-04-16: Auth/API Hardening Scope Review — Mikey Lead Verdict
+
+**Reviewer:** Mikey (Lead)  
+**Scope:** API-side origin policy + security headers + regression coverage  
+**Status:** In progress; verdict gates merge readiness
+
