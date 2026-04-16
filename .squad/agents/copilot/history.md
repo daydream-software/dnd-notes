@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-16T21:10:42Z): ISSUE #45 SECOND SLICE LANDED — The owner campaign cluster is now out of `apps/api/src/app.ts` and lives in `apps/api/src/routes/owner-campaign-routes.ts`. That module now owns campaign CRUD, campaign session listing, membership listing/consolidation, and share-link create/reveal/revoke registration, while `route-support.ts` continues to carry the shared auth/access and public URL helpers. The next obvious `#45` target is the remaining owner/shared notes + overview cluster.
+
 📌 Team update (2026-04-16T21:06:06Z): ISSUE #45 FIRST SLICE LANDED — The first route-modularization slice now moves reusable API route helpers into `apps/api/src/route-support.ts` and extracts dedicated auth/admin registrars under `apps/api/src/routes/`. `createApp()` now wires those modules instead of keeping auth, admin backup, and admin restore inline, while preserving the existing runtime behavior and live note-store replacement during restore. The next likely `#45` slice is the campaign/share-link owner cluster, which still shares the same auth/access shape inside `app.ts`.
 
 📌 Team update (2026-04-16T20:58:28Z): ISSUE #45 STARTED — With the test-hotspot lane closed, the next backend refactor target is now the Express composition hotspot in `apps/api/src/app.ts`. The first planned extraction is the auth/admin cluster into dedicated route registrars backed by shared route-support helpers, with the goal of preserving route order and behavior while making future backend edits more local.
