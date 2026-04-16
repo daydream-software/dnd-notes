@@ -1,6 +1,6 @@
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import { Button, Stack, Typography } from '@mui/material'
-import { formatTimestamp } from './formatTimestamp.js'
+import { formatTimestamp } from './formatTimestamp'
 
 interface NoteEditorActionsProps {
   canEditWorkspace: boolean
