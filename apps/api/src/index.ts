@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { createApp } from './app.js'
 import { createNoteStore } from './note-store.js'
 

@@ -31,13 +31,18 @@ Use Node.js `v22.21.1` for local development. The repo pins that version in
 
 ## Local persistence
 
+Copy `apps/api/.env.example` to `apps/api/.env` when you want a checked-in
+starting point for API configuration.
+
 The API stores notes in a local SQLite database at:
 
 ```text
 apps/api/data/dnd-notes.sqlite
 ```
 
-You can override that path with `NOTES_DB_PATH`.
+You can override that path with `NOTES_DB_PATH`, and you can also set `PORT`
+there for the API listener. When you set `NOTES_DB_PATH` in `apps/api/.env`, use
+paths relative to `apps/api` (for example `data/dnd-notes.sqlite`).
 
 You can bootstrap global site-admin access with `SITE_ADMIN_EMAILS`, using a
 comma-separated list of owner-account emails. Matching accounts are promoted to
