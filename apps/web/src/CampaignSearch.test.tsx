@@ -2,6 +2,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { createJsonResponse, readMockRequest } from './test-helpers'
 
 const owner = {
   id: 'owner-1',
@@ -136,13 +137,6 @@ const notes = [
   },
 ]
 
-function createJsonResponse(body: unknown, status = 200) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-
 function getVisibleNoteButtons() {
   return within(screen.getByRole('list', { name: 'Notes list' })).getAllByRole('button')
 }
@@ -169,10 +163,7 @@ describe('Campaign note search regressions', () => {
     window.history.replaceState({}, '', '/')
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
-      const url = typeof input === 'string' ? input : (input as Request).url
-      const parsedUrl = new URL(url, 'http://localhost')
-      const path = parsedUrl.pathname
-      const method = init?.method?.toUpperCase() ?? 'GET'
+      const { path, method } = readMockRequest(input, init)
 
       if (path === '/api/auth/register' && method === 'POST') {
         return createJsonResponse({ owner, token: 'test-token' }, 201)

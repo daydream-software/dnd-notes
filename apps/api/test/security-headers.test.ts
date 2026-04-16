@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
-import request, { type SuperTest, type Test } from 'supertest'
-import { createApp } from '../src/app.js'
+import request from 'supertest'
 import { defaultCampaignId } from '../src/campaign.js'
-import { createNoteStore } from '../src/note-store.js'
+import {
+  createTestApp as createSharedTestApp,
+  registerOwner,
+  withAuth,
+  withGuest,
+} from './test-helpers.js'
 
 /**
  * Regression tests for CORS and security header hardening.
@@ -25,6 +26,16 @@ import { createNoteStore } from '../src/note-store.js'
  * 5. Prepare for future CORS origin whitelisting without breaking existing flows
  */
 
+const defaultSecurityTestOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://example.com',
+  'http://guest-origin.com',
+  'http://admin-dashboard.com',
+  'http://malicious-site.com',
+  'http://monitoring-tool.com',
+]
+
 async function createTestApp(
   options: {
     siteAdminEmails?: readonly string[]
@@ -32,98 +43,12 @@ async function createTestApp(
     allowedOrigins?: readonly string[]
   } = {},
 ) {
-  const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-api-security-'))
-  const dbPath = join(directory, 'notes.sqlite')
-  const noteStore = createNoteStore({ dbPath, siteAdminEmails: options.siteAdminEmails })
-  
-  // Include all test origins in the allowed list for security header tests
-  const allowedOrigins = (
-    options.allowedOrigins ?? [
-      'http://localhost:5173',
-      'http://localhost:3000',
-      'http://example.com',
-      'http://guest-origin.com',
-      'http://admin-dashboard.com',
-      'http://malicious-site.com',
-      'http://monitoring-tool.com',
-    ]
-  ).join(',')
-
-  const app = createApp({ noteStore, publicWebUrl: options.publicWebUrl, allowedOrigins })
-
-  return {
-    app,
-    noteStore,
-    dbPath,
-    async cleanup() {
-      noteStore.close()
-      await rm(directory, { recursive: true, force: true })
-    },
-  }
-}
-
-async function registerOwner(
-  app: SuperTest<Test>,
-  overrides: Partial<{
-    displayName: string
-    email: string
-    password: string
-  }> = {},
-) {
-  const payload = {
-    displayName: overrides.displayName ?? 'Tester',
-    email: overrides.email ?? 'tester@example.com',
-    password: overrides.password ?? 'secure-password',
-  }
-
-  const response = await app.post('/api/auth/register').send(payload)
-
-  assert.equal(response.status, 201)
-
-  return {
-    token: response.body.token as string,
-    owner: response.body.owner as {
-      id: string
-      email: string
-      displayName: string
-      isSiteAdmin: boolean
-    },
-    payload,
-  }
-}
-
-function withAuth(app: SuperTest<Test>, token: string) {
-  return {
-    get(path: string) {
-      return app.get(path).set('Authorization', `Bearer ${token}`)
-    },
-    post(path: string) {
-      return app.post(path).set('Authorization', `Bearer ${token}`)
-    },
-    put(path: string) {
-      return app.put(path).set('Authorization', `Bearer ${token}`)
-    },
-    delete(path: string) {
-      return app.delete(path).set('Authorization', `Bearer ${token}`)
-    },
-  }
-}
-
-function withGuest(app: SuperTest<Test>, token: string) {
-  return {
-    get(path: string) {
-      return app.get(path).set('X-Guest-Token', token)
-    },
-    post(path: string) {
-      return app.post(path).set('X-Guest-Token', token)
-    },
-    put(path: string) {
-      return app.put(path).set('X-Guest-Token', token)
-    },
-    delete(path: string) {
-      return app.delete(path).set('X-Guest-Token', token)
-    },
-  }
+  return createSharedTestApp({
+    directoryPrefix: 'dnd-notes-api-security-',
+    siteAdminEmails: options.siteAdminEmails,
+    publicWebUrl: options.publicWebUrl,
+    allowedOrigins: options.allowedOrigins ?? defaultSecurityTestOrigins,
+  })
 }
 
 test('CORS headers are present and permissive for authenticated requests', async () => {
