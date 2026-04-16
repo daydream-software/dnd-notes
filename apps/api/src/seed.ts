@@ -1,3 +1,4 @@
+import 'dotenv/config'
 import { createNoteStore, resolveNoteDbPath } from './note-store.js'
 import { resetStarterNotes, seedStarterNotes } from './seed-data.js'
 
