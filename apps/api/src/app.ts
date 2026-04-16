@@ -109,6 +109,33 @@ const sharedClaimRateLimitPolicy: RateLimitPolicy = {
 
 interface CreateAppOptions {
   noteStore: NoteStore
+  publicWebUrl?: string
+}
+
+function normalizePublicWebUrl(publicWebUrl?: string) {
+  if (!publicWebUrl) {
+    return null
+  }
+
+  const trimmed = publicWebUrl.trim()
+
+  if (!trimmed) {
+    return null
+  }
+
+  let parsed: URL
+
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    throw new Error('PUBLIC_WEB_URL must be an absolute URL.')
+  }
+
+  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
+    throw new Error('PUBLIC_WEB_URL must not include a path, query string, or hash.')
+  }
+
+  return parsed.toString().replace(/\/$/, '')
 }
 
 function parseAuthorizationToken(request: Request) {
@@ -482,7 +509,15 @@ function requireEditorAccess(
   return true
 }
 
-function buildSharedUrl(request: Request, shareToken: string) {
+function buildSharedUrl(
+  request: Request,
+  shareToken: string,
+  publicWebUrl: string | null,
+) {
+  if (publicWebUrl) {
+    return `${publicWebUrl}/share/${shareToken}`
+  }
+
   const origin = request.header('origin')?.replace(/\/$/, '')
 
   if (origin) {
@@ -496,9 +531,10 @@ function readRateLimitClientId(request: Request) {
   return request.ip || request.socket.remoteAddress || 'unknown'
 }
 
-export function createApp({ noteStore }: CreateAppOptions): Express {
+export function createApp({ noteStore, publicWebUrl: configuredPublicWebUrl }: CreateAppOptions): Express {
   const app = express()
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
+  const publicWebUrl = normalizePublicWebUrl(configuredPublicWebUrl)
 
   function isRateLimited(
     request: Request,
@@ -1115,7 +1151,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
       response.status(201).json({
         shareLink: created.shareLink,
         token: created.token,
-        url: buildSharedUrl(request, created.token),
+        url: buildSharedUrl(request, created.token, publicWebUrl),
       })
     },
   )
@@ -1166,7 +1202,7 @@ export function createApp({ noteStore }: CreateAppOptions): Express {
 
       response.json({
         token: reveal.token,
-        url: buildSharedUrl(request, reveal.token),
+        url: buildSharedUrl(request, reveal.token, publicWebUrl),
       })
     },
   )
