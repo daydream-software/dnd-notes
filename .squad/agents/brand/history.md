@@ -121,3 +121,59 @@ Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-han
 - Decision inbox merged to `.squad/decisions.md`
 
 📌 Team update (2026-04-14T15:52:31Z): Squad upgrade cleanup delegated to Brand; workflows pinning and repo-fit audit underway — Scribe
+
+## 2026-04-16: Origin/Web URL Configuration Investigation — Handoff Report
+
+**Requested by:** FFMikha  
+**Task:** Investigate codebase for PUBLIC WEB URL / origin-model track — env surfaces, deployment assumptions, same-origin preference, and production-safe slice guidance.
+
+### Summary of Findings
+
+**Config Surfaces:**
+- Web: `VITE_API_BASE_URL` (Vite env, defaults to http://localhost:3001)
+- API: `PORT` (dotenv, defaults to 3001)
+- Shared routes: per-link `frameAncestors` policy (stored in db, configured at share-link creation)
+- CORS: blanket `app.use(cors())` with no options (allows all origins)
+
+**Deployment Assumptions:**
+1. Frontend defaults same-machine, different-port model (not true same-origin)
+2. API origin detection: `buildSharedUrl()` reads request.header('origin')
+3. No production config surface: no nginx template, no docker-compose, no deployment docs
+4. Vite build-time env injection: VITE_API_BASE_URL must be set before `npm run build`
+
+**Same-Origin Recommendation:** YES, strongly. Eliminates CORS config, simplifies frame-ancestors policy, improves deployment friction.
+
+**Smallest Safe Production Slice (priority order):**
+1. Document VITE_API_BASE_URL as build-time requirement in README
+2. Add nginx.conf template routing web + api under single origin
+3. Create docker-compose.prod.yml showing /api/* reverse-proxy pattern
+4. Add production deployment guide with env var checklist
+
+### Key Files Referenced
+
+**Config:**
+- `apps/web/vite.config.ts:68-70` (VITE_API_BASE_URL reading)
+- `apps/web/.env.example` (VITE_API_BASE_URL default)
+- `apps/api/.env` (PORT, NOTES_DB_PATH, SITE_ADMIN_EMAILS)
+- `apps/api/src/app.ts:502` (cors() blanket enable)
+- `apps/api/src/app.ts:485-493` (buildSharedUrl origin extraction)
+
+**Validation:**
+- `apps/api/src/validation.ts:133-159` (frameAncestors policy validation)
+
+**Shared Route Model:**
+- `apps/web/src/App.tsx` (share token routing)
+- `apps/api/src/app.ts:1070-1125` (POST /api/campaigns/:id/share-links endpoint)
+- `apps/api/src/app.ts:427-435` (applySharedLinkPolicy CSP header)
+
+**CI/Deployment:**
+- `.github/workflows/ci.yml` (no prod config, localhost hardcoded)
+- `.copilot_here/docker/Dockerfile` (dev-focused, no API_BASE_URL injection)
+
+### Next Steps
+
+This handoff is ready for whoever picks up production deployment work. All assumptions, config surfaces, and origin decisions are now explicit. The reverse-proxy same-origin model is documented and safe to implement without rearchitecting the app.
+
+---
+**2026-04-16T18:45:00Z — Investigation complete. Zero code changes. Handoff decision pending squad action.**
+📌 Team update (2026-04-16T15:30:33Z): Origin-model audit completed. Frontend ready for split-origin deployment. Backend: add PUBLIC_WEB_ORIGIN env var to buildSharedUrl(). Platform: same-origin reverse proxy recommended for prod. — decided by Stef, Data, Brand, Mikey

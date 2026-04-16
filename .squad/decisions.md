@@ -2469,3 +2469,558 @@ Recommend Lexical for the editor layer, wrapped in MUI chrome, with markdown imp
 Background agent work created unsigned local commits even though signing is required. The team needs an explicit, durable rule that preserves signing and keeps the user in the loop when interactive signing is needed.
 
 ---
+# PUBLIC WEB URL / Origin-Model Track Handoff
+
+**Author:** Data (Backend Dev)  
+**Date:** 2026-04-16  
+**Scope:** API architecture analysis for shared-link URL generation and same-origin vs split-origin deployment models
+
+## Current State
+
+### Shared URL Generation Logic
+- **Location:** `apps/api/src/app.ts` lines 485–493
+- **Function:** `buildSharedUrl(request: Request, shareToken: string)`
+- **Behavior:**
+  1. Reads `Origin` header from incoming request → strips trailing slash
+  2. If header exists: returns `${origin}/share/${shareToken}` 
+  3. If missing: falls back to `${request.protocol}://${request.get('host')}/share/${shareToken}`
+
+### Where URLs Are Returned
+- **POST `/api/campaigns/:campaignId/share-links`** (line 1118) — new link creation
+- **GET `/api/campaigns/:campaignId/share-links/:shareLinkId`** (line 1169) — owner reveal endpoint
+- Both endpoints return JSON: `{ shareLink, token, url }`
+
+### Current Assumptions (SAME-ORIGIN MODEL)
+The API **implicitly assumes same-origin deployment**:
+- API reads the client's incoming `Origin` header and echoes it back into the URL
+- Web client fetches from `VITE_API_BASE_URL` (env var, defaults to `http://localhost:3001`)
+- When web calls `POST /api/campaigns/:campaignId/share-links`, the API mirrors the web's origin
+- **Result:** Generated URL will always point to the same origin as the requesting web client
+- **Critical:** This breaks cleanly if API and web are on different origins
+
+### CORS Configuration
+- **Location:** `apps/api/src/app.ts` line 546
+- **Implementation:** `app.use(cors())` — **permissive, no origin whitelist**
+- Default behavior: allows any origin, reflects requested origin in CORS headers
+- No environment config for origin restrictions
+- No explicit `Access-Control-Allow-Origin` overrides
+
+### Frame-Ancestors CSP (Embedded Share Links)
+- **Location:** `apps/api/src/app.ts` lines 427–435
+- **Flow:**
+  1. Owner creates share link and specifies `frameAncestors` (e.g., `'self' https://app.roll20.net`)
+  2. API stores in `campaign_share_links.frame_ancestors` column
+  3. On shared session read (`GET /api/shared/:shareToken/session`), API returns frameAncestors and sets CSP header: `frame-ancestors ${frameAncestors || "'none'"}`
+  4. **Web layer** (Vite dev server, `apps/web/vite.config.ts` lines 11–65):
+     - Intercepts requests to `/share/:token`
+     - Fetches `GET /api/shared/:token/session` from API
+     - Reads `shareLink.frameAncestors` from response
+     - Sets CSP header locally before rendering
+
+**Problem:** Web server must already know API URL to fetch frameAncestors policy. If API is on a different origin, Vite plugin must be configured with that origin.
+
+---
+
+## Practical Implications
+
+### Same-Origin Deployment (Current Default)
+```
+Production: https://dnd-notes.example.com
+
+  web app (React, port 3000)
+       ↓
+  api (Node, port 3001)
+       ↓ (both behind same domain)
+  SQLite database
+```
+
+- ✅ `buildSharedUrl()` works trivially — mirrors requester's origin
+- ✅ CORS permissive, no issues
+- ✅ Frame-ancestors CSP flow works as-is
+- ⚠️ **Single failure point:** If API goes down, web and shared links both break
+- ⚠️ **Scaling:** Both services compete for resources on same host
+
+### Split-Origin Deployment (Proposed)
+```
+Production:
+  https://app.dnd-notes.com (web)    ← clients access here
+       ↓ (CORS fetch to)
+  https://api.dnd-notes.com (API)    ← database backend
+```
+
+- 🔴 **`buildSharedUrl()` breaks:** API reads `Origin: https://app.dnd-notes.com` and returns `https://app.dnd-notes.com/share/{token}`, which **is correct** — but only by accident/assumption
+- 🔴 **Issue:** If web is behind a CDN proxy (e.g., `cdn.dnd-notes.com`), or if API is called from an automated tool, the `Origin` header may be unpredictable
+- 🟡 **Frame-ancestors fetch from Vite:** Vite dev server must know API endpoint; requires env config `VITE_API_BASE_URL` to point to correct origin
+- 🟡 **CORS permissive:** No issue for shared-link access, but a risk if you later add auth-required endpoints
+
+---
+
+## Required Changes for Split-Origin Model
+
+### 1. Make Shared URL Generation Explicit (API-side)
+**File:** `apps/api/src/app.ts`
+
+**Current (unsafe assumption):**
+```typescript
+function buildSharedUrl(request: Request, shareToken: string) {
+  const origin = request.header('origin')?.replace(/\/$/, '')
+  if (origin) {
+    return `${origin}/share/${shareToken}`  // mirrors client origin — risky
+  }
+  return `${request.protocol}://${request.get('host')}/share/${shareToken}`
+}
+```
+
+**Recommendation:**
+```typescript
+function buildSharedUrl(_request: Request, shareToken: string) {
+  const webOrigin = process.env.PUBLIC_WEB_ORIGIN ?? 'http://localhost:3000'
+  return `${webOrigin}/share/${shareToken}`
+}
+```
+
+- **Why:** Explicit config means same URL generation regardless of who asks, no header sniffing
+- **Env var:** `PUBLIC_WEB_ORIGIN` — deploy-time config, not request-time inference
+- **Default:** `http://localhost:3000` for dev (matches Vite default port)
+- **Testing:** Mock by setting env var in test suite before app creation
+
+### 2. Harden CORS (if deploying publicly)
+**File:** `apps/api/src/app.ts` line 546
+
+**Current:**
+```typescript
+app.use(cors())
+```
+
+**Recommendation (split-origin prod):**
+```typescript
+const allowedOrigins = (process.env.ALLOWED_ORIGINS ?? 'http://localhost:3000').split(',')
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || allowedOrigins.some(allowed => origin.startsWith(allowed))) {
+      callback(null, true)
+    } else {
+      callback(new Error('CORS not allowed'))
+    }
+  },
+  credentials: true,
+}))
+```
+
+- **Why:** Prevent unexpected origins from calling API endpoints
+- **Env var:** `ALLOWED_ORIGINS=https://app.example.com,https://staging.example.com`
+- **Credentials:** Required if shared links use HTTP-only cookies (not current design)
+
+### 3. Update Vite Frame-Ancestors Plugin (web-side)
+**File:** `apps/web/vite.config.ts` lines 11–65
+
+**Current:**
+```typescript
+const apiBaseUrl = env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:3001'
+// Uses apiBaseUrl to fetch /api/shared/.../session
+```
+
+**Already correct** — Vite config already reads `VITE_API_BASE_URL` env var and uses it for CSP fetch. No change needed if you set the env var at deploy time.
+
+- **Verify:** In CI/deployment, ensure `VITE_API_BASE_URL` matches actual API origin
+- **Example:** `VITE_API_BASE_URL=https://api.example.com npm run build`
+
+### 4. Environment Config (Deployment)
+**File:** `apps/api/.env.example` (and production deployment config)
+
+Add:
+```env
+PUBLIC_WEB_ORIGIN=http://localhost:3000
+ALLOWED_ORIGINS=http://localhost:3000
+```
+
+Update `.env.example` to show both for future developers.
+
+**File:** `apps/web/.env.example` (already correct, just verify)
+```env
+VITE_API_BASE_URL=http://localhost:3001
+```
+
+### 5. Test Coverage for URL Generation
+**File:** `apps/api/test/app.test.ts`
+
+Add regression tests:
+```typescript
+test('buildSharedUrl uses PUBLIC_WEB_ORIGIN env var, not request origin', async (t) => {
+  // Set env before app creation
+  const originalEnv = process.env.PUBLIC_WEB_ORIGIN
+  process.env.PUBLIC_WEB_ORIGIN = 'https://custom.example.com'
+  
+  const { app, cleanup } = await createTestApp()
+  t.after(() => {
+    cleanup()
+    if (originalEnv) process.env.PUBLIC_WEB_ORIGIN = originalEnv
+    else delete process.env.PUBLIC_WEB_ORIGIN
+  })
+
+  const owner = await registerOwner(request(app), { email: 'owner@test.com' })
+  const campaign = await createCampaign(request(app), owner.token, {})
+  
+  const response = await withAuth(request(app), owner.token)
+    .post(`/api/campaigns/${campaign.id}/share-links`)
+    .send({ label: 'Test', accessLevel: 'viewer' })
+  
+  assert.equal(response.status, 201)
+  assert.match(response.body.url, /^https:\/\/custom\.example\.com\/share\/.+$/)
+})
+```
+
+---
+
+## Risk Summary
+
+| Scenario | Current (Same-Origin) | Split-Origin (with changes) |
+|----------|----------------------|----------------------------|
+| Shared link URL correct | ✅ (mirrors origin) | ✅ (explicit config) |
+| CORS blocked on mismatch | No (permissive) | 🟡 Depends on `ALLOWED_ORIGINS` |
+| Frame-ancestors CSP works | ✅ (Vite reads API) | ✅ (requires `VITE_API_BASE_URL` env) |
+| Redeployment without config change | ✅ | 🔴 Breaks if `PUBLIC_WEB_ORIGIN` not set |
+| Multiple web origins (e.g., staging+prod) | 🟡 (shared API) | ✅ (whitelist in `ALLOWED_ORIGINS`) |
+
+---
+
+## File Locations Summary
+
+| File | Lines | Purpose |
+|------|-------|---------|
+| `apps/api/src/app.ts` | 485–493 | `buildSharedUrl()` — **PRIMARY CHANGE** |
+| `apps/api/src/app.ts` | 546 | CORS setup — consider hardening |
+| `apps/api/src/app.ts` | 427–435 | CSP header application (OK as-is) |
+| `apps/api/.env.example` | all | Add `PUBLIC_WEB_ORIGIN` + `ALLOWED_ORIGINS` |
+| `apps/web/vite.config.ts` | 11–65 | Frame-ancestors plugin (already correct) |
+| `apps/web/.env.example` | all | Verify `VITE_API_BASE_URL` documented |
+| `apps/api/test/app.test.ts` | all | Add split-origin URL generation test |
+
+---
+
+## Recommendation for Immediate Action
+
+**Phase 1 (Defensive):** Add `PUBLIC_WEB_ORIGIN` env var to `buildSharedUrl()` with fallback to current logic. No breaking changes, safe to deploy now.
+
+**Phase 2 (Hardening):** Restrict CORS to explicit whitelist if planning multi-environment deployment.
+
+**Phase 3 (Testing):** Add regression test for URL generation to prevent accidental header-sniffing regressions.
+
+If staying same-origin only, no changes needed — current design is correct and minimal.
+# Frontend API Origin Handoff — PUBLIC WEB URL Track
+
+**From:** Stef (Frontend Dev)  
+**Date:** 2026-04-13  
+**Context:** Architecture planning for supporting split-origin deployments (frontend on public URL, API on separate origin)
+
+---
+
+## Current State: Same-Origin Assumptions
+
+### How API URL is Set
+
+**File:** `apps/web/src/api.ts:31-32`
+```typescript
+const apiBaseUrl =
+  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:3001'
+```
+
+- **Single source of truth** for all API calls across the app
+- Falls back to `http://localhost:3001` in dev
+- Configured via `VITE_API_BASE_URL` env var
+- Trailing slash stripped to keep URLs clean
+
+### How It's Used
+
+All 50+ API calls in `apps/web/src/api.ts` use this base URL. Pattern is consistent:
+- No hardcoded origins anywhere in React code
+- No `location.origin` or `window.location` for API URLs
+- All fetches use explicit full URLs: `${apiBaseUrl}/api/...`
+
+### Current Token Pattern (Same-Origin Safe)
+
+**Header creation** (`apps/web/src/api.ts:34-46`):
+- Auth token sent via `Authorization: Bearer {token}` header (explicit)
+- Credentials NOT added to fetch options (no `credentials: 'include'`)
+- Tokens are **in localStorage** and managed explicitly by app
+
+This is **safe for split origins**—no cookie leakage risk.
+
+---
+
+## Shared Routes: Special Origin Case
+
+**File:** `apps/web/vite.config.ts:11-65`
+
+The `createFrameAncestorsPlugin` does something important:
+```typescript
+const sessionResponse = await fetch(
+  `${apiBaseUrl}/api/shared/${encodeURIComponent(shareMatch[1])}/session`,
+)
+```
+
+- Runs **during dev/preview server** middleware
+- Makes calls to API from **server-side middleware** (not browser)
+- Used to set CSP `frame-ancestors` header dynamically
+- This call **does NOT need origin changes**—it can still use `apiBaseUrl`
+
+---
+
+## Frontend Router: Client-Side Only
+
+**File:** `apps/web/src/App.tsx:187-188, 624`
+
+Share routes are parsed from pathname:
+```typescript
+function getShareTokenFromPath(pathname: string) {
+  const match = pathname.match(/^\/share\/([^/]+)\/?$/)
+  ...
+}
+```
+
+- Routing is **client-side** (window.location parsing)
+- No server-side routing involved on frontend
+- Paths like `/share/{token}` work via SPA navigation
+- Navigation reset is explicit: `window.location.assign('/')` for logout
+
+---
+
+## Frontend-Facing Changes Needed for Split Origin
+
+### 1. **NO Code Changes Required** ✅
+- API base URL is already parameterized
+- Token handling uses headers (not cookies)
+- No same-origin checks in frontend code
+
+### 2. **Deployment Configuration Changes** (Likely)
+
+**Environment Setup:**
+- Ensure `VITE_API_BASE_URL` is set to the split API origin in prod builds
+- Example: if frontend is `https://dnd.example.com` and API is `https://api.example.com`, set:
+  ```
+  VITE_API_BASE_URL=https://api.example.com
+  ```
+
+**Vite Config:**
+- Already uses `VITE_API_BASE_URL` in `vite.config.ts:69-70` for the plugin
+- No code changes needed; just env var setup
+
+### 3. **CORS Configuration** (Backend Team)
+- Backend must return proper CORS headers when origin differs
+- Frontend can't control this—it'll just fail if backend doesn't allow it
+
+### 4. **Potential Issues to Watch**
+
+| Scenario | Risk | Mitigation |
+|----------|------|-----------|
+| API on different domain | CORS preflight requests | Backend must set `Access-Control-Allow-Origin` |
+| API on different port (same host) | Treated as different origin by browser | Same CORS headers apply |
+| Token stored in localStorage | XSS risk if frontend compromised | Keep dependencies updated, use CSP |
+| Share embeds (iframe) | CSP `frame-ancestors` enforced | Already dynamic via vite plugin ✅ |
+
+---
+
+## Files to Monitor
+
+**Frontend code that's origin-aware:**
+- `apps/web/src/api.ts` — All API calls (centralized, good)
+- `apps/web/vite.config.ts` — Shared session middleware (already parameterized)
+- `apps/web/.env.example` — Documents expected env vars
+- `apps/web/src/App.tsx` — Shared route parsing (client-side, no origin deps)
+
+**No hardcoded origins found in:**
+- Component code
+- State management
+- Navigation logic
+- Header handling
+
+---
+
+## Handoff Recommendation
+
+**Status:** ✅ **Frontend is ready for split-origin deployment**
+
+**Next steps:**
+1. **Data Team:** Ensure backend CORS headers are configured for the split origin
+2. **Deployment/DevOps:** Set `VITE_API_BASE_URL` env var during build for prod/staging
+3. **QA:** Test auth flows and shared routes with split-origin API
+4. **Frontend:** No changes needed; monitor for CORS errors in logs if they arise
+
+**Open questions for Data:**
+- Will the API server handle CORS? If so, what `Access-Control-Allow-Origin` values?
+- Preflight requests will double API latency slightly—acceptable?
+
+---
+
+## What I Didn't Find (Safe to Note)
+
+- ❌ No axios/http-client wrapper (good—Fetch API is straightforward)
+- ❌ No global interceptors that assume same origin
+- ❌ No cookie-based auth (tokens in localStorage—explicit)
+- ❌ No hardcoded environment-specific URLs
+- ❌ No browser redirect logic based on origin
+
+This app's architecture is **pragmatic and origin-agnostic**.
+# Origin/Web URL Configuration Handoff — Investigation Results
+
+**Date:** 2026-04-16  
+**Investigator:** Brand (Platform Dev)  
+**Status:** Ready for squad decision  
+
+## Executive Summary
+
+The dnd-notes codebase has explicit origin awareness through shared-link CSP policies, but **lacks a documented production deployment model**. The current config surfaces support a **same-origin reverse-proxy pattern**, which is strongly recommended for this repo.
+
+## Current Config Surfaces
+
+### Frontend (Web)
+- **File:** `apps/web/vite.config.ts`
+- **Mechanism:** Vite env var injection at build time
+- **Key var:** `VITE_API_BASE_URL` (defaults to `http://localhost:3001`)
+- **Frame-ancestors:** Dynamic CSP policy per share-link, fetched from API at request time
+- **Source:** `apps/web/.env.example` shows example value
+
+### API (Backend)
+- **File:** `apps/api/src/app.ts` + `apps/api/.env`
+- **Config:** `PORT` (defaults 3001), `NOTES_DB_PATH`, `SITE_ADMIN_EMAILS`
+- **CORS:** Blanket `app.use(cors())` — allows all origins
+- **Origin awareness:** `buildSharedUrl()` reads `request.header('origin')` to construct share links
+- **Frame-ancestors:** Validated per share-link in `apps/api/src/validation.ts` (lines 133–159)
+
+### Shared Routes Model
+- **Entry:** `/share/:shareToken` (Vite dev server applies CSP dynamically)
+- **Policies:** Owner-configured, validated as `'none'` (default) | `'self'` | space-separated origin URLs
+- **Applied at:** API response header `Content-Security-Policy: frame-ancestors ...`
+- **Endpoint:** `POST /api/campaigns/:campaignId/share-links` (creates link with policy)
+
+## Deployment / Origin Assumptions
+
+### What's Explicit
+1. **README (line 174):** "only the `/share/:shareToken` route is intended for embedding; the main app stays denied by default"
+2. **Validation:** Frame-ancestors must be null, `'self'`, `'none'`, or valid origin URLs
+3. **API:** Reads `request.header('origin')` for share-link URL construction (assumes origin is trustworthy)
+
+### What's Implicit (NOT documented)
+1. **Local dev:** Frontend (localhost:5173) talks to API (localhost:3001) via CORS header
+2. **Production:** No guidance on reverse-proxy, nginx config, or origin topology
+3. **Build time:** `VITE_API_BASE_URL` must be set before `npm run build`, but docs don't mention this
+4. **Docker:** `.copilot_here/docker/Dockerfile` doesn't inject `VITE_API_BASE_URL` at build/run
+
+## Same-Origin Assessment
+
+**Recommendation:** **YES, strongly prefer same-origin for production.**
+
+### Why Same-Origin is Right for This Repo
+
+1. **Eliminates CORS complexity**
+   - Current blanket `cors()` allows all origins — unsafe for production
+   - Same-origin (via reverse proxy) requires zero CORS config
+
+2. **Frame-ancestors policy consistency**
+   - Shared `/share/:shareToken` route is intended for embedding
+   - If served from same origin as app, default `frame-ancestors 'self'` works automatically
+   - Current per-link policy becomes simpler: just `'self'` or null/`'none'`
+
+3. **Deployment simplicity**
+   - Single web server (nginx/caddy) routes `/` to web app, `/api/*` to API
+   - One domain, one port, one certificate
+   - Easier to deploy to VPS, K8s, or managed PaaS
+
+4. **Security improvement**
+   - No cross-origin fetch credentials (eliminates cookie/auth leakage vectors)
+   - Simpler auth model: session tokens/JWTs not exposed to multiple origins
+
+### Cross-Origin Still Supported (But Not Recommended)
+If cross-origin is needed later (e.g., decoupled mobile app), the frame-ancestors policy per share-link already supports it. But it should be opt-in, not default.
+
+## Smallest Safe Production-Oriented Slice
+
+Priority order for implementation:
+
+### Phase 1: Documentation (Next immediate step)
+- [ ] Add "Production Deployment" section to README.md
+- [ ] Document VITE_API_BASE_URL as build-time requirement
+- [ ] List env vars (PORT, NOTES_DB_PATH, SITE_ADMIN_EMAILS)
+
+### Phase 2: Reverse-Proxy Template (High priority)
+- [ ] Create `docker/nginx/nginx.conf` template
+  - Route `/api/*` to backend (Port 3001)
+  - Route `/` to frontend (Port 5173 in dev, or built files in prod)
+  - No CORS headers (same-origin model)
+- [ ] Create `docker-compose.prod.yml`
+  - Services: api, web (built), nginx
+  - Network: internal
+  - Example: `https://example.com/` = nginx → web, `https://example.com/api/*` = nginx → api
+
+### Phase 3: Deployment Guide (Medium priority)
+- [ ] Step-by-step deployment to VPS (with nginx)
+- [ ] Environment variable injection (build-time vs. runtime)
+- [ ] HTTPS certificate setup (Let's Encrypt)
+- [ ] Health checks and monitoring
+
+### Phase 4: Runtime Config (Optional, lower priority)
+- [ ] If dynamic redeployment without rebuild is needed:
+  - Option A: Fetch config from API at app startup (window.__CONFIG__)
+  - Option B: Env var injection via reverse proxy (not yet supported)
+  - Option C: Full rebuild required (current model)
+
+## Files to Reference (No Changes Needed)
+
+All investigation was read-only; no code changes were made.
+
+**Frontend config:**
+- `apps/web/vite.config.ts` (lines 68–70, 11–65)
+- `apps/web/.env.example`
+- `apps/web/src/api.ts` (apiBaseUrl handling)
+
+**Backend config:**
+- `apps/api/src/index.ts` (PORT reading, startup)
+- `apps/api/src/app.ts` (cors() at line 502, buildSharedUrl at 485–493, frame-ancestors at 427–435)
+- `apps/api/.env`
+- `apps/api/src/validation.ts` (frameAncestors schema at 161–167, validator at 133–159)
+
+**CI/Deployment:**
+- `.github/workflows/ci.yml` (no production env vars)
+- `.copilot_here/docker/Dockerfile` (development-focused)
+
+## Decision for Squad
+
+**Next action owner:** Whoever picks up production deployment work should start with **Phase 1 (documentation)** while the findings are fresh. This handoff is complete and safe to hand off to any agent.
+
+**No blocking issues.** The codebase is ready for same-origin production deployment; it just needs documentation and templates.
+
+---
+
+**Status:** Ready for merge to `.squad/decisions.md`  
+**Reviewed by:** Brand  
+**Approved for:** Next sprint / anyone working on deployment track
+---
+title: Origin-model handoff
+date: 2026-04-16
+by: Mikey
+---
+
+## Decision
+
+Treat production shared-link generation as a backend-owned canonical URL problem. Add an explicit API-side public web origin (`PUBLIC_WEB_URL` or `PUBLIC_WEB_ORIGIN`) and prefer same-origin deployment as the default target shape; do not couple production link generation to request `Origin` or current API host detection.
+
+## Why
+
+- The frontend already centralizes API calls behind `VITE_API_BASE_URL`, so split-origin fetches are not the main gap.
+- `apps/api/src/app.ts` currently returns share URLs via `buildSharedUrl()`, which prefers the incoming `Origin` header and otherwise falls back to `request.protocol://host`.
+- That fallback is brittle behind proxies, split-origin deployments, admin/API callers, or any request that does not originate from the canonical public web host.
+- Today the API also uses blanket `app.use(cors())`; tightening CORS is a separate concern and should only be done when browser traffic actually crosses origins.
+
+## Thin Slice
+
+1. Add API env parsing for `PUBLIC_WEB_URL` in startup/config.
+2. Change `buildSharedUrl()` to prefer that configured public web origin.
+3. Keep request-derived fallback only for local/dev compatibility.
+4. Add API tests for env-first link generation plus fallback behavior.
+5. Document `PUBLIC_WEB_URL` and same-origin-vs-split-origin expectations in README / `.env.example`.
+
+## Boundaries
+
+- Same-origin should be the preferred production posture today.
+- CORS allowlisting is only required when the browser-served web app and API are intentionally on different origins, or when additional browser origins must call authenticated API routes.
+- Deployment artifacts (nginx/docker/proxy wiring) stay deferred until hosting is chosen.
