@@ -51,6 +51,16 @@ do not depend on request headers or reverse-proxy host detection. This repo now
 assumes a same-origin production model by default; only introduce split web/API
 origins when you intentionally want that deployment shape.
 
+Set `ALLOWED_ORIGINS` to a comma-separated list of origins that can access the API
+via CORS (for example `http://localhost:5173,http://localhost:3000`). Defaults to
+`http://localhost:5173,http://localhost:3000` for local development. Requests with
+no origin header (mobile apps, curl, Postman) are always allowed. This explicit
+allowlist replaces the previous permissive CORS configuration and is appropriate
+for production deployments where the web app and API may be served from different
+origins. For same-origin deployments (recommended), both the web app and API should
+share the same domain via reverse proxy, so CORS is primarily relevant during local
+development.
+
 You can bootstrap global site-admin access with `SITE_ADMIN_EMAILS`, using a
 comma-separated list of owner-account emails. Matching accounts are promoted to
 site admin on registration and again on API startup so the future global admin
@@ -126,6 +136,29 @@ All `/api/campaigns`, `/api/overview`, and `/api/notes` routes require an
 Any linked campaign membership can open the authenticated workspace, while
 campaign management routes such as settings, memberships, and share links stay
 owner-only.
+
+## API Security
+
+The API implements several security hardening measures:
+
+- **CORS Policy:** Enforces an explicit origin allowlist via `ALLOWED_ORIGINS`. Only
+  origins in the allowlist can access the API from browsers. Requests without an
+  origin header (server-to-server, mobile apps, CLI tools) are always allowed.
+  
+- **Security Headers:** All API responses include:
+  - `X-Content-Type-Options: nosniff` — prevents MIME type sniffing
+  - `X-Frame-Options: DENY` — prevents clickjacking on API routes
+  - `X-XSS-Protection: 1; mode=block` — legacy XSS protection
+  - `Referrer-Policy: strict-origin-when-cross-origin` — restricts referrer leakage
+  
+- **Share Link Frame Policy:** Shared campaign routes (`/api/shared/:shareToken/*`)
+  override the default `X-Frame-Options: DENY` with per-link `Content-Security-Policy`
+  `frame-ancestors` directives. Campaign owners specify which origins can embed their
+  shared campaigns (e.g., `'self' https://app.roll20.net`), enabling controlled
+  embedding while maintaining clickjacking protection everywhere else.
+
+- **Authentication:** Owner routes use Bearer tokens in `Authorization` headers. Guest
+  routes use guest tokens in `X-Guest-Token` headers. No cookies are used for auth.
 
 `GET /api/admin/accounts`, `GET /api/admin/overview`, and `GET /api/admin/backup`
 are site-admin-only. `/api/admin/accounts` returns the real-account directory plus

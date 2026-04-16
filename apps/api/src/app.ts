@@ -110,6 +110,7 @@ const sharedClaimRateLimitPolicy: RateLimitPolicy = {
 interface CreateAppOptions {
   noteStore: NoteStore
   publicWebUrl?: string
+  allowedOrigins?: string
 }
 
 function normalizePublicWebUrl(publicWebUrl?: string) {
@@ -455,10 +456,15 @@ function applySharedLinkPolicy(
   response: Response,
   frameAncestors: string | null,
 ) {
+  // Set frame-ancestors CSP (per-link policy)
   response.set(
     'Content-Security-Policy',
     `frame-ancestors ${frameAncestors?.trim() || "'none'"}`,
   )
+  
+  // Remove X-Frame-Options for shared routes - CSP frame-ancestors takes precedence
+  // and allows granular per-link embedding control
+  response.removeHeader('X-Frame-Options')
 }
 
 function readSharedMembership(
@@ -531,7 +537,7 @@ function readRateLimitClientId(request: Request) {
   return request.ip || request.socket.remoteAddress || 'unknown'
 }
 
-export function createApp({ noteStore, publicWebUrl: configuredPublicWebUrl }: CreateAppOptions): Express {
+export function createApp({ noteStore, publicWebUrl: configuredPublicWebUrl, allowedOrigins: configuredAllowedOrigins }: CreateAppOptions): Express {
   const app = express()
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
   const publicWebUrl = normalizePublicWebUrl(configuredPublicWebUrl)
@@ -579,7 +585,51 @@ export function createApp({ noteStore, publicWebUrl: configuredPublicWebUrl }: C
     return false
   }
 
-  app.use(cors())
+  // CORS configuration - explicit origin allowlist for security
+  const allowedOrigins = (configuredAllowedOrigins ?? process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter((origin) => origin.length > 0)
+
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        // Allow requests with no origin (e.g., mobile apps, curl, Postman)
+        if (!origin) {
+          callback(null, true)
+          return
+        }
+
+        // Check if origin is in allowlist
+        if (allowedOrigins.includes(origin)) {
+          callback(null, true)
+          return
+        }
+
+        // Reject origin
+        callback(new Error('CORS policy: Origin not allowed'))
+      },
+      credentials: true,
+    }),
+  )
+
+  // Security headers middleware
+  app.use((_request, response, next) => {
+    // Prevent MIME type sniffing
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    
+    // Prevent clickjacking for API routes (frame-ancestors CSP applied per-route for shared links)
+    response.setHeader('X-Frame-Options', 'DENY')
+    
+    // XSS protection (legacy header, but doesn't hurt)
+    response.setHeader('X-XSS-Protection', '1; mode=block')
+    
+    // Don't send referrer to external sites
+    response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+    
+    next()
+  })
+
   app.use(express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
