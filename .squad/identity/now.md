@@ -1,8 +1,8 @@
 # Current Focus
 
-- **Updated:** 2026-04-16T17:49:00Z
-- **Active slice:** Admin backup/restore implementation — completed
-- **Shipped now:** site-admin `POST /api/admin/restore`, rollback-on-failure restore flow, admin-panel restore UI with mandatory confirmation, and API/web regression coverage
-- **Prerequisites already shipped:** `PUBLIC_WEB_URL` canonical share URLs and API exposure hardening
-- **Operational caveat:** restoring a backup can invalidate the current owner session if the restored snapshot carries different session rows
-- **Next likely task:** choose the next production roadmap slice after backup/restore, most likely provisioning prototype work or deeper deployment/runbook work
+- **Updated:** 2026-04-16T18:45:49Z
+- **Active slice:** Roadmap expansion — agent-friendly architecture refactor lane analyzed and queued
+- **New roadmap lane:** shrink the monolithic hotspots in `apps/web/src/App.tsx`, `apps/api/src/app.ts`, `apps/api/src/note-store.ts`, and the large integration specs to improve parallel work and reduce large-context edits
+- **Tracked issues:** #44 (`squad:stef`), #45 (`squad:data`), #46 (`squad:data`), #47 (`squad:chunk`)
+- **Production context still active:** same-origin deployment default, admin backup/restore now shipped, WAL/restore-concurrency/provisioning follow-ups tracked in #39–#43
+- **Next likely task:** pick the next lane to execute, either the new architecture-refactor slices or one of the remaining production issues
