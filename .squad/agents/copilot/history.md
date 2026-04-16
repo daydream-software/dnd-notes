@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-16T21:55:14Z): ISSUE #46 SECOND SLICE LANDED — `apps/api/src/note-store-notes.ts` now owns the note-specific prepared statements, row types, note/reference mappers, and note composition helpers that used to live inside `apps/api/src/note-store.ts`. The store entrypoint still owns the public API and transactions, but the note SQL/mapping block is now local to a dedicated module, which makes the next `#46` slice safer to target around note-reference synchronization or another transaction bundle.
+
 📌 Team update (2026-04-16T21:40:06Z): ISSUE #46 STARTED — The first persistence-modularization slice is in. `apps/api/src/note-store-bootstrap.ts` now owns SQLite schema creation, lightweight legacy-column migrations, share-link reveal-token upgrade, and configured site-admin elevation. `createNoteStore()` still opens the database and wires the store API, but its startup path is smaller and the next `#46` seam can focus on query/transaction clusters instead of bootstrap plumbing.
 
 📌 Team update (2026-04-16T21:35:14Z): ISSUE #45 COMPLETED — All remaining API route clusters are now out of `apps/api/src/app.ts`. Owner overview/note routes live in `apps/api/src/routes/owner-note-routes.ts`, shared-link guest routes live in `apps/api/src/routes/shared-routes.ts`, and the earlier auth/admin/owner-campaign registrars still sit alongside them under `apps/api/src/routes/`. `app.ts` is now mostly the composition root for middleware, rate-limit state, route context, health, and ordered registrar wiring. This leaves `apps/api/src/note-store.ts` (`#46`) as the next clear backend hotspot.
