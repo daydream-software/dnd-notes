@@ -24,6 +24,13 @@ Use Node.js `v22.21.1` for local development. The repo pins that version in
 - `npm run lint` runs ESLint in both workspaces
 - `npm run test` runs the web and API tests
 
+## Git hooks
+
+`npm install` now provisions Husky git hooks automatically via the root `prepare`
+script. Commits are checked with commitlint, so commit messages must follow the
+Conventional Commits format (for example `feat(api): harden CORS policy` or
+`chore: update hook tooling`).
+
 ## Workspace layout
 
 - `apps/web` — React + Vite + Material UI notes workspace
