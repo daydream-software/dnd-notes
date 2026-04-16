@@ -108,6 +108,38 @@ test('GET /health returns service metadata', async (t) => {
   assert.equal(response.body.service, 'dnd-notes-api')
 })
 
+test('site admins can download a SQLite backup and non-admins cannot', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    siteAdminEmails: ['site-admin@example.com'],
+  })
+  t.after(cleanup)
+
+  const nonAdmin = await registerOwner(request(app), {
+    email: 'not-admin@example.com',
+  })
+  const nonAdminBackupResponse = await withAuth(request(app), nonAdmin.token).get(
+    '/api/admin/backup',
+  )
+  assert.equal(nonAdminBackupResponse.status, 403)
+  assert.equal(nonAdminBackupResponse.body.error, 'Site-admin access is required.')
+
+  const siteAdmin = await registerOwner(request(app), {
+    displayName: 'Site Admin',
+    email: 'site-admin@example.com',
+  })
+  assert.equal(siteAdmin.owner.isSiteAdmin, true)
+
+  const backupResponse = await withAuth(request(app), siteAdmin.token).get('/api/admin/backup')
+  assert.equal(backupResponse.status, 200)
+  assert.match(
+    backupResponse.headers['content-disposition'],
+    /^attachment; filename="dnd-notes-backup-.+\.sqlite"$/,
+  )
+  assert.equal(backupResponse.headers['content-type'], 'application/octet-stream')
+  assert.ok(Buffer.isBuffer(backupResponse.body))
+  assert.equal(backupResponse.body.subarray(0, 15).toString('utf8'), 'SQLite format 3')
+})
+
 test('owner auth and campaign endpoints support the management workflow', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
@@ -224,6 +256,65 @@ test('owner auth and campaign endpoints support the management workflow', async 
 
   const expiredSessionResponse = await authed.get('/api/auth/session')
   assert.equal(expiredSessionResponse.status, 401)
+})
+
+test('owner registration is rate limited after repeated attempts', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  for (let index = 0; index < 5; index += 1) {
+    const response = await request(app).post('/api/auth/register').send({
+      displayName: `Rate Limited ${index}`,
+      email: `rate-limit-${index}@example.com`,
+      password: 'moonlit-secret',
+    })
+
+    assert.equal(response.status, 201)
+  }
+
+  const limitedResponse = await request(app).post('/api/auth/register').send({
+    displayName: 'Rate Limited Final',
+    email: 'rate-limit-final@example.com',
+    password: 'moonlit-secret',
+  })
+
+  assert.equal(limitedResponse.status, 429)
+  assert.equal(
+    limitedResponse.body.error,
+    'Too many registration attempts. Please wait before trying again.',
+  )
+  assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
+})
+
+test('owner login is rate limited after repeated attempts', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  await registerOwner(request(app), {
+    email: 'login-rate-limit@example.com',
+    password: 'moonlit-secret',
+  })
+
+  for (let index = 0; index < 5; index += 1) {
+    const response = await request(app).post('/api/auth/login').send({
+      email: 'login-rate-limit@example.com',
+      password: 'wrong-password',
+    })
+
+    assert.equal(response.status, 401)
+  }
+
+  const limitedResponse = await request(app).post('/api/auth/login').send({
+    email: 'login-rate-limit@example.com',
+    password: 'wrong-password',
+  })
+
+  assert.equal(limitedResponse.status, 429)
+  assert.equal(
+    limitedResponse.body.error,
+    'Too many login attempts. Please wait before trying again.',
+  )
+  assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
 })
 
 test('authenticated owners can run the note CRUD workflow in a selected campaign', async (t) => {
@@ -803,6 +894,43 @@ test('shared links support guest join, scoped access, and editor note workflow',
   assert.equal(revokedSessionResponse.status, 404)
 })
 
+test('shared guest joins are rate limited per link after repeated attempts', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+  const shareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'Rate-limited join link',
+      accessLevel: 'editor',
+      frameAncestors: null,
+    })
+  assert.equal(shareLinkResponse.status, 201)
+
+  const shareToken = shareLinkResponse.body.token as string
+
+  for (let index = 0; index < 10; index += 1) {
+    const response = await request(app).post(`/api/shared/${shareToken}/join`).send({
+      displayName: `Guest ${index}`,
+    })
+
+    assert.equal(response.status, 201)
+  }
+
+  const limitedResponse = await request(app).post(`/api/shared/${shareToken}/join`).send({
+    displayName: 'Guest Final',
+  })
+
+  assert.equal(limitedResponse.status, 429)
+  assert.equal(
+    limitedResponse.body.error,
+    'Too many guest join attempts. Please wait before trying again.',
+  )
+  assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
+})
+
 test('guests can claim an existing membership with a real account without losing attribution', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
@@ -933,6 +1061,61 @@ test('guests can claim an existing membership with a real account without losing
   assert.equal(updateNoteResponse.body.note.createdBy.displayName, 'Mira')
   assert.equal(updateNoteResponse.body.note.lastEditedBy.membershipId, membershipId)
   assert.equal(updateNoteResponse.body.note.lastEditedBy.displayName, 'Mira')
+})
+
+test('shared membership claims are rate limited after repeated attempts', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+  const shareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({
+      label: 'Rate-limited claim link',
+      accessLevel: 'editor',
+      frameAncestors: null,
+    })
+  assert.equal(shareLinkResponse.status, 201)
+
+  const shareToken = shareLinkResponse.body.token as string
+  const joinResponse = await request(app).post(`/api/shared/${shareToken}/join`).send({
+    displayName: 'Claim Target',
+  })
+  assert.equal(joinResponse.status, 201)
+
+  const claimant = await registerOwner(request(app), {
+    displayName: 'Claimant',
+    email: 'claim-rate-limit@example.com',
+    password: 'claim-rate-limit-password',
+  })
+
+  let activeGuestToken = joinResponse.body.guestToken as string
+
+  for (let index = 0; index < 5; index += 1) {
+    const response = await request(app)
+      .post(`/api/shared/${shareToken}/membership/claim`)
+      .set('Authorization', `Bearer ${claimant.token}`)
+      .set('X-Guest-Token', activeGuestToken)
+
+    assert.equal(response.status, 200)
+
+    if (typeof response.body.guestToken === 'string') {
+      activeGuestToken = response.body.guestToken
+    }
+  }
+
+  const limitedResponse = await request(app)
+    .post(`/api/shared/${shareToken}/membership/claim`)
+    .set('Authorization', `Bearer ${claimant.token}`)
+    .set('X-Guest-Token', activeGuestToken)
+
+  assert.equal(limitedResponse.status, 429)
+  assert.equal(
+    limitedResponse.body.error,
+    'Too many membership claim attempts. Please wait before trying again.',
+  )
+  assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
 })
 
 test('owners can preview and consolidate note attribution onto another membership', async (t) => {

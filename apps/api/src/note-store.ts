@@ -270,6 +270,7 @@ export interface NoteStore {
   deleteNote(noteId: string): boolean
   resetNotes(inputs: NoteInput[], campaignId?: string): Note[]
   getStats(campaignId?: string): NoteStats
+  backupDatabase(destinationPath: string): Promise<void>
   close(): void
 }
 
@@ -2572,6 +2573,9 @@ export function createNoteStore(
         archivedNotes: notes.filter((note) => note.status === 'archived').length,
         sessionLinkedNotes: notes.filter((note) => note.sessionName !== null).length,
       }
+    },
+    backupDatabase(destinationPath) {
+      return database.backup(destinationPath).then(() => undefined)
     },
     close() {
       database.close()
