@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-16T19:38:58Z): ISSUE #47 WEB SPEC SPLIT — The main web integration hotspot was reduced further by deleting the old monolithic `apps/web/src/App.test.tsx` and replacing it with feature-scoped suites: `App.auth.test.tsx`, `App.site-admin.test.tsx`, and `App.note-links.test.tsx`. Shared fixtures and fetch-mock setup for those suites now live in `apps/web/src/app-test-helpers.tsx`. This keeps the same coverage while making future changes more local. Issue #47 is still in progress because `apps/api/test/app.test.ts` remains the main monolithic test hotspot.
+
 📌 Team update (2026-04-16T19:27:28Z): ISSUE-REFERENCE COMMIT DIRECTIVE — For issue-driven work, every commit message must include the GitHub issue number (`#...`). When a commit is the final one that closes the issue, the commit message should use closing language such as `fixes #...` instead of a plain reference.
 
 📌 Team update (2026-04-16T18:58:20Z): TEST HARNESS REFACTOR STARTED — The first implementation slice for issue #47 landed as a low-risk harness extraction instead of a full spec split. Shared API integration helpers now live in `apps/api/test/test-helpers.ts` (`createTestApp`, `registerOwner`, `withAuth`, `withGuest`, plus restore-aware store handling), and both `app.test.ts` and `security-headers.test.ts` consume them. Shared web test helpers now live in `apps/web/src/test-helpers.ts`, and the common mock fetch/JSON response plumbing was removed from `App.test.tsx` and `CampaignSearch.test.tsx`. The issue remains in progress because the large spec files themselves still need feature-scoped splits.
