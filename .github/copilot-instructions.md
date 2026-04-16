@@ -45,6 +45,15 @@ If you make a decision that affects other team members, write it to:
 ```
 The Scribe will merge it into the shared decisions file.
 
+## Planning Persistence
+
+For any task that spans multiple phases, files, or sessions:
+
+1. Create or update the session `plan.md` early with the problem, chosen approach, key decisions, current status, and next steps.
+2. Do not rely on chat history or CLI-only SQL state as the only source of truth.
+3. Mirror the durable handoff context in `.squad/agents/copilot/history.md` whenever work starts, meaningfully changes direction, or pauses with unfinished follow-up.
+4. Treat `.squad/agents/copilot/history.md` as the cross-session recovery point for ongoing Copilot work.
+
 ## Commit Signing
 
 When creating git commits for this repo:
@@ -52,3 +61,5 @@ When creating git commits for this repo:
 1. Never bypass signing with `--no-gpg-sign`.
 2. Assume signed commits are required.
 3. If a signing passphrase or interactive confirmation is needed, stage the work and hand the user the exact `git commit -S ...` command before expecting the commit to be finalized.
+4. When a coherent set of changes is complete and validated, stage it and commit it immediately unless the user asked not to commit yet.
+5. Use a conventional commit message when creating that commit.
