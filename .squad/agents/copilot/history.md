@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-16T21:40:06Z): ISSUE #46 STARTED — The first persistence-modularization slice is in. `apps/api/src/note-store-bootstrap.ts` now owns SQLite schema creation, lightweight legacy-column migrations, share-link reveal-token upgrade, and configured site-admin elevation. `createNoteStore()` still opens the database and wires the store API, but its startup path is smaller and the next `#46` seam can focus on query/transaction clusters instead of bootstrap plumbing.
+
 📌 Team update (2026-04-16T21:35:14Z): ISSUE #45 COMPLETED — All remaining API route clusters are now out of `apps/api/src/app.ts`. Owner overview/note routes live in `apps/api/src/routes/owner-note-routes.ts`, shared-link guest routes live in `apps/api/src/routes/shared-routes.ts`, and the earlier auth/admin/owner-campaign registrars still sit alongside them under `apps/api/src/routes/`. `app.ts` is now mostly the composition root for middleware, rate-limit state, route context, health, and ordered registrar wiring. This leaves `apps/api/src/note-store.ts` (`#46`) as the next clear backend hotspot.
 
 📌 Team update (2026-04-16T21:10:42Z): ISSUE #45 SECOND SLICE LANDED — The owner campaign cluster is now out of `apps/api/src/app.ts` and lives in `apps/api/src/routes/owner-campaign-routes.ts`. That module now owns campaign CRUD, campaign session listing, membership listing/consolidation, and share-link create/reveal/revoke registration, while `route-support.ts` continues to carry the shared auth/access and public URL helpers. The next obvious `#45` target is the remaining owner/shared notes + overview cluster.
