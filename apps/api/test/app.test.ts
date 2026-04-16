@@ -10,11 +10,16 @@ import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
 import { createNoteStore } from '../src/note-store.js'
 
-async function createTestApp(options: { siteAdminEmails?: readonly string[] } = {}) {
+async function createTestApp(
+  options: {
+    siteAdminEmails?: readonly string[]
+    publicWebUrl?: string
+  } = {},
+) {
   const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-api-'))
   const dbPath = join(directory, 'notes.sqlite')
   const noteStore = createNoteStore({ dbPath, siteAdminEmails: options.siteAdminEmails })
-  const app = createApp({ noteStore })
+  const app = createApp({ noteStore, publicWebUrl: options.publicWebUrl })
 
   return {
     app,
@@ -250,7 +255,9 @@ test('site admins can read the admin account directory and non-admins cannot', a
 })
 
 test('owner auth and campaign endpoints support the management workflow', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup } = await createTestApp({
+    publicWebUrl: 'https://notes.example.com',
+  })
   t.after(cleanup)
 
   const unauthenticatedListResponse = await request(app).get('/api/campaigns')
@@ -288,16 +295,19 @@ test('owner auth and campaign endpoints support the management workflow', async 
   assert.equal(createDefaultShareLinkResponse.status, 201)
   assert.equal(createDefaultShareLinkResponse.body.shareLink.label, 'VTT link')
   assert.equal(createDefaultShareLinkResponse.body.shareLink.accessLevel, 'editor')
-  assert.match(createDefaultShareLinkResponse.body.url, /\/share\//)
+  assert.equal(
+    createDefaultShareLinkResponse.body.url,
+    `https://notes.example.com/share/${createDefaultShareLinkResponse.body.token}`,
+  )
 
   const revealDefaultShareLinkResponse = await authed.get(
     `/api/campaigns/${defaultCampaignId}/share-links/${createDefaultShareLinkResponse.body.shareLink.id}`,
   )
   assert.equal(revealDefaultShareLinkResponse.status, 200)
   assert.equal(revealDefaultShareLinkResponse.body.token, createDefaultShareLinkResponse.body.token)
-  assert.match(
+  assert.equal(
     revealDefaultShareLinkResponse.body.url,
-    new RegExp(`/share/${createDefaultShareLinkResponse.body.token}$`),
+    `https://notes.example.com/share/${createDefaultShareLinkResponse.body.token}`,
   )
 
   const createCampaignResponse = await authed.post('/api/campaigns').send({
@@ -365,6 +375,39 @@ test('owner auth and campaign endpoints support the management workflow', async 
 
   const expiredSessionResponse = await authed.get('/api/auth/session')
   assert.equal(expiredSessionResponse.status, 401)
+})
+
+test('share link creation falls back to the request host when PUBLIC_WEB_URL is not configured', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const createShareLinkResponse = await authed
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .set('Host', 'api.test.local:4010')
+    .send({
+      label: 'Fallback link',
+      accessLevel: 'viewer',
+      frameAncestors: null,
+    })
+
+  assert.equal(createShareLinkResponse.status, 201)
+  assert.equal(
+    createShareLinkResponse.body.url,
+    `http://api.test.local:4010/share/${createShareLinkResponse.body.token}`,
+  )
+
+  const revealShareLinkResponse = await authed
+    .get(`/api/campaigns/${defaultCampaignId}/share-links/${createShareLinkResponse.body.shareLink.id}`)
+    .set('Host', 'api.test.local:4010')
+
+  assert.equal(revealShareLinkResponse.status, 200)
+  assert.equal(
+    revealShareLinkResponse.body.url,
+    `http://api.test.local:4010/share/${createShareLinkResponse.body.token}`,
+  )
 })
 
 test('owner registration is rate limited after repeated attempts', async (t) => {

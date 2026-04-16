@@ -4,7 +4,10 @@ import { createNoteStore } from './note-store.js'
 
 const port = Number(process.env.PORT ?? 3001)
 const noteStore = createNoteStore()
-const app = createApp({ noteStore })
+const app = createApp({
+  noteStore,
+  publicWebUrl: process.env.PUBLIC_WEB_URL,
+})
 
 function shutdown(exitCode: number) {
   noteStore.close()

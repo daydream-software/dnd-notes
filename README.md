@@ -44,6 +44,13 @@ You can override that path with `NOTES_DB_PATH`, and you can also set `PORT`
 there for the API listener. When you set `NOTES_DB_PATH` in `apps/api/.env`, use
 paths relative to `apps/api` (for example `data/dnd-notes.sqlite`).
 
+Set `PUBLIC_WEB_URL` to the canonical public web origin that should own app and
+share-link URLs in production (for example `https://notes.example.com`). The API
+uses that value when it returns owner-facing shared-link URLs so production links
+do not depend on request headers or reverse-proxy host detection. This repo now
+assumes a same-origin production model by default; only introduce split web/API
+origins when you intentionally want that deployment shape.
+
 You can bootstrap global site-admin access with `SITE_ADMIN_EMAILS`, using a
 comma-separated list of owner-account emails. Matching accounts are promoted to
 site admin on registration and again on API startup so the future global admin
