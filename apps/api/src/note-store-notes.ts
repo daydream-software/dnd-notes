@@ -14,7 +14,7 @@ export interface NoteRow {
   body: string
   status: Note['status']
   tags_json: string
-  linked_notes_json?: string
+  linked_notes_json: string
   session_name: string | null
   created_by_membership_id: string | null
   last_edited_by_membership_id: string | null

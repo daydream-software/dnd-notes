@@ -1,5 +1,9 @@
 import type Database from 'better-sqlite3'
 
+const pragmaTableNames = ['notes', 'owner_accounts', 'campaign_share_links'] as const
+type PragmaTableName = (typeof pragmaTableNames)[number]
+const pragmaTableNameSet = new Set<string>(pragmaTableNames)
+
 function tableExists(database: Database.Database, tableName: string) {
   return database
     .prepare(`
@@ -10,11 +14,15 @@ function tableExists(database: Database.Database, tableName: string) {
     .get(tableName)
 }
 
-function listTableColumns(database: Database.Database, tableName: string) {
+function listTableColumns(database: Database.Database, tableName: PragmaTableName) {
+  if (!pragmaTableNameSet.has(tableName)) {
+    throw new Error(`Unsupported PRAGMA table lookup for "${tableName}".`)
+  }
+
   return new Set(
     (
       database.prepare(`
-        PRAGMA table_info(${tableName})
+        PRAGMA table_info("${tableName}")
       `).all() as Array<{ name: string }>
     ).map((column) => column.name),
   )
