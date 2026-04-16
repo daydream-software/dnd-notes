@@ -11,6 +11,7 @@
     "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run dev --workspace apps/api",
     "dev:web": "npm run dev --workspace apps/web",
+    "copilot:yolo": "bash ./scripts/copilot-yolo.sh",
     "lint:web": "npm run lint --workspace apps/web",
     "build:web": "npm run build --workspace apps/web",
     "test:web": "npm run test --workspace apps/web --",
