@@ -19,5 +19,15 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            ":matches(ImportDeclaration, ExportNamedDeclaration[source], ExportAllDeclaration)[source.value=/^\\.{1,2}\\//][source.value=/\\.(js|ts|tsx)$/]",
+          message: 'Use extensionless relative imports in apps/web.',
+        },
+      ],
+    },
   },
 ])
