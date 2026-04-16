@@ -5,10 +5,14 @@ A full-stack D&D notes MVP built as an npm workspace with a React + Material UI 
 ## Getting started
 
 ```bash
+nvm use
 npm install
 npm run seed:data
 npm run dev
 ```
+
+Use Node.js `v22.21.1` for local development. The repo pins that version in
+`.nvmrc`, and CI uses the same runtime.
 
 - **Web:** `http://localhost:5173`
 - **API:** `http://localhost:3001`
@@ -70,6 +74,7 @@ Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an al
 ## API
 
 - `GET /health`
+- `GET /api/admin/overview`
 - `GET /api/admin/backup`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
@@ -109,8 +114,10 @@ Any linked campaign membership can open the authenticated workspace, while
 campaign management routes such as settings, memberships, and share links stay
 owner-only.
 
-`GET /api/admin/backup` is site-admin-only. It returns a SQLite snapshot as a
-downloadable attachment and is intended for operational backup workflows.
+`GET /api/admin/overview` and `GET /api/admin/backup` are site-admin-only.
+`/api/admin/overview` returns aggregate account, campaign, membership, share-link,
+and note counts for the admin surface. `/api/admin/backup` returns a SQLite
+snapshot as a downloadable attachment for operational backup workflows.
 
 `POST /api/campaigns/:campaignId/memberships/consolidations` is also owner-only.
 Send `sourceMembershipId` and `targetMembershipId` to preview the note-attribution

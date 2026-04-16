@@ -29,6 +29,7 @@ import type {
   NoteReference,
   NoteReferenceType,
   NoteStats,
+  AdminOverview,
   OwnerAccount,
   OwnerRegistrationInput,
   SessionSummary,
@@ -270,6 +271,7 @@ export interface NoteStore {
   deleteNote(noteId: string): boolean
   resetNotes(inputs: NoteInput[], campaignId?: string): Note[]
   getStats(campaignId?: string): NoteStats
+  getAdminOverview(): AdminOverview
   backupDatabase(destinationPath: string): Promise<void>
   close(): void
 }
@@ -1048,6 +1050,23 @@ export function createNoteStore(
     SELECT COUNT(*) AS count
     FROM campaign_memberships
     WHERE campaign_id = ? AND role = 'owner'
+  `)
+
+  const selectAdminOverviewCounts = database.prepare(`
+    SELECT
+      (SELECT COUNT(*) FROM owner_accounts) AS owner_account_count,
+      (SELECT COUNT(*) FROM owner_accounts WHERE is_site_admin = 1) AS site_admin_count,
+      (SELECT COUNT(*) FROM campaigns) AS campaign_count,
+      (SELECT COUNT(*) FROM campaigns WHERE archived_at IS NOT NULL) AS archived_campaign_count,
+      (SELECT COUNT(*) FROM campaign_memberships) AS membership_count,
+      (SELECT COUNT(*) FROM campaign_memberships WHERE user_id IS NOT NULL) AS linked_membership_count,
+      (SELECT COUNT(*) FROM campaign_memberships WHERE role = 'guest') AS guest_membership_count,
+      (SELECT COUNT(*) FROM campaign_share_links WHERE revoked_at IS NULL) AS active_share_link_count,
+      (SELECT COUNT(*) FROM campaign_share_links WHERE revoked_at IS NOT NULL) AS revoked_share_link_count,
+      (SELECT COUNT(*) FROM notes) AS note_count,
+      (SELECT COUNT(*) FROM notes WHERE status = 'draft') AS draft_note_count,
+      (SELECT COUNT(*) FROM notes WHERE status = 'active') AS active_note_count,
+      (SELECT COUNT(*) FROM notes WHERE status = 'archived') AS archived_note_count
   `)
 
   const selectOwnerAccountById = database.prepare(`
@@ -2572,6 +2591,50 @@ export function createNoteStore(
         activeNotes: notes.filter((note) => note.status === 'active').length,
         archivedNotes: notes.filter((note) => note.status === 'archived').length,
         sessionLinkedNotes: notes.filter((note) => note.sessionName !== null).length,
+      }
+    },
+    getAdminOverview() {
+      const counts = selectAdminOverviewCounts.get() as {
+        owner_account_count: number
+        site_admin_count: number
+        campaign_count: number
+        archived_campaign_count: number
+        membership_count: number
+        linked_membership_count: number
+        guest_membership_count: number
+        active_share_link_count: number
+        revoked_share_link_count: number
+        note_count: number
+        draft_note_count: number
+        active_note_count: number
+        archived_note_count: number
+      }
+
+      return {
+        generatedAt: new Date().toISOString(),
+        accounts: {
+          total: counts.owner_account_count,
+          siteAdmins: counts.site_admin_count,
+        },
+        campaigns: {
+          total: counts.campaign_count,
+          archived: counts.archived_campaign_count,
+        },
+        memberships: {
+          total: counts.membership_count,
+          linkedAccounts: counts.linked_membership_count,
+          guests: counts.guest_membership_count,
+        },
+        shareLinks: {
+          active: counts.active_share_link_count,
+          revoked: counts.revoked_share_link_count,
+        },
+        notes: {
+          total: counts.note_count,
+          draft: counts.draft_note_count,
+          active: counts.active_note_count,
+          archived: counts.archived_note_count,
+        },
       }
     },
     backupDatabase(destinationPath) {
