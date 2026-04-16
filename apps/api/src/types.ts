@@ -64,6 +64,7 @@ export interface OwnerAccount {
   id: string
   email: string
   displayName: string
+  isSiteAdmin: boolean
   createdAt: string
   updatedAt: string
 }
