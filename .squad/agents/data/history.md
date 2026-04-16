@@ -132,3 +132,25 @@ Data initialized as Backend Dev for the initial project squad.
 3. NoteStore.syncLinkedNotesIntoReferences() for lazy migration
 
 **Ready to begin schema design immediately; coordinate with Stef on NoteInput contract during Phase 2b.**
+
+## 2026-04-16: PUBLIC WEB URL / Origin-Model Track Handoff
+
+📌 **Orchestration complete:** Data analyzed shared-link URL generation architecture and split-origin deployment implications.
+
+**Key findings:**
+- Shared URL generation (`buildSharedUrl()`) currently mirrors incoming `Origin` header — safe for same-origin deployment but brittle for split-origin
+- CORS config is permissive (no origin whitelist) — acceptable for shared links but risky if adding auth-required endpoints
+- Frame-ancestors CSP policy correctly flows through Vite dev server plugin — already handles split-origin case if `VITE_API_BASE_URL` env is set
+- Test suite confirms URL generation via request inspection (no explicit env config current)
+
+**Recommended changes (Phase 1 defensive / Phase 2 hardening):**
+1. Make `buildSharedUrl()` explicit: add `PUBLIC_WEB_ORIGIN` env var (deploy-time) instead of header sniffing; default to `http://localhost:3000`
+2. Harden CORS with `ALLOWED_ORIGINS` whitelist (optional, Phase 2 if scaling to multiple environments)
+3. Add regression tests for URL generation env-var isolation
+4. Update `.env.example` to document `PUBLIC_WEB_ORIGIN` for future developers
+5. Verify `VITE_API_BASE_URL` set at deploy time for frame-ancestors CSP fetch
+
+**Deliverable:** Comprehensive handoff document in `.squad/decisions/inbox/data-origin-handoff.md` with risk summary, file locations, and implementation recommendations.
+
+**Status:** Same-origin deployment works as-is; split-origin requires Phase 1 changes (defensive, backward-compatible).
+📌 Team update (2026-04-16T15:30:33Z): Origin-model audit completed. Frontend ready for split-origin deployment. Backend: add PUBLIC_WEB_ORIGIN env var to buildSharedUrl(). Platform: same-origin reverse proxy recommended for prod. — decided by Stef, Data, Brand, Mikey

@@ -20,7 +20,16 @@ Stef initialized as Frontend Dev for the initial project squad.
 
 ## Learnings
 
-- Initial squad setup complete.
+### Origin Architecture (2026-04-13)
+
+- **API origin handling is already parameterized.** Single source of truth is `VITE_API_BASE_URL` in `apps/web/src/api.ts:31-32`; all 50+ API calls use this base. Falls back to `http://localhost:3001` in dev.
+- **Token strategy is safe for split origins.** Auth tokens live in localStorage and are sent explicitly via `Authorization: Bearer {token}` headers—no cookies, no `credentials: 'include'`, so no same-origin leakage risk.
+- **No hardcoded origins anywhere in React code.** No `window.location`, `location.origin`, or same-origin checks in component code, state management, or routing logic.
+- **Shared routes already param-driven.** The `createFrameAncestorsPlugin` in `apps/web/vite.config.ts:11-65` makes API calls from the dev server middleware using the same `apiBaseUrl` pattern, then sets CSP headers dynamically.
+- **Frontend is ready for split-origin deployment.** No code changes needed. Backend must configure CORS headers; deployment must set `VITE_API_BASE_URL` to the split API origin during build.
+- **Client-side routing has no origin deps.** Share routes are parsed from pathname (`getShareTokenFromPath`) and navigation is explicit (`window.location.assign`), so no assumptions about URL scheme or host.
+
+### Initial squad setup complete.
 - Owner share links now stay metadata-only in the list UI until a card-level reveal action fetches that specific reusable URL, then the card handles blur/show/copy locally in `apps/web/src/App.tsx`.
 - Frontend share-link reveal wiring lives in `apps/web/src/api.ts`, `apps/web/src/types.ts`, and `apps/web/src/App.test.tsx`; legacy reveal failures should be surfaced inline on the card with a recreate suggestion.
 - Claimed guest memberships must unlock the authenticated workspace through any linked campaign membership, while owner-only settings stay gated; the cross-cut lives in `apps/api/src/app.ts`, `apps/api/src/note-store.ts`, and `apps/web/src/App.tsx`.
@@ -204,3 +213,4 @@ Phase 2 additions should test:
 📌 Team update (2026-04-14T17:28:20Z): Shared campaign note rows in `apps/web/src/SharedCampaignRoute.tsx` now match the owner workspace compact note-row layout, replacing the older large-card treatment with the same title/excerpt/session-left plus status/updated-right structure — implemented by Stef
 
 📌 Team update (2026-04-14T17:42:26Z): Shared owner/editor mode no longer overflows horizontally on narrow screens after constraining the common workspace pane shells and editor width behavior across the shared and authenticated workspace surfaces — implemented by Stef
+📌 Team update (2026-04-16T15:30:33Z): Origin-model audit completed. Frontend ready for split-origin deployment. Backend: add PUBLIC_WEB_ORIGIN env var to buildSharedUrl(). Platform: same-origin reverse proxy recommended for prod. — decided by Stef, Data, Brand, Mikey
