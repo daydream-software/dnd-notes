@@ -15,6 +15,11 @@ const owner = {
   updatedAt: '2026-04-13T00:00:00.000Z',
 }
 
+const siteAdminOwner = {
+  ...owner,
+  isSiteAdmin: true,
+}
+
 const campaign = {
   id: 'moonshae-ledger',
   name: 'Moonshae Ledger',
@@ -77,6 +82,33 @@ const notes = [
   },
 ]
 
+const adminOverview = {
+  generatedAt: '2026-04-16T01:30:00.000Z',
+  accounts: {
+    total: 2,
+    siteAdmins: 1,
+  },
+  campaigns: {
+    total: 1,
+    archived: 0,
+  },
+  memberships: {
+    total: 1,
+    linkedAccounts: 1,
+    guests: 0,
+  },
+  shareLinks: {
+    active: 1,
+    revoked: 0,
+  },
+  notes: {
+    total: notes.length,
+    draft: 1,
+    active: 1,
+    archived: 0,
+  },
+}
+
 function createJsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -100,6 +132,8 @@ async function registerOwnerAndLoadWorkspace(user: ReturnType<typeof userEvent.s
 }
 
 describe('App smoke path', () => {
+  let activeOwner = owner
+
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
@@ -108,6 +142,7 @@ describe('App smoke path', () => {
   beforeEach(() => {
     localStorage.clear()
     window.history.replaceState({}, '', '/')
+    activeOwner = owner
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const url = typeof input === 'string' ? input : (input as Request).url
@@ -116,15 +151,19 @@ describe('App smoke path', () => {
       const method = init?.method?.toUpperCase() ?? 'GET'
 
       if (path === '/api/auth/register' && method === 'POST') {
-        return createJsonResponse({ owner, token: 'smoke-token' }, 201)
+        return createJsonResponse({ owner: activeOwner, token: 'smoke-token' }, 201)
       }
 
       if (path === '/api/auth/session' && method === 'GET') {
-        return createJsonResponse({ owner })
+        return createJsonResponse({ owner: activeOwner })
       }
 
       if (path === '/api/campaigns' && method === 'GET') {
         return createJsonResponse({ campaigns: [campaign] })
+      }
+
+      if (path === '/api/admin/overview' && method === 'GET') {
+        return createJsonResponse({ overview: adminOverview })
       }
 
       if (path === '/api/overview' && method === 'GET') {
@@ -185,6 +224,18 @@ describe('App smoke path', () => {
     expect(screen.getAllByText('Moonshae Ledger').length).toBeGreaterThan(0)
     expect(getVisibleNotes()).toHaveLength(2)
     expect(screen.getAllByRole('button', { name: 'New note' }).length).toBeGreaterThan(0)
+  })
+
+  it('shows the site admin panel for site admins', async () => {
+    const user = userEvent.setup()
+    activeOwner = siteAdminOwner
+
+    await registerOwnerAndLoadWorkspace(user)
+
+    expect(await screen.findByRole('heading', { name: 'Site admin panel' })).toBeTruthy()
+    expect(screen.getByText('Site admins 1')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Refresh admin metrics' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Download SQLite backup' })).toBeTruthy()
   })
 
   it('restores a saved owner session into the selected campaign workspace', async () => {

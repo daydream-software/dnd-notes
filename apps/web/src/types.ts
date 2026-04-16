@@ -143,6 +143,37 @@ export interface NotesOverview {
   recentNotes: Note[]
 }
 
+export interface AdminOverview {
+  generatedAt: string
+  accounts: {
+    total: number
+    siteAdmins: number
+  }
+  campaigns: {
+    total: number
+    archived: number
+  }
+  memberships: {
+    total: number
+    linkedAccounts: number
+    guests: number
+  }
+  shareLinks: {
+    active: number
+    revoked: number
+  }
+  notes: {
+    total: number
+    draft: number
+    active: number
+    archived: number
+  }
+}
+
+export interface AdminOverviewResponse {
+  overview: AdminOverview
+}
+
 export interface AuthSessionResponse {
   token: string
   owner: OwnerAccount

@@ -45,9 +45,11 @@ import {
   createCampaign,
   createCampaignShareLink,
   createNote,
+  downloadAdminBackup,
   createSharedNote,
   deleteNote,
   deleteSharedNote,
+  fetchAdminOverview,
   fetchCampaignShareLinks,
   fetchCampaignMemberships,
   fetchCampaigns,
@@ -88,6 +90,7 @@ import { NoteBodyPreview } from './note-formatting'
 import { extractInlineNoteReferences } from './note-references'
 import type {
   ActivityCollaborator,
+  AdminOverview,
   CampaignInput,
   CampaignMembership,
   MembershipConsolidationSummary,
@@ -105,6 +108,7 @@ import type {
   ShareAccessLevel,
 } from './types'
 import { noteStatuses } from './types'
+import SiteAdminPanel from './SiteAdminPanel'
 import WorkspacePane from './WorkspacePane'
 
 interface NoteDraft {
@@ -681,6 +685,8 @@ function App() {
   const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [isSavingCampaign, setIsSavingCampaign] = useState(false)
   const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
+  const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
+  const [isDownloadingAdminBackup, setIsDownloadingAdminBackup] = useState(false)
   const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
     useState(false)
   const [isApplyingMembershipConsolidation, setIsApplyingMembershipConsolidation] =
@@ -696,6 +702,9 @@ function App() {
   )
   const [shareLinkNotice, setShareLinkNotice] = useState<string | null>(null)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
+  const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
+  const [adminNotice, setAdminNotice] = useState<string | null>(null)
+  const [adminError, setAdminError] = useState<string | null>(null)
   const [revealedShareLinks, setRevealedShareLinks] = useState<
     Record<string, RevealedShareLink>
   >({})
@@ -1151,6 +1160,9 @@ function App() {
     setMemberships([])
     setShareLinks([])
     setOverview(null)
+    setAdminOverview(null)
+    setAdminNotice(null)
+    setAdminError(null)
     setNotes([])
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('browse')
@@ -1382,6 +1394,60 @@ function App() {
     [loadWorkspace, resetActivityState, resetSessionBrowserState],
   )
 
+  const handleRefreshAdminOverview = useCallback(async () => {
+    if (!authToken) {
+      return
+    }
+
+    setIsLoadingAdminOverview(true)
+
+    try {
+      const nextOverview = await fetchAdminOverview(authToken)
+      setAdminOverview(nextOverview)
+      setAdminError(null)
+    } catch (loadError) {
+      setAdminError(
+        loadError instanceof Error
+          ? loadError.message
+          : 'Could not load site-admin metrics.',
+      )
+    } finally {
+      setIsLoadingAdminOverview(false)
+    }
+  }, [authToken])
+
+  const handleDownloadAdminBackup = useCallback(async () => {
+    if (!authToken) {
+      return
+    }
+
+    setIsDownloadingAdminBackup(true)
+    setAdminNotice(null)
+    setAdminError(null)
+
+    try {
+      const backup = await downloadAdminBackup(authToken)
+      const downloadUrl = window.URL.createObjectURL(backup.blob)
+      const link = document.createElement('a')
+
+      link.href = downloadUrl
+      link.download = backup.fileName
+      document.body.append(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(downloadUrl)
+      setAdminNotice(`Backup ready: ${backup.fileName}`)
+    } catch (downloadError) {
+      setAdminError(
+        downloadError instanceof Error
+          ? downloadError.message
+          : 'Could not download the site backup.',
+      )
+    } finally {
+      setIsDownloadingAdminBackup(false)
+    }
+  }, [authToken])
+
   useEffect(() => {
     if (isSharedMode) {
       return
@@ -1424,6 +1490,54 @@ function App() {
       cancelled = true
     }
   }, [clearSession, isSharedMode, loadCampaigns])
+
+  useEffect(() => {
+    if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
+      setAdminOverview(null)
+      setAdminNotice(null)
+      setAdminError(null)
+      setIsLoadingAdminOverview(false)
+      return
+    }
+
+    let cancelled = false
+
+    const loadSiteAdminOverview = async () => {
+      setIsLoadingAdminOverview(true)
+
+      try {
+        const nextOverview = await fetchAdminOverview(authToken)
+
+        if (cancelled) {
+          return
+        }
+
+        setAdminOverview(nextOverview)
+        setAdminError(null)
+      } catch (loadError) {
+        if (cancelled) {
+          return
+        }
+
+        setAdminOverview(null)
+        setAdminError(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Could not load site-admin metrics.',
+        )
+      } finally {
+        if (!cancelled) {
+          setIsLoadingAdminOverview(false)
+        }
+      }
+    }
+
+    void loadSiteAdminOverview()
+
+    return () => {
+      cancelled = true
+    }
+  }, [authToken, isSharedMode, owner?.isSiteAdmin])
 
   useEffect(() => {
     if (!isSharedMode || !shareToken || !guestStorageKey) {
@@ -2722,6 +2836,18 @@ function App() {
       <Box component="main" sx={{ minHeight: '100vh', py: { xs: 4, md: 6 } }}>
         <Container maxWidth="md">
           <Stack spacing={3}>
+            {owner?.isSiteAdmin ? (
+              <SiteAdminPanel
+                overview={adminOverview}
+                isLoading={isLoadingAdminOverview}
+                isDownloadingBackup={isDownloadingAdminBackup}
+                error={adminError}
+                notice={adminNotice}
+                onRefresh={() => void handleRefreshAdminOverview()}
+                onDownloadBackup={() => void handleDownloadAdminBackup()}
+                surfaceRadius={surfaceRadius}
+              />
+            ) : null}
             <Card sx={{ borderRadius: heroCardRadius }}>
               <CardContent sx={{ p: { xs: 3, md: 4 } }}>
                 <Stack spacing={3}>
@@ -2917,6 +3043,19 @@ function App() {
             <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
               {error}
             </Alert>
+          ) : null}
+
+          {!isSharedMode && owner?.isSiteAdmin ? (
+            <SiteAdminPanel
+              overview={adminOverview}
+              isLoading={isLoadingAdminOverview}
+              isDownloadingBackup={isDownloadingAdminBackup}
+              error={adminError}
+              notice={adminNotice}
+              onRefresh={() => void handleRefreshAdminOverview()}
+              onDownloadBackup={() => void handleDownloadAdminBackup()}
+              surfaceRadius={surfaceRadius}
+            />
           ) : null}
 
           {isSharedMode && resolvedMembership?.userId === null ? (
