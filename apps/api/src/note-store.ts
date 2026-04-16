@@ -122,6 +122,7 @@ interface OwnerAccountRow {
   email: string
   display_name: string
   password_hash: string
+  is_site_admin: number
   created_at: string
   updated_at: string
 }
@@ -178,9 +179,27 @@ type MembershipConsolidationResult =
 
 interface CreateNoteStoreOptions {
   dbPath?: string
+  siteAdminEmails?: readonly string[]
 }
 
 const sessionTtlMs = 1000 * 60 * 60 * 24 * 30
+
+function normalizeEmailAddress(email: string) {
+  return email.trim().toLowerCase()
+}
+
+function resolveConfiguredSiteAdminEmails(options: CreateNoteStoreOptions) {
+  const configuredEmails =
+    options.siteAdminEmails ??
+    process.env.SITE_ADMIN_EMAILS?.split(',').map((email) => email.trim()) ??
+    []
+
+  return new Set(
+    configuredEmails
+      .map((email) => normalizeEmailAddress(email))
+      .filter((email) => email.length > 0),
+  )
+}
 
 export interface NoteStore {
   listCampaigns(): CampaignSummary[]
@@ -435,6 +454,7 @@ function mapOwnerAccountRow(row: OwnerAccountRow): OwnerAccount {
     id: row.id,
     email: row.email,
     displayName: row.display_name,
+    isSiteAdmin: row.is_site_admin === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -481,6 +501,7 @@ export function createNoteStore(
   options: CreateNoteStoreOptions = {},
 ): NoteStore {
   const dbPath = resolveNoteDbPath(options)
+  const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
 
   if (dbPath !== ':memory:') {
     mkdirSync(dirname(dbPath), { recursive: true })
@@ -495,6 +516,7 @@ export function createNoteStore(
       email TEXT NOT NULL UNIQUE,
       display_name TEXT NOT NULL,
       password_hash TEXT NOT NULL,
+      is_site_admin INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -641,6 +663,35 @@ export function createNoteStore(
     }
   })
 
+  const ensureOwnerSiteAdminColumn = database.transaction(() => {
+    const ownerAccountsTableExists = database
+      .prepare(`
+        SELECT 1
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'owner_accounts'
+      `)
+      .get()
+
+    if (!ownerAccountsTableExists) {
+      return
+    }
+
+    const ownerColumns = new Set(
+      (
+        database.prepare(`
+          PRAGMA table_info(owner_accounts)
+        `).all() as Array<{ name: string }>
+      ).map((column) => column.name),
+    )
+
+    if (!ownerColumns.has('is_site_admin')) {
+      database.exec(`
+        ALTER TABLE owner_accounts
+        ADD COLUMN is_site_admin INTEGER NOT NULL DEFAULT 0
+      `)
+    }
+  })
+
   const ensureShareLinkRevealTokens = database.transaction(() => {
     const shareLinksTableExists = database
       .prepare(`
@@ -670,8 +721,32 @@ export function createNoteStore(
     }
   })
 
+  function elevateConfiguredSiteAdminAccounts() {
+    if (configuredSiteAdminEmails.size === 0) {
+      return
+    }
+
+    const placeholders = Array.from(
+      { length: configuredSiteAdminEmails.size },
+      () => '?',
+    ).join(', ')
+    const timestamp = new Date().toISOString()
+
+    database
+      .prepare(`
+        UPDATE owner_accounts
+        SET is_site_admin = 1,
+            updated_at = ?
+        WHERE is_site_admin != 1
+          AND lower(email) IN (${placeholders})
+      `)
+      .run(timestamp, ...configuredSiteAdminEmails)
+  }
+
+  ensureOwnerSiteAdminColumn()
   ensureNotesAttributionColumns()
   ensureShareLinkRevealTokens()
+  elevateConfiguredSiteAdminAccounts()
 
   const selectCampaignById = database.prepare(`
     SELECT
@@ -980,6 +1055,7 @@ export function createNoteStore(
       email,
       display_name,
       password_hash,
+      is_site_admin,
       created_at,
       updated_at
     FROM owner_accounts
@@ -992,6 +1068,7 @@ export function createNoteStore(
       email,
       display_name,
       password_hash,
+      is_site_admin,
       created_at,
       updated_at
     FROM owner_accounts
@@ -1004,6 +1081,7 @@ export function createNoteStore(
       email,
       display_name,
       password_hash,
+      is_site_admin,
       created_at,
       updated_at
     ) VALUES (
@@ -1011,6 +1089,7 @@ export function createNoteStore(
       @email,
       @display_name,
       @password_hash,
+      @is_site_admin,
       @created_at,
       @updated_at
     )
@@ -1038,6 +1117,7 @@ export function createNoteStore(
       owner_accounts.email,
       owner_accounts.display_name,
       owner_accounts.password_hash,
+      owner_accounts.is_site_admin,
       owner_accounts.created_at,
       owner_accounts.updated_at
     FROM owner_sessions
@@ -1453,6 +1533,7 @@ export function createNoteStore(
 
   const createOwnerAccountTransaction = database.transaction(
     (input: OwnerRegistrationInput) => {
+      const normalizedEmail = normalizeEmailAddress(input.email)
       const existing = selectOwnerAccountByEmail.get(input.email) as
         | OwnerAccountRow
         | undefined
@@ -1466,6 +1547,7 @@ export function createNoteStore(
         id: randomUUID(),
         email: input.email,
         displayName: input.displayName,
+        isSiteAdmin: configuredSiteAdminEmails.has(normalizedEmail),
         createdAt: timestamp,
         updatedAt: timestamp,
       }
@@ -1475,6 +1557,7 @@ export function createNoteStore(
         email: owner.email,
         display_name: owner.displayName,
         password_hash: createPasswordHash(input.password),
+        is_site_admin: owner.isSiteAdmin ? 1 : 0,
         created_at: owner.createdAt,
         updated_at: owner.updatedAt,
       })

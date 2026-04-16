@@ -8,6 +8,9 @@
 # Squad: worktrees folder (issue-specific checkouts)
 .worktrees/
 
+# Copilot_here: ignore user configuration
+.copilot_here/
+
 # Node / workspace output
 node_modules/
 apps/*/node_modules/

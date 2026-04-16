@@ -10,10 +10,10 @@ import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
 import { createNoteStore } from '../src/note-store.js'
 
-async function createTestApp() {
+async function createTestApp(options: { siteAdminEmails?: readonly string[] } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-api-'))
   const dbPath = join(directory, 'notes.sqlite')
-  const noteStore = createNoteStore({ dbPath })
+  const noteStore = createNoteStore({ dbPath, siteAdminEmails: options.siteAdminEmails })
   const app = createApp({ noteStore })
 
   return {
@@ -51,6 +51,7 @@ async function registerOwner(
       id: string
       email: string
       displayName: string
+      isSiteAdmin: boolean
     },
     payload,
   }
@@ -120,6 +121,7 @@ test('owner auth and campaign endpoints support the management workflow', async 
   const sessionResponse = await authed.get('/api/auth/session')
   assert.equal(sessionResponse.status, 200)
   assert.equal(sessionResponse.body.owner.email, payload.email)
+  assert.equal(sessionResponse.body.owner.isSiteAdmin, false)
 
   const campaignsResponse = await authed.get('/api/campaigns')
   assert.equal(campaignsResponse.status, 200)
@@ -275,6 +277,38 @@ test('authenticated owners can run the note CRUD workflow in a selected campaign
     .get('/api/notes')
     .query({ campaignId: defaultCampaignId })
   assert.equal(finalListResponse.body.notes.length, 0)
+})
+
+test('configured site-admin emails are promoted through registration and login', async (t) => {
+  const siteAdminEmail = 'admin@example.com'
+  const { app, noteStore, dbPath, cleanup } = await createTestApp({
+    siteAdminEmails: [siteAdminEmail],
+  })
+  t.after(cleanup)
+
+  const registration = await registerOwner(request(app), {
+    displayName: 'Admin Aela',
+    email: siteAdminEmail,
+  })
+  assert.equal(registration.owner.isSiteAdmin, true)
+
+  const sessionResponse = await withAuth(request(app), registration.token).get('/api/auth/session')
+  assert.equal(sessionResponse.status, 200)
+  assert.equal(sessionResponse.body.owner.isSiteAdmin, true)
+
+  noteStore.close()
+
+  const reopenedStore = createNoteStore({ dbPath, siteAdminEmails: [siteAdminEmail] })
+  t.after(() => reopenedStore.close())
+
+  const reopenedApp = createApp({ noteStore: reopenedStore })
+  const loginResponse = await request(reopenedApp).post('/api/auth/login').send({
+    email: siteAdminEmail,
+    password: 'moonlit-secret',
+  })
+
+  assert.equal(loginResponse.status, 200)
+  assert.equal(loginResponse.body.owner.isSiteAdmin, true)
 })
 
 test('quick capture creates a note with only a title using server defaults', async (t) => {

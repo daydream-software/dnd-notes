@@ -35,6 +35,11 @@ apps/api/data/dnd-notes.sqlite
 
 You can override that path with `NOTES_DB_PATH`.
 
+You can bootstrap global site-admin access with `SITE_ADMIN_EMAILS`, using a
+comma-separated list of owner-account emails. Matching accounts are promoted to
+site admin on registration and again on API startup so the future global admin
+panel has a stable access model.
+
 When the local database is from an older schema, the API upgrades compatible note
 attribution columns in place during startup so existing note data keeps loading.
 

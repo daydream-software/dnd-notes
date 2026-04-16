@@ -10,6 +10,7 @@ const owner = {
   id: 'owner-1',
   email: 'chunk@example.com',
   displayName: 'Chunk the Tester',
+  isSiteAdmin: false,
   createdAt: '2026-04-13T00:00:00.000Z',
   updatedAt: '2026-04-13T00:00:00.000Z',
 }
