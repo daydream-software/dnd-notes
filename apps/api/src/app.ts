@@ -1,18 +1,36 @@
-import { createReadStream } from 'node:fs'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
 import type { NoteStore } from './note-store.js'
-import { InvalidBackupDatabaseError } from './note-store.js'
+import { registerAdminRoutes } from './routes/admin-routes.js'
+import { registerAuthRoutes } from './routes/auth-routes.js'
+import {
+  type CampaignParams,
+  type NoteParams,
+  type SessionParams,
+  type ShareLinkParams,
+  type ShareParams,
+  type SharedNoteParams,
+  buildNoteActivityResponse,
+  buildOverview,
+  buildSessions,
+  buildSharedUrl,
+  normalizePublicWebUrl,
+  readRequestedActivityLimit,
+  readRequestedCampaignId,
+  readRequestedMembershipId,
+  resolveAccessibleCampaign,
+  resolveOwnedCampaign,
+  resolveSharedLink,
+  applySharedLinkPolicy,
+  readSharedMembership,
+  requireAuthenticatedAccount,
+  requireEditorAccess,
+  requireSharedMembership,
+  sharedClaimRateLimitPolicy,
+  sharedJoinRateLimitPolicy,
+  type RateLimitPolicy,
+} from './route-support.js'
 import type {
-  ActivityCollaborator,
-  AdminAccountsResponse,
-  AdminRestoreResponse,
-  AuthSessionResponse,
-  AdminOverviewResponse,
-  CampaignMembership,
   CampaignMembershipsResponse,
   MembershipConsolidationResponse,
   CampaignShareLinkCreateResponse,
@@ -20,17 +38,12 @@ import type {
   CampaignShareLinksResponse,
   CampaignResponse,
   CampaignsResponse,
-  CurrentOwnerResponse,
   ErrorResponse,
   HealthResponse,
-  Note,
-  NoteActivityEntry,
   NoteActivityResponse,
   NoteResponse,
   NotesOverview,
   NotesResponse,
-  OwnerAccount,
-  SessionSummary,
   SessionsResponse,
   SharedJoinResponse,
   SharedMembershipClaimResponse,
@@ -43,70 +56,10 @@ import {
   validateNoteCreateInput,
   validateMembershipConsolidationInput,
   validateNoteInput,
-  validateOwnerLoginInput,
-  validateOwnerRegistrationInput,
 } from './validation.js'
-
-interface NoteParams extends Record<string, string> {
-  noteId: string
-}
-
-interface CampaignParams extends Record<string, string> {
-  campaignId: string
-}
-
-interface SessionParams extends Record<string, string> {
-  sessionId: string
-}
-
-interface ShareParams extends Record<string, string> {
-  shareToken: string
-}
-
-interface ShareLinkParams extends CampaignParams {
-  shareLinkId: string
-}
-
-interface SharedNoteParams extends ShareParams {
-  noteId: string
-}
-
-const defaultActivityLimit = 20
-const maxActivityLimit = 100
-
-interface RateLimitPolicy {
-  maxRequests: number
-  windowMs: number
-  errorMessage: string
-}
-
 interface RateLimitBucket {
   count: number
   resetAt: number
-}
-
-const registerRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many registration attempts. Please wait before trying again.',
-}
-
-const loginRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many login attempts. Please wait before trying again.',
-}
-
-const sharedJoinRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 10,
-  windowMs: 1000 * 60 * 10,
-  errorMessage: 'Too many guest join attempts. Please wait before trying again.',
-}
-
-const sharedClaimRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many membership claim attempts. Please wait before trying again.',
 }
 
 interface CreateAppOptions {
@@ -114,428 +67,6 @@ interface CreateAppOptions {
   publicWebUrl?: string
   allowedOrigins?: string
   restoreNoteStore?: (sourcePath: string) => NoteStore
-}
-
-const sqliteFileHeader = Buffer.from('SQLite format 3\0')
-
-function normalizePublicWebUrl(publicWebUrl?: string) {
-  if (!publicWebUrl) {
-    return null
-  }
-
-  const trimmed = publicWebUrl.trim()
-
-  if (!trimmed) {
-    return null
-  }
-
-  let parsed: URL
-
-  try {
-    parsed = new URL(trimmed)
-  } catch {
-    throw new Error('PUBLIC_WEB_URL must be an absolute URL.')
-  }
-
-  if (parsed.pathname !== '/' || parsed.search || parsed.hash) {
-    throw new Error('PUBLIC_WEB_URL must not include a path, query string, or hash.')
-  }
-
-  return parsed.toString().replace(/\/$/, '')
-}
-
-function parseAuthorizationToken(request: Request) {
-  const authorizationHeader = request.header('authorization')
-
-  if (!authorizationHeader) {
-    return null
-  }
-
-  const [scheme, token] = authorizationHeader.split(' ')
-
-  if (scheme !== 'Bearer' || !token) {
-    return null
-  }
-
-  return token
-}
-
-function parseGuestToken(request: Request) {
-  const guestToken = request.header('x-guest-token')
-
-  if (!guestToken) {
-    return null
-  }
-
-  const trimmed = guestToken.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function readRequestedCampaignId(request: Request) {
-  const value = request.query.campaignId
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function readRequestedMembershipId(request: Request) {
-  const value = request.query.membershipId
-
-  if (typeof value !== 'string') {
-    return null
-  }
-
-  const trimmed = value.trim()
-  return trimmed.length > 0 ? trimmed : null
-}
-
-function readRequestedActivityLimit(
-  request: Request,
-  response: Response<ErrorResponse>,
-) {
-  const value = request.query.limit
-
-  if (value === undefined) {
-    return defaultActivityLimit
-  }
-
-  if (typeof value !== 'string') {
-    response.status(400).json({ error: 'Activity limit must be a positive integer.' })
-    return null
-  }
-
-  const parsed = Number.parseInt(value, 10)
-
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    response.status(400).json({ error: 'Activity limit must be a positive integer.' })
-    return null
-  }
-
-  return Math.min(parsed, maxActivityLimit)
-}
-
-function buildOverview(
-  noteStore: NoteStore,
-  campaignId: string,
-  membership: CampaignMembership | null,
-): NotesOverview {
-  const campaign = noteStore.getCampaign(campaignId)
-
-  if (!campaign || campaign.archivedAt !== null) {
-    throw new Error(`Campaign "${campaignId}" was not found.`)
-  }
-
-  return {
-    campaign,
-    membership,
-    stats: noteStore.getStats(campaign.id),
-    recentNotes: noteStore.listRecentNotes(3, campaign.id),
-  }
-}
-
-function buildSessions(noteStore: NoteStore, campaignId: string): SessionSummary[] {
-  const sessions = noteStore.listSessionNames(campaignId) as Array<string | SessionSummary>
-
-  return sessions.map((session) => {
-    if (typeof session !== 'string') {
-      return session
-    }
-
-    const notes = noteStore.getSessionNotes(campaignId, session)
-    const latestActivity = notes.reduce(
-      (latest, note) => (note.updatedAt > latest ? note.updatedAt : latest),
-      '',
-    )
-
-    return {
-      sessionName: session,
-      noteCount: notes.length,
-      latestActivity,
-    }
-  })
-}
-
-function noteMatchesActivityMembership(note: Note, membershipId: string) {
-  return (
-    note.createdBy?.membershipId === membershipId ||
-    note.lastEditedBy?.membershipId === membershipId
-  )
-}
-
-function buildActivityCollaborators(notes: Note[]): ActivityCollaborator[] {
-  const collaborators = new Map<string, ActivityCollaborator>()
-
-  for (const note of notes) {
-    const actorIds = new Set<string>()
-
-    for (const actor of [note.createdBy, note.lastEditedBy]) {
-      if (!actor || actorIds.has(actor.membershipId)) {
-        continue
-      }
-
-      actorIds.add(actor.membershipId)
-      const existing = collaborators.get(actor.membershipId)
-
-      if (existing) {
-        existing.noteCount += 1
-        continue
-      }
-
-      collaborators.set(actor.membershipId, {
-        membershipId: actor.membershipId,
-        displayName: actor.displayName,
-        role: actor.role,
-        noteCount: 1,
-      })
-    }
-  }
-
-  return [...collaborators.values()].sort((left, right) =>
-    right.noteCount !== left.noteCount
-      ? right.noteCount - left.noteCount
-      : left.displayName.localeCompare(right.displayName),
-  )
-}
-
-function buildNoteActivityEntry(note: Note): NoteActivityEntry {
-  return {
-    ...note,
-    action: note.createdAt === note.updatedAt ? 'created' : 'edited',
-  }
-}
-
-function buildNoteActivityResponse(
-  noteStore: NoteStore,
-  campaignId: string,
-  membershipId: string | null,
-  limit: number,
-): NoteActivityResponse {
-  const campaign = noteStore.getCampaign(campaignId)
-
-  if (!campaign || campaign.archivedAt !== null) {
-    throw new Error(`Campaign "${campaignId}" was not found.`)
-  }
-
-  const notes = [...noteStore.listNotes(campaignId)].sort((left, right) =>
-    right.updatedAt.localeCompare(left.updatedAt),
-  )
-
-  const activity = membershipId
-    ? notes.filter((note) => noteMatchesActivityMembership(note, membershipId))
-    : notes
-
-  return {
-    campaign,
-    collaborators: buildActivityCollaborators(notes),
-    activity: activity.slice(0, limit).map(buildNoteActivityEntry),
-  }
-}
-
-function requireAuthenticatedAccount(
-  noteStore: NoteStore,
-  request: Request,
-  response: Response<ErrorResponse>,
-) {
-  const token = parseAuthorizationToken(request)
-
-  if (!token) {
-    response.status(401).json({ error: 'Owner authentication is required.' })
-    return null
-  }
-
-  const owner = noteStore.getOwnerBySessionToken(token)
-
-  if (!owner) {
-    response.status(401).json({ error: 'Owner session is invalid or expired.' })
-    return null
-  }
-
-  return owner
-}
-
-function requireSiteAdmin(
-  noteStore: NoteStore,
-  request: Request,
-  response: Response<ErrorResponse>,
-) {
-  const owner = requireAuthenticatedAccount(noteStore, request, response)
-
-  if (!owner) {
-    return null
-  }
-
-  if (!owner.isSiteAdmin) {
-    response.status(403).json({ error: 'Site-admin access is required.' })
-    return null
-  }
-
-  return owner
-}
-
-function resolveOwnedCampaign(
-  noteStore: NoteStore,
-  owner: OwnerAccount,
-  campaignId: string | null | undefined,
-  response: Response<ErrorResponse>,
-) {
-  if (!campaignId) {
-    try {
-      return noteStore.getPrimaryCampaign(owner.id)
-    } catch {
-      response.status(404).json({ error: 'No owned campaigns are available.' })
-      return null
-    }
-  }
-
-  const campaign = noteStore.getCampaign(campaignId)
-
-  if (!campaign || campaign.archivedAt !== null) {
-    response.status(404).json({ error: `Campaign "${campaignId}" was not found.` })
-    return null
-  }
-
-  if (!noteStore.userOwnsCampaign(owner.id, campaignId)) {
-    response.status(403).json({ error: 'You do not have access to this campaign.' })
-    return null
-  }
-
-  return campaign
-}
-
-function resolveAccessibleCampaign(
-  noteStore: NoteStore,
-  owner: OwnerAccount,
-  campaignId: string | null | undefined,
-  response: Response<ErrorResponse>,
-) {
-  if (!campaignId) {
-    try {
-      return noteStore.getPrimaryCampaignForUser(owner.id)
-    } catch {
-      response.status(404).json({ error: 'No campaigns are available.' })
-      return null
-    }
-  }
-
-  const campaign = noteStore.getCampaign(campaignId)
-
-  if (!campaign || campaign.archivedAt !== null) {
-    response.status(404).json({ error: `Campaign "${campaignId}" was not found.` })
-    return null
-  }
-
-  if (!noteStore.userHasCampaignAccess(owner.id, campaignId)) {
-    response.status(403).json({ error: 'You do not have access to this campaign.' })
-    return null
-  }
-
-  return campaign
-}
-
-function resolveSharedLink(
-  noteStore: NoteStore,
-  shareToken: string,
-  response: Response<ErrorResponse>,
-) {
-  const shareLink = noteStore.getCampaignShareLinkByToken(shareToken)
-
-  if (!shareLink) {
-    response.status(404).json({ error: 'Shared link was not found or has been revoked.' })
-    return null
-  }
-
-  const campaign = noteStore.getCampaign(shareLink.campaignId)
-
-  if (!campaign || campaign.archivedAt !== null) {
-    response.status(404).json({ error: 'Campaign was not found for this shared link.' })
-    return null
-  }
-
-  return { shareLink, campaign }
-}
-
-function applySharedLinkPolicy(
-  response: Response,
-  frameAncestors: string | null,
-) {
-  // Set frame-ancestors CSP (per-link policy)
-  response.set(
-    'Content-Security-Policy',
-    `frame-ancestors ${frameAncestors?.trim() || "'none'"}`,
-  )
-  
-  // Remove X-Frame-Options for shared routes - CSP frame-ancestors takes precedence
-  // and allows granular per-link embedding control
-  response.removeHeader('X-Frame-Options')
-}
-
-function readSharedMembership(
-  noteStore: NoteStore,
-  request: Request,
-  campaignId: string,
-) {
-  const guestToken = parseGuestToken(request)
-
-  if (!guestToken) {
-    return null
-  }
-
-  const membership = noteStore.getGuestMembershipByToken(guestToken)
-
-  if (!membership || membership.campaignId !== campaignId) {
-    return null
-  }
-
-  return membership
-}
-
-function requireSharedMembership(
-  noteStore: NoteStore,
-  request: Request,
-  campaignId: string,
-  response: Response<ErrorResponse>,
-) {
-  const membership = readSharedMembership(noteStore, request, campaignId)
-
-  if (!membership) {
-    response.status(401).json({ error: 'Guest authentication is required for this shared campaign.' })
-    return null
-  }
-
-  return membership
-}
-
-function requireEditorAccess(
-  accessLevel: 'viewer' | 'editor',
-  response: Response<ErrorResponse>,
-) {
-  if (accessLevel !== 'editor') {
-    response.status(403).json({ error: 'This shared link does not allow editing.' })
-    return false
-  }
-
-  return true
-}
-
-function buildSharedUrl(
-  request: Request,
-  shareToken: string,
-  publicWebUrl: string | null,
-) {
-  if (publicWebUrl) {
-    return `${publicWebUrl}/share/${shareToken}`
-  }
-
-  const origin = request.header('origin')?.replace(/\/$/, '')
-
-  if (origin) {
-    return `${origin}/share/${shareToken}`
-  }
-
-  return `${request.protocol}://${request.get('host')}/share/${shareToken}`
 }
 
 function readRateLimitClientId(request: Request) {
@@ -596,6 +127,16 @@ export function createApp({
     return false
   }
 
+  const routeContext = {
+    getNoteStore: () => noteStore,
+    setNoteStore: (restoredNoteStore: NoteStore) => {
+      noteStore = restoredNoteStore
+    },
+    publicWebUrl,
+    restoreNoteStore,
+    isRateLimited,
+  }
+
   // CORS configuration - explicit origin allowlist for security
   const allowedOrigins = (configuredAllowedOrigins ?? process.env.ALLOWED_ORIGINS ?? 'http://localhost:5173,http://localhost:3000')
     .split(',')
@@ -628,16 +169,16 @@ export function createApp({
   app.use((_request, response, next) => {
     // Prevent MIME type sniffing
     response.setHeader('X-Content-Type-Options', 'nosniff')
-    
+
     // Prevent clickjacking for API routes (frame-ancestors CSP applied per-route for shared links)
     response.setHeader('X-Frame-Options', 'DENY')
-    
+
     // XSS protection (legacy header, but doesn't hurt)
     response.setHeader('X-XSS-Protection', '1; mode=block')
-    
+
     // Don't send referrer to external sites
     response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
-    
+
     next()
   })
 
@@ -647,294 +188,8 @@ export function createApp({
     response.json({ status: 'ok', service: 'dnd-notes-api' })
   })
 
-  app.get(
-    '/api/admin/accounts',
-    (
-      request: Request,
-      response: Response<AdminAccountsResponse | ErrorResponse>,
-    ) => {
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
-
-      if (!siteAdmin) {
-        return
-      }
-
-      response.json({ accounts: noteStore.listOwnerAccounts() })
-    },
-  )
-
-  app.get(
-    '/api/admin/overview',
-    (
-      request: Request,
-      response: Response<AdminOverviewResponse | ErrorResponse>,
-    ) => {
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
-
-      if (!siteAdmin) {
-        return
-      }
-
-      response.json({ overview: noteStore.getAdminOverview() })
-    },
-  )
-
-  app.get(
-    '/api/admin/backup',
-    async (
-      request: Request,
-      response: Response<ErrorResponse>,
-    ) => {
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
-
-      if (!siteAdmin) {
-        return
-      }
-
-      const backupDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-backup-'))
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '-')
-      const backupFileName = `dnd-notes-backup-${timestamp}.sqlite`
-      const backupPath = join(backupDirectory, backupFileName)
-
-      try {
-        await noteStore.backupDatabase(backupPath)
-      } catch {
-        await rm(backupDirectory, { recursive: true, force: true })
-        response.status(500).json({ error: 'Could not create the admin backup.' })
-        return
-      }
-
-      response.setHeader('Content-Type', 'application/octet-stream')
-      response.setHeader(
-        'Content-Disposition',
-        `attachment; filename="${backupFileName}"`,
-      )
-
-      const stream = createReadStream(backupPath)
-      let cleanedUp = false
-
-      const cleanupBackup = () => {
-        if (cleanedUp) {
-          return
-        }
-
-        cleanedUp = true
-        void rm(backupDirectory, { recursive: true, force: true })
-      }
-
-      stream.on('error', () => {
-        cleanupBackup()
-
-        if (!response.headersSent) {
-          response.status(500).json({ error: 'Could not stream the admin backup.' })
-          return
-        }
-
-        response.destroy()
-      })
-
-      response.on('finish', cleanupBackup)
-      response.on('close', cleanupBackup)
-      stream.pipe(response)
-    },
-  )
-
-  app.post(
-    '/api/admin/restore',
-    express.raw({
-      type: [
-        'application/octet-stream',
-        'application/vnd.sqlite3',
-        'application/x-sqlite3',
-      ],
-      limit: '50mb',
-    }),
-    async (
-      request: Request,
-      response: Response<AdminRestoreResponse | ErrorResponse>,
-    ) => {
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
-
-      if (!siteAdmin) {
-        return
-      }
-
-      if (!restoreNoteStore) {
-        response.status(500).json({ error: 'Admin restore is not configured.' })
-        return
-      }
-
-      if (!Buffer.isBuffer(request.body) || request.body.length === 0) {
-        response.status(400).json({ error: 'A SQLite backup file is required.' })
-        return
-      }
-
-      if (
-        request.body.length < sqliteFileHeader.length ||
-        !request.body.subarray(0, sqliteFileHeader.length).equals(sqliteFileHeader)
-      ) {
-        response
-          .status(400)
-          .json({ error: 'The uploaded file is not a valid SQLite backup.' })
-        return
-      }
-
-      const restoreDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-restore-'))
-      const uploadPath = join(restoreDirectory, 'uploaded-backup.sqlite')
-      const rollbackPath = join(restoreDirectory, 'rollback.sqlite')
-
-      try {
-        await writeFile(uploadPath, request.body)
-        await noteStore.backupDatabase(rollbackPath)
-      } catch {
-        await rm(restoreDirectory, { recursive: true, force: true })
-        response
-          .status(500)
-          .json({ error: 'Could not prepare the current database for restore.' })
-        return
-      }
-
-      noteStore.close()
-
-      try {
-        noteStore = restoreNoteStore(uploadPath)
-      } catch (restoreError) {
-        try {
-          noteStore = restoreNoteStore(rollbackPath)
-        } catch {
-          await rm(restoreDirectory, { recursive: true, force: true })
-          response.status(500).json({
-            error:
-              'Restore failed and the original database could not be reopened.',
-          })
-          return
-        }
-
-        await rm(restoreDirectory, { recursive: true, force: true })
-
-        if (restoreError instanceof InvalidBackupDatabaseError) {
-          response.status(400).json({
-            error: 'The uploaded file is not a valid dnd-notes SQLite backup.',
-          })
-          return
-        }
-
-        response.status(500).json({ error: 'Could not restore the admin backup.' })
-        return
-      }
-
-      await rm(restoreDirectory, { recursive: true, force: true })
-
-      response.json({
-        message: 'Backup restored successfully.',
-        restoredAt: new Date().toISOString(),
-        overview: noteStore.getAdminOverview(),
-      })
-    },
-  )
-
-  app.post(
-    '/api/auth/register',
-    (
-      request: Request,
-      response: Response<AuthSessionResponse | ErrorResponse>,
-    ) => {
-      if (isRateLimited(request, response, 'auth-register', registerRateLimitPolicy)) {
-        return
-      }
-
-      const validation = validateOwnerRegistrationInput(request.body)
-
-      if (!validation.success) {
-        response.status(400).json({
-          error: 'Owner registration payload is invalid.',
-          details: validation.errors,
-        })
-        return
-      }
-
-      const owner = noteStore.createOwnerAccount(validation.data)
-
-      if (!owner) {
-        response.status(409).json({
-          error: `An owner account already exists for ${validation.data.email}.`,
-        })
-        return
-      }
-
-      const token = noteStore.createOwnerSession(owner.id)
-      response.status(201).json({ token, owner })
-    },
-  )
-
-  app.post(
-    '/api/auth/login',
-    (
-      request: Request,
-      response: Response<AuthSessionResponse | ErrorResponse>,
-    ) => {
-      if (isRateLimited(request, response, 'auth-login', loginRateLimitPolicy)) {
-        return
-      }
-
-      const validation = validateOwnerLoginInput(request.body)
-
-      if (!validation.success) {
-        response.status(400).json({
-          error: 'Owner login payload is invalid.',
-          details: validation.errors,
-        })
-        return
-      }
-
-      const owner = noteStore.authenticateOwner(
-        validation.data.email,
-        validation.data.password,
-      )
-
-      if (!owner) {
-        response.status(401).json({ error: 'Email or password is incorrect.' })
-        return
-      }
-
-      const token = noteStore.createOwnerSession(owner.id)
-      response.json({ token, owner })
-    },
-  )
-
-  app.get(
-    '/api/auth/session',
-    (
-      request: Request,
-      response: Response<CurrentOwnerResponse | ErrorResponse>,
-    ) => {
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
-
-      if (!owner) {
-        return
-      }
-
-      response.json({ owner })
-    },
-  )
-
-  app.post(
-    '/api/auth/logout',
-    (
-      request: Request,
-      response: Response<undefined | ErrorResponse>,
-    ) => {
-      const token = parseAuthorizationToken(request)
-
-      if (!token) {
-        response.status(401).json({ error: 'Owner authentication is required.' })
-        return
-      }
-
-      noteStore.deleteOwnerSession(token)
-      response.status(204).send()
-    },
-  )
+  registerAdminRoutes(app, routeContext)
+  registerAuthRoutes(app, routeContext)
 
   app.get(
     '/api/campaigns',
