@@ -6,7 +6,7 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { copyFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -190,10 +190,21 @@ type MembershipConsolidationResult =
   | { status: 'same-membership' }
   | { status: 'forbidden' }
 
-interface CreateNoteStoreOptions {
+export interface CreateNoteStoreOptions {
   dbPath?: string
   siteAdminEmails?: readonly string[]
 }
+
+export class InvalidBackupDatabaseError extends Error {}
+
+const requiredBackupTables = [
+  'owner_accounts',
+  'owner_sessions',
+  'campaigns',
+  'campaign_memberships',
+  'campaign_share_links',
+  'notes',
+] as const
 
 const sessionTtlMs = 1000 * 60 * 60 * 24 * 30
 
@@ -2701,4 +2712,66 @@ export function createNoteStore(
       database.close()
     },
   }
+}
+
+export function restoreNoteStoreFromBackup(
+  sourcePath: string,
+  options: CreateNoteStoreOptions = {},
+): NoteStore {
+  const dbPath = resolveNoteDbPath(options)
+
+  if (dbPath === ':memory:') {
+    throw new Error('Admin restore is not supported for in-memory note stores.')
+  }
+
+  const validationDatabase = new Database(sourcePath, {
+    readonly: true,
+    fileMustExist: true,
+  })
+
+  try {
+    const existingTables = new Set(
+      (
+        validationDatabase.prepare(`
+          SELECT name
+          FROM sqlite_master
+          WHERE type = 'table'
+        `).all() as Array<{ name: string }>
+      ).map((row) => row.name),
+    )
+    const missingTables = requiredBackupTables.filter(
+      (tableName) => !existingTables.has(tableName),
+    )
+
+    if (missingTables.length > 0) {
+      throw new InvalidBackupDatabaseError(
+        `Missing required tables: ${missingTables.join(', ')}`,
+      )
+    }
+  } catch (error) {
+    if (error instanceof InvalidBackupDatabaseError) {
+      throw error
+    }
+
+    throw new InvalidBackupDatabaseError('The uploaded database could not be read.')
+  } finally {
+    validationDatabase.close()
+  }
+
+  const validationStore = createNoteStore({ ...options, dbPath: sourcePath })
+
+  try {
+    validationStore.getAdminOverview()
+  } catch {
+    throw new InvalidBackupDatabaseError(
+      'The uploaded database could not be opened as a dnd-notes backup.',
+    )
+  } finally {
+    validationStore.close()
+  }
+
+  mkdirSync(dirname(dbPath), { recursive: true })
+  copyFileSync(sourcePath, dbPath)
+
+  return createNoteStore({ ...options, dbPath })
 }

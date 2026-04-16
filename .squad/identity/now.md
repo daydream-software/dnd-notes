@@ -1,9 +1,8 @@
 # Current Focus
 
-- **Updated:** 2026-04-16T16:11:48Z
-- **Active slice:** Auth/API hardening implementation — explicit API-side origin policy + security headers + regression coverage
-- **Lanes:** Data implementing | Chunk testing | Mikey scoping
-- **Prerequisite shipped:** PUBLIC_WEB_URL + buildSharedUrl() handoff (2026-04-16)
-- **Scope boundary:** Bearer/localStorage auth transport remains unchanged this slice
-- **Checkpoint:** Restart requested while Data and Chunk were still running. Working tree already contained edits in `apps/api/.env.example`, `apps/api/src/app.ts`, `apps/api/test/app.test.ts`, and a new `apps/api/test/security-headers.test.ts`.
-- **Next likely task:** Resume from the auth/API hardening working tree, validate the slice, then document and commit it
+- **Updated:** 2026-04-16T17:49:00Z
+- **Active slice:** Admin backup/restore implementation — completed
+- **Shipped now:** site-admin `POST /api/admin/restore`, rollback-on-failure restore flow, admin-panel restore UI with mandatory confirmation, and API/web regression coverage
+- **Prerequisites already shipped:** `PUBLIC_WEB_URL` canonical share URLs and API exposure hardening
+- **Operational caveat:** restoring a backup can invalidate the current owner session if the restored snapshot carries different session rows
+- **Next likely task:** choose the next production roadmap slice after backup/restore, most likely provisioning prototype work or deeper deployment/runbook work

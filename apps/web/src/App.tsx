@@ -66,6 +66,7 @@ import {
   joinSharedCampaign,
   loginOwner,
   logoutOwner,
+  restoreAdminBackup,
   revealCampaignShareLink,
   registerOwner,
   revokeCampaignShareLink,
@@ -689,6 +690,7 @@ function App() {
   const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
   const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
   const [isDownloadingAdminBackup, setIsDownloadingAdminBackup] = useState(false)
+  const [isRestoringAdminBackup, setIsRestoringAdminBackup] = useState(false)
   const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
     useState(false)
   const [isApplyingMembershipConsolidation, setIsApplyingMembershipConsolidation] =
@@ -1455,6 +1457,60 @@ function App() {
       setIsDownloadingAdminBackup(false)
     }
   }, [authToken])
+
+  const handleRestoreAdminBackup = useCallback(
+    async (backupFile: File) => {
+      if (!authToken) {
+        return
+      }
+
+      const confirmed = window.confirm(
+        `Restore "${backupFile.name}"? This will replace the current SQLite database.`,
+      )
+
+      if (!confirmed) {
+        return
+      }
+
+      setIsRestoringAdminBackup(true)
+      setAdminNotice(null)
+      setAdminError(null)
+
+      try {
+        const restore = await restoreAdminBackup(authToken, backupFile)
+        setAdminNotice(restore.message)
+
+        try {
+          const session = await fetchOwnerSession(authToken)
+          setOwner(session.owner)
+          await loadCampaigns(authToken)
+
+          const [nextOverview, nextAccounts] = await Promise.all([
+            fetchAdminOverview(authToken),
+            fetchAdminAccounts(authToken),
+          ])
+
+          setAdminOverview(nextOverview)
+          setAdminAccounts(nextAccounts)
+          setAdminError(null)
+          setError(null)
+        } catch {
+          clearSession()
+          setIsRegisterMode(false)
+          setError('Backup restored successfully. Sign in again to continue.')
+        }
+      } catch (restoreError) {
+        setAdminError(
+          restoreError instanceof Error
+            ? restoreError.message
+            : 'Could not restore the site backup.',
+        )
+      } finally {
+        setIsRestoringAdminBackup(false)
+      }
+    },
+    [authToken, clearSession, loadCampaigns],
+  )
 
   useEffect(() => {
     if (isSharedMode) {
@@ -2856,10 +2912,12 @@ function App() {
                 overview={adminOverview}
                 isLoading={isLoadingAdminOverview}
                 isDownloadingBackup={isDownloadingAdminBackup}
+                isRestoringBackup={isRestoringAdminBackup}
                 error={adminError}
                 notice={adminNotice}
                 onRefresh={() => void handleRefreshAdminOverview()}
                 onDownloadBackup={() => void handleDownloadAdminBackup()}
+                onRestoreBackup={(backupFile) => void handleRestoreAdminBackup(backupFile)}
                 surfaceRadius={surfaceRadius}
               />
             ) : null}
@@ -3066,10 +3124,12 @@ function App() {
               overview={adminOverview}
               isLoading={isLoadingAdminOverview}
               isDownloadingBackup={isDownloadingAdminBackup}
+              isRestoringBackup={isRestoringAdminBackup}
               error={adminError}
               notice={adminNotice}
               onRefresh={() => void handleRefreshAdminOverview()}
               onDownloadBackup={() => void handleDownloadAdminBackup()}
+              onRestoreBackup={(backupFile) => void handleRestoreAdminBackup(backupFile)}
               surfaceRadius={surfaceRadius}
             />
           ) : null}

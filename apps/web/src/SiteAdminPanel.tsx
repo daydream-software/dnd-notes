@@ -1,6 +1,7 @@
 import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded'
 import DownloadRoundedIcon from '@mui/icons-material/DownloadRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
+import UploadRoundedIcon from '@mui/icons-material/UploadRounded'
 import {
   Alert,
   Box,
@@ -11,6 +12,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import type { ChangeEvent } from 'react'
 import type { AdminAccountSummary, AdminOverview } from './types'
 
 interface SiteAdminPanelProps {
@@ -18,11 +20,25 @@ interface SiteAdminPanelProps {
   overview: AdminOverview | null
   isLoading: boolean
   isDownloadingBackup: boolean
+  isRestoringBackup: boolean
   error: string | null
   notice: string | null
   onRefresh: () => void
   onDownloadBackup: () => void
+  onRestoreBackup: (backupFile: File) => void
   surfaceRadius: number | string
+}
+
+const visuallyHiddenInputStyle = {
+  border: 0,
+  clip: 'rect(0 0 0 0)',
+  height: '1px',
+  margin: '-1px',
+  overflow: 'hidden',
+  padding: 0,
+  position: 'absolute' as const,
+  whiteSpace: 'nowrap' as const,
+  width: '1px',
 }
 
 interface MetricSection {
@@ -82,12 +98,26 @@ export default function SiteAdminPanel({
   overview,
   isLoading,
   isDownloadingBackup,
+  isRestoringBackup,
   error,
   notice,
   onRefresh,
   onDownloadBackup,
+  onRestoreBackup,
   surfaceRadius,
 }: SiteAdminPanelProps) {
+  const handleRestoreSelection = (event: ChangeEvent<HTMLInputElement>) => {
+    const backupFile = event.target.files?.[0]
+
+    event.target.value = ''
+
+    if (!backupFile) {
+      return
+    }
+
+    onRestoreBackup(backupFile)
+  }
+
   return (
     <Card aria-label="Site admin panel" sx={{ borderRadius: surfaceRadius }}>
       <CardContent sx={{ p: 3 }}>
@@ -103,8 +133,8 @@ export default function SiteAdminPanel({
                 <Typography variant="h5">Site admin panel</Typography>
               </Stack>
               <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                Review global usage counts and pull a SQLite backup without leaving the
-                notes workspace.
+                Review global usage counts, download SQLite backups, and restore a
+                validated snapshot without leaving the notes workspace.
               </Typography>
               <Typography color="text.secondary" variant="body2" sx={{ mt: 1 }}>
                 {overview
@@ -129,13 +159,36 @@ export default function SiteAdminPanel({
                 variant="contained"
                 startIcon={<DownloadRoundedIcon />}
                 onClick={onDownloadBackup}
-                disabled={isDownloadingBackup}
+                disabled={isDownloadingBackup || isRestoringBackup}
                 aria-label="Download SQLite backup"
               >
                 {isDownloadingBackup ? 'Preparing backup...' : 'Download backup'}
               </Button>
+              <Button
+                component="label"
+                variant="outlined"
+                color="warning"
+                startIcon={<UploadRoundedIcon />}
+                disabled={isDownloadingBackup || isRestoringBackup}
+                aria-label="Restore SQLite backup"
+              >
+                {isRestoringBackup ? 'Restoring backup...' : 'Restore backup'}
+                <input
+                  type="file"
+                  accept=".sqlite,application/octet-stream,application/vnd.sqlite3,application/x-sqlite3"
+                  aria-label="Select SQLite backup to restore"
+                  onChange={handleRestoreSelection}
+                  style={visuallyHiddenInputStyle}
+                />
+              </Button>
             </Stack>
           </Stack>
+
+          <Alert severity="warning" sx={{ borderRadius: surfaceRadius }}>
+            Restoring a backup replaces the live SQLite database after confirmation
+            and may require signing in again if the restored snapshot has different
+            owner sessions.
+          </Alert>
 
           {notice ? (
             <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>

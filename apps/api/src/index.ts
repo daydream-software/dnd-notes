@@ -1,12 +1,18 @@
 import 'dotenv/config'
 import { createApp } from './app.js'
-import { createNoteStore } from './note-store.js'
+import { createNoteStore, restoreNoteStoreFromBackup } from './note-store.js'
 
 const port = Number(process.env.PORT ?? 3001)
-const noteStore = createNoteStore()
+const siteAdminEmails =
+  process.env.SITE_ADMIN_EMAILS?.split(',').map((email) => email.trim()) ?? []
+let noteStore = createNoteStore({ siteAdminEmails })
 const app = createApp({
   noteStore,
   publicWebUrl: process.env.PUBLIC_WEB_URL,
+  restoreNoteStore(sourcePath) {
+    noteStore = restoreNoteStoreFromBackup(sourcePath, { siteAdminEmails })
+    return noteStore
+  },
 })
 
 function shutdown(exitCode: number) {
