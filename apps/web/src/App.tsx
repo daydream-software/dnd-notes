@@ -85,6 +85,7 @@ import {
   type StarterNoteSeed,
 } from './templates'
 import CampaignWorkspaceHeader from './CampaignWorkspaceHeader'
+import { formatTimestamp } from './formatTimestamp'
 import { markdownToPlainText } from './note-excerpts'
 import NoteBodyEditor from './NoteBodyEditor'
 import NotesBrowsePane from './NotesBrowsePane'
@@ -113,6 +114,7 @@ import type {
 import { noteStatuses } from './types'
 import SiteAdminPanel from './SiteAdminPanel'
 import WorkspacePane from './WorkspacePane'
+import NoteEditorActions from './NoteEditorActions'
 
 interface NoteDraft {
   title: string
@@ -352,19 +354,6 @@ async function copyTextToClipboard(value: string) {
   }
 
   throw new Error('Clipboard access is unavailable. Reveal the link and copy it manually.')
-}
-
-function formatTimestamp(value: string) {
-  const date = new Date(value)
-
-  if (Number.isNaN(date.getTime())) {
-    return value
-  }
-
-  return new Intl.DateTimeFormat('en', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  }).format(date)
 }
 
 function excerpt(body: string) {
@@ -4474,51 +4463,15 @@ function App() {
                       </Stack>
                     )}
 
-                    <Stack
-                      direction={{ xs: 'column', sm: 'row' }}
-                      spacing={1.5}
-                      sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
-                    >
-                      <Typography color="text.secondary" variant="body2">
-                        {selectedNote && !isCreating
-                          ? `Last updated ${formatTimestamp(selectedNote.updatedAt)}`
-                          : canEditWorkspace
-                            ? `New notes are saved straight to the selected campaign.`
-                            : 'Viewer links can read shared notes but cannot save changes.'}
-                      </Typography>
-
-                      <Stack
-                        direction={{ xs: 'column', sm: 'row' }}
-                        spacing={1}
-                        sx={{
-                          width: { xs: '100%', sm: 'auto' },
-                          '& > *': {
-                            width: { xs: '100%', sm: 'auto' },
-                          },
-                        }}
-                      >
-                        {canEditWorkspace && !isCreating && selectedNote ? (
-                          <Button
-                            color="error"
-                            variant="outlined"
-                            onClick={handleDeleteNote}
-                            disabled={isSaving || isDeleting}
-                          >
-                            {isDeleting ? 'Deleting...' : 'Delete note'}
-                          </Button>
-                        ) : null}
-                        {canEditWorkspace ? (
-                          <Button
-                            variant="contained"
-                            startIcon={<SaveRoundedIcon />}
-                            onClick={handleSaveNote}
-                            disabled={isSaving || isDeleting}
-                          >
-                            {isSaving ? 'Saving...' : 'Save note'}
-                          </Button>
-                        ) : null}
-                      </Stack>
-                    </Stack>
+                    <NoteEditorActions
+                      canEditWorkspace={canEditWorkspace}
+                      isCreating={isCreating}
+                      isSaving={isSaving}
+                      isDeleting={isDeleting}
+                      selectedNoteUpdatedAt={selectedNote?.updatedAt}
+                      onSave={handleSaveNote}
+                      onDelete={handleDeleteNote}
+                    />
                   </Stack>
                 </CardContent>
               </Card>
