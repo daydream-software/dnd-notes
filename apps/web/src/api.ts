@@ -1,4 +1,5 @@
 import type {
+  AdminOverviewResponse,
   AuthSessionResponse,
   CampaignInput,
   CampaignMembershipsResponse,
@@ -133,6 +134,55 @@ export async function fetchCampaigns(authToken: string, signal?: AbortSignal) {
   })
 
   return readJson<CampaignsResponse>(response)
+}
+
+export async function fetchAdminOverview(authToken: string, signal?: AbortSignal) {
+  const response = await fetch(`${apiBaseUrl}/api/admin/overview`, {
+    headers: createHeaders(authToken),
+    signal,
+  })
+
+  const data = await readJson<AdminOverviewResponse>(response)
+  return data.overview
+}
+
+function readAttachmentFilename(contentDisposition: string | null, fallback: string) {
+  if (!contentDisposition) {
+    return fallback
+  }
+
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+
+  if (utf8Match) {
+    return decodeURIComponent(utf8Match[1])
+  }
+
+  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i)
+
+  if (quotedMatch) {
+    return quotedMatch[1]
+  }
+
+  const plainMatch = contentDisposition.match(/filename=([^;]+)/i)
+  return plainMatch ? plainMatch[1].trim() : fallback
+}
+
+export async function downloadAdminBackup(authToken: string) {
+  const response = await fetch(`${apiBaseUrl}/api/admin/backup`, {
+    headers: createHeaders(authToken),
+  })
+
+  if (!response.ok) {
+    await readJson(response)
+  }
+
+  return {
+    blob: await response.blob(),
+    fileName: readAttachmentFilename(
+      response.headers.get('content-disposition'),
+      'dnd-notes-backup.sqlite',
+    ),
+  }
 }
 
 export async function fetchCampaignMemberships(
