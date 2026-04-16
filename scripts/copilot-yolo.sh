@@ -214,6 +214,7 @@ launch_cmd=(
   --image "$image_tag"
   --skip-pull
   --mount-rw "$ssh_auth_sock:/ssh-agent"
+  --agent Squad
   "${forward_args[@]}"
 )
 
