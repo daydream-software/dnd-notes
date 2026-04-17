@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-17T01:26:52Z): ISSUE #41 COPILOT FEEDBACK ADDRESSED — Branch `squad/41-backup-restore-runbook` is now rebased on current `main`, so PR `#50` no longer carries the earlier base conflicts. The runbook now uses the actual Site admin panel button labels, states an explicit minimum retention baseline, and clarifies that the post-restore “session” check refers to the notes/campaign session-browsing flow before Copilot review is re-requested.
+
 📌 Team update (2026-04-17T01:20:20Z): WAIT-REVIEW MATCH FIX — `scripts/wait-copilot-review.ts` now normalizes reviewer logins before matching them, because GitHub GraphQL reports Copilot as `copilot-pull-request-reviewer` while the REST/UI surfaces often show `copilot-pull-request-reviewer[bot]`. After that fix, the helper correctly reports PR `#50` as reviewed-with-work-remaining and exits `10` for the five active Copilot threads instead of timing out.
 
 📌 Team update (2026-04-17T01:12:00Z): GATEKEEPER TRIGGER FIX — `.github/workflows/copilot-pr-automerge.yml` no longer declares the unsupported `pull_request_review_thread` event, which GitHub rejected as invalid workflow syntax. The gatekeeper now keeps its immediate PR/review/CI triggers and adds scheduled + manual re-evaluation so resolved Copilot threads can still unblock auto-merge without relying on an unsupported event source.

@@ -194,7 +194,11 @@ replace the live SQLite database with a known-good snapshot.
 ### Minimum operating expectations
 
 - do not overwrite your only known-good snapshot;
-- keep at least one recent live backup taken immediately before any restore;
+- keep at least three rotating backups in durable storage, including the most
+  recent known-good snapshot;
+- take a fresh live backup immediately before any restore and retain that
+  pre-restore snapshot until post-restore validation passes and users confirm
+  the system is healthy;
 - label snapshots with when they were taken and why they exist (routine backup,
   pre-maintenance backup, rehearsal fixture, incident recovery, and so on);
 - treat restore as an operator action: ask active users to stop editing before
@@ -203,16 +207,17 @@ replace the live SQLite database with a known-good snapshot.
 
 ### Backup procedure
 
-1. Sign in as a site admin and open the admin panel.
-2. Download a fresh backup from the backup action before any risky maintenance
-   or before starting a restore.
+1. Sign in as a site admin and open the Site admin panel.
+2. Download a fresh backup using **Download backup** (aria label:
+   **Download SQLite backup**) before any risky maintenance or before starting
+   a restore.
 3. Store the snapshot somewhere durable outside the running app directory.
 4. Confirm the file is non-empty and keep the timestamp/provenance with it.
 
 ### Restore preparation checklist
 
-Before uploading a snapshot to `POST /api/admin/restore` through the site-admin
-panel, confirm all of the following:
+Before uploading a snapshot to `POST /api/admin/restore` through the Site admin
+panel using **Restore backup**, confirm all of the following:
 
 1. You know why this snapshot is the correct recovery point.
 2. You already downloaded a fresh backup of the current live instance.
@@ -222,7 +227,7 @@ panel, confirm all of the following:
 
 ### Restore procedure
 
-1. Open the site-admin panel restore flow.
+1. Open the Site admin panel restore flow.
 2. Select the SQLite snapshot you intend to restore.
 3. Complete the required confirmation and start the restore.
 4. Wait for the app to finish replacing the live database.
@@ -240,7 +245,8 @@ Run these checks immediately after a restore:
    (accounts, campaigns, memberships, share links, notes).
 4. Open at least one representative campaign and verify that notes load.
 5. Verify one expected recent/shared workflow still works for the restored
-   data set, such as loading a shared campaign or browsing a known session.
+   data set, such as loading a shared campaign or browsing a known
+   notes/campaign session from the session-browsing workflow.
 6. Keep the pre-restore live backup until the restored instance is accepted as
    healthy.
 
