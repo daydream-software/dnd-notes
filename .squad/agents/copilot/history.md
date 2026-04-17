@@ -98,3 +98,5 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 3. Session browse pane
 
 **Strategy Note:** Lift presentation boundaries first while keeping handlers/state in `App.tsx`, avoiding cascading prop rewrites.
+
+📌 Team update (2026-04-17T23:10:00Z): COPILOT YOLO GH FALLBACK — `scripts/copilot-yolo.sh` still forwards the SSH agent exactly as before, now prefers an already-exported `GH_TOKEN`, and otherwise tries a non-fatal `gh auth token` fallback before launching the sandbox. Dry-run output now reports whether GitHub auth will come from the host env, `gh`, or not be forwarded at all, and `npm run copilot:yolo -- --dry-run -- --help` was validated for host-token, derived-token, and no-token cases.

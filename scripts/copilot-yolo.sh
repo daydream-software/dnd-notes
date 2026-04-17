@@ -22,6 +22,8 @@ Usage: scripts/copilot-yolo.sh [--dry-run] [--force-rebuild] [--] [copilot_here 
 Builds the local custom image from .copilot_here/docker/Dockerfile when needed,
 then launches copilot_here with --yolo, the SSH agent mount, and the --image override.
 If GH_TOKEN is already set in the host environment, it is forwarded into the sandbox.
+Otherwise the wrapper will try to derive GH_TOKEN from `gh auth token` and forward it
+when that succeeds.
 
 Options:
   --dry-run        Print the docker build and copilot_here commands without running them.
@@ -209,7 +211,19 @@ if [[ -z "$ssh_auth_sock" ]]; then
 fi
 
 sandbox_flags="--env SSH_AUTH_SOCK=/ssh-agent"
-if [[ -n "${GH_TOKEN:-}" ]]; then
+gh_token_value="${GH_TOKEN:-}"
+gh_token_source=""
+if [[ -n "$gh_token_value" ]]; then
+  gh_token_source="host"
+elif has_command gh; then
+  if gh_token_value="$(gh auth token 2>/dev/null)" && [[ -n "$gh_token_value" ]]; then
+    gh_token_source="gh"
+  else
+    gh_token_value=""
+  fi
+fi
+
+if [[ -n "$gh_token_value" ]]; then
   sandbox_flags+=" --env GH_TOKEN"
 fi
 
@@ -241,6 +255,17 @@ if [[ "$dry_run" == true ]]; then
     printf 'Launch cwd: %s\n' "$launch_cwd"
     printf 'Fingerprint: %s\n' "$desired_fingerprint"
   fi
+  case "$gh_token_source" in
+    host)
+      printf 'GitHub auth: forwarding GH_TOKEN from host environment\n'
+      ;;
+    gh)
+      printf 'GitHub auth: forwarding GH_TOKEN derived from gh auth token\n'
+      ;;
+    *)
+      printf 'GitHub auth: no GH_TOKEN available to forward\n'
+      ;;
+  esac
   printf 'Launch command: SANDBOX_FLAGS=%q' "$sandbox_flags"
   printf ' %q' "${launch_cmd[@]}"
   printf '\n'
@@ -259,4 +284,8 @@ else
 fi
 
 cd "$launch_cwd"
+if [[ -n "$gh_token_value" ]]; then
+  GH_TOKEN="$gh_token_value" SANDBOX_FLAGS="$sandbox_flags" exec "${launch_cmd[@]}"
+fi
+
 SANDBOX_FLAGS="$sandbox_flags" exec "${launch_cmd[@]}"
