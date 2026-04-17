@@ -18,6 +18,7 @@ Brand initialized as Platform Dev for the initial project squad.
 ## Learnings
 
 - **Web test entrypoints (2026-04-14):** Keep web CI and local commands rooted in `package.json` with explicit workspace paths (`apps/web`), not shorthand names like `web`; this repo's reliable smoke lane is `npm run test:web:focused` and the full workspace suite remains `npm run test:web`.
+- **copilot_yolo auth forwarding (2026-04-17):** Keep sandboxed git/commit flow split cleanly: SSH stays brokered via `--mount-rw "$SSH_AUTH_SOCK:/ssh-agent"` plus `SANDBOX_FLAGS="--env SSH_AUTH_SOCK=/ssh-agent"`, while GitHub token auth is opt-in by appending `--env GH_TOKEN` only when the host already exported it.
 - **Worktree Governance (2026-04-13):** Treat `.squad/config.json` as the authoritative worktree path source. When `workTreesFolder` is set, resolve worktrees from repo root; when absent, fall back to sibling-path legacy behavior. This alignment removes ambiguity across governance docs, lifecycle guides, and coordinator templates.
 - Treat `.squad/config.json` as the preferred worktree path source of truth: if `workTreesFolder` is set, resolve it from the repo root; if not, document the sibling-path fallback consistently across governance, lifecycle docs, and workflow skills.
 - Initial squad setup complete.
