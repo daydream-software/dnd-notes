@@ -21,6 +21,7 @@ Usage: scripts/copilot-yolo.sh [--dry-run] [--force-rebuild] [--] [copilot_here 
 
 Builds the local custom image from .copilot_here/docker/Dockerfile when needed,
 then launches copilot_here with --yolo, the SSH agent mount, and the --image override.
+If GH_TOKEN is already set in the host environment, it is forwarded into the sandbox.
 
 Options:
   --dry-run        Print the docker build and copilot_here commands without running them.
@@ -207,6 +208,11 @@ if [[ -z "$ssh_auth_sock" ]]; then
   fi
 fi
 
+sandbox_flags="--env SSH_AUTH_SOCK=/ssh-agent"
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  sandbox_flags+=" --env GH_TOKEN"
+fi
+
 launch_cmd=(
   "$copilot_here_bin"
   -pw
@@ -235,7 +241,7 @@ if [[ "$dry_run" == true ]]; then
     printf 'Launch cwd: %s\n' "$launch_cwd"
     printf 'Fingerprint: %s\n' "$desired_fingerprint"
   fi
-  printf 'Launch command: SANDBOX_FLAGS=%q' '--env SSH_AUTH_SOCK=/ssh-agent'
+  printf 'Launch command: SANDBOX_FLAGS=%q' "$sandbox_flags"
   printf ' %q' "${launch_cmd[@]}"
   printf '\n'
   exit 0
@@ -253,4 +259,4 @@ else
 fi
 
 cd "$launch_cwd"
-SANDBOX_FLAGS="--env SSH_AUTH_SOCK=/ssh-agent" exec "${launch_cmd[@]}"
+SANDBOX_FLAGS="$sandbox_flags" exec "${launch_cmd[@]}"
