@@ -186,6 +186,81 @@ downloaded backup nearby. A successful restore may invalidate the current owner
 session if the restored snapshot contains different session rows, so the UI may
 require signing in again immediately afterward.
 
+## Backup and restore runbook
+
+Use this runbook whenever you need to capture a backup, rehearse recovery, or
+replace the live SQLite database with a known-good snapshot.
+
+### Minimum operating expectations
+
+- do not overwrite your only known-good snapshot;
+- keep at least three rotating backups in durable storage, including the most
+  recent known-good snapshot;
+- take a fresh live backup immediately before any restore and retain that
+  pre-restore snapshot until post-restore validation passes and users confirm
+  the system is healthy;
+- label snapshots with when they were taken and why they exist (routine backup,
+  pre-maintenance backup, rehearsal fixture, incident recovery, and so on);
+- treat restore as an operator action: ask active users to stop editing before
+  you replace the database, because connected clients are not yet placed into a
+  maintenance mode automatically.
+
+### Backup procedure
+
+1. Sign in as a site admin and open the Site admin panel.
+2. Download a fresh backup using **Download backup** (aria label:
+   **Download SQLite backup**) before any risky maintenance or before starting
+   a restore.
+3. Store the snapshot somewhere durable outside the running app directory.
+4. Confirm the file is non-empty and keep the timestamp/provenance with it.
+
+### Restore preparation checklist
+
+Before uploading a snapshot to `POST /api/admin/restore` through the Site admin
+panel using **Restore backup**, confirm all of the following:
+
+1. You know why this snapshot is the correct recovery point.
+2. You already downloaded a fresh backup of the current live instance.
+3. Active collaborators have been told to stop editing until validation is done.
+4. You have site-admin credentials ready in case the current session is
+   invalidated by the restore.
+
+### Restore procedure
+
+1. Open the Site admin panel restore flow.
+2. Select the SQLite snapshot you intend to restore.
+3. Complete the required confirmation and start the restore.
+4. Wait for the app to finish replacing the live database.
+5. If the UI signs you out afterward, sign in again as a site admin before
+   continuing validation.
+
+### Post-restore validation
+
+Run these checks immediately after a restore:
+
+1. Confirm the app responds normally (for example, load the main app and
+   confirm `GET /health` still succeeds if you have direct API access).
+2. Sign in as a site admin and open the admin overview.
+3. Check that high-level counts look plausible for the restored snapshot
+   (accounts, campaigns, memberships, share links, notes).
+4. Open at least one representative campaign and verify that notes load.
+5. Verify one expected recent/shared workflow still works for the restored
+   data set, such as loading a shared campaign or browsing a known
+   notes/campaign session from the session-browsing workflow.
+6. Keep the pre-restore live backup until the restored instance is accepted as
+   healthy.
+
+### Rehearsal expectations
+
+- rehearse the backup + restore flow on a non-production copy before you need
+  it for a real incident;
+- repeat the rehearsal after meaningful backup/restore changes or before first
+  production rollout on a new hosting setup;
+- record which snapshot you used, how long the restore took, and which
+  validation checks you completed;
+- if the rehearsal exposes gaps, update this runbook before treating recovery
+  readiness as complete.
+
 `POST /api/campaigns/:campaignId/memberships/consolidations` is also owner-only.
 Send `sourceMembershipId` and `targetMembershipId` to preview the note-attribution
 move first, then repeat the request with `confirm: true` to apply it. The response
