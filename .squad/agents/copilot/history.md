@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-17T23:22:37Z): ISSUE BACKUP/RUNBOOK REHEARSAL PASS — Branch `copilot/document-backup-restore-operations` was revalidated (lint/build/test baseline green) and README runbook now includes an explicit **Restore rehearsal checklist** that ties operators to restore prep, execution, post-restore validation, and evidence capture cadence for safer recurring drills.
+
 📌 Team update (2026-04-17T01:26:52Z): ISSUE #41 COPILOT FEEDBACK ADDRESSED — Branch `squad/41-backup-restore-runbook` is now rebased on current `main`, so PR `#50` no longer carries the earlier base conflicts. The runbook now uses the actual Site admin panel button labels, states an explicit minimum retention baseline, and clarifies that the post-restore “session” check refers to the notes/campaign session-browsing flow before Copilot review is re-requested.
 📌 Team update (2026-04-17T01:34:24Z): GATEKEEPER COPILOT LOGIN FIX — PR `#50` exposed that the merge gate still matched Copilot thread authors too literally: the workflow expected `copilot-pull-request-reviewer[bot]`, but GitHub GraphQL returns `copilot-pull-request-reviewer` for review-thread authors. `.github/workflows/copilot-pr-automerge.yml` now normalizes reviewer logins the same way as the waiter helper, so future auto-merges block correctly on active Copilot threads for the current head instead of merging through fresh commented reviews.
 

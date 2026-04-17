@@ -250,16 +250,30 @@ Run these checks immediately after a restore:
 6. Keep the pre-restore live backup until the restored instance is accepted as
    healthy.
 
+### Restore rehearsal checklist
+
+Use this checklist for each non-production rehearsal:
+
+1. Capture a fresh backup from the rehearsal source instance and store it with
+   timestamp + purpose metadata.
+2. Run the **Restore preparation checklist** above before you upload the
+   rehearsal snapshot.
+3. Perform the **Restore procedure** end to end.
+4. Complete every step in **Post-restore validation** and record pass/fail for
+   each check.
+5. Record rehearsal timing (start/end/duration), who ran it, and any follow-up
+   actions.
+6. If any check fails, keep the pre-restore backup, investigate the gap, and
+   update this runbook before the next rehearsal.
+
 ### Rehearsal expectations
 
 - rehearse the backup + restore flow on a non-production copy before you need
   it for a real incident;
-- repeat the rehearsal after meaningful backup/restore changes or before first
-  production rollout on a new hosting setup;
-- record which snapshot you used, how long the restore took, and which
-  validation checks you completed;
-- if the rehearsal exposes gaps, update this runbook before treating recovery
-  readiness as complete.
+- repeat rehearsals at least quarterly, after meaningful backup/restore
+  changes, and before first production rollout on a new hosting setup;
+- treat rehearsal results as operational evidence: keep logs/screenshots of the
+  restore flow plus your validation records.
 
 `POST /api/campaigns/:campaignId/memberships/consolidations` is also owner-only.
 Send `sourceMembershipId` and `targetMembershipId` to preview the note-attribution
