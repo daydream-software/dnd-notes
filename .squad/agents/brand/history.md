@@ -178,3 +178,14 @@ This handoff is ready for whoever picks up production deployment work. All assum
 ---
 **2026-04-16T18:45:00Z — Investigation complete. Zero code changes. Handoff decision pending squad action.**
 📌 Team update (2026-04-16T15:30:33Z): Origin-model audit completed. Frontend ready for split-origin deployment. Backend: add PUBLIC_WEB_ORIGIN env var to buildSharedUrl(). Platform: same-origin reverse proxy recommended for prod. — decided by Stef, Data, Brand, Mikey
+
+## 2026-04-17: GH_TOKEN Passthrough Implementation
+
+**Context:** FFMikha requested conditional forwarding of `GH_TOKEN` in `copilot_yolo.sh`.
+
+**Action:** Implemented decision to forward `GH_TOKEN` only when set on the host, preserving SSH agent socket forwarding. Updated help text and dry-run output. Committed as 870006c.
+
+**Decision merged to `.squad/decisions.md`.**
+
+**Impact:** Developers can now use GitHub token auth inside the sandbox when needed, without breaking existing flows that rely on SSH agent signing.
+
