@@ -190,3 +190,6 @@ This handoff is ready for whoever picks up production deployment work. All assum
 **Decision merged to `.squad/decisions.md`.**
 
 **Impact:** Developers can now use GitHub token auth inside the sandbox when needed, without breaking existing flows that rely on SSH agent signing.
+
+## 2026-04-17: Issue #42 Multi-Instance Design Spike (Orchestrated)
+

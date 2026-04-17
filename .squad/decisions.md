@@ -3489,3 +3489,372 @@ Approve PR #51 on its current head.
 ## Reviewer note
 
 No new substantive blocker surfaced on re-review. Pending CI can finish independently, but from a review standpoint this is ready to approve.
+# Issue #42 Architecture Direction — Multi-Instance SaaS Shape
+
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-17  
+**Status:** RECOMMENDATION — awaiting team alignment  
+**Triggered by:** FFMikha's expanded vision for #42 (SSO, customer portal, K8s operator)
+
+---
+
+## Context
+
+Issue #42 asks to prototype dynamic provisioning of isolated SQLite-backed customer instances. FFMikha has since expanded the vision: Keycloak for SSO, a separate admin/public portal for registration and subscription, and possibly a Kubernetes operator with ingress for automated routing.
+
+The current product is a single-tenant Express + SQLite app (one API process, one database file, localStorage-based owner tokens, same-origin deployment). There is no shared identity layer, no multi-instance orchestration, and no customer-facing portal.
+
+---
+
+## 1. Target Architecture (Full Vision)
+
+If dnd-notes grows into multi-instance SaaS with SSO and a customer portal, the system decomposes into five layers:
+
+```
+┌─────────────────────────────────────────────────┐
+│                  Routing Layer                   │
+│  (reverse proxy / ingress)                       │
+│  portal.example.com → Portal                     │
+│  auth.example.com   → Keycloak                   │
+│  {slug}.example.com → Customer Instance           │
+└──────────┬───────────┬──────────────┬────────────┘
+           │           │              │
+     ┌─────▼────┐ ┌────▼─────┐ ┌─────▼──────────┐
+     │  Portal  │ │ Keycloak │ │ Instance Pool   │
+     │  (new)   │ │  (IdP)   │ │ N × dnd-notes   │
+     └──────────┘ └──────────┘ │ each w/ own      │
+                               │ SQLite + volume   │
+                               └──────────────────┘
+           │
+     ┌─────▼─────────────┐
+     │  Control Plane DB  │
+     │  (Postgres or      │
+     │   SQLite)           │
+     │  tenants, billing,  │
+     │  instance state     │
+     └────────────────────┘
+```
+
+### Components
+
+| Component | Responsibility | Tech |
+|-----------|---------------|------|
+| **Portal** | Registration, subscription, instance dashboard, admin | New app (Express or Next.js) |
+| **Keycloak** | SSO / OIDC provider for all components | Keycloak container |
+| **Instance** | Existing dnd-notes app, unmodified except auth adapter | Current Express + SQLite |
+| **Routing layer** | Maps subdomain/path → instance, TLS termination | Caddy / Traefik / K8s Ingress |
+| **Control Plane** | Provisions/deprovisions instances, tracks lifecycle | New service or part of Portal |
+| **Control Plane DB** | Tenant registry, instance state, billing hooks | Postgres (shared) or SQLite |
+
+### Auth flow (target)
+
+1. User registers at Portal → Keycloak account created
+2. User requests new instance → Control Plane provisions container + volume + subdomain
+3. User accesses `{slug}.example.com` → redirected to Keycloak for OIDC login
+4. Instance API validates OIDC token against Keycloak (replaces current localStorage token model)
+5. Portal can also show a dashboard of the user's instances, all behind the same SSO session
+
+---
+
+## 2. Thinnest Credible Next Slice for #42
+
+**The prototype should prove instance lifecycle mechanics, not build the platform.**
+
+### Scope IN for #42
+
+- **Provisioning script or minimal API** that can: create an instance (container + SQLite volume), start it, health-check it, stop it, destroy it
+- **Docker Compose template** as the runtime: one `docker-compose.yml` per instance, or a shared compose with dynamic services
+- **Measured data**: instance cold-start time, SQLite WAL checkpoint under concurrent requests, backup snapshot time
+- **Routing stub**: a simple Caddy/Traefik config that maps `localhost:{port}` per instance (no real subdomain DNS yet)
+- **Documented control-plane contract**: what operations exist, what state they manage, what the operator needs to know
+
+### Scope OUT for #42
+
+- No Keycloak integration (auth is a separate slice — see §3)
+- No portal app (provisioning triggered by script/CLI for the prototype)
+- No Kubernetes operator (deployment target is a later decision)
+- No billing, subscription, or public landing page
+- No production DNS or wildcard TLS
+
+### Deliverable shape
+
+A `provisioning/` directory (or `tools/provisioning/`) at repo root containing:
+- A shell script or small Node CLI for create/start/stop/destroy
+- A parameterized Docker Compose template for an instance
+- A brief README documenting measured results and go/no-go findings
+
+---
+
+## 3. What to Defer and Why
+
+| Deferred item | Why defer | When to revisit |
+|--------------|-----------|-----------------|
+| **Keycloak / SSO** | Auth migration is a cross-cutting change to the existing app. Proving it before knowing if provisioning even works wastes effort. | After #42 proves lifecycle; then a focused slice replaces localStorage tokens with OIDC in the instance API. |
+| **Kubernetes operator** | K8s is an optimization of the deployment target. Docker Compose proves the same isolation model with 10× less infrastructure complexity. | Only if scale projections justify K8s over a simpler Docker host or managed container service. |
+| **Full ingress automation** | Wildcard DNS + auto-TLS is infra plumbing. The prototype can use port-mapping or a static reverse proxy config. | After provisioning is proven and a deployment target is chosen. |
+| **Portal / landing app** | Building registration + subscription UI before the provisioning contract is stable creates coupling risk. | After #42 lands a stable control-plane API; the portal becomes a frontend to that API. |
+| **Billing** | Billing is a business concern, not a technical validation. Premature billing integration constrains the provisioning model. | After product-market fit signals justify it. |
+
+---
+
+## 4. Decision Points to Settle Before Implementation
+
+### Must decide now (before #42 coding starts)
+
+1. **Isolation boundary**: Container per customer, or process per customer on a shared host?
+   - *Recommendation:* Container per customer. Strongest isolation guarantee, maps cleanly to volumes and resource limits, and is the unit that K8s or any container orchestrator expects if we scale later.
+
+2. **Prototype scope confirmation**: Does #42 stay as a pure spike (throwaway), or should the provisioning script be production-path code?
+   - *Recommendation:* Production-path but thin. Write it well enough to keep, but don't over-engineer. A clean shell script or Node CLI is fine.
+
+### Decide soon (before auth slice)
+
+3. **Auth migration strategy**: Replace localStorage tokens with OIDC, or add OIDC as an alternative auth method alongside the current model?
+   - *Recommendation:* Add OIDC as an alternative first (feature flag or env var). This lets existing dev/local workflows keep working while instances in the pool authenticate via Keycloak.
+
+4. **Routing model**: Subdomain per instance (`alice.dndnotes.app`) vs. path-prefix (`dndnotes.app/i/alice`)?
+   - *Recommendation:* Subdomain. It gives each instance full origin isolation (cookies, localStorage, service workers stay separate). Path-prefix creates subtle sharing bugs.
+
+### Can wait
+
+5. **Control Plane persistence**: Postgres vs. SQLite for the tenant registry?
+6. **Upgrade strategy**: Rolling container replacement vs. in-place migration per instance?
+7. **Shared vs. per-instance Keycloak realm**: One realm with user attributes, or separate realms?
+
+---
+
+## Summary
+
+**The shape is right**: multi-instance SaaS with Keycloak SSO and a portal is a credible target architecture for dnd-notes. **But the build order matters.** Issue #42 should prove that we can dynamically spin up, health-check, and tear down isolated dnd-notes instances. Everything else — SSO, portal, K8s, billing — layers on top of that proven foundation. Building the platform before the foundation is validated creates expensive rework if the instance model turns out to have deal-breaking operational costs.
+
+**Proposed build order:**
+1. **#42** — Provisioning prototype (container lifecycle + SQLite volume + measurements)
+2. **Auth slice** — OIDC adapter in the instance API + Keycloak dev setup
+3. **Portal MVP** — Registration + instance dashboard backed by the control-plane API
+4. **Routing automation** — Reverse proxy config generation for new instances
+5. **Deployment target decision** — Docker host, managed containers, or K8s
+
+Each slice delivers a working increment and validates the next one's assumptions.
+---
+title: "Issue #42 infrastructure direction"
+date: "2026-04-17"
+by: "Brand"
+---
+
+## Decision
+
+For issue #42, de-risk isolated per-customer instances with a **small control plane plus simple app-per-customer provisioning** before adding shared SSO or Kubernetes automation. Treat **Keycloak** and a **Kubernetes operator** as later-stage tools that should be introduced only when real scale or enterprise identity requirements justify their operational cost.
+
+## Why
+
+- The repo already prefers a **same-origin deployment model** and keeps **backup/restore** in the core production readiness path.
+- The biggest unknowns for this roadmap are **instance lifecycle, routing, upgrades, backup/restore, and support ergonomics** — not cluster scheduling.
+- Adding self-hosted Keycloak first would introduce another stateful control-plane dependency and a larger blast radius before the instance model itself is validated.
+- Building an operator first would optimize automation before we know the steady-state hosting shape, failure modes, or support workflow.
+
+## Recommended first hosting shape
+
+Start with:
+
+1. a small **control-plane registry/service**;
+2. a standard **reverse proxy** with wildcard DNS/TLS;
+3. **one app instance per customer** (container or service);
+4. **one SQLite file/volume per customer instance**.
+
+Each customer instance should serve both web and API on the **same origin** under its own customer domain/subdomain. The control plane can live separately as the provisioning/admin surface.
+
+## What the control plane should own
+
+- customer signup / subscription state;
+- instance create, suspend, delete, and bootstrap workflows;
+- domain/subdomain assignment and routing metadata;
+- health/status, version tracking, and upgrade orchestration;
+- backup inventory / restore initiation policy;
+- global identity only if shared login becomes a real product need.
+
+## What should stay inside each customer instance
+
+- campaign, note, membership, and share-link data;
+- per-instance auth/session handling until shared SSO is justified;
+- backup/restore execution against that instance's SQLite data;
+- maintenance/read-only behavior during restore;
+- product-specific admin actions local to that tenant.
+
+Keep tenant content and tenant restore semantics out of the control plane so the isolation model stays real.
+
+## Keycloak assessment
+
+### Good fit when
+
+- the same human needs access across multiple customer instances;
+- enterprise SSO / IdP integration becomes a sales requirement;
+- centralized user lifecycle and offboarding matter more than per-instance autonomy;
+- support/admin workflows need a single identity plane.
+
+### Operational costs
+
+- another stateful platform service to run, upgrade, back up, and monitor;
+- client/realm provisioning automation for every instance;
+- single-service blast radius for login failures;
+- more moving parts around redirects, logout, cookies/tokens, and customer domains.
+
+### Recommendation now
+
+**Do not make Keycloak part of the first prototype.** Revisit shared SSO only after the team proves the per-customer instance lifecycle and decides whether cross-instance identity is truly required. If that requirement appears, compare self-hosted Keycloak with a managed IdP instead of assuming self-hosting is worth it.
+
+## Kubernetes operator + ingress automation
+
+### Worth it when
+
+- instance count is large enough that manual/scripted lifecycle work is painful;
+- provisioning/deprovisioning happens frequently;
+- per-instance DNS, TLS, secrets, storage, and upgrades all need reliable automation;
+- the team needs repeatable fleet operations across dozens/hundreds of instances.
+
+### Overkill when
+
+- the first target is a small number of customers;
+- the product is still validating whether per-customer isolation is even the right model;
+- a VM + reverse proxy + scripted container/service provisioning can still be understood and supported by one person.
+
+### Recommendation now
+
+Use plain provisioning automation first. Move to Kubernetes only after the operational pain is concrete and repeatable.
+
+## Smallest prototype that meaningfully de-risks #42
+
+Build the thinnest possible stack that can:
+
+1. create a new customer instance from a template;
+2. assign its public URL / same-origin config;
+3. attach dedicated SQLite storage;
+4. run health checks and expose instance status;
+5. exercise backup and restore on one provisioned instance;
+6. measure cold start, ready time, backup time, restore time, and basic concurrent usage behavior;
+7. prove one upgrade rollout across multiple isolated instances.
+
+That prototype answers the real go/no-go questions without prematurely committing to Keycloak or Kubernetes.
+
+## Platform guidance for next discussion
+
+- **Recommend first:** simple app-per-customer provisioning.
+- **Do not recommend first:** Kubernetes operator.
+- **Do not recommend first:** shared Keycloak.
+- **Re-evaluate later:** when customer count, enterprise SSO demand, or provisioning toil makes the simple model obviously too manual.
+---
+title: Issue #42 backend direction
+date: 2026-04-17
+by: Data
+---
+
+## Decision
+
+If `dnd-notes` moves toward a multi-instance SaaS, split responsibilities cleanly:
+
+1. **Control plane owns customer lifecycle**: signup, subscription, tenant registry, domain/ingress mapping, provisioning state, upgrade orchestration, fleet health, and backup policy.
+2. **Each tenant instance owns app data and app authorization**: campaigns, memberships, notes, share links, guest flows, and per-instance admin actions.
+3. **Shared SSO should do authentication, not replace local authorization**: a central IdP such as Keycloak can authenticate real users across the portal and tenant apps, but each tenant instance should still map the authenticated subject to local roles and campaign memberships.
+4. **Do not jump straight to a Kubernetes operator for the prototype**: start with a thin control-plane registry plus a provisioning worker and a narrow instance-management contract. Add an operator only if the spike shows instance count / drift / lifecycle complexity justifies it.
+
+## Control-plane / tenant boundary
+
+### Control plane should own
+- account, organization, and subscription records;
+- tenant / instance registry (`tenantId`, `instanceId`, status, version, domain, backup target, createdAt);
+- provisioning and deprovisioning workflows;
+- ingress/domain/TLS wiring;
+- upgrade rollout scheduling and version tracking;
+- fleet-level health and operational telemetry;
+- support/admin access policy.
+
+### Tenant instance should own
+- the existing app API and SQLite data model;
+- local user projection for authenticated users (keyed by stable IdP subject);
+- campaign-level membership and roles;
+- share-link and guest-token flows;
+- local backup/restore execution against that instance's database;
+- maintenance/read-only behavior during restore or upgrade.
+
+### Contract between them
+The control plane should not reach directly into note tables. It should talk to each instance through a narrow management surface such as:
+- `GET /internal/status` → health, version, db mode, backup freshness;
+- `POST /internal/bootstrap` → one-time initialization with tenant metadata and initial admin subject/email;
+- `POST /internal/maintenance` → enter/leave read-only mode for restore/upgrade work;
+- `POST /internal/backup` / `POST /internal/restore` (or equivalent worker-triggered hooks);
+- `POST /internal/reconcile-identity` for first-login/admin-seeding edge cases if needed.
+
+## Identity and access model
+
+Recommended shape:
+
+- **One shared IdP** (for example Keycloak) handles real-user login.
+- **Portal and tenant instances are separate clients/audiences** under that IdP.
+- **Stable identity key is issuer + subject**, not email alone.
+- **Tenant instance authorization stays local**:
+  - global roles live in the control plane (support admin, billing admin, platform ops);
+  - local roles live in the tenant instance (site admin for that instance, campaign owner, guest, future editor/viewer roles);
+  - IdP groups can seed instance admin access, but should not directly become campaign authorization.
+- **Guest/share-link flows remain instance-local** and can continue without SSO.
+- **Claiming a guest membership** should bind the local membership row to the authenticated SSO subject inside that tenant instance.
+
+This keeps SSO boring: authenticate once centrally, authorize locally where the campaign data actually lives.
+
+## Minimum provisioning workflow for the #42 prototype
+
+Keep the prototype small and measurable:
+
+1. **Portal/control-plane request**: create tenant with slug/domain + initial admin email/subject.
+2. **Provisioning worker**:
+   - allocates runtime config;
+   - creates storage / SQLite file location;
+   - deploys or starts one tenant instance;
+   - applies instance env (`PUBLIC_WEB_URL`, allowed origins, IdP config, tenant/instance IDs);
+   - waits for `/health`.
+3. **Bootstrap call** to the instance:
+   - record immutable `tenantId` / `instanceId`;
+   - seed initial instance admin mapping;
+   - mark bootstrap complete.
+4. **Registry update**: `provisioning -> ready` with version, endpoint, timestamps.
+5. **Portal handoff**: admin can launch their instance.
+
+For the spike, that is enough. A full Kubernetes operator, self-service billing integration, and complex cross-instance admin APIs can wait.
+
+## Current assumptions that break or become risky in multi-instance SaaS
+
+The current backend is still a single-instance app. The main pressure points are:
+
+- one process owns one live `NoteStore` and one SQLite file (`NOTES_DB_PATH`);
+- owner accounts, owner sessions, site-admin state, campaign data, and app content all live in the same database;
+- auth is local email/password (`/api/auth/register`, `/api/auth/login`) rather than external OIDC;
+- admin overview / backup / restore operate on the whole live database, not on a fleet of instances;
+- `SITE_ADMIN_EMAILS` bootstraps admin privileges from process env, which is too blunt for SaaS tenancy;
+- `PUBLIC_WEB_URL` and `ALLOWED_ORIGINS` are per-process settings, but SaaS will likely need both a customer portal origin and many tenant app origins;
+- several APIs assume a default or "primary" campaign when `campaignId` is omitted, which is fine inside one tenant app but meaningless in the control plane;
+- restore currently swaps the live database in place and may invalidate sessions, which gets much sharper when provisioning, upgrades, and support operations happen across many instances.
+
+## Measurements the spike should capture before we commit further
+
+At minimum, capture:
+
+1. **Provisioning latency**: request accepted -> instance healthy -> bootstrap complete -> usable URL.
+2. **Startup behavior**: cold start, warm restart, and startup after migration/restore.
+3. **SQLite operating mode**: rollback journal vs WAL, plus read/write concurrency under realistic note-edit traffic.
+4. **Backup/restore numbers**: snapshot size, backup duration, restore duration, operator steps, session fallout, and required read-only window.
+5. **Upgrade fan-out cost**: migration duration per instance, failure handling, rollback path, and version skew visibility.
+6. **Identity path timings**: portal login, redirect into tenant app, first-login account linking, and guest-membership claim after SSO.
+7. **Per-instance cost envelope**: idle memory/CPU, storage footprint, and how many quiet instances one node/host can carry.
+8. **Ingress/domain timing**: DNS/TLS readiness and failure modes for customer-facing URLs.
+9. **Operational observability**: can we answer "which version is tenant X on, when was last backup, is the instance healthy, what failed during provisioning?" without logging into the instance by hand.
+
+## Recommendation for the team
+
+Proceed with issue #42 as a **control-plane + instance-management spike**, not as a final hosting commitment.
+
+Backend recommendation:
+- keep the app instance boring and mostly intact;
+- add a small control-plane contract around it;
+- centralize authentication with shared SSO;
+- keep authorization and content data local to each tenant instance;
+- only invest in a Kubernetes operator after the spike proves the lifecycle pain is real.
+
+This direction needs Brand + Mikey review because it crosses platform and product boundaries, but it is the safest backend shape I see right now.
