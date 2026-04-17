@@ -3426,3 +3426,36 @@ The `workflow_run`-only pattern misses critical state transitions (review submis
 
 Implemented as part of Copilot PR gatekeeper decision above.
 
+---
+
+### 2026-04-17: Brand & FFMikha — copilot_yolo GitHub CLI Integration (consolidated)
+**Decided by:** Brand (Platform Dev) with user directive from FFMikha  
+**Date:** 2026-04-17
+
+## Decision
+
+Fully integrate GitHub CLI (`gh`) into the copilot_yolo sandbox:
+
+1. **Install `gh` binary:** Add Debian's `gh` package to `.copilot_here/docker/Dockerfile` base system package install.
+2. **Auth fallback (best-effort):** When `GH_TOKEN` not exported by host, attempt `gh auth token` lookup; fail gracefully if unavailable.
+3. **Auth enforcement:** Require GitHub CLI auth: fail fast with `gh auth login` guidance if `gh` is missing or token derivation fails. Do not continue silently without token.
+
+## Why
+
+- **Binary gap:** Sandbox image lacked `gh` despite auth forwarding being ready (`.copilot-yolo.sh` already supports `GH_TOKEN` passthrough).
+- **Security shape:** Keep auth derivation on host (SSH agent forwarding + optional `GH_TOKEN`); container gains authenticated client binary only.
+- **Ergonomics + enforcement:** Developers with GitHub CLI auth can use sandbox without manual token export, but the wrapper fails fast if auth is missing—no ambiguous silent fallback.
+- **User directive (FFMikha):** "If `gh` is not connected, block and tell the user to run the auth command, then retry."
+
+## Impact
+
+- Future yolo sessions can run `gh` inside the container with host-forwarded auth.
+- Host-exported `GH_TOKEN` still takes precedence over derived token.
+- SSH agent forwarding unchanged.
+- Sandbox workflows requiring GitHub API access now explicit: succeed only with auth available, fail with clear guidance otherwise.
+- Dockerfile change auto-invalidates image cache, triggering rebuild on next wrapper run.
+
+## Follow-Up
+
+Copilot and other agents can now rely on `gh` availability within sandbox context, with host-brokered authentication.
+
