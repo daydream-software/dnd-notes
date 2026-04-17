@@ -23,6 +23,8 @@ Use Node.js `v22.21.1` for local development. The repo pins that version in
 - `npm run build` builds the web app and syntax-checks the API
 - `npm run lint` runs ESLint in both workspaces
 - `npm run test` runs the web and API tests
+- `npm run copilot:yolo` launches the local Copilot Squad image wrapper
+- `npm run copilot:wait-review -- --pr 123` waits for Copilot review on a PR and exits with `0` (clear), `10` (review finished but work remains), `124` (timeout), or `1` (error). It prefers `gh` when available and otherwise uses `GH_TOKEN` / `GITHUB_TOKEN`.
 
 ## Git hooks
 
