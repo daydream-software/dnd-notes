@@ -341,3 +341,6 @@ Decision merged to `.squad/decisions.md`. Awaiting Brand background agent start.
 📌 Team update (2026-04-16T15:30:33Z): Origin-model audit completed. Frontend ready for split-origin deployment. Backend: add PUBLIC_WEB_ORIGIN env var to buildSharedUrl(). Platform: same-origin reverse proxy recommended for prod. — decided by Stef, Data, Brand, Mikey
 
 ---
+
+## 2026-04-17: Issue #42 Multi-Instance Design Spike (Orchestrated)
+
