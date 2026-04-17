@@ -3345,3 +3345,84 @@ Location: `apps/api/src/app.ts` lines 588-620
 **Scope:** API-side origin policy + security headers + regression coverage  
 **Status:** In progress; verdict gates merge readiness
 
+
+---
+
+## 2026-04-17: Brand — copilot_yolo GH_TOKEN passthrough
+
+**Requested by:** FFMikha  
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-17  
+**Status:** IMPLEMENTED
+
+### Decision
+
+Keep `scripts/copilot-yolo.sh`'s SSH agent forwarding exactly as-is, and append `--env GH_TOKEN` to `SANDBOX_FLAGS` only when the host already exported `GH_TOKEN`.
+
+### Why
+
+The sandbox already relies on the forwarded SSH agent for signing and SSH-based git operations. Some developer flows still need explicit GitHub token auth inside `copilot_here` for `gh` and HTTPS git operations, so the wrapper should pass that token through without hardcoding its value into command output or changing behavior for users who do not set it.
+
+### Impact
+
+- Existing launch behavior stays unchanged when `GH_TOKEN` is unset.
+- `gh` and token-backed git flows inside the sandbox can reuse the host token when present.
+- Dry-run/help output can explain the optional passthrough without exposing the token value itself.
+
+---
+
+## 2026-04-16: Copilot PR gatekeeper
+
+**Author:** Copilot  
+**Date:** 2026-04-16  
+**Scope:** GitHub Actions review-and-merge automation for `squad/* -> main` pull requests
+
+### Decision
+
+- Replace the `workflow_run`-only Copilot automerge logic with a multi-event gatekeeper.
+- Re-evaluate merge eligibility on PR lifecycle changes, Copilot review submission, review-thread resolution changes, and CI completion.
+- Require all of the following before squash-merging:
+  - the PR is still open, non-draft, and matches the `squad/* -> main` flow;
+  - the latest `CI` run for the current PR head SHA is green;
+  - Copilot has a non-dismissed review on the current PR head SHA;
+  - there are no unresolved, non-outdated Copilot review threads.
+- Keep Copilot reviewer requests in a separate workflow and make repeated synchronize/comment-triggered requests non-fatal.
+
+### Why
+
+- A `workflow_run`-only merge gate misses the common race where CI finishes before Copilot review arrives or before Copilot review threads are resolved.
+- Historical Copilot reviews should not satisfy the merge gate for newer commits pushed to the same PR.
+- The team wants an automated flow that is safe to re-trigger repeatedly without manual cleanup when review requests already exist.
+
+### Expected impact
+
+- Squad PRs only merge after both CI and Copilot are current on the latest revision.
+- Resolving a Copilot thread after green CI can now unblock merge without requiring another push.
+- Re-requesting Copilot on `synchronize` or via PR comment no longer turns duplicate reviewer state into a failed automation run.
+
+---
+
+## 2026-04-16: PR Automation Merge-Gate Trigger Pattern
+
+**Status**: Decided / Merged into PR gatekeeper  
+**Raised by**: Scribe (session 2026-04-16T23:43:07Z)  
+**Related to**: `.github/workflows/copilot-pr-automerge.yml`
+
+### Decision
+
+Use multi-event gatekeeper pattern triggered by:
+1. `workflow_run` (CI completion)
+2. `pull_request_review` (Copilot review submission)
+3. `pull_request` (synchronize — new commits)
+4. Thread state changes affecting merge readiness
+
+This ensures merge-readiness is re-checked whenever any blocking state changes.
+
+### Why
+
+The `workflow_run`-only pattern misses critical state transitions (review submission, thread resolution) that occur after CI completes. A shared merge-gate evaluator triggered by all relevant events ensures PR automation is robust to concurrent state changes without manual intervention.
+
+### Implementation
+
+Implemented as part of Copilot PR gatekeeper decision above.
+
