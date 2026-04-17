@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-17T01:20:20Z): WAIT-REVIEW MATCH FIX — `scripts/wait-copilot-review.ts` now normalizes reviewer logins before matching them, because GitHub GraphQL reports Copilot as `copilot-pull-request-reviewer` while the REST/UI surfaces often show `copilot-pull-request-reviewer[bot]`. After that fix, the helper correctly reports PR `#50` as reviewed-with-work-remaining and exits `10` for the five active Copilot threads instead of timing out.
+
 📌 Team update (2026-04-17T01:12:00Z): GATEKEEPER TRIGGER FIX — `.github/workflows/copilot-pr-automerge.yml` no longer declares the unsupported `pull_request_review_thread` event, which GitHub rejected as invalid workflow syntax. The gatekeeper now keeps its immediate PR/review/CI triggers and adds scheduled + manual re-evaluation so resolved Copilot threads can still unblock auto-merge without relying on an unsupported event source.
 
 📌 Team update (2026-04-17T01:05:25Z): COPILOT REVIEW TOKEN FIX — `.github/workflows/copilot-pr-review.yml` now uses `secrets.COPILOT_ASSIGN_TOKEN` instead of the default workflow token, fails explicitly if that secret is missing, and re-reads the PR after each request so the job errors if Copilot was not actually attached as a requested reviewer. This closes the earlier false-success path where the workflow logged a successful request but left no requested reviewer on the PR.

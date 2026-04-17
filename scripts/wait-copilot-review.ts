@@ -51,6 +51,14 @@ interface ReviewStatus {
   message: string
 }
 
+function normalizeLogin(login?: string | null): string {
+  return (login ?? '').toLowerCase().replace(/\[bot\]$/, '')
+}
+
+function matchesReviewer(login: string | null | undefined, reviewer: string): boolean {
+  return normalizeLogin(login) === normalizeLogin(reviewer)
+}
+
 const pullRequestQuery = `
   query($owner: String!, $repo: String!, $pullNumber: Int!) {
     repository(owner: $owner, name: $repo) {
@@ -426,7 +434,7 @@ function evaluateReviewStatus(
 
   const freshReviews = snapshot.reviews.filter(
     (review) =>
-      review.author?.login === reviewer &&
+      matchesReviewer(review.author?.login, reviewer) &&
       review.commit?.oid === snapshot.headRefOid &&
       review.state !== 'DISMISSED',
   )
@@ -443,7 +451,7 @@ function evaluateReviewStatus(
       return false
     }
 
-    return thread.comments.some((comment) => comment.author?.login === reviewer)
+    return thread.comments.some((comment) => matchesReviewer(comment.author?.login, reviewer))
   })
 
   if (activeThreads.length > 0) {
