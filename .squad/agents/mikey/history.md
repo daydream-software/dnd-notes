@@ -19,6 +19,7 @@ Mikey initialized as Lead for the initial project squad.
 ## Learnings
 
 - Initial squad setup complete.
+- **PR #51 review (2026-04-17):** For docs-focused PRs, keep merge scope to the user-facing docs plus any required tracked squad history; a repo-root `plan.md` is session-planning residue, not ship material, and should be removed before merge.
 - **Origin-model handoff (2026-04-16):** Frontend API access is already centralized behind `VITE_API_BASE_URL` in `apps/web/src/api.ts`, so the missing production seam is backend-owned share-link URL generation, not web fetch plumbing. `apps/api/src/app.ts` currently builds share URLs from `Origin` or `request.protocol + host`, while CORS is blanket `app.use(cors())`; safest next slice is an explicit API env like `PUBLIC_WEB_URL` for canonical `/share/:token` links, README + `.env.example` docs, and API tests proving env-first behavior with request fallback kept only for local/dev compatibility.
 - **Workflow Review (2026-04-11):** Audited all 4 squad workflows for action-pinning compliance. Found 100% non-compliance (4/4 files use major-version refs instead of SHAs). Key risk: squad-heartbeat.yml is synced across 4 locations; pin must happen at template source, then sync. Documented team rule and action requirements for Brand in decision inbox. See `.squad/decisions/inbox/mikey-workflow-review.md`.
 - **PR #21 Review (2026-04-12):** Reviewed membership-based note attribution feature (Copilot-authored). Verdict: **APPROVE with minor notes**. Architecture is sound — uses `campaign_memberships` as the stable actor reference, LEFT JOINs for inline attribution, nullable FKs for backward compat. API types mirrored correctly between `apps/api/src/types.ts` and `apps/web/src/types.ts`. All 11 API tests + 5 web tests pass. TypeScript compiles clean. One minor observation: `package-lock.json` includes an unrelated removal of the `yaml` package — harmless but worth noting. The `resetNotes` path correctly nulls out attribution, preserving legacy-note behavior.
@@ -337,3 +338,6 @@ Web test infrastructure P1 approved for Brand + Chunk execution:
 
 Decision merged to `.squad/decisions.md`. Awaiting Brand background agent start. — Scribe
 📌 Team update (2026-04-16T15:30:33Z): Origin-model audit completed. Frontend ready for split-origin deployment. Backend: add PUBLIC_WEB_ORIGIN env var to buildSharedUrl(). Platform: same-origin reverse proxy recommended for prod. — decided by Stef, Data, Brand, Mikey
+
+---
+
