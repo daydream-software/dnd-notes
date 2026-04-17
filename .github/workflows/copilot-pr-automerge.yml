@@ -5,11 +5,12 @@ on:
     types: [opened, reopened, ready_for_review, synchronize]
   pull_request_review:
     types: [submitted, dismissed]
-  pull_request_review_thread:
-    types: [thread_resolved, thread_unresolved]
   workflow_run:
     workflows: ['CI']
     types: [completed]
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
 
 permissions:
   actions: read
@@ -42,17 +43,27 @@ jobs:
             }
 
             async function getTargetPullNumbers() {
-              if (
-                context.eventName === 'pull_request_target' ||
-                context.eventName === 'pull_request_review' ||
-                context.eventName === 'pull_request_review_thread'
-              ) {
+              if (context.eventName === 'pull_request_target' || context.eventName === 'pull_request_review') {
                 return uniquePullNumbers([context.payload.pull_request?.number]);
               }
 
               if (context.eventName === 'workflow_run') {
                 return uniquePullNumbers(
                   (context.payload.workflow_run.pull_requests ?? []).map((pr) => pr.number),
+                );
+              }
+
+              if (context.eventName === 'schedule' || context.eventName === 'workflow_dispatch') {
+                const openPulls = await github.paginate(github.rest.pulls.list, {
+                  owner,
+                  repo,
+                  state: 'open',
+                  base: 'main',
+                  per_page: 100,
+                });
+
+                return uniquePullNumbers(
+                  openPulls.filter((pr) => isSquadFlow(pr)).map((pr) => pr.number),
                 );
               }
 
