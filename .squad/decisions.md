@@ -3469,3 +3469,23 @@ Copilot and other agents can now rely on `gh` availability within sandbox contex
 **Impact:** Reviewers should treat stray planning artifacts in feature/docs PRs as scope-hygiene issues worth removing before merge. Authors can still preserve operational context in `.squad/agents/*/history.md` when that context is meant to live in the repo.
 
 **By:** Mikey
+
+---
+
+### 2026-04-17: PR #51 Re-review — approve after scope cleanup
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-17
+
+## Decision
+
+Approve PR #51 on its current head.
+
+## Why
+
+- The previous blocker is resolved: `plan.md` is no longer part of the PR.
+- The remaining product change is the README restore-rehearsal checklist, which is a good thin-slice improvement to the backup/restore runbook.
+- `.squad/agents/copilot/history.md` is acceptable here because it is a tracked squad handoff file, not a throwaway session artifact.
+
+## Reviewer note
+
+No new substantive blocker surfaced on re-review. Pending CI can finish independently, but from a review standpoint this is ready to approve.
