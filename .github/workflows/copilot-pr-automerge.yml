@@ -34,6 +34,14 @@ jobs:
             const reviewer = 'copilot-pull-request-reviewer[bot]';
             const ciWorkflowId = 'ci.yml';
 
+            function normalizeLogin(login) {
+              return (login ?? '').toLowerCase().replace(/\[bot\]$/, '');
+            }
+
+            function matchesReviewer(login) {
+              return normalizeLogin(login) === normalizeLogin(reviewer);
+            }
+
             function isSquadFlow(pr) {
               return pr.base.ref === 'main' && pr.head.ref.startsWith('squad/');
             }
@@ -116,7 +124,7 @@ jobs:
 
               return reviews.some(
                 (review) =>
-                  review.user?.login === reviewer &&
+                  matchesReviewer(review.user?.login) &&
                   review.commit_id === headSha &&
                   review.state !== 'DISMISSED',
               );
@@ -160,7 +168,7 @@ jobs:
                 }
 
                 return thread.comments.nodes.some(
-                  (comment) => comment.author?.login === reviewer,
+                  (comment) => matchesReviewer(comment.author?.login),
                 );
               });
             }
