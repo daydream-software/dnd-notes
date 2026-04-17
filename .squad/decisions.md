@@ -3459,3 +3459,13 @@ Fully integrate GitHub CLI (`gh`) into the copilot_yolo sandbox:
 
 Copilot and other agents can now rely on `gh` availability within sandbox context, with host-brokered authentication.
 
+
+### 2026-04-17: PR #51 review — session planning scope
+
+**Decision:** Treat repo-root `plan.md` files as session-planning artifacts, not merge material, for docs-focused PRs.
+
+**Why:** PR #51 is otherwise a narrow README runbook update, but the added `plan.md` is an internal execution checklist with unfinished status markers, not user-facing documentation or durable project reference. The repo already tracks append-only squad history for durable handoff, while root-level `plan.md` has no existing precedent and increases merge noise for future contributors.
+
+**Impact:** Reviewers should treat stray planning artifacts in feature/docs PRs as scope-hygiene issues worth removing before merge. Authors can still preserve operational context in `.squad/agents/*/history.md` when that context is meant to live in the repo.
+
+**By:** Mikey
