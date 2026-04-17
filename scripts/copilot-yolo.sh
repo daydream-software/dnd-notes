@@ -22,8 +22,8 @@ Usage: scripts/copilot-yolo.sh [--dry-run] [--force-rebuild] [--] [copilot_here 
 Builds the local custom image from .copilot_here/docker/Dockerfile when needed,
 then launches copilot_here with --yolo, the SSH agent mount, and the --image override.
 If GH_TOKEN is already set in the host environment, it is forwarded into the sandbox.
-Otherwise the wrapper will try to derive GH_TOKEN from `gh auth token` and forward it
-when that succeeds.
+Otherwise the wrapper requires an authenticated `gh` session, derives GH_TOKEN from
+`gh auth token`, and stops with guidance if that fallback is unavailable.
 
 Options:
   --dry-run        Print the docker build and copilot_here commands without running them.
@@ -70,6 +70,19 @@ require_command() {
 
 has_command() {
   command -v "$1" >/dev/null 2>&1
+}
+
+print_gh_auth_blocked() {
+  case "$1" in
+    missing-gh)
+      printf 'GitHub auth: blocked because GH_TOKEN is unset and GitHub CLI (`gh`) is unavailable.\n' >&2
+      printf 'Install GitHub CLI, run `gh auth login`, then rerun this wrapper.\n' >&2
+      ;;
+    *)
+      printf 'GitHub auth: blocked because GH_TOKEN is unset and `gh auth token` did not return a token.\n' >&2
+      printf 'Run `gh auth login`, then rerun this wrapper.\n' >&2
+      ;;
+  esac
 }
 
 resolve_copilot_here() {
@@ -198,8 +211,6 @@ build_cmd=(
   .
 )
 
-copilot_here_bin="$(resolve_copilot_here)"
-
 ssh_auth_sock="${SSH_AUTH_SOCK:-}"
 if [[ -z "$ssh_auth_sock" ]]; then
   if [[ "$dry_run" == true ]]; then
@@ -215,28 +226,23 @@ gh_token_value="${GH_TOKEN:-}"
 gh_token_source=""
 if [[ -n "$gh_token_value" ]]; then
   gh_token_source="host"
-elif has_command gh; then
-  if gh_token_value="$(gh auth token 2>/dev/null)" && [[ -n "$gh_token_value" ]]; then
-    gh_token_source="gh"
-  else
-    gh_token_value=""
-  fi
+elif ! has_command gh; then
+  gh_token_source="missing-gh"
+elif gh_token_value="$(gh auth token 2>/dev/null)" && [[ -n "$gh_token_value" ]]; then
+  gh_token_source="gh"
+else
+  gh_token_value=""
+  gh_token_source="gh-auth-required"
 fi
 
-if [[ -n "$gh_token_value" ]]; then
+if [[ "$gh_token_source" == "missing-gh" || "$gh_token_source" == "gh-auth-required" ]]; then
+  if [[ "$dry_run" != true ]]; then
+    print_gh_auth_blocked "$gh_token_source"
+    exit 1
+  fi
+elif [[ -n "$gh_token_value" ]]; then
   sandbox_flags+=" --env GH_TOKEN"
 fi
-
-launch_cmd=(
-  "$copilot_here_bin"
-  -pw
-  --yolo
-  --image "$image_tag"
-  --skip-pull
-  --mount-rw "$ssh_auth_sock:/ssh-agent"
-  --agent Squad
-  "${forward_args[@]}"
-)
 
 if [[ "$dry_run" == true ]]; then
   if [[ "$docker_available" == false ]]; then
@@ -263,9 +269,26 @@ if [[ "$dry_run" == true ]]; then
       printf 'GitHub auth: forwarding GH_TOKEN derived from gh auth token\n'
       ;;
     *)
-      printf 'GitHub auth: no GH_TOKEN available to forward\n'
+      print_gh_auth_blocked "$gh_token_source"
+      exit 1
       ;;
   esac
+fi
+
+copilot_here_bin="$(resolve_copilot_here)"
+
+launch_cmd=(
+  "$copilot_here_bin"
+  -pw
+  --yolo
+  --image "$image_tag"
+  --skip-pull
+  --mount-rw "$ssh_auth_sock:/ssh-agent"
+  --agent Squad
+  "${forward_args[@]}"
+)
+
+if [[ "$dry_run" == true ]]; then
   printf 'Launch command: SANDBOX_FLAGS=%q' "$sandbox_flags"
   printf ' %q' "${launch_cmd[@]}"
   printf '\n'
