@@ -12,6 +12,7 @@
     "dev:api": "npm run dev --workspace apps/api",
     "dev:web": "npm run dev --workspace apps/web",
     "copilot:yolo": "bash ./scripts/copilot-yolo.sh",
+    "copilot:wait-review": "node --import tsx ./scripts/wait-copilot-review.ts",
     "lint:web": "npm run lint --workspace apps/web",
     "build:web": "npm run build --workspace apps/web",
     "test:web": "npm run test --workspace apps/web --",
