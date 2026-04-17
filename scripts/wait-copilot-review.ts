@@ -1,7 +1,7 @@
 #!/usr/bin/env -S node --import tsx
 
-const { execFile } = require('node:child_process') as typeof import('node:child_process')
-const { promisify } = require('node:util') as typeof import('node:util')
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
@@ -188,7 +188,7 @@ function parseArgs(argv: string[]): CliOptions {
         if (argv[index] !== 'auto' && argv[index] !== 'gh' && argv[index] !== 'api') {
           fail(`Invalid value for --transport: ${argv[index]}`)
         }
-        options.transport = argv[index]
+        options.transport = argv[index] as 'auto' | Transport
         break
       case '--help':
       case '-h':
