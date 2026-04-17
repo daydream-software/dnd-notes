@@ -14,11 +14,13 @@ Brand initialized as Platform Dev for the initial project squad.
 
 📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
 📌 Team update (2026-04-11T19:27:38Z): GitHub Actions in all workflows pinned to commit SHAs; decision merged to team decisions log — Brand
+📌 Team update (2026-04-17T23:10:03Z): copilot_yolo GitHub CLI integration complete (install `gh`, auth fallback, auth enforcement). Three decisions consolidated to team decisions.md — Brand
 
 ## Learnings
 
 - **Web test entrypoints (2026-04-14):** Keep web CI and local commands rooted in `package.json` with explicit workspace paths (`apps/web`), not shorthand names like `web`; this repo's reliable smoke lane is `npm run test:web:focused` and the full workspace suite remains `npm run test:web`.
 - **copilot_yolo auth forwarding (2026-04-17):** Keep sandboxed git/commit flow split cleanly: SSH stays brokered via `--mount-rw "$SSH_AUTH_SOCK:/ssh-agent"` plus `SANDBOX_FLAGS="--env SSH_AUTH_SOCK=/ssh-agent"`, while GitHub token auth is opt-in by appending `--env GH_TOKEN` only when the host already exported it.
+- **YOLO image tooling (2026-04-17):** Keep sandbox-only binaries in `.copilot_here/docker/Dockerfile`; `scripts/copilot-yolo.sh` already fingerprints that file, so adding Debian's `gh` package triggers the expected image rebuild without changing the wrapper's host-side GH_TOKEN / `gh auth token` auth flow.
 - **Worktree Governance (2026-04-13):** Treat `.squad/config.json` as the authoritative worktree path source. When `workTreesFolder` is set, resolve worktrees from repo root; when absent, fall back to sibling-path legacy behavior. This alignment removes ambiguity across governance docs, lifecycle guides, and coordinator templates.
 - Treat `.squad/config.json` as the preferred worktree path source of truth: if `workTreesFolder` is set, resolve it from the repo root; if not, document the sibling-path fallback consistently across governance, lifecycle docs, and workflow skills.
 - Initial squad setup complete.
@@ -188,4 +190,3 @@ This handoff is ready for whoever picks up production deployment work. All assum
 **Decision merged to `.squad/decisions.md`.**
 
 **Impact:** Developers can now use GitHub token auth inside the sandbox when needed, without breaking existing flows that rely on SSH agent signing.
-
