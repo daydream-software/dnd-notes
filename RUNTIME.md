@@ -26,7 +26,7 @@ None. The application will start with defaults.
 - **`DATABASE_URL`** (not yet implemented)  
   Postgres connection string for production tenant databases.  
   Format: `postgresql://user:pass@host:5432/dbname`  
-  **Status:** Reserved for Phase 0 Postgres adapter work (issue #46).
+  **Status:** Reserved for Phase 0 Postgres adapter work (issue #58).
 
 ### Security & Access Control
 
@@ -195,7 +195,7 @@ See issue #43 for full manifest examples after Phase 0 validation.
 
 **Migration:**
 1. Phase 0 proves container + health contract + Kubernetes lifecycle
-2. Issue #46 ports `note-store.ts` to Postgres (`node-postgres`)
+2. Issue #58 ports the NoteStore adapter to Postgres (`node-postgres`)
 3. Phase 1 manifests (#43) reference `DATABASE_URL` instead of PVC
 4. SQLite support retained as local dev fallback via env detection
 
@@ -222,7 +222,7 @@ These are reserved for Phase 1 control-plane orchestration and are **not** expos
 ## Postgres Notes (Phase 1 preparation)
 
 When `DATABASE_URL` is set, the application will:
-1. Use `node-postgres` for async database access (issue #46)
+1. Use `node-postgres` for async database access (issue #58)
 2. Respect Postgres connection pooling and timeout settings
 3. Gracefully handle connection loss (retry with exponential backoff)
 4. Support schema migrations via control-plane orchestration
@@ -293,12 +293,12 @@ docker rm dnd-notes-test
 ```
 
 ### Integration test (with Postgres, Phase 1)
-To be defined in issue #46 after Postgres adapter lands.
+To be defined in issue #58 after the Postgres adapter lands.
 
 ## References
 
 - Issue #52 - Containerize dnd-notes for per-tenant Kubernetes deployment (this work)
 - Issue #42 - Epic: build the multi-tenant Kubernetes platform
-- Issue #46 - Migrate note-store backend from SQLite to Postgres
+- Issue #58 - Port NoteStore adapter from SQLite to Postgres
 - Issue #43 - Track deployment artifacts (manifests, after Postgres)
 - Epic 42 Phase 0 decisions - `.squad/decisions.md`

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
@@ -12,6 +13,12 @@ import {
   registerOwner,
   withAuth,
 } from './test-helpers.js'
+
+const testFixtureWebDistPath = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  'fixtures',
+  'web-dist',
+)
 
 test('GET /health returns service metadata', async (t) => {
   const { app, cleanup } = await createTestApp()
@@ -55,6 +62,29 @@ test('GET /readyz returns 503 when the database is unavailable', async (t) => {
 
   assert.equal(response.status, 503)
   assert.deepEqual(response.body, { error: 'Database unavailable' })
+})
+
+test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    serveWeb: true,
+    webDistPath: testFixtureWebDistPath,
+  })
+  t.after(cleanup)
+
+  const [navigationResponse, assetResponse, jsonResponse] = await Promise.all([
+    request(app).get('/campaigns/demo').set('Accept', 'text/html'),
+    request(app).get('/assets/missing.js').set('Accept', '*/*'),
+    request(app).get('/missing-route').set('Accept', 'application/json'),
+  ])
+
+  assert.equal(navigationResponse.status, 200)
+  assert.match(navigationResponse.text, /Fixture dnd-notes app/)
+
+  assert.equal(assetResponse.status, 404)
+  assert.doesNotMatch(assetResponse.text, /Fixture dnd-notes app/)
+
+  assert.equal(jsonResponse.status, 404)
+  assert.doesNotMatch(jsonResponse.text, /Fixture dnd-notes app/)
 })
 
 test('site admins can download a SQLite backup and non-admins cannot', async (t) => {
