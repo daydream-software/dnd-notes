@@ -4975,3 +4975,160 @@ Merge this into `.squad/decisions.md` as:
 - Confirm the "Control-Plane ↔ Tenant Contract (Phase 1)" decision status: **LOCKED**.
 - Update epic #42 body to reflect the locked decision (done by Mikey 2026-04-19).
 - Link this sync to #42 comment for audit trail.
+
+---
+
+## 2026-04-19: Issue #42 — Four Clarifications Locked (Final Architectural Close)
+
+**Status:** LOCKED  
+**Locked by:** Mikey (Lead) on behalf of FFMikha  
+**Date:** 2026-04-19  
+**Epic:** #42  
+
+### Summary
+
+All four remaining "Next points to clarify together" items in #42 are now locked. These decisions complete the Phase 1 architectural contract.
+
+---
+
+### Decision 7: Tenant Lifecycle / State Machine (Phase 1 Shape)
+
+**7-state thin model:**
+
+```
+provisioning → ready ⇄ maintenance ⇄ upgrading
+                 ↓          ↓           ↓
+               ready    restoring    ready
+                 ↓          ↓
+               failed    failed
+                 ↓
+           deprovisioned
+```
+
+**Key properties:**
+- States live in control-plane DB (`tenants.state` column); K8s is observed truth.
+- Only one active transition per tenant at a time (no concurrent ops).
+- `failed` requires explicit operator action to recover; not a dead end.
+- `provisioning` → `ready` or `failed` (K8s probes + app `/ready` check)
+- `ready` ⇄ `maintenance` (drain mode, reads allowed, writes rejected)
+- `ready` → `upgrading` → `ready` or `failed` (rolling update via CP)
+- `ready` → `restoring` → `ready` or `failed` (pre-restore safety snapshot mandatory)
+- `ready` → `deprovisioned` (terminal; resources cleaned, backup retained)
+- Every state transition logged in `audit_log` table.
+
+**Phase 2 additions (defer):** `suspended` (billing/abuse hold), `migrating` (cross-cluster move).
+
+**Rationale:** Minimal, explicit, load-bearing for Phase 1 control-plane skeleton (#53), provisioning (#54), rollout (#55), and backup/restore (#40).
+
+**Impacts:**
+- #53 (control-plane skeleton): Registry schema models `tenants.state` + `audit_log`.
+- #54 (provisioning): Implements state transitions via K8s probes + `/ready` endpoint.
+- #55 (rollout rules): Implements `upgrading` state + drain coordination.
+- #40 (backup/restore): Adds `restoring` state + pre-restore snapshot logic.
+
+---
+
+### Decision 8: Rollout / Version-Skew Policy (Phase 1 Shape)
+
+**Same train, coordinated rollout, transient N-1 skew during update only.**
+
+- **One image tag = one version.** Control plane, portal, and tenant app ship from the same Git tag.
+- **Rollout is serial per tenant.** CP upgrades one tenant at a time (or bounded batch of N).
+- **Brief transient skew during rollout is acceptable.** Some tenants on version N, others still on N-1. This is expected during active rollout.
+- **After rollout completes, all tenants reach version N.** No long-term N-1 support steady state.
+- **Schema migrations are additive-only within a release.** No destructive changes in the same release (drop column, rename). Destructive migrations require two releases: N introduces new path, N+1 removes old path.
+- **Control plane upgrades itself first,** before any tenant rollout starts.
+- **Rollback = re-deploy N-1 image + restore from pre-upgrade backup.** No in-place rollback.
+- **API contract between CP and tenant is versioned.** `/_control/info` returns `app_version` and `schema_version`. CP uses these to gate tenant rollout safety.
+
+**Phase 2+ additions (defer):** Canary rollout (upgrade 1 tenant, observe, then fleet), automated rollback triggers, N-2 compatibility for slow-upgrading tenants.
+
+**Rationale:** Coordinated upgrades are operationally simple at single-digit tenant scale. N-1 support and canary patterns add testing and migration complexity; defer until fleet size justifies.
+
+**Impacts:**
+- #55 (rollout rules): Implements serial tenant upgrade, pre-upgrade backup requirement, health checks post-upgrade.
+- CI/CD: Tenant image rollout is single-stage; canary gates are Phase 2+.
+- Migration design: All schema changes within a release must be forward-compatible (N-1 code can run against N schema).
+
+---
+
+### Decision 9: Auth Migration Shape (Phase 2 work, Phase 1 must prepare)
+
+**Coexistence → cutover model, no flag day cutover.**
+
+**Phase 1 preparation:**
+- Add `users.keycloak_sub` (nullable) column in Phase 1 schema alongside existing `users.email`.
+- Keycloak `sub` claim becomes the canonical identifier once populated; email remains fallback for matching.
+- Single `AuthMiddleware` that delegates to `LocalAuthStrategy` or `KeycloakAuthStrategy` based on `AUTH_PROVIDER` env var.
+- Both strategies produce the same `AuthenticatedUser` shape: `{ userId, email, tenantId, roles }`.
+- Control-plane admin API protected by admin-realm JWT (Keycloak token from admin realm) from Phase 1 onward.
+
+**Phase 2a (coexistence release):**
+- Tenant app accepts BOTH auth methods simultaneously.
+- `AUTH_PROVIDER=local` (current email/password) or `AUTH_PROVIDER=keycloak` (OIDC via Keycloak JWTs).
+- When `keycloak`: app validates Keycloak JWTs, maps `sub` claim to internal user. New users auto-provisioned on first login. Existing users matched by email (case-insensitive, verified email only).
+- When `local`: current behavior unchanged.
+- Share links and guest access remain unauthenticated; no Keycloak redirect. Guest elevation to authenticated user is opt-in.
+
+**Phase 2b (cutover release):**
+- `AUTH_PROVIDER=local` removed. Keycloak becomes mandatory.
+- Email/password auth code deleted.
+- All users must have Keycloak accounts. Migration script: for each user, create Keycloak user if not present, send password-reset email.
+- Grace period: ≥2 weeks between Phase 2a (coexistence) and Phase 2b (cutover).
+
+**Key safety properties:**
+- No flag day — dual auth runs for a defined window.
+- Share links / guest access survive migration unchanged (stay anonymous).
+- Membership rows (source of truth for permissions) never change shape.
+- Phase 1 control-plane admin auth stays independent from tenant auth.
+
+**What to defer to pre-Phase 2 design:**
+- Token refresh and session lifecycle details.
+- Keycloak client registration model (one client per tenant vs. shared client with audience).
+- Cross-subdomain SSO cookie/token sharing mechanics.
+- Exact migration script implementation and rollback path.
+
+**Rationale:** Shapes how Phase 1 schema is designed (`keycloak_sub` column) and Phase 2 implementation proceeds (middleware strategy pattern). Defers implementation details to a pre-Phase 2 design task to avoid premature commitment before control plane and Postgres migration are complete.
+
+**Impacts:**
+- #46 (Postgres migration): Schema adds `keycloak_sub` column.
+- #53 (control-plane skeleton): Admin API protected by admin-realm JWT from start.
+- #56 (Keycloak integration Phase 2): Implements coexistence + cutover using locked shape.
+
+---
+
+### Decision 10: Local Keycloak Operational Model (Phase 1 dev readiness)
+
+**Docker Compose + realm import + test user seeding. k3d is the standard dev environment.**
+
+- **Docker Compose service** alongside existing dev stack. One `docker-compose.keycloak.yml` (or profile in main compose file) that starts Keycloak + its own Postgres.
+- **Realm import on startup.** Two realm JSON files checked into repo under `infra/keycloak/realms/`: `admin-realm.json` (control-plane admin access) and `notetakers-realm.json` (tenant app users). Keycloak `--import-realm` flag loads them on first boot.
+- **Pre-seeded test users.** Each realm includes 2–3 test users with known passwords for local dev.
+- **Keycloak version pinned.** Use specific Keycloak Docker image tag (not `latest`). Pin in compose file; document in `infra/keycloak/README.md`.
+- **Tenant app dev mode.** When `AUTH_PROVIDER=keycloak` env var is set, tenant app validates JWTs against local Keycloak JWKS endpoint. When unset or `AUTH_PROVIDER=local`, app uses current email/password auth.
+- **No Keycloak in CI (Phase 1).** CI tests use `AUTH_PROVIDER=local`. Keycloak integration tests are manual or run in dedicated CI job (Phase 2+).
+- **k3d is the standard dev environment.** Keycloak is deployed as always-available part of k3d stack. No separate basic-auth-only mode for developer convenience.
+
+**Phase 2 additions (defer):** Realm config-as-code pipeline (Keycloak Terraform provider), CI integration tests with Keycloak container, production Keycloak HA topology.
+
+**Rationale:** Single unified dev environment (k3d + Keycloak) prevents branch-in-the-road surprises where developers iterate against local auth while Phase 2 ships OIDC. Phase 1 auth readiness verified daily in dev loop, not discovered late in Phase 2 spike. Keycloak overhead is minimal; fast local iteration is preserved. Per FFMikha's directive, normal local dev must be on k3d with Keycloak always available; no separate basic-only path.
+
+**Impacts:**
+- Dev documentation: k3d setup guide includes Keycloak bootstrap and test account creation.
+- #56 (Keycloak integration): Can rely on local Keycloak dev environment for testing coexistence layer.
+- Phase 1 CI: No Keycloak required; tests use `AUTH_PROVIDER=local`.
+
+---
+
+## Locked Phase 1 Clarifications Summary
+
+| Item | Status | Load-bearing for |
+|------|--------|-----------------|
+| Tenant lifecycle state machine (Decision 7) | ✅ LOCKED | #53, #54, #55, backup/restore |
+| Rollout / version-skew policy (Decision 8) | ✅ LOCKED | #55, CI/CD, schema migration design |
+| Auth migration shape (Decision 9) | ✅ LOCKED | #46, #53, #56 Phase 2 |
+| Local Keycloak dev model (Decision 10) | ✅ LOCKED | #56 dev readiness, Phase 1 iteration |
+
+**All four clarifications from #42 "Next points to clarify together" are now resolved.**
+
+The epic's open clarifications list becomes **empty**. Issue #42 is fully scoped for Phase 1 execution.
