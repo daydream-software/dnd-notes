@@ -308,3 +308,35 @@ This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0
 
 ---
 
+
+## 2026-04-18: Issue #53 — Control Plane Skeleton
+
+
+**Implementation:**
+- Created `apps/control-plane` workspace following existing monorepo patterns
+- Implemented SQLite-backed tenant registry with 7-state lifecycle model (provisioning, ready, maintenance, upgrading, restoring, failed, deprovisioned)
+- Built internal API surface for tenant CRUD and state management
+- All state transitions logged in audit table for full lifecycle history
+- 15 comprehensive tests covering full API contract
+- Validation: lint clean, build succeeds, all tests pass
+
+**Key Design Decisions:**
+- SQLite persistence for Phase 1 (low write volume, straightforward backups)
+- Explicit state tracking (no implicit state inference)
+- Idempotent state transitions with audit trail
+- Thin by design — no business logic beyond registry CRUD and state tracking
+
+**Learnings:**
+- When SQLite datetime() creates identical timestamps in rapid succession, use `ORDER BY id DESC` instead of `ORDER BY created_at DESC` for deterministic ordering
+- In-memory SQLite databases (`:memory:`) require proper cleanup in test `afterEach` hooks to prevent state leakage between tests
+- Monorepo workspace addition requires updating root `package.json` workspaces array and adding convenience dev scripts
+- Control-plane port 3001 chosen to avoid conflict with tenant API (3000)
+
+**Follow-up Work:**
+This skeleton is ready to drive:
+- Issue #54: K8s provisioning orchestration
+- Issue #55: Rolling update choreography
+- Issue #40: Backup/restore coordination
+
+**PR:** #59 (awaiting Copilot review)
+
