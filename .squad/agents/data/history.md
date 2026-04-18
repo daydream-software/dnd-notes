@@ -42,6 +42,7 @@ Data initialized as Backend Dev for the initial project squad.
 - Issue #26 stayed schema-light: note bodies remain stored as plain text, while the web app now interprets that text as Markdown so old notes stay readable without migration.
 - Shared note rendering now lives in `apps/web/src/note-formatting.tsx`, which uses `react-markdown` + `remark-gfm` and is reused by both `apps/web/src/App.tsx` and `apps/web/src/SharedCampaignRoute.tsx`.
 - Rich-formatting regression coverage now lives in `apps/web/src/note-formatting.test.tsx`, with app wiring covered in `apps/web/src/App.test.tsx`.
+- When a locked squad decision supersedes an exploratory history note, point the history entry at `.squad/decisions.md` or mark it explicitly superseded; do not leave PR-visible history pointing at stale inbox artifacts or retired endpoint drafts.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
@@ -206,12 +207,12 @@ This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0
 
 ## 2026-04-18: Issue #42 — Control-Plane ↔ Tenant Contract Recommendation
 
-📌 Wrote `.squad/decisions/inbox/data-42-tenant-contract.md` defining the Phase 1 internal API contract between control plane and tenant app.
+📌 Recorded the locked Phase 1 control-plane ↔ tenant contract in `.squad/decisions.md`.
 
 **Key decisions:**
-- Tenant app exposes exactly three internal endpoints: `GET /_control/health`, `GET /_control/info`, `POST /_control/maintenance`. All cluster-internal only.
+- Tenant app exposes exactly four internal endpoints: `GET /health`, `GET /ready`, `GET /_control/info`, and `POST /_control/maintenance`. All cluster-internal only.
 - Pure push model — control plane drives all interactions. Tenant app never phones home, never heartbeats, never registers itself. Zero outbound dependency on control plane.
-- Provisioning, backup, restore, updates, deprovisioning — all orchestrated by control plane via K8s API + direct Postgres access + the three tenant endpoints.
+- Provisioning, backup, restore, updates, deprovisioning — all orchestrated by control plane via K8s API + direct Postgres access + the locked tenant endpoints documented in `.squad/decisions.md`.
 - Maintenance mode (drain + 503 to users) is the sole point of required tenant cooperation, used only for restore and risky upgrades. Has timeout-and-abort safety.
 - Backup (`pg_dump`) runs directly against tenant DB — no tenant app involvement, no maintenance required (Postgres MVCC snapshot).
 - No event bus, no callbacks, no shared state, no auto-rollback in Phase 1.
@@ -344,4 +345,3 @@ This skeleton is ready to drive:
 - Issue #40: Backup/restore coordination
 
 **PR:** #59 (awaiting Copilot review)
-
