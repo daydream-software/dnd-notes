@@ -385,3 +385,162 @@ Phase 1 (#53 control plane, #54 provisioning, #55 rolling updates) depends heavi
 - `.squad/decisions/inbox/chunk-phase0-checks.md` — 450-line comprehensive test-readiness plan for Phase 0
 
 **Status:** DRAFT — Ready for FFMikha product sign-off and team feedback before implementation starts
+
+## 2026-04-19: Issue #53 Control-Plane Skeleton APPROVED
+
+**Verdict:** ✅ **APPROVE** — PR #59 ready to merge
+
+**Validation results:**
+- All 15 tests pass (comprehensive CRUD + state transitions + validation)
+- Lint clean across all workspaces
+- Build succeeds (TypeScript compilation error-free)
+- All acceptance criteria met
+
+**7-State Lifecycle Model Validation:**
+ Matches epic #42 locked decisions exactly:
+```
+provisioning → ready ⇄ maintenance ⇄ upgrading
+                ↓          ↓           ↓
+              ready    restoring    ready
+                ↓          ↓
+              failed    failed
+                ↓
+          deprovisioned
+```
+- Type-safe state contract in types.ts with TenantState union
+- DB constraints enforce valid states
+- State transitions properly logged in audit table
+
+**Tenant Registry Model Validation:**
+ All required fields present per issue #53 requirements:
+- id, slug (DNS-safe validation), ownerId
+- desiredState / currentState (explicit desired vs observed pattern)
+- version, storageReference, backupMetadata
+- createdAt / updatedAt timestamps
+- Unique constraints on id and slug
+- SQLite-backed per Phase 1 decision
+
+**API Surface Validation:**
+ Thin, explicit, ready for orchestration:
+- `GET /api/tenants` — list all (working)
+- `GET /api/tenants/:id` — detail (working)
+- `POST /api/tenants` — create (working, duplicate checks enforced)
+- `PATCH /api/tenants/:id/state` — state update + transition logging (working)
+- `PATCH /api/tenants/:id/desired-state` — desired state update (working)
+- `PATCH /api/tenants/:id/storage` — storage reference (working)
+- `PATCH /api/tenants/:id/backup` — backup metadata (working)
+- `GET /api/tenants/:id/transitions` — audit history (working)
+
+**Test Coverage Analysis:**
+ 15 tests cover all critical paths:
+- Health check endpoint
+- Tenant creation (happy path + duplicate ID/slug rejection + slug validation)
+- List tenants (empty + populated states)
+- Get tenant (found + 404)
+- State transition recording (updates state + creates audit log)
+- Desired state updates
+- Storage reference updates
+- Backup metadata updates
+- Transition history retrieval (with 404 for missing tenant)
+
+**Missing Edge Cases (acceptable for skeleton):**
+- State transition validation (blocking invalid transitions like `ready` → `deprovisioned` without intermediate states) — deferred to #54/#55 orchestration logic
+- Concurrent state update protection — deferred to orchestrator (single-writer assumption)
+- Tenant deletion lifecycle — not required for Phase 1
+
+**Follow-Up Readiness:**
+ Clean contract ready to drive:
+- Issue #54: K8s provisioning (create tenant record → provision resources → update state)
+- Issue #55: Rolling update choreography (desired state → orchestrator → current state sync)
+- Issue #40: Backup/restore coordination (backup metadata + restoring state)
+
+**Quality Gates:**
+ Build: passes
+ Lint: clean (apps/web, apps/api, apps/control-plane all pass)
+ Tests: 15/15 passing
+ Type safety: explicit TenantState contract enforced at DB + API boundaries
+ Audit trail: every state change logged with triggeredBy + reason
+ Workspace integration: package.json properly wired for monorepo
+
+**Reviewer Notes:**
+- This is a thin, explicit skeleton as intended — no premature orchestration logic
+- SQLite-backed per Phase 1 decision (Postgres migration deferred until fleet size justifies it)
+- State machine defined but transitions not validated (intentional — orchestrator owns transition logic)
+- No DELETE endpoint (intentional — deprovisioned state is the soft-delete marker)
+- Database path configurable via env var (DATABASE_PATH), defaults to data/control-plane.sqlite
+- Graceful shutdown handles DB cleanup (close on SIGINT/SIGTERM)
+
+**Decision Impact:**
+This skeleton unblocks Phase 1 work immediately. Brand can start #54 (K8s provisioning), Data can start #55 (rollout choreography). No further control-plane schema changes expected until Phase 2.
+
+**Next Steps:**
+1. Merge PR #59
+2. Start #54 and #55 in parallel (both consume this registry contract)
+3. Add state transition validation to orchestrator (not registry) in #55
+
+**Files Validated:**
+- apps/control-plane/src/types.ts (7-state enum, tenant model, audit trail)
+- apps/control-plane/src/tenant-registry.ts (SQLite layer, CRUD, transitions)
+- apps/control-plane/src/app.ts (Express routes, validation, error handling)
+- apps/control-plane/src/index.ts (startup, graceful shutdown)
+- apps/control-plane/test/app.test.ts (15 comprehensive tests)
+- apps/control-plane/README.md (lifecycle docs, API reference)
+- package.json (workspace wiring, control-plane added)
+
+**Root Validation:** `npm run lint --workspaces && npm test --workspace=apps/control-plane && npm run build --workspace=apps/control-plane` — all green
+
+## 2026-04-19: PR #60 Review (Issue #52 - Containerization)
+
+**What:** Reviewed Brand's containerization implementation for Epic #42 Phase 0.
+
+**Verdict:** ✅ APPROVE
+
+**Key Validations:**
+- Multi-stage Dockerfile with proper non-root execution (appuser:appuser)
+- K8s health probes correctly implemented: `/healthz` (liveness), `/readyz` (readiness with DB check), `/health` (legacy)
+- RUNTIME.md is comprehensive (301 lines) covering env contract, K8s lifecycle, Phase 0→1 migration
+- Same-origin serving via `SERVE_WEB=true` flag works correctly
+- SPA fallback excludes health/API routes (correct middleware ordering)
+- SIGTERM graceful shutdown implemented
+- DATABASE_URL reserved but not wired (correct for Phase 0)
+- No scope drift: no #43 manifests, no CI auto-push, no provider-specific artifacts
+- All 60 tests pass, lint clean, single commit with conventional format
+
+**Edge Cases Checked:**
+1. Port consistency: Dockerfile PORT=3000, index.ts defaults to 3001 for local dev (correct)
+2. Readiness probe failure: Returns 503 on DB error via `noteStore.getAdminOverview()` (correct K8s semantics)
+3. Same-origin CORS: Correctly bypassed when no Origin header (mobile apps, container testing)
+4. Health route shadowing: Routes registered BEFORE SPA fallback (no conflicts)
+
+**Production-Minded Qualities:**
+- Security: Non-root user, read-only code, write-only data volume
+- Observability: Health endpoints, SIGTERM handling, future Phase 2+ metrics hooks
+- Documentation: RUNTIME.md covers env vars, K8s probes, migration notes, smoke tests
+- Epic alignment: Respects all Epic #42 locked decisions (same-origin, no auto-GHCR, DATABASE_URL reserved)
+
+**Learnings:**
+- Containerization acceptance criteria: reproducible image + K8s-shaped runtime + documented contract + same-origin validation
+- Health probe semantics for K8s: liveness = process alive (simple 200), readiness = ready to serve (DB check, 503 on fail)
+- Phase 0 scope discipline: container + health + runtime docs only; defer manifests (#43) and Postgres wiring (#46)
+- RUNTIME.md is the authoritative source for tenant container contract; README.md is quickstart only
+- Same-origin mode in containers: `SERVE_WEB=true` enables production deployment shape, SPA fallback must exclude health/API routes
+- Multi-stage Dockerfile pattern: deps → build-deps → build → runtime (minimize final image size)
+- Port defaulting strategy: container sets PORT=3000 (production), index.ts defaults to 3001 (local dev split mode)
+
+**Next Steps:**
+- Phase 0 blocker: Issue #46 (Postgres adapter) must land before #43 manifests
+- Phase 1 prerequisite: Control-plane skeleton (#53) running in parallel
+- Production readiness: CI pipeline rescope (#43) for container build + smoke tests after Phase 0 gate
+
+**Review Quality:**
+- No test additions needed (health endpoints are smoke-testable, not unit-testable)
+- Commit message quality: conventional format, Co-authored-by trailer, clear scope statement
+- PR description quality: Epic alignment, non-scope callouts, testing instructions, follow-up tracking
+
+**Decision:** No new team-wide decisions. This PR implements existing locked decisions from Epic #42.
+
+**Reviewer verdict format reminder:** APPROVE or REJECT with evidence, name different agent for revision on reject, suggest next steps on approve.
+
+---
+
+

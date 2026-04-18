@@ -280,3 +280,50 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 
 ---
 
+
+## 2026-04-18: Issue #52 — Containerize Tenant App for Kubernetes
+
+**Context:**
+Epic 42 Phase 0 work to prove per-tenant Kubernetes deployment with production-grade containerization.
+
+**What I built:**
+1. Multi-stage Dockerfile (deps → build → runtime) with Node 22.21.1
+2. Same-origin deployment mode: API serves web assets when `SERVE_WEB=true`
+3. Kubernetes-ready health endpoints:
+   - `/healthz` - liveness probe (process alive)
+   - `/readyz` - readiness probe (database healthy, checks via `noteStore.getAdminOverview()`)
+   - `/health` - legacy compatibility
+4. RUNTIME.md documenting full env contract, health probes, lifecycle hooks
+5. Non-root container execution (appuser:appuser)
+6. SIGTERM graceful shutdown handling
+
+**Key decisions:**
+- Used middleware-based SPA fallback instead of Express 5 wildcard route (path-to-regexp compatibility)
+- Reserved `DATABASE_URL` for Postgres adapter (issue #46) without implementing it yet
+- No CI push to GHCR per Epic 42 Phase 0 locked decisions
+- Health endpoints use existing NoteStore methods, not direct DB access
+
+**Validation:**
+- All 60 API tests pass
+- Lint clean
+- Local server tested: `/healthz`, `/readyz`, web serving all work
+- Committed eeffa20, pushed squad/52-containerize-tenant-app, opened PR #60
+- Requested `/copilot-review` per squad workflow
+
+**Epic 42 alignment:**
+ Respects Postgres pivot (DATABASE_URL reserved)  
+ No premature CI automation  
+ No scope drift into #43 manifests  
+ Production-minded (security, observability, lifecycle)
+
+**What's next:**
+- Issue #46: Postgres adapter implementation
+- Issue #43: Kubernetes manifests after Postgres lands
+- CI integration: GHCR push after Phase 0 gate
+
+**Learning:**
+Express 5's path-to-regexp upgrade broke traditional `app.get('*')` SPA catchall patterns. Use middleware with path prefix checks instead: cleaner, explicit, no regex surprises.
+
+---
+
+
