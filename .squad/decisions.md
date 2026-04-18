@@ -3977,3 +3977,172 @@ When merging decision inbox files and propagating team updates, parse the decisi
 
 **Why:** Clarity — each agent's history reflects their actual work and decisions, not decisions they observed or heard about. Signal — when reviewing Copilot's history, readers should see Copilot's contributions, not a full team transcript. Accountability — architecture decisions should be visible in the originating agent's history (Data, Brand), not scattered across all agents' logs. Scalability — as the team grows, scoped history propagation prevents history logs from becoming noise archives.
 
+---
+
+### 2026-04-18: Issue #42 Architecture Gaps — Mikey's Platform Direction Risk Analysis
+
+**By:** Mikey (Lead)  
+**Date:** 2026-04-18  
+**Type:** Architecture Risk Review  
+**Context:** User escalated k3d/k3s testing question to comprehensive platform direction gap analysis for #42 epic.
+
+**What:** Mikey identified 11 cross-cutting platform gaps in the #42 multi-tenant Kubernetes direction, prioritized by phase:
+
+**🔴 CRITICAL — Must Resolve Phase 0–1:**
+1. **Local K8s development loop** — k3d/k3s as target is right, but no dev script exists. Brand should spike `scripts/dev-cluster.sh` alongside #52 (containerization) to enable fast iteration on control-plane and provisioning work.
+2. **Ingress, wildcard DNS, and wildcard TLS untracked** — Epic mentions "ingress + cert-manager + wildcard DNS" but no issue covers the domain-provisioning choreography. Hard prerequisite for #54 (provisioning with subdomain assignment). Requires Phase 0–1 ingress spike.
+3. **SQLite PVC backup strategy undefined** — The plan mentions "keep PVCs and scale workloads to zero when idle" but doesn't specify: CSI volume snapshots (cloud-dependent), sidecar CronJob (app-managed), or only-backup-during-scale-to-zero? Answer shapes #39 (WAL), #55 (single-writer), and #40 (restore). Data should include backup strategy recommendation as part of #39 WAL investigation.
+4. **Control-plane SQLite is a SPOF** — #53 accepts single-replica control-plane for Phase 1 (fair), but must explicitly document single-replica constraint and trigger for moving off SQLite (Postgres, Turso, etc.). Include in #53 acceptance criteria.
+5. **No CI for container builds or K8s manifests** — Current CI runs lint + test + build for Node.js only. No image build step, no manifest validation, no K8s integration tests. Brand should extend CI once #52 lands — at minimum, build image and lint manifests.
+
+**🟡 IMPORTANT — Resolve Before Phase 2:**
+6. **Keycloak deployment and operational model** — #56 covers OIDC but not *where Keycloak runs*. Self-hosted on cluster? Managed service? Keycloak needs persistence, HA, backup, realm config-as-code. On k3d, Keycloak is another stateful service to stand up. Scope "Keycloak deployment + local dev" sub-task before #56 implementation.
+7. **Cross-origin communication between portal and tenants** — Opaque subdomains (portal.app.example.com vs. abc123.app.example.com) are different origins. Cookies don't share, Keycloak tokens need to work for both origins, CORS must be dynamic per-tenant. Current `cors` middleware with static `allowedOrigins` won't scale. Data + Stef should design auth-flow-across-subdomains contract explicitly in or before #56.
+8. **Secret management at scale** — Keycloak secrets, tenant DB encryption keys, OIDC signing material. Current app uses `.env`. Doesn't work for multi-tenant K8s. Decide: K8s Secrets, External Secrets Operator, Sealed Secrets, Vault? Brand should pick direction as part of Phase 1 infra. K8s Secrets + RBAC is fine for first slice but must be explicit.
+
+**🟢 CAN WAIT — Phase 3+:**
+9. **Observability stack** — No logging, metrics, tracing. Fleet status (#57) is Phase 3, but operators want `kubectl logs` + basic Prometheus from Phase 0. Defer structured logs and `/metrics` endpoint, but plan early so plumbing is in place.
+10. **Per-tenant resource limits and cost controls** — Resource quotas, PVC size limits, CPU/memory per tenant. Important at scale but not for first handful. Document intent and defer.
+11. **Multi-cluster / cloud provider portability** — Plan doesn't pick managed K8s provider. k3s/k3d for dev, any managed K8s for prod. Don't optimize for multi-cloud yet.
+
+**Priority Summary:**
+| # | Gap | Urgency | Owner |
+|---|-----|---------|-------|
+| 1 | Local K8s dev loop (k3d) | 🔴 Phase 0 | Brand |
+| 2 | Ingress + wildcard DNS + TLS | 🔴 Phase 0–1 | Brand |
+| 3 | SQLite PVC backup strategy | 🔴 Phase 0–1 | Data |
+| 4 | Control-plane SPOF acknowledgment | 🔴 Phase 1 | Data |
+| 5 | CI for containers/manifests | 🔴 Phase 0–1 | Brand |
+| 6 | Keycloak deployment model | 🟡 Pre-Phase 2 | Brand + Data |
+| 7 | Cross-origin auth flow | 🟡 Pre-Phase 2 | Data + Stef |
+| 8 | Secret management | 🟡 Phase 1 | Brand |
+| 9 | Observability | 🟢 Phase 3 | Brand |
+| 10 | Resource limits | 🟢 Phase 3+ | Brand |
+| 11 | Cloud portability | 🟢 Defer | — |
+
+**Why k3d/k3s specifically:** Excellent fit for local dev (local registry, Traefik ingress, multi-node support, fast cluster creation). Gap is nobody wired it up. Highest leverage: `scripts/dev-cluster.sh` to create cluster, push image, deploy one tenant. That script becomes foundation for both developer iteration and CI integration tests.
+
+**Next:** FFMikha to review with Mikey, approve assignments, adjust Phase 0–1 timeline to include k3d dev loop and ingress/TLS spikes.
+
+---
+
+### 2026-04-18: Issue #42 Infrastructure & Operations Gaps — Brand's Platform Risk Analysis
+
+**By:** Brand (Platform Dev)  
+**Date:** 2026-04-18  
+**Type:** Infra/Ops Risk Review  
+**Context:** Platform direction risk assessment for #42 multi-tenant Kubernetes epic.
+
+**What:** Brand identified 13 infrastructure and operations blind spots, organized by phase and severity.
+
+**MUST RESOLVE EARLY (Phase 0–1):**
+
+1. **SQLite Single-Writer Enforcement on Kubernetes** — One tenant DB = one writable pod. But how is ownership enforced? How does old pod release the volume during rollout? How do we detect crashed writers? Does Storage Class guarantee exclusive attach? Two writers = data corruption. Before Phase 1: design pod-ownership pattern (control-plane leases or Storage Class enforcement), test rollout choreography, implement PRAGMA integrity_check after every rollout with alerting.
+
+2. **PVC Lifecycle During Scale-to-Zero and Restore** — Do we detach PVC when workload scales to zero, or keep attached with no pod? Restore workflow: temp PVC swap (safest), in-place with read-only (risky), snapshot restore (requires discipline)? How prevent accidental deletion? Backup lifecycle (90 days inactivity — delete, archive, keep?). Before Phase 1: define PVC lifecycle policy, implement backup verification (test-restore canary), add capacity-tracking dashboard.
+
+3. **Ingress, DNS, and TLS at Spike Time** — Phase 0 defers cert-manager, but what replaces it? Static IP + hand-managed DNS? Localhost:port routing? Unencrypted HTTP? If Phase 0 uses port-per-tenant routing, Phase 1's switch to hostname-based routing requires rearchitecting control-plane provisioning contract. Before Phase 0 finish: decide routing model (port vs. hostname), TLS story (self-signed or skip), ensure control-plane provisioning contract records final subdomain shape (tenant-slug.dnd-notes.app).
+
+4. **Observability Baseline and Fleet Status Visibility** — What is "internal fleet status"? Dashboard, Prometheus, K8s Dashboard, CloudWatch? What metrics (pod readiness, PVC utilization, SQLite checkpoints, backup age, latency, errors)? How correlate errors across tenants? Alert rules (backup >24h, PVC >80%, cert renewal <7 days)? Cost tracking per-tenant? Before Phase 1: implement Prometheus + Grafana dashboards (control-plane health, tenant resource use, pod/PVC status, backup/restore success), add logs aggregation (journald/syslog initially, Loki/ELK later), alerting for critical path.
+
+5. **Backup and Restore Workflow for Hundreds of Tenants** — Backup frequency? Hourly, daily, snapshots, continuous replication? How many per tenant? Restore SLA (hot vs. cold)? Cross-tenant blast radius (one backup service down = all fail)? Backup verification (test-restore or trust?)? Point-in-time recovery? Before Phase 1: validate backup frequency + retention + cost model, implement backup integrity test (write, backup, delete, restore, verify), measure restore SLA (how long to restore 100 MB SQLite), run multi-backup scale test (100 tenants, 10% data loss, restore all, verify).
+
+**SHOULD CLARIFY (Phase 1–2):**
+
+6. **Control-Plane Database Choice and HA Strategy** — Exit ramp from SQLite? At how many tenants? Postgres migration script ready? Single-writer enforcement (control-plane app or separate provisioning worker)? Control-plane DB backup + restore? What if corrupt? Before Phase 2: design schema for migration readiness, implement DB backup/recovery, add write-concurrency guard (PRAGMA busy_timeout + retry or leader election), document recovery procedure and test quarterly.
+
+7. **Tenant Realm Isolation vs. Multi-Realm Keycloak** — How does tenant validate bearer token is for *that tenant*? Explicit tenant ID in claim? Who puts it there? Token revocation story? Tenant onboarding (who creates Keycloak group when control plane creates tenant)? Race conditions? Admin cross-tenant operations (password reset, audit logs)? Before Phase 2: design token shape + required claims, implement revocation (subsecond invalidation), design tenant onboarding automation, define admin workflows.
+
+8. **Rollout Discipline and Version Skew Tolerance** — Rollout order (control plane first, then portals, then tenants)? Version compatibility matrix (can tenant v1.5 run against control plane v1.4, for how long)? Rollout pause points (auto-pause if >3 consecutive failures?)? Schema migration during rollout (pre-flight check or assume success)? Before Phase 1: design versioning scheme (semver with compatibility guarantees), implement pre-flight migration check, add rollout canary (5% first), implement auto-pause on repeated failures.
+
+**MUST NAIL BEFORE PRODUCTION (Phase 1–3):**
+
+9. **Cost Model and Resource Packing Strategy** — Resource budget per tenant? Oversubscribe or reserve headroom? Idle tenant cost (PVC + backups)? Burst handling? Node consolidation during scale? Multi-zone redundancy (cost vs. availability)? Before Phase 1: benchmark resource usage (1000 notes, 10 active sessions), calculate monthly cost per tenant vs. willingness to pay, implement K8s resource limits + requests, add cost tracking via cloud labels.
+
+10. **Disaster Recovery and Multi-Region Expansion** — Control-plane state after region failure? Restore in secondary region? Customer data RTO/RPO? Failover automation (auto or manual)? Multi-region a Phase 4+ goal or design for Phase 1? Before production: define RTO/RPO, implement cross-region backup (PVC snapshots + control-plane DB to second region), add monthly failover drill, create runbook.
+
+11. **Compliance, Audit, and Tenant Isolation Verification** — Audit trail (what events logged, where stored, customer access)? Data residency (enforce region)? Encryption at rest (tenant-specific keys or shared)? Compliance certifications (SOC 2, HIPAA)? Isolation testing (automated verify tenant A can't read B's data)? Before production: implement audit logging from day one, add isolation tests, define compliance baseline (assume SOC 2), implement encryption at rest + access logs + change management.
+
+**WILL EMERGE AT SCALE (Phase 2–3):**
+
+12. **Observability Gaps That Only Show Up at Scale** — Tenant-specific alerting (which slow, which consume bandwidth, which backup failures)? Root-cause tools (distributed tracing)? Cost anomaly detection (10x usage spike = alert before billing)? Capacity planning (predict when cluster full)? By 50–100 tenants: add per-tenant metrics aggregation, distributed tracing (Jaeger), cost anomaly detection, capacity-tracking alerts.
+
+13. **Support and Debugging Operability** — Log access for support engineers (queryable by tenant, timestamp, request ID, not shell access to pod)? Tenant state inspection (version, last backup, PVC full)? Emergency actions (scale to zero, force backup)? Runbooks? By Phase 2: build control-plane admin UI (show status, last backup, pod restarts, version, trigger manual actions), structured logging with request IDs, tenant health dashboard, incident runbooks.
+
+**Summary Table:**
+| Gap | Phase | Severity | Action |
+|-----|-------|----------|--------|
+| 1. Single-writer enforcement | 0–1 | 🔴 CRITICAL | Design ownership; test rollout; implement integrity checks. |
+| 2. PVC lifecycle | 0–1 | 🔴 CRITICAL | Define attach/detach; design restore; implement backup verification. |
+| 3. Ingress/DNS/TLS | 0–1 | 🟠 HIGH | Clarify Phase 0 routing; ensure Phase 1 not surprise. |
+| 4. Observability baseline | 0–1 | 🟠 HIGH | Implement Prometheus + Grafana; critical-path alerting; log aggregation. |
+| 5. Backup/restore for scale | 0–1 | 🟠 HIGH | Validate verification; benchmark SLA; test multi-tenant. |
+| 6. Control-plane DB | 1–2 | 🟡 MEDIUM | Design for Postgres migration; backup/recovery; write concurrency. |
+| 7. Tenant realm isolation | 1–2 | 🟡 MEDIUM | Design token shape; implement revocation; plan tenant onboarding. |
+| 8. Rollout discipline | 1–2 | 🟡 MEDIUM | Versioning scheme; canary rollouts; pre-flight migration checks. |
+| 9. Cost model | 1–2 | 🟡 MEDIUM | Benchmark resources; model cost; implement tracking. |
+| 10. Disaster recovery | 1–3 | 🟡 MEDIUM | Define RTO/RPO; plan multi-region backups; implement runbook. |
+| 11. Compliance & isolation | 1–3 | 🟡 MEDIUM | Audit logging; isolation tests; compliance baseline. |
+| 12. Observability at scale | 2–3 | 🟢 LOW | Monitor Phase 2; implement per-tenant aggregation before 50 tenants. |
+| 13. Support operability | 2–3 | 🟢 LOW | Build admin UI by Phase 2; structured logging; runbooks. |
+
+**Recommendations:** Prioritize Phase 0 validation (single-writer rollout without corruption, backup/restore with integrity, realistic cost). Document assumptions in code so Phase 1 doesn't break them. Create production readiness checklist mapping each gap to test/artifact. Assign gap owners (Data owns #6, #7, #8; Brand owns #3, #9, #10). Monthly sync as Phase 0 progresses to incorporate real data.
+
+**Next:** FFMikha + Mikey to review with Brand, assign Phase 0–1 spikes (k3d dev loop, ingress/TLS, backup verification, observability baseline).
+
+---
+
+### 2026-04-18: Issue #42 Backend & Data Safety Gaps — Data's Platform Risk Analysis
+
+**By:** Data (Backend Dev)  
+**Date:** 2026-04-18  
+**Type:** Backend Risk Review  
+**Context:** Backend and data safety risk assessment for #42 multi-tenant Kubernetes platform.
+
+**What:** Data identified 12 unresolved design questions that must be resolved *during* issue #42's phase plan, not deferred:
+
+**7 BLOCKING RISKS (Phase 0–2):**
+
+1. **Control-Plane Data Model Incompleteness** — Tenant registry in #53 is sketched but lacks critical detail: no state machine (what states? provisioning, bootstrapping, ready, upgrading, maintenance, restore, failed, suspended, deprovisioned?), missing version tracking (current vs. desired version per tenant, rollout status), backup state vague (last success, next scheduled, retry on failure?), no admin/support model (how do ops access tenant state without breaking isolation?), audit trail missing (who provisioned, when, what changed?). Without clear state machine, provisioning worker (#54) invents orchestration inline, creating coupling + fragile rollbacks. **Must resolve in #53:** Mikey + Data codify state diagram and audit model before provisioning lands.
+
+2. **Tenant → Control-Plane API Boundary Undefined** — Internal API contract is one-directional and incomplete: no initial bootstrap flow (how does control plane pass tenant ID, admin subject, domain, backup target, cluster context?), maintenance mode contract missing (how put tenant in read-only?), restore handoff vague (control plane restores file directly or calls endpoint?), no liveness/readiness contract (what does `/internal/status` return?), reconciliation missing (if control plane's view diverges from reality, what happens?). Without clear contract, provisioning worker and orchestration make ad-hoc decisions. **Must resolve in #53 or early #54:** Data should draft `ProvisioningContract` interface formalizing `/internal/*` endpoints, auth, idempotency, state preconditions, error cases.
+
+3. **SQLite Tenant Safety on Kubernetes Unvalidated** — Assumption that single-writer + WAL prevents corruption not yet proven: WAL mode evaluation incomplete (#39), no concurrent read/write validation under K8s (network latency, pod eviction, PVC mount/unmount behavior?), overlapping-pod failure mode undefined (two pods on same PVC = corruption or hang?), restore + concurrency untested (guarantee no active connections during file swap?), data loss during rollout uncovered (killed mid-transaction = crash recovery?). Foundation of tenant isolation at risk. **Must resolve:** #39 (WAL) complete before #54 lands. #55 (single-writer rules) formalize pod lifecycle during restore/upgrade + validation that overlapping pods impossible. #40 (restore protection) prerequisite for safe multi-tenant restore orchestration.
+
+4. **Tenant App Auth/Identity Model Breaking Change** — Current app: email/password + localStorage tokens. Issue #56 plans OIDC but migration path unspecified, will collide with #53's bootstrap: no auth migration strategy (reset all passwords, both auth methods during grace period, email-match binding?), bootstrap collision (how does initial admin access app?), guest/share-link stability (prevent guests from unexpected Keycloak auth?), no identity claim mapping (which claim is canonical user ID, stable across email/subject changes?), token refresh/logout scope unclear (revoke sessions on restore/upgrade?). Retrofitting OIDC without clear migration creates dead code + inconsistent behavior. **Must resolve before #56 starts:** Data draft `AuthAdapter` interface for both `LocalPasswordAuth` and `OIDCAuth`. #53's bootstrap specify how initial admin identity established. Migration strategy (both, grace period, cutover) approved by Mikey + FFMikha, not invented mid-implementation.
+
+5. **N and N-1 Compatibility During Rollouts Undefined** — No versioning scheme (semver, schema version tracking separately, what versions compatible?), schema migration story missing (can old instances still read/write after new column added?), API contract stability undefined (if change request/response format, old tenants fail?), dependency compatibility (SQLite 3.41 vs 3.42?), rollback safety (roll out v2.0, 5 of 10 fail, can we rollback to v1.9?). Without versioning strategy, rolling out to 100 tenants becomes coordinated cutover (high risk, high downtime). **Must resolve in #53:** define versioning scheme + migration responsibility. #55 (rollout rules) formalize canary/rollback strategy + test in spike. #56 (OIDC) explicitly version auth contract.
+
+6. **Backup/Restore Semantics and Failure Modes Incomplete** — App supports restore (#40) but control-plane backup/restore workflow undefined: who triggers backups (control plane scheduled, tenant app periodic, who stores — S3, GCS, local?), restore failure recovery (file transfer fails halfway = corruption, recovery path?), session invalidation during restore (control plane stops pod, restores, starts vs. calls endpoint on running pod?), backup retention + compliance (customer deletes tenant — recover how long? encrypted at rest? isolated by tenant?), disaster recovery drill (practiced restoring under load?). Cannot make SLO commitments without backup/restore strategy. **Must resolve:** #40 complete for single-tenant app as proof point. #53 follow-up specify backup/restore orchestration + storage strategy. #55 include backup-before-upgrade discipline.
+
+7. **Local Auth → OIDC Migration Path Blocks Backward Compatibility** — Current app hardcoded email/password + localStorage. Keycloak integration (#56) will break existing deployments unless designed for both: no coexistence model (both auth methods simultaneously?), share-link flows (require Keycloak = guest cannot access?), guest account semantics (guest token or Keycloak user?), default campaign assumption (app assumes one campaign per owner — multi-tenant support necessary?). Breaking backward compat = no on-prem or self-hosted post-#56. **Must resolve before #56:** clarify if Keycloak optional or mandatory. #53's design account for both auth strategies if optional.
+
+**5 LATER CONCERNS (Post-MVP):**
+
+8. **Fleet Observability and Alerting** — Control plane has no visibility into tenant health, backup status, reconciliation state. Defer: Prometheus metrics, Grafana dashboards, alerting rules, log aggregation. **Resolve by Phase 3** (#57: fleet status surface) before production.
+
+9. **Upgrade Orchestration Sophistication** — First rollout strategy (#55) will be simple: stop, migrate, start. Defer: canary, blue-green, shadow traffic, automated canary analysis, auto-rollback. **Resolve after Phase 1** when tenant count/change frequency demands.
+
+10. **Billing and Multi-Instance Accounting** — No pricing, metering, subscription model. Defer: usage tracking, billing engine, cost allocation. **Resolve when** first paying customer signs up.
+
+11. **Self-Hosted / On-Prem Multi-Tenancy** — Platform designed for SaaS (K8s), not self-hosted. Defer: on-prem control planes, offline provisioning, air-gapped backups. **Resolve if** business need arises.
+
+12. **Keycloak High Availability and Failover** — Single instance = SPOF for shared auth. Defer: multi-instance Keycloak + replication. **Resolve when** Keycloak outages impact SLO.
+
+**Critical Dependencies (Blocking Order):**
+- #39 (WAL) → completion before #54 lands
+- #40 (restore protection) → prerequisite for safe multi-tenant restore
+- #53 (control plane) → state machine, audit trail, versioning, bootstrap contract
+- #55 (rollout) → single-writer rules, pod lifecycle, restore handoff, overlap prevention
+- #56 (OIDC) → AuthAdapter interface, migration strategy, bootstrap flow
+
+**Decision Points for Mikey:**
+1. Auth migration: Force Keycloak or support both email/password + OIDC during transition? (Affects backward compat, on-prem support, implementation scope.)
+2. Versioning scheme: Semver + schema version tracking, or Git SHA + auto-compatibility? (Affects rollout safety + canary strategy.)
+3. Backup ownership: Control plane manages all (centralized, simpler), or tenant app self-manages (isolated, less visibility)? (Affects control-plane complexity + restore responsibility.)
+4. Keycloak timing: Required Phase 2 (#56), or defer to Phase 3 if mock OIDC works? (Affects scope creep + time to first working prototype.)
+
+**Summary:** Platform direction (multi-tenant K8s + Keycloak + rolling updates) is sound, but backend foundation incomplete. Risks 1–7 are not speculative; they are unresolved design questions that will surface during implementation. Blocking the platform: must resolve *during* Phase 0–2, not after. Deferring will require rework or compromise isolation/data safety.
+
+**Next:** Mikey reviews with FFMikha, clarifies decision points, updates issue descriptions for #39, #40, #53–56 to reflect resolved gaps. Adjust Phase 0–1 timeline to include k3d dev loop + ingress/TLS + backup verification.
+
