@@ -236,3 +236,49 @@ This completes the Phase 1 critical-decision set. Brand can now spec out the K8s
 
 **Next:** Phase 0 pre-work on K8s manifests + CI can proceed; Phase 0 gate focuses on PVC rolling-update safety; Phase 1 gate requires functional backup/restore end-to-end.
 
+## 2026-04-19: Epic #42 Phase 0 Execution Readiness Analysis
+
+**Requested by:** FFMikha  
+**Task:** Analyze issues #52 (Containerize) and #43 (Track deployment artifacts) for execution readiness; recommend Phase 0 slice and worktree scope.
+
+### Findings
+
+**Issue #52 — Containerize dnd-notes:**
+- ✅ Ready to start immediately. No blockers.
+- Scope: Multi-stage Dockerfile (production shape) + health/readiness endpoints + CI build step (no push) + runtime documentation
+- Effort: 1-2 days (Brand owns)
+- Decision: Dockerfile at `apps/api/Dockerfile` (monorepo pattern, tenant-scoped)
+
+**Issue #43 — Track deployment artifacts:**
+- 🟡 Blocked intentionally (no work needed now)
+- Unblock condition: Once K8s hosting provider is selected (AKS, GKE, etc.)
+- When unblocked: Becomes intake for Kubernetes manifests + environment wiring + reverse-proxy config for chosen provider
+
+**Hidden dependencies:**
+1. Postgres migration (#46): Parallel, not blocking. Container agnostic to backing store; env vars handle both SQLite and Postgres.
+2. Health endpoints: Minimal stubs (3 lines each); include in #52
+3. Environment contract: Already in place (PORT, NOTES_DB_PATH, etc.); just document in #52
+4. CI workflow: Add container build step (no push Phase 0); straightforward, no new tooling
+
+**Parallel work (not Brand):**
+- Data: Postgres schema prep + auth migration schema
+- Mikey/Chunk: K8s manifests for Phase 0 single-tenant proof (separate issue)
+- Stef: Validate same-origin web build captures VITE_API_BASE_URL at runtime
+
+### Decisions Made
+
+1. **Dockerfile location:** `apps/api/Dockerfile` (not repo root). Tenant instance owns its container.
+2. **Health endpoints:** Separate `/healthz` and `/readyz` (K8s industry standard)
+3. **Postgres blocking status:** Not a blocker; container works with current SQLite app. Postgres swap in Phase 0 but separate issue.
+4. **Issue #43 unblock condition:** Explicit approval needed once hosting provider is chosen (not auto-unblock)
+
+### Outcome
+
+Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Ready for FFMikha approval. Brand can start worktree `.worktrees/52/` immediately upon approval.
+
+**Next:** FFMikha approves scope → Brand creates worktree → parallel Phase 0 work with Data, Mikey, Stef.
+
+
+
+---
+

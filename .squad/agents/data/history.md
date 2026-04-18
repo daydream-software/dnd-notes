@@ -223,3 +223,120 @@ This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0
 - Health endpoint must verify DB connectivity (`SELECT 1`), not just app process liveness — a running app with a dead DB connection is not healthy.
 - Restore is the only non-idempotent operation in the contract. Pre-restore safety backup is the mandatory escape hatch.
 
+## 2026-04-19: Issue #42 — Remaining 4 Clarifications Recommendation
+
+📌 Wrote `.squad/decisions/inbox/data-42-remaining-four.md` covering the 4 remaining open clarification items from the #42 epic.
+
+**Items addressed:**
+1. **Tenant lifecycle state machine** — 9 states (provisioning → migrating → ready → maintenance/upgrading/restoring/suspended → failed/deprovisioned). `desired_state`/`observed_state` reconciliation model. Every state has explicit DB write posture.
+2. **Auth migration (OIDC/Keycloak)** — Three-phase additive migration (2a: add OIDC alongside local, 2b: default OIDC + deprecate local, 2c: remove local). AuthAdapter strategy pattern. Guest tokens unchanged. Membership model unchanged. No flag day.
+3. **Version-skew policy** — Strict same-version Phase 1; N/N-1 read compatibility starting Phase 2. Forward-only schema migrations. `schema_meta` table for version tracking.
+4. **Local Keycloak dev** — Optional Docker Compose sidecar with realm import. No backend code changes until Phase 2a. Does not affect `npm run dev` or `npm test`.
+
+**Key decisions:**
+- State machine is the foundation — items 2 and 3 depend on it.
+- Auth identity and campaign membership are separate concerns. OIDC changes who you are; membership says what you can do. Keep them apart.
+- Version skew starts narrow (same-version only) and widens only when fleet size forces it.
+- Local Keycloak is a developer convenience, not a dependency.
+
+### Learnings
+
+- Tenant lifecycle state machine should use `desired_state`/`observed_state` reconciliation (Kubernetes pattern). Control plane writes desired; polls observed from `/_control/info`.
+- Auth migration must be additive and reversible. The `AuthAdapter` strategy pattern (env-var selected) gives a rollback path at any point.
+- Guest share-link tokens are orthogonal to OIDC — they stay app-issued and membership-scoped regardless of identity provider.
+- `schema_version` tracked in both the tenant database (`schema_meta` table) and control-plane registry (`tenants.schema_version`) enables backup/restore version mismatch detection.
+- Version-skew testing cost is multiplicative. Defer N/N-1 support until fleet size makes coordinated upgrades impractical.
+
+
+## 2026-04-19: Issue #53 Control-Plane Architecture Analysis & Phase 1 Readiness
+
+
+**Outcome:**
+- ✅ #53 can start immediately in parallel with Phase 0 (#52, #43, #46)
+- ✅ Control plane and tenant workload are decoupled; no blocking architectural gap
+- ✅ All locked decisions from #42 (Phase 1) are accounted for in the skeleton design
+- ✅ Execution plan documented and ready for implementation
+
+**Key findings:**
+
+1. **Control-Plane Database:** Single-replica SQLite (Phase 1), not Postgres
+   - Write volume negligible: ~N tenant events/day + audit rows
+   - Explicit upgrade path to Postgres documented for Phase 2 (50–100+ tenant scale)
+   - Keeps local dev story simple (one sqlite file); intentional separation from tenant Postgres databases
+
+2. **Tenant Registry Model (7-state machine):**
+   - `tenants` table: id, slug, ownerId, displayName, state, desiredState, imageTag info, Postgres reference, backup metadata, timestamps
+   - `tenant_state_transitions` audit table: append-only lifecycle history with error tracking
+   - State enum locked to 7 states from #42 (provisioning→ready⇄maintenance⇄upgrading, restoring, failed, deprovisioned)
+   - Idempotent state transitions with validation (rejects invalid moves)
+
+3. **Internal API (Phase 1 skeleton):**
+   - `POST /internal/tenants` – Create + request K8s provisioning (idempotent by slug)
+   - `GET /internal/tenants` – Fleet visibility with optional filters
+   - `GET /internal/tenants/:id` – Full record + live K8s state
+   - `PATCH /internal/tenants/:id` – Request state transition + image upgrade
+   - `POST /internal/tenants/:id/backups` – Log completed backup
+   - `GET /internal/tenants/:id/backups` – Backup catalog (metadata only, blobs in object storage)
+   - No `/control/info` endpoint in control plane Phase 1 (tenant reads control plane, not reverse)
+
+4. **Sequencing logic:**
+   - Phase 0 validates tenant workload (container image, Postgres porting, health checks) — no orchestration needed
+   - Phase 1 builds control plane skeleton in parallel — zero code dependency on tenant app
+   - Control plane uses K8s API for state observation (standard pattern), not tenant callbacks
+   - Integration point: #54 (provisioning orchestrator) consumes both Phase 0 container + Phase 1 control-plane APIs
+
+5. **Blockers:** None identified
+   - All locked decisions from #42 Phase 1 mapped into schema/API design
+   - No architectural guidance needed from Lead (self-contained backend work)
+   - Ready to proceed autonomously
+
+**Monorepo placement:**
+- New: `apps/control-plane/` (Node.js + Express, mirrors API structure)
+- Workspace addition: Root `package.json` + `tsconfig.json`
+- No changes to `apps/api` or `apps/web`
+
+**Timeline:** 12–16 hours (Data, Backend Dev)
+- Schema design + SQL bootstrap (2h)
+- Express routing + internal endpoints (4h)
+- State machine validation + audit (3h)
+- Test coverage (3–4h)
+
+**Decision written to:** `.squad/decisions/inbox/data-control-plane-slice.md` for Mikey (Lead) review
+
+**Next step:** Implementation can begin immediately; review happens asynchronously.
+
+
+---
+
+
+## 2026-04-18: Issue #53 — Control Plane Skeleton
+
+
+**Implementation:**
+- Created `apps/control-plane` workspace following existing monorepo patterns
+- Implemented SQLite-backed tenant registry with 7-state lifecycle model (provisioning, ready, maintenance, upgrading, restoring, failed, deprovisioned)
+- Built internal API surface for tenant CRUD and state management
+- All state transitions logged in audit table for full lifecycle history
+- 15 comprehensive tests covering full API contract
+- Validation: lint clean, build succeeds, all tests pass
+
+**Key Design Decisions:**
+- SQLite persistence for Phase 1 (low write volume, straightforward backups)
+- Explicit state tracking (no implicit state inference)
+- Idempotent state transitions with audit trail
+- Thin by design — no business logic beyond registry CRUD and state tracking
+
+**Learnings:**
+- When SQLite datetime() creates identical timestamps in rapid succession, use `ORDER BY id DESC` instead of `ORDER BY created_at DESC` for deterministic ordering
+- In-memory SQLite databases (`:memory:`) require proper cleanup in test `afterEach` hooks to prevent state leakage between tests
+- Monorepo workspace addition requires updating root `package.json` workspaces array and adding convenience dev scripts
+- Control-plane port 3001 chosen to avoid conflict with tenant API (3000)
+
+**Follow-up Work:**
+This skeleton is ready to drive:
+- Issue #54: K8s provisioning orchestration
+- Issue #55: Rolling update choreography
+- Issue #40: Backup/restore coordination
+
+**PR:** #59 (awaiting Copilot review)
+
