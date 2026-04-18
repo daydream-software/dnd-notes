@@ -171,3 +171,15 @@ Data initialized as Backend Dev for the initial project squad.
 
 
 Team update (2026-04-18T14:45:11Z): ISSUE #42 POSTGRES DIRECTION REVIEWED - Data recommends keeping tenant instances on SQLite for the first hosted slice and not using Postgres as a shortcut around single-writer rollout work. Centralized backup is necessary but insufficient for restore safety, per-instance DB users only help as secondary isolation in a Postgres model, and Azure Blob/object storage should hold immutable backup artifacts while live databases stay on block storage. If Postgres is introduced before evidence forces a broader redesign, it belongs in the control plane first, not in every tenant instance.
+
+## 2026-04-18: Issue #42 Backup/Restore Strategy Recommendation
+
+📌 Team update: Data wrote `.squad/decisions/inbox/data-42-backup-restore.md` — Phase 1 tenant Postgres backup/restore recommendation. Two-layer strategy: managed Postgres continuous backup (fleet PITR, ~5 min RPO) plus daily per-tenant `pg_dump` to Blob storage (single-tenant restore, ≤24h RPO, ≤30 min RTO). PITR comes free with managed Postgres — take it, don't build it. Primary restore unit is single tenant database via logical backups; fleet PITR is the disaster-recovery escalation path only. Control plane must track backup catalog + restore log with full audit trail. Tenant lifecycle state machine requires a `restoring` state with connection draining and mandatory pre-restore safety snapshot. Backup verification (weekly automated test-restore) required from Phase 1 launch. Key risks: shared-server PITR is all-or-nothing (can't cherry-pick one tenant), schema version mismatch on restore, and backup frequency sets the RPO floor for single-tenant recovery.
+
+### Learnings
+
+- Phase 1 backup/restore recommendation lives in `.squad/decisions/inbox/data-42-backup-restore.md`.
+- For managed Postgres (Azure Flexible Server), PITR is fleet-scoped — cannot restore a single database without restoring the entire server. Per-tenant logical backups (`pg_dump`) are the actual single-tenant restore mechanism.
+- Pre-restore safety backup is a non-negotiable control-plane requirement — never overwrite a tenant database without first snapshotting current state.
+- Backup catalog and restore log are control-plane schema concerns (tied to #53 control-plane skeleton work).
+- Schema version tracking in backup metadata is essential to prevent restoring a backup into an incompatible forward-migrated database.
