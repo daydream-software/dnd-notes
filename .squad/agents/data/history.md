@@ -227,3 +227,4 @@ This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0
 - Keep `tenantStates` centralized and reuse it for both Zod schemas and SQLite `CHECK` constraints; otherwise the API contract and audit table can silently drift.
 - The control-plane startup path should normalize relative `DATABASE_PATH` values against the app root; otherwise the same env file can create SQLite files in different locations depending on process cwd.
 - Even when HTTP handlers pre-check tenant existence, `TenantRegistry` update helpers should still throw on `changes === 0` so future callers cannot hide no-op writes.
+- Control-plane schema bootstrap should stamp a version/signature (`user_version` + metadata) and fail fast on enum-constraint drift, instead of waiting for a later write to discover stale SQLite CHECK constraints.

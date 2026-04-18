@@ -38,6 +38,12 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.status, 'healthy')
       assert.strictEqual(typeof response.body.uptime, 'number')
       assert.strictEqual(response.body.version, appVersion)
+      assert.strictEqual(response.headers['x-content-type-options'], 'nosniff')
+      assert.strictEqual(response.headers['x-frame-options'], 'DENY')
+      assert.strictEqual(
+        response.headers['referrer-policy'],
+        'strict-origin-when-cross-origin',
+      )
     })
   })
 

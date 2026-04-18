@@ -14,7 +14,7 @@ import type {
 
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
-  adminToken?: string
+  adminToken: string
 }
 
 const require = createRequire(import.meta.url)
@@ -72,13 +72,8 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
   return { error: 'Tenant already exists' }
 }
 
-function createAdminAuthMiddleware(adminToken?: string): express.RequestHandler {
+function createAdminAuthMiddleware(adminToken: string): express.RequestHandler {
   return (request, response, next) => {
-    if (!adminToken) {
-      next()
-      return
-    }
-
     const authorizationHeader = request.header('authorization')
     if (authorizationHeader !== `Bearer ${adminToken}`) {
       response.status(401).json({ error: 'Unauthorized' })
@@ -96,8 +91,15 @@ export function createApp({
   const app = express()
 
   app.disable('x-powered-by')
-  app.use(express.json())
+  app.use((_request, response, next) => {
+    response.setHeader('X-Content-Type-Options', 'nosniff')
+    response.setHeader('X-Frame-Options', 'DENY')
+    response.setHeader('X-XSS-Protection', '1; mode=block')
+    response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
+    next()
+  })
   app.use('/api', createAdminAuthMiddleware(adminToken))
+  app.use('/api', express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json({

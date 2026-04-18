@@ -2,6 +2,8 @@ import Database, { type Database as DatabaseType } from 'better-sqlite3'
 import { tenantStates, type Tenant, type TenantState, type StateTransition } from './types.js'
 
 const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
+const CURRENT_SCHEMA_VERSION = 1
+const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 
 export class TenantRegistry {
   private db: DatabaseType
@@ -9,11 +11,54 @@ export class TenantRegistry {
   constructor(databasePath: string) {
     this.db = new Database(databasePath)
     this.db.pragma('foreign_keys = ON')
+    this.migrateSchema()
+  }
+
+  private migrateSchema(): void {
+    const currentSchemaVersion = this.db.pragma('user_version', {
+      simple: true,
+    }) as number
+
     this.bootstrap()
+
+    if (currentSchemaVersion === 0) {
+      this.setSchemaMetadata(
+        'tenant_state_signature',
+        CURRENT_TENANT_STATE_SIGNATURE,
+      )
+      this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+      return
+    }
+
+    if (currentSchemaVersion !== CURRENT_SCHEMA_VERSION) {
+      throw new Error(
+        `Unsupported control-plane schema version ${currentSchemaVersion}`,
+      )
+    }
+
+    const storedStateSignature = this.getSchemaMetadata('tenant_state_signature')
+    if (!storedStateSignature) {
+      this.setSchemaMetadata(
+        'tenant_state_signature',
+        CURRENT_TENANT_STATE_SIGNATURE,
+      )
+      return
+    }
+
+    if (storedStateSignature !== CURRENT_TENANT_STATE_SIGNATURE) {
+      throw new Error(
+        'Tenant state constraints changed; explicit schema migration required',
+      )
+    }
   }
 
   private bootstrap(): void {
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY,
         slug TEXT UNIQUE NOT NULL,
@@ -220,6 +265,28 @@ export class TenantRegistry {
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(tenantId, fromState, toState, triggeredBy, reason)
+  }
+
+  private getSchemaMetadata(key: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT value
+         FROM schema_metadata
+         WHERE key = ?`,
+      )
+      .get(key) as { value: string } | undefined
+
+    return row?.value ?? null
+  }
+
+  private setSchemaMetadata(key: string, value: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO schema_metadata (key, value)
+         VALUES (?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      )
+      .run(key, value)
   }
 
   private assertTenantUpdated(
