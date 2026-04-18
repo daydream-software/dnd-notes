@@ -5132,3 +5132,269 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 **All four clarifications from #42 "Next points to clarify together" are now resolved.**
 
 The epic's open clarifications list becomes **empty**. Issue #42 is fully scoped for Phase 1 execution.
+
+---
+
+### 2026-04-19: Epic #42 Phase 0 Execution Priority — Wave 1 Decision
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-19  
+**Type:** Execution sequencing
+
+## Decision
+
+**Wave 1 (start now, parallel on worktrees):**
+
+| Issue | Owner | Worktree | Status |
+|-------|-------|----------|--------|
+| **#52** Containerize dnd-notes | Brand | `squad/52-containerize` | 🟢 GO — no blockers |
+| **#53** Control-plane skeleton | Data | `squad/53-control-plane-skeleton` | 🟢 GO — independent |
+
+**Wave 2 (wait — blocked on Wave 1):**
+
+| Issue | Blocked on | Notes |
+|-------|-----------|-------|
+| **#43** Deployment artifacts | #52 | Scope overlap with #52; recommend retitle as CI pipeline intake |
+| **#54** Provision tenant workloads | #52 + #53 | Needs container image + tenant registry |
+| **#55** Rollout choreography | #52 + #53 | Title/scope **stale** — rescope for Postgres, not SQLite |
+
+## Rationale
+
+#52 and #53 are the two load-bearing roots of the entire Phase 0–1 dependency tree. Starting them in parallel on separate worktrees maximizes throughput and keeps developers unblocked. Everything else — CI pipeline, provisioning, rollout — depends on one or both of these deliverables.
+
+## Follow-Up Actions
+
+1. **`.squad/identity/now.md` is misleading** — references "Track A (Data): NoteStore Postgres adapter (5–7 days)" mapped to #46, but #46 was only the structural refactor and is closed. The async Postgres adapter port (better-sqlite3 → node-postgres) has no tracking issue. Update `now.md` to reflect Wave 1.
+
+2. **#55 title is stale** — "Define single-writer rollout rules for SQLite tenant instances on Kubernetes" assumes SQLite constraints; epic pivoted to Postgres. Locked decision #8 (version-skew policy) already covers the rollout model. Retitle to "Define tenant rolling-update and database connection-draining choreography" and rescope for Postgres stateless updates.
+
+3. **#43 needs scope clarification** — currently says "Blocked until hosting/deployment target is selected," but hosting IS decided. Issue is unblocked, but scope overlaps heavily with #52 (which produces container image, runtime contract, k3d proof). Recommend #43 becomes the **CI pipeline issue** — build container image in GitHub Actions, validate manifests, no auto-push to GHCR per locked decision. That gives it clear, non-overlapping scope.
+
+4. **Missing Postgres adapter issue** — The epic Phase 0 plan lists "#46 Migrate note-store backend from SQLite to Postgres," but the actual #46 was only the structural refactor. The async adapter port needs a new issue assigned to Data, tracked under Phase 0. This is a blocker for tenant containers to run against Postgres in production.
+
+## Blockers
+
+None. All platform decisions locked in #42; Wave 1 can start immediately.
+
+---
+
+### 2026-04-19: Brand Phase 0 Slice — Execution Readiness
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-19  
+**Type:** Issue Analysis & Recommendation
+
+## Decision
+
+**Issue #52 — Containerize dnd-notes: ✅ GO** — Start immediately. No blockers.
+
+**Issue #43 — Deployment artifacts: 🟡 Blocked (intentional).** Leave open as placeholder; unblock on hosting decision.
+
+## Scope (Brand-owned Phase 0)
+
+### #52 Deliverables
+1. **Production Dockerfile:** Multi-stage, minimal runtime base, SQLite volume mount ready
+2. **Health/readiness endpoints:** Stubs in `apps/api/src/app.ts` (`GET /healthz`, `GET /readyz`)
+3. **CI container build:** Update `.github/workflows/ci.yml` to build image + validate with API smoke tests (no push to GHCR Phase 0)
+4. **Runtime contract documentation:** Environment variables, health behavior, port binding
+
+### #43 Current Status
+- Do not start yet; scope overlaps with #52 (both produce container, runtime contract, k3d proof)
+- Recommend retitle as CI pipeline intake issue
+- Unblock once hosting target finalized
+
+## Key Decisions
+
+1. **Dockerfile location:** `apps/api/Dockerfile` (monorepo pattern, tenant-scoped)
+2. **Health endpoints:** Separate `/healthz` and `/readyz` (K8s standard)
+3. **Postgres blocking:** Not a blocker; Phase 0 container works with SQLite now
+4. **Parallel work:** Data (schema), Mikey (K8s manifests), Stef (web runtime validation) — no inter-blocking
+
+## Effort & Timeline
+
+- **Estimated:** 1–2 days (Dockerfile + endpoints + CI + doc)
+- **Dependencies:** None on other Wave 1 issues
+- **Acceptance criteria:** Reproducible Dockerfile, health endpoints defined and tested, runtime contract documented, CI validates with API smoke tests
+
+---
+
+### 2026-04-19: Control-Plane Skeleton Architecture — Issue #53
+**Decided by:** Data (Backend Dev)  
+**Date:** 2026-04-19  
+**Type:** Backend Architecture & Sequencing
+
+## Decision
+
+**Issue #53 — Control-plane skeleton: ✅ GO, start immediately** — Independent parallel track with #52.
+
+## Architecture
+
+**Placement:** New monorepo service `apps/control-plane/` (Node.js + Express)
+
+**Database:** Single-replica SQLite in Phase 1
+- Write volume negligible (N tenant lifecycle events/day + daily backup audit)
+- Zero-scaling required; control plane is single-instance
+- Simpler local dev story than Postgres in Phase 0–1
+- Documented upgrade path to Postgres post-Phase-1 (when fleet exceeds 50–100 tenants)
+
+**Tenant Registry Schema:**
+```
+CREATE TABLE tenants (
+  id TEXT PRIMARY KEY,
+  slug TEXT UNIQUE,
+  ownerId TEXT,
+  displayName TEXT,
+  state TEXT,                -- 7-state machine
+  desiredState TEXT,
+  currentImageTag TEXT,
+  desiredImageTag TEXT,
+  postgresDbName TEXT,
+  postgresInstanceId TEXT,
+  lastBackupAt TEXT,
+  lastBackupId TEXT,
+  lastStateTransitionAt TEXT,
+  lastReconcileAt TEXT,
+  reconcileErrorMessage TEXT,
+  createdAt TEXT,
+  updatedAt TEXT,
+  metadata TEXT              -- JSON for extensibility
+);
+```
+
+**7-State Lifecycle:** `provisioning`, `ready`, `maintenance`, `upgrading`, `restoring`, `failed`, `deprovisioned`
+
+**Internal API (thin skeleton):**
+- `POST /internal/tenants` — Create tenant record, request K8s provisioning (idempotent by slug)
+- `GET /internal/tenants` — List all tenants with state filters
+- `GET /internal/tenants/:id` — Fetch tenant record + live K8s state
+- `PATCH /internal/tenants/:id` — Request state transition (validates legal moves)
+- `POST /internal/tenants/:id/backups` — Log completed backup
+- `GET /internal/tenants/:id/backups` — List backup catalog
+
+**Audit Table:** `tenant_state_transitions` — append-only, one row per state transition
+
+## Why Not Shared with Tenant API Database
+
+- Tenant databases are Postgres per-instance; control plane is fleet-wide single database
+- Separate lifecycle: Tenants roll independently; control plane is release-locked with platform
+- Separate concerns: Control plane reads K8s API (not tenant data)
+
+## Sequencing
+
+Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 parallel) builds the skeleton that drives Phase 0. No code dependencies; develop in isolation, integrate in #54 (provisioning orchestrator).
+
+## Effort & Timeline
+
+- **Estimated:** 12–16 hours (Data, Backend Dev)
+- **Dependencies:** None
+- **Unblocks:** #54 provisioning, #55 rolling updates
+
+---
+
+### 2026-04-19: Phase 0 Test-Readiness Analysis — Acceptance Gates & Regression Watch
+**Prepared by:** Chunk (Tester)  
+**Date:** 2026-04-19  
+**Type:** QA Strategy & Validation Planning
+
+## Decision
+
+**Acceptance gates defined for #52, #43, #46 (containerization, Postgres porting, local fallback).**  
+**Regression watch-list identified for Phase 0–1 transition (R1–R7).**  
+**Parallel test infrastructure work planned (T1–T3).**
+
+## Phase 0 Acceptance Gates (Hard Stops)
+
+### Gate 1a: Container image builds and validates
+- ✅ `docker build` succeeds with explicit `NODE_VERSION` ARG
+- ✅ Image is reproducible (same source = same digest)
+- ✅ Image runs in k3d, serves HTTP on configurable port
+- ✅ `HEALTHCHECK` / liveness probe responds within 2 seconds
+
+### Gate 1b: Runtime environment contract documented
+- ✅ All env vars documented (PORT, POSTGRES_URL, TLS, etc.)
+- ✅ Safe defaults for local dev (fallback to SQLite if `POSTGRES_URL` absent)
+- ✅ Health/readiness endpoints at fixed paths (`/healthz`, `/readyz`)
+- ✅ App returns 503 Ready until preconditions met (graceful degradation)
+
+### Gate 1c: Single tenant instance persists data
+- ✅ K8s deployment with PVC mounts single volume
+- ✅ Postgres initializes schema on first run
+- ✅ Web UI loads without CORS errors; API requests succeed (same-origin)
+- ✅ Pod restart does NOT lose notes, campaigns, or share-link metadata
+
+### Gate 2a: Postgres backend is primary
+- ✅ `node-postgres` adapter replaces SQLite in `apps/api/src/note-store.ts`
+- ✅ Schema migrations idempotent, run once on startup
+- ✅ All test suites pass against Postgres (no SQLite-specific mocks)
+- ✅ CI runs tests against `postgres:15` container
+
+### Gate 2b: Local SQLite fallback seamless
+- ✅ `POSTGRES_URL` absent/invalid → fallback to SQLite (not error)
+- ✅ `npm run dev` starts with no config; local notes persist in `apps/api/data/dnd-notes.sqlite`
+- ✅ Switch between Postgres (staging) and SQLite (local) without code changes
+- ✅ Zero fallback errors in local dev logs
+
+### Gate 2c: Schema forward-compatible
+- ✅ Postgres schema includes Phase 1 auth prep (e.g., `users.keycloak_sub`)
+- ✅ Legacy SQLite databases bootstrap new columns via introspection
+- ✅ Rollback from Postgres → SQLite is safe
+
+## Regression Watch-List (Phase 0–1 Transition)
+
+### R1: Pod identity & storage isolation (🔴 Critical)
+- PVC selectors use `tenant-id` label correctly
+- Pod security policy doesn't grant all-to-all PVC access
+- Postgres connection string includes correct database per tenant (no cross-DB queries)
+
+### R2: Graceful shutdown under load (🟡 High)
+- App catches SIGTERM, stops accepting requests (returns 503 on health check)
+- Active Postgres transactions committed or rolled back before exit
+- HTTP server drains existing requests (Node.js `server.close()`)
+
+### R3: Liveness vs. readiness probe semantics (🟡 High)
+- `/healthz` checks process health only (not external dependencies)
+- `/readyz` checks external dependencies (Postgres, schema migrations)
+- K8s `livenessProbe` calls `/healthz`; `readinessProbe` calls `/readyz`
+
+### R4: Connection pool exhaustion (🟡 High)
+- Pool size configurable via env var (default sensible)
+- Pool accounts for concurrent requests + internal overhead
+- Idle connection cleanup tuned
+- Request timeout explicit; slow queries logged
+
+### R5: Schema migration idempotence & rollback (🟡 High)
+- Migrations use `IF NOT EXISTS` or equivalent guards
+- Migrations are one-way (forward only)
+- Schema version tracked (no re-runs)
+- Rollback documented
+
+### R6: Auth state preservation across pod restart (🟡 Medium)
+- Session tokens stored in DB or signed JWT (not in-memory)
+- Pod restart during active session does NOT require re-login
+- Logout atomically invalidates tokens
+
+### R7: Postgres schema changes don't break app startup (🟡 Medium)
+- Migrations run before app starts (init container or startup hook)
+- App code defensive: assume columns may not exist, add if missing
+- Backward-compatibility migrations exist for ≥1 historical schema version
+
+## Parallel Test Infrastructure (T1–T3)
+
+1. **T1: Containerized test suite** — `docker-compose.test.yml` with `npm run test`, postgres test DB
+2. **T2: K8s manifest validation** — Kustomize/Helm templates, kubeval/kube-score lint
+3. **T3: Health/readiness probe spec** — Document HTTP semantics, integration tests
+
+## Sign-Off Checklist
+
+**Before Phase 0 merge:**
+-  All acceptance gates 1a–1c pass in k3d
+- ✅ All acceptance gates 2a–2c pass (Postgres + local SQLite)
+- ✅ Root validation (lint, test, build) passes
+- ✅ API tests pass in CI against Postgres
+- ✅ Runtime contract documented
+
+**Before Phase 1 starts:**
+- ✅ Regression watch-list R1–R7 assessed
+- ✅ Pod lifecycle stress (R1) has test harness
+- ✅ Connection pool sized with load test (R4)
+- ✅ Migration safety (R5) verified
+- ✅ Auth persistence (R6) tested
+

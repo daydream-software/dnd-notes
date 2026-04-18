@@ -519,3 +519,6 @@ Locked three critical Phase 0–1 clarifications into GitHub issue #42 body and 
 **Epic status:** Issue #42 now has zero open clarifications. All architectural questions are resolved and documented. Child issues (#53–#57, #40) can reference a stable public contract.
 
 **Key lesson:** Locking multiple clarifications in sequence (done 2026-04-19 by Mikey over multiple sync cycles) is faster than individual decision threads. The three-item lock (state machine, version-skew, auth shape) at 2026-04-19T15:42 unblocked the final Keycloak decision at 2026-04-19T16:00. Consolidating the full team's input into one lead recommendation + approval cycle accelerates Phase 1 execution.
+
+---
+
