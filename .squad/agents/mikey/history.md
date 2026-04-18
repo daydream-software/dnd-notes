@@ -15,6 +15,7 @@ Mikey initialized as Lead for the initial project squad.
 📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
 📌 Team update (2026-04-11T19:27:38Z): GitHub Actions in all workflows pinned to commit SHAs; decision merged to team decisions log — Brand
 📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
+📌 Team update (2026-04-18T03:15:00Z): Issue #42 platform planning — consolidated Brand's dependency graph into lead execution recommendation with clear NOW/LATER decision boundaries and 4-phase roadmap. Decision: `.squad/decisions/inbox/mikey-issue-42-planning.md` — Mikey
 
 ## Learnings
 
@@ -386,3 +387,32 @@ Decision merged to `.squad/decisions.md`. Awaiting Brand background agent start.
 - **Decision point triage:** Data's 4 blocking questions were the right forcing function. Without explicit answers to auth strategy, versioning, backup ownership, and Keycloak timing, no child issue can be confidently scoped.
 - **Phase overlap reduces idle time:** Design tasks for Phase N+1 can start during Phase N implementation when outputs are interfaces/contracts rather than code. State machine, API contract, and adapter interface drafts are all non-blocking on Phase 0 code.
 - **Key file paths:** Epic decisions consolidated in `.squad/decisions.md` lines 3492–4180. Sub-issues: #52 (containerize), #43 (artifacts), #39 (WAL), #53 (control plane), #54 (provisioning), #55 (rollout), #56 (OIDC), #40 (restore), #57 (fleet status).
+
+## 2026-04-18: Issue #42 Platform Planning — Execution Recommendation
+
+
+**Action Taken:**
+1. Reviewed Brand's dependency graph, existing decisions, and issue #42 current state
+2. Consolidated planning into actionable lead recommendation with three clear answers:
+   - **Next planning slice:** Launch Phase 0 now (#52 Dockerfile + #43 manifests)
+   - **Decision timing:** 5 decisions NOW (registry, ingress, DNS/TLS, secrets, single-writer), 2 LATER (Keycloak ops, versioning)
+   - **Execution order:** Phase 0 (container + PVC proof) → Phase 1 (control plane + isolation) → Phase 2 (auth) → Phase 3 (ops maturity)
+
+**Key Decisions Made:**
+- **Image registry:** GitHub Packages (OIDC-ready, zero setup)
+- **Ingress:** ingress-nginx (boring, AKS default, cert-manager proven)
+- **DNS/TLS:** Wildcard DNS + cert-manager DNS-01
+- **Secrets:** K8s Secrets for Phase 0–1 (document gap, upgrade Phase 2)
+- **Single-writer:** Control-plane validation + tenant app readiness check
+
+**Phase Boundaries:**
+- Phase 0 gate: Rolling update proven on k3d without PVC data loss
+- Phase 1 gate: Two isolated tenants, data isolation verified
+- Phase 2 gate: Keycloak auth works across multiple tenants
+- Phase 3 gate: Backup/restore measured, fleet dashboard exists
+
+**Verdict:** GO. Dependency graph is clean, gates are measurable, sequencing is safe. Not a spike — measured build with exit points at each gate.
+
+**Next:** FFMikha approves 5 NOW decisions → Brand starts #52 → Data + Brand design state machine (Phase 0→1 pre-work).
+
+**Artifact:** `.squad/decisions/inbox/mikey-issue-42-planning.md` (updated from earlier version)

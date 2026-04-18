@@ -4177,3 +4177,587 @@ The platform direction is already set at the epic level, but several cross-cutti
 - The epic remains the canonical platform tracker.
 - Future child issues should either resolve or explicitly narrow one of these clarification points.
 - The team has a visible checklist of contracts and operational assumptions to settle before broad platform execution.
+# Issue #42 Multi-Tenant K8s Platform — Dependency Graph & Sequencing
+**Brand (Platform Dev)**  
+**Date:** 2026-04-18T03:00:00Z  
+**For:** FFMikha, Mikey — Platform planning continuation
+
+---
+
+## Executive Summary
+
+Issue #42 is now canonical — not a spike, but the real platform plan. The team has already made the core architectural decisions (Kubernetes-first, per-tenant containers, managed K8s, thin control plane, Keycloak OIDC). This document captures the concrete dependency graph and sequencing risks that determine go/no-go points, phase boundaries, and where parallel work becomes safe.
+
+**Key insight:** Phase boundaries are locked by *data plane (SQLite-backed single-writer discipline) and control-plane state machine contract*, not feature-count. Phase 0 → 1 gate: single-writer rollout discipline proven on real K8s. Phase 1 → 2 gate: control-plane DB stabilized for tenant mutations. Phase 2 → 3 gate: Keycloak operationalized locally and in hosted environment.
+
+---
+
+## Concrete Dependency Graph
+
+### Phase 0: Containerize + Single-Instance K8s Deploy
+
+**Goal:** Prove the app runs in a container on K8s with zero-downtime rolling updates.
+
+**Issues:** #52 (Dockerfile + container build), #43 (deployment artifacts — K8s manifests)
+
+**Critical Path:**
+1. **#52 — Dockerfile & container build (Brand)**
+   - Input: current Express + React monorepo
+   - Output: single `Dockerfile` that builds API + web in one image per tenant
+   - Acceptance: `docker build` succeeds, image runs locally, `npm run build` and `npm run test` work in container
+   - Risk: **multi-stage build order** — web build emits `/dist/`, API must serve it at `/api` without prefix conflict
+   - Dependency: None (can start immediately)
+   - Time: 2–3 days (straightforward; test coverage is pre-existing)
+
+2. **#43 — K8s manifests for single-tenant deploy (Brand)**
+   - Input: Dockerfile from #52
+   - Output: k3d development manifests + managed AKS reference manifests
+   - Includes: Deployment/Pod, Service, PVC, basic Ingress (no TLS first)
+   - Acceptance: `kubectl apply` works; app reaches readiness in k3d
+   - Risk: **PVC attachment semantics** — k3d vs. AKS divergence on block storage (local vs. managed disk)
+   - Dependency: #52 (Dockerfile exists)
+   - Time: 3–4 days
+
+3. **New task: local k3d dev loop & testing (Brand)**
+   - Input: #52 + #43
+   - Output: Developer guide for `k3d cluster create` + manifest application; parity checklist (k3d ↔ AKS behavior)
+   - Acceptance: One developer can `k3d cluster create`, `kubectl apply`, see running tenant, run tests
+   - Risk: **k3d node CPU/memory limits** — burstable workloads may hide real saturation; baseline CPU profile needed early
+   - Dependency: #52, #43
+   - Time: 2 days + embedded into #52/#43
+
+4. **New task: CI container build lane (Brand)**
+   - Input: #52 (Dockerfile)
+   - Output: GitHub Actions workflow for `docker build`, `docker push` on tagged releases
+   - Acceptance: PR with Dockerfile triggers `docker build`; main branch pushes to image registry
+   - Risk: **image registry choice** — GitHub Packages vs. Docker Hub vs. private ACR; currently no registry decision
+   - Dependency: #52, organization/budget decision on registry
+   - Time: 1 day (once registry is picked)
+
+**Phase 0 Gate:**
+- Rolling update works on k3d (old pod stops → data persists on PVC → new pod starts → readiness achieved)
+- No mid-request connection loss during rolling update
+- Local dev loop repeatable from cold cluster
+- Dockerfile is maintainable (not a one-off)
+
+---
+
+### Phase 1: Control Plane Skeleton + Second Tenant Instance
+
+**Goal:** Programmatically create, list, and delete tenant instances from the control plane.
+
+**Issues:** #53 (control-plane skeleton), #54 (provisioning + PVC lifecycle)
+
+**Critical Path:**
+
+1. **Pre-work: Control-plane state machine & tenant contract (Data + Brand)**
+   - **Not a GitHub issue yet** — but must be decided before #53 coding starts
+   - Output: documented state machine + API contract
+   - Decision points:
+     - Tenant states: `Creating` → `Ready` → `Paused` → `Scaling` → `Upgrading` → `Deleting` → `Archived`?
+     - Control-plane API surface: `POST /tenants`, `GET /tenants/{id}`, `PATCH /tenants/{id}` (desired version, labels, pause state)?
+     - Idempotency semantics: Can `POST /tenants` be retried? How does control plane detect stale requests?
+     - Scope: Does control plane manage DNS, TLS certs, or is ingress a post-Phase-1 concern?
+   - Risk: **Misalignment between control-plane DB schema and K8s resource ownership** — who is source of truth for tenant version, status, labels?
+   - Dependency: None (decision task, can happen in parallel with Phase 0)
+   - Time: 2–3 days of joint design work (Mikey + Data + Brand in a doc)
+
+2. **#53 — Control-plane skeleton (Brand + Data)**
+   - Input: State machine decision (above)
+   - Output: Control-plane app (separate process from tenant instance)
+   - Includes:
+     - SQLite database schema: `tenants` table (id, name, status, desired_version, created_at, updated_at)
+     - Express app with `/api/v1/tenants` CRUD endpoints
+     - Worker loop that watches K8s for actual pod/PVC status and updates control-plane DB
+     - Tenant registry (list, lookup, health check)
+     - Bootstrap script that creates Kubernetes namespace, service account, RBAC rules for control plane to manipulate tenant resources
+   - Acceptance:
+     - `POST /api/v1/tenants` returns 201 with tenant ID
+     - Worker reconciles K8s Deployment/PVC creation
+     - `GET /api/v1/tenants` lists all with status
+   - Risk: **K8s client library choice** — official client (@kubernetes/client-node) vs. wrapper; error handling in reconciliation loop
+   - Dependency: State machine decision
+   - Time: 4–5 days (CRUD + reconciliation loop)
+
+3. **#54 — Tenant provisioning & PVC lifecycle (Brand)**
+   - Input: #53 (control-plane DB + K8s reconciliation exists)
+   - Output: Worker extends provisioning logic; PVC creation + data seeding
+   - Includes:
+     - PVC creation for second tenant (can be same cluster as Phase 0 single-tenant or a dedicated namespace)
+     - Dockerfile + image tag strategy for per-tenant containers (Tag = `tenant-{tenantId}:{version}`?)
+     - K8s Deployment creation for second tenant, pointing to its PVC
+     - Proof that multiple pods can coexist without clobbering each other
+   - Acceptance:
+     - Control plane creates tenant 1 (Phase 0's single-instance tenant)
+     - Control plane creates tenant 2 from API call
+     - Both tenants have separate PVCs, separate database files
+     - Data isolation confirmed (campaigns in tenant 1 ≠ campaigns in tenant 2)
+   - Risk: **Single-writer enforcement** — both tenants reading from Phase 0 single-tenant code; if we run multiple pods on same tenant PVC by accident, SQLite corruption will *not* appear until data loss happens
+   - Dependency: #53
+   - Time: 3–4 days
+
+**Phase 1 Gate:**
+- Two isolated tenant instances coexist in same cluster with separate PVCs
+- Control plane creates tenant instances programmatically
+- Each tenant's SQLite is writable only to its pod (no stale lock files, no WAL contention)
+- Data isolation verified (no cross-tenant read leakage)
+- Backup of one tenant's PVC does not interfere with another
+
+---
+
+### Phase 2: Auth Integration (Keycloak OIDC)
+
+**Goal:** Replace app-issued bearer tokens with Keycloak OIDC. One note-takers realm for all customers.
+
+**Issues:** #56 (Keycloak integration), plus #55 (single-writer rollout rules) as a dependency
+
+**Critical Path:**
+
+1. **Pre-work: Auth migration strategy (Data)**
+   - **Not a GitHub issue yet** — but must be designed before #56 coding starts
+   - Output: Documented migration path
+   - Decision points:
+     - Coexistence window: Can tokens from old app and new Keycloak be valid at the same time?
+     - Token validation in tenant app: Validate Keycloak JWT locally (JWKS from Keycloak OIDC discovery) or call back to Keycloak each request?
+     - Guest claim flow from issue #20: Does a guest claiming a membership link to Keycloak identity at claim time, or stay app-managed until they explicitly sign up?
+     - Admin realm separation: Do platform admins (Brand, Data, Mikey) get separate Keycloak realm or shared realm with `admin` role?
+   - Dependency: None
+   - Time: 1–2 days of design
+
+2. **#55 — Single-writer rollout choreography (Data + Brand)**
+   - Input: Phase 1 complete (multiple tenants exist)
+   - Output: Documented rollout strategy + control-plane logic for staged tenant updates
+   - Includes:
+     - Tenant upgrade workflow: mark tenant maintenance/read-only, wait for in-flight requests to finish, checkpoint/backup, stop pod, start new pod, run migrations, clear maintenance mode
+     - Concurrency limits: Can we upgrade multiple tenants in parallel, or must upgrades be serial?
+     - Downtime: Zero planned downtime for reads (new pod should be ready before old pod stops); acceptable brief write unavailability during maintenance window?
+     - Deployment strategy: Can we use Kubernetes `strategy: RollingUpdate`, or must updates be controlled by control plane (Deployment paused, manual pod delete)?
+   - Acceptance: Tenant is upgraded from version N to N+1 with zero loss of PVC state; in-flight writes either complete or fail gracefully
+   - Risk: **Rollout coordination** — if control plane crashes mid-rollout, is the tenant left in maintenance mode forever? Need idempotent recovery.
+   - Dependency: Phase 1 (tenants exist), auth migration strategy
+   - Time: 3–4 days
+
+3. **#56 — Keycloak OIDC integration (Data + Brand)**
+   - Input: Auth migration strategy, #55 (rollout rules defined)
+   - Output: Keycloak instance + tenant app token validation
+   - Includes:
+     - Docker Compose or K8s StatefulSet for Keycloak (with persistent Postgres)
+     - Two realms: `admin` (for Brand/Data/Mikey) + `note-takers` (for customer users)
+     - OIDC client configuration per tenant (or one client with audience per tenant?)
+     - Middleware in tenant app to validate Keycloak JWT and extract tenant claims
+     - Login flow: Tenant app redirects to Keycloak `/auth/realms/{realm}/protocol/openid-connect/auth`
+     - Tenant app callback: Exchange auth code for token, validate JWT, store in sessionStorage
+     - Guest claim flow: Guest linking existing membership to Keycloak identity (issue #20 integration)
+   - Acceptance:
+     - User logs in to tenant via Keycloak
+     - User sees their campaigns + memberships (auth layer delegates to membership table)
+     - Token expires and user must re-auth
+     - Admin can view all tenants from admin realm
+   - Risk: **Token validation latency** — JWKS fetching on first request; consider caching JWKS locally
+   - Dependency: Phase 1, auth migration strategy, #55 partially (enough to understand rollout impact)
+   - Time: 4–5 days
+
+**Phase 2 Gate:**
+- One user can sign in via Keycloak to multiple tenant instances (membership table controls access)
+- Keycloak JWT validated locally by tenant app (no per-request callback to Keycloak)
+- Admin realm separates platform operators from customer users
+- Token lifecycle understood (expiry, refresh, revocation)
+- Guest claim flow (issue #20) maps cleanly to Keycloak identity
+
+---
+
+### Phase 3: Operational Maturity
+
+**Goal:** Backup/restore, fleet status page, tenant lifecycle observability, measured data on performance.
+
+**Issues:** #39 (WAL mode), #40 (restore safety), #57 (fleet status), plus new observability issues
+
+**Critical Path:**
+
+1. **#39 — SQLite WAL mode evaluation (Data)**
+   - Input: Phase 1 (at least two tenants with real load)
+   - Output: Measured data on WAL benefits and risks
+   - Includes:
+     - Enable WAL mode on control-plane + tenant DBs in production slice
+     - Measure: write concurrency, checkpoint frequency, restart time with WAL recovery
+     - Measure: WAL file growth, disk I/O patterns, PVC utilization
+     - Decision: Is WAL worth the operational overhead (larger checkpoint windows, more I/O), or is single-writer sufficient?
+   - Acceptance: Clear recommendation on whether WAL is production-safe for dnd-notes workload
+   - Risk: **False confidence** — WAL may improve perceived concurrency without fixing the fundamental single-writer constraint
+   - Dependency: Phase 1+2 (real traffic on tenants)
+   - Time: 2 weeks of measurement + 2 days analysis
+
+2. **#40 — Admin restore safety (Data + Brand)**
+   - Input: Phase 1 (PVCs exist), #39 (WAL strategy known)
+   - Output: Restore workflow + active-session protection
+   - Includes:
+     - Backup creation: Automated CronJob that snapshots tenant PVCs to cold storage (S3, blob store)
+     - Restore flow: Control plane can request restore of tenant to point-in-time backup
+     - Session protection: Restore-in-progress stops accepting new writes, existing sessions are invalidated, restore completes, tenant is ready
+     - Test: Full backup/restore cycle validated with measured RTO/RPO per tenant size
+   - Acceptance: Restore of a 10MB tenant SQLite takes <1m; users are notified of restore window
+   - Risk: **Concurrent writes during backup** — SQLite WAL may complicate snapshot consistency
+   - Dependency: Phase 1, #39 (to inform restore strategy)
+   - Time: 3–4 days for workflow; 1 week for validation
+
+3. **#57 — Fleet status surface (Brand + Chunk)**
+   - Input: Phase 1 (control plane API exists), phase 2 (Keycloak separates admins)
+   - Output: Internal fleet status page
+   - Includes:
+     - Control-plane API endpoint: `GET /api/v1/admin/fleet/status` returns tenants + pod readiness + PVC usage
+     - Web UI: Internal admin dashboard showing tenant list, current version, last upgrade time, PVC size, last backup age
+     - Stretch goal: Customer-facing status page (static HTML or simple hosted page)
+   - Acceptance: Brand can see all tenants, their health, and recent events in one page
+   - Risk: **Stale data** — status dashboard shows last-known state; if K8s is partitioned, status is wrong
+   - Dependency: Phase 1+2 (control plane + auth)
+   - Time: 3–5 days (internal dashboard); 2 days (public status)
+
+**Phase 3 Gate:**
+- Backup age, restore time, and uptime are measured for at least one production tenant
+- Fleet visibility exists (admin dashboard)
+- Restore workflow is tested and documented for ops team
+
+---
+
+## Cross-Cutting Risks & Decision Points
+
+### 1. **Local K8s Dev Loop Parity**
+- **Risk:** k3d behavior ≠ AKS behavior on storage, networking, ingress
+- **Mitigation:** Early parity matrix (Phase 0); test PVC behavior in both environments before Phase 1
+- **Decision needed:** Accept k3d limitations (no multi-node, limited storage options) and test AKS separately, or require full parity?
+
+### 2. **Single-Writer Enforcement**
+- **Risk:** Multiple pods on same tenant PVC can corrupt SQLite without any visible warning until data loss
+- **Mitigation:** 
+  - #54 must include a "single pod per tenant PVC" validation test
+  - K8s admission webhook or control-plane validation that rejects Deployment with >1 replica for a tenant
+- **Decision needed:** Who enforces the constraint — K8s RBAC + webhook, or control-plane business logic?
+
+### 3. **Image Registry & Build Pipeline**
+- **Risk:** No image registry chosen yet; Phase 0 Dockerfile is aimless without a registry
+- **Decision needed:** Docker Hub, GitHub Packages, Azure ACR, or private registry?
+- **Impact:** Phase 0 CI + Phase 1 deployment
+- **Recommended:** Start with GitHub Packages (free for public, works with existing OIDC)
+
+### 4. **Keycloak Operational Load**
+- **Risk:** Keycloak + Postgres add operational weight; local dev needs lightweight Keycloak
+- **Mitigation:**
+  - Phase 0–1: Use fake JWT for testing (issue-signed bearer tokens)
+  - Phase 2 local dev: Lightweight Keycloak (docker-compose with realm import from JSON)
+  - Phase 2 hosted: Keycloak StatefulSet + Postgres (separate from tenant app)
+- **Decision needed:** Can Keycloak share a Postgres with the control plane, or must it be separate?
+
+### 5. **Secret Management**
+- **Risk:** API keys, database passwords, TLS certs need secure storage
+- **Mitigation:**
+  - Phase 0–1: K8s Secrets (built-in; not production-hardened)
+  - Phase 2+: Consider Sealed Secrets or HashiCorp Vault
+- **Decision needed:** Is K8s Secrets acceptable for MVP, or start with Sealed Secrets now?
+
+### 6. **Ingress & TLS**
+- **Risk:** Ingress controller, wildcard DNS, cert-manager add configuration complexity
+- **Mitigation:**
+  - Phase 0: No ingress (localhost port-forward in k3d, direct pod IP in AKS)
+  - Phase 1: Basic ingress without TLS (HTTP only, for testing)
+  - Phase 2–3: Cert-manager + Let's Encrypt for wildcard DNS
+- **Decision needed:** Which ingress controller (traefik built-in k3s, nginx, others)? Wildcard or per-tenant certs?
+
+### 7. **Versioning & Version Skew**
+- **Risk:** Control plane, tenant app, and Keycloak on different versions; compatibility matrix explodes
+- **Mitigation:**
+  - Phase 0–1: Single release train (one tag, all components same version)
+  - Phase 2: Accept short-lived skew during rollouts (old pod serving requests while new pod starts)
+  - Phase 3: Document compatibility matrix (control plane v2.5 supports tenant app v2.3–v2.5)
+- **Decision needed:** Is one-version constraint (all control plane + all tenants = same version) acceptable for MVP, or allow multi-version from day 1?
+
+---
+
+## Recommended Sequencing for Mikey & FFMikha
+
+### Immediate (Next 1–2 weeks)
+1. **Decide:** Image registry choice (GitHub Packages recommended)
+2. **Decide:** Keycloak operational model (shared Postgres or separate?)
+3. **Decide:** Secret backend for Phase 0 (K8s Secrets acceptable?)
+4. **Decide:** Ingress controller choice + wildcard DNS strategy
+5. **Assign:** #52 (Dockerfile) to Brand — can start immediately
+6. **Assign:** State machine design (pre-#53) to Data + Brand — 2 days, inform #53 scope
+
+### Phase 0 (Weeks 3–5)
+- Brand: #52 (Dockerfile) + #43 (K8s manifests) + CI container build lane
+- Parallel: Brand + Data design state machine, tenant contract (pre-#53)
+- Gate: Single-instance rolling update proven on k3d + AKS parity checklist complete
+
+### Phase 1 (Weeks 6–9)
+- Brand + Data: #53 (control-plane skeleton) + #54 (provisioning + PVC)
+- Parallel: Stef + Brand investigate #55 single-writer choreography
+- Gate: Two isolated tenants, data isolation verified, backup isolation verified
+
+### Phase 2 (Weeks 10–13)
+- Data + Brand: Auth migration strategy, #56 (Keycloak integration)
+- Parallel: Data + Brand validate #55 (rollout rules) against real Keycloak auth
+- Gate: One user can auth to multiple tenants; Keycloak JWT validated locally
+
+### Phase 3 (Weeks 14+)
+- Data: #39 (WAL) + #40 (restore), measured backup/restore cycles
+- Brand: #57 (fleet status), internal admin dashboard
+- Chunk: Runbook for ops (backup, restore, emergency recovery)
+
+---
+
+## What's Not in This Plan (Deferred)
+
+- **Multi-cluster federation** (Phase 3+)
+- **Advanced deployment patterns** (canary, blue-green) — Phase 3+
+- **Cost controls & resource quotas** — Phase 3+
+- **Per-tenant Keycloak realms** — explicitly out of scope (shared realm sufficient)
+- **Custom Kubernetes operator** — explicitly out of scope (control plane via API)
+- **High-availability control plane** — Phase 3 (single control plane acceptable Phase 0–2)
+- **Distributed tracing / APM** — Phase 3+ (logs + basic metrics first)
+
+---
+
+## Handoff to Mikey & FFMikha
+
+This document captures:
+1. ✅ The concrete dependency graph (which issues unblock which)
+2. ✅ The phase boundaries (gates based on data plane + control plane maturity)
+3. ✅ The critical decision points (7 cross-cutting risks needing team input)
+4. ✅ The recommended sequencing (4-phase roadmap with week estimates)
+
+**Next steps:**
+- Review + approve recommended sequencing
+- Decide on the 7 cross-cutting questions (registry, Keycloak ops, secrets, ingress, versioning, etc.)
+- Update issue #52 description to clarify Phase 0 scope (Dockerfile = full API + web stack)
+- Spin up #53 and #54 with state machine documentation as prerequisite
+- Track Phase 0 → 1 gate in epic acceptance criteria
+
+The platform is now actionable — not a spike, but a measured march toward real multi-tenant operations.
+
+# Issue #42 Planning — Lead Execution Recommendation
+
+**By:** Mikey (Lead)  
+**Date:** 2026-04-18T03:15:00Z (updated from earlier version)  
+**Type:** Epic Planning & Sequencing Decision  
+**Context:** Brand delivered concrete dependency graph + phase gates. Consolidating planning into actionable execution order with clear NOW vs LATER decision boundaries.
+
+---
+
+## Status Assessment
+
+Brand's dependency graph (`.squad/decisions/inbox/brand-issue-42-platform.md`) is the strongest artifact yet: concrete phase gates, 7 cross-cutting risks, measured time estimates, clear blocking relationships.
+
+**What's next:** Turn Brand's sequencing into a lead recommendation with three clear answers:
+1. Next planning slice
+2. Decision now vs decision later
+3. Execution order from here
+
+All 9 sub-issues are open. Phase 0 can start immediately once 5 cross-cutting decisions are locked.
+
+---
+
+## Part 1: Next Planning Slice
+
+**Launch Phase 0 now.**
+
+- **#52 (Dockerfile)** — Brand can start immediately. Zero blockers.
+- **#43 (K8s manifests)** — Depends on #52, but Brand can draft in parallel.
+- **CI container build** — 1 day after image registry decision lands.
+
+Phase 0 gate: one tenant rolls from old pod → new pod without losing PVC state. That's the anchor proof for everything else.
+
+---
+
+## Part 2: Decision Now vs. Decision Later
+
+Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 code starts*. Two can defer to Phase 1.
+
+### ✅ Decide NOW (before Phase 0 coding)
+
+**1. Image registry** (impacts #52 CI + #43 manifests)
+- **Recommendation:** GitHub Packages (Container Registry)
+- **Why:** Free for public repos, OIDC-ready, zero external account setup, works with existing GitHub Actions.
+- **Fallback:** Docker Hub if multi-arch needed (not needed Phase 0).
+
+**2. Ingress controller** (impacts #43 + Phase 1 provisioning)
+- **Recommendation:** ingress-nginx
+- **Why:** Boring, well-documented, managed AKS default, works identically in k3d and AKS, cert-manager integration proven.
+- **Not traefik:** k3d ships it, but it's not the AKS default — creates parity gap.
+
+**3. Wildcard DNS + TLS** (impacts Phase 1 tenant contract)
+- **Recommendation:** Wildcard DNS (`*.dnd-notes.example.com`) + cert-manager with DNS-01 (Let's Encrypt)
+- **Why:** Opaque subdomains already decided. Wildcard cert = one TLS secret for all tenants, no per-tenant cert churn.
+- **Defer:** DNS provider choice (Azure DNS, Cloudflare). Phase 0 uses localhost port-forward.
+
+**4. Secret backend** (impacts tenant env var management)
+- **Recommendation:** Plain K8s Secrets for Phase 0–1, document the gap.
+- **Why:** Sealed Secrets/Vault add weight before platform is proven. K8s Secrets are fast path; upgrade in Phase 2 if needed.
+- **Note:** Document in decisions that this is a known MVP shortcut, not production-hardened.
+
+**5. Single-writer enforcement** (impacts #54 provisioning + #55 rollout)
+- **Recommendation:** Control-plane validation (not K8s webhook)
+- **Why:** Webhooks are complex to deploy/test locally. Control plane already owns tenant lifecycle — enforce `replicas: 1` at provisioning, reject manual scale-up.
+- **Safety:** Add readiness check in tenant app that fails if multiple pods see same PVC (detects multi-writer before data loss).
+
+### 🟡 Decide LATER (Phase 1 handoff, no Phase 0 blocker)
+
+**6. Keycloak operational model** (Phase 2)
+- **Question:** Shared Postgres with control plane, or separate?
+- **Lean toward:** Separate Postgres. Keycloak schema churn shouldn't risk control-plane DB. Marginal cost (one more StatefulSet).
+
+**7. Versioning policy** (Phase 1+)
+- **Question:** One release train (all same version), or N/N-1 skew?
+- **Lean toward:** One release train for Phase 0–2, measure rollout time in Phase 2, revisit N/N-1 only if rollout windows become painful.
+
+---
+
+## Part 3: Execution Order
+
+### Phase 0: Prove Container + PVC Rollout (Weeks 1–3)
+
+**Assignee:** Brand  
+**Dependencies:** Image registry, ingress, secret backend decisions (NOW)
+
+**Deliverables:**
+- #52: Dockerfile (multi-stage, API + web, single image)
+- #43: K8s manifests (Deployment, Service, PVC, Ingress placeholder)
+- CI: GitHub Actions workflow for `docker build` + `docker push` to GitHub Packages
+- Local dev: k3d setup guide + parity checklist (k3d ↔ AKS)
+
+**Gate:**
+- ✅ Rolling update works on k3d (old pod → new pod → readiness → data persists)
+- ✅ PVC survives pod deletion
+- ✅ No mid-request 500s during rolling update
+- ✅ Dockerfile is maintainable
+
+**Scope:** No auth, no control plane, no second tenant. Just: "Can we roll a pod without losing SQLite state?"
+
+---
+
+### Phase 1: Control Plane + Second Tenant (Weeks 4–7)
+
+**Assignees:** Brand + Data  
+**Dependencies:** Phase 0 gate, state machine design (pre-work)
+
+**Pre-work (parallel with Phase 0 tail):**
+- Data + Brand: Control-plane state machine + tenant contract (2–3 days)
+  - States: `Creating` → `Ready` → `Paused` → `Upgrading` → `Deleting`
+  - API: `POST /tenants`, `GET /tenants`, `PATCH /tenants/:id`
+  - Idempotency: retry semantics for `POST /tenants`
+  - Scope: DNS/TLS wiring in Phase 1 or defer to Phase 2?
+
+**Deliverables:**
+- #53: Control-plane skeleton (SQLite DB, CRUD API, K8s reconciliation worker)
+- #54: Tenant provisioning (second tenant, separate PVC, data isolation)
+- #55: Single-writer rollout rules (choreography for tenant upgrades)
+
+**Gate:**
+- ✅ Two tenants coexist, separate PVCs
+- ✅ Control plane creates tenants via API
+- ✅ Each tenant SQLite writable only to its pod
+- ✅ Data isolation verified (tenant 1 campaigns ≠ tenant 2 campaigns)
+- ✅ Backup isolation verified
+
+**Scope:** No auth. Just: "Can control plane manage multiple isolated tenant lifecycles?"
+
+---
+
+### Phase 2: Auth Integration (Weeks 8–11)
+
+**Assignees:** Data + Brand  
+**Dependencies:** Phase 1 gate, auth migration strategy (pre-work)
+
+**Pre-work (parallel with Phase 1 tail):**
+- Data: Auth migration strategy (1–2 days)
+  - Coexistence window: old tokens + Keycloak tokens both valid?
+  - Validation: local JWKS or per-request callback?
+  - Guest claim flow (issue #20): when does guest link to Keycloak?
+  - Admin realm: separate for platform operators?
+
+**Deliverables:**
+- #56: Keycloak OIDC integration (Keycloak instance + tenant JWT validation)
+- Keycloak Postgres decision finalized
+
+**Gate:**
+- ✅ One user signs in via Keycloak to multiple tenants
+- ✅ JWT validated locally (no per-request callback)
+- ✅ Admin realm separates operators from customers
+- ✅ Token lifecycle understood (expiry, refresh, revocation)
+- ✅ Guest claim flow maps to Keycloak identity
+
+**Scope:** "Can auth scale across tenants without per-tenant identity plumbing?"
+
+---
+
+### Phase 3: Operational Maturity (Weeks 12+)
+
+**Assignees:** Data (WAL + restore), Brand (fleet status), Chunk (runbook)  
+**Dependencies:** Phase 2 gate
+
+**Deliverables:**
+- #39: SQLite WAL evaluation (measured data)
+- #40: Admin restore safety (backup/restore workflow)
+- #57: Fleet status surface (admin dashboard)
+- Runbook: backup, restore, emergency recovery (Chunk)
+
+**Gate:**
+- ✅ Backup age, restore time, uptime measured for ≥1 prod tenant
+- ✅ Fleet visibility (admin dashboard)
+- ✅ Restore workflow tested + documented
+
+**Scope:** "Can we operate without firefighting every incident?"
+
+---
+
+---
+
+## Critical Risks (from Brand's analysis)
+
+1. **k3d ↔ AKS parity gap** — PVC, storage classes, node resources may diverge.  
+   Mitigation: parity checklist Phase 0, test both early.
+
+2. **Single-writer enforcement** — Multi-pod-on-same-PVC corrupts SQLite silently.  
+   Mitigation: control-plane validation + readiness check in tenant app.
+
+3. **Keycloak operational load** — Keycloak + Postgres add weight.  
+   Mitigation: docker-compose for local dev, don't block Phase 0 on auth.
+
+4. **Ingress + TLS complexity** — cert-manager, wildcard DNS, LB wiring.  
+   Mitigation: Phase 0 skips ingress (localhost port-forward), Phase 1 HTTP only, TLS Phase 2.
+
+---
+
+## What's Explicitly Out (No Scope Creep)
+
+- Multi-cluster federation (deferred)
+- Blue-green/canary deployments (deferred)
+- Per-tenant Keycloak realms (rejected — shared realm sufficient)
+- Custom K8s operator (control plane via API enough)
+- HA control plane (single acceptable Phase 0–2)
+- Cost controls / resource quotas (Phase 3+)
+- Distributed tracing / APM (Phase 3+)
+
+---
+
+---
+
+## Immediate Actions for FFMikha
+
+1. **Approve 5 NOW decisions** (registry, ingress, DNS/TLS, secrets, single-writer)
+2. **Assign #52 to Brand** — can start immediately
+3. **Spin up state machine pre-work** — Data + Brand, 2 days, blocks #53
+4. **Update issue #42 gates** — make epic acceptance criteria concrete
+
+---
+
+## Lead Recommendation
+
+**GO.** Dependency graph is clean, gates are measurable, sequencing is safe.
+
+- Phase 0 proves hardest risk (PVC + rolling update)
+- Phase 1 proves isolation
+- Phase 2 proves auth
+- Phase 3 proves ops maturity
+
+This is not a spike — it's a measured build. Team can stop at any gate if operational cost looks wrong.
+
+**Next commit:** Brand starts #52. Data + Brand design state machine. Real work in 24 hours.
