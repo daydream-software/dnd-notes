@@ -3858,3 +3858,122 @@ Backend recommendation:
 - only invest in a Kubernetes operator after the spike proves the lifecycle pain is real.
 
 This direction needs Brand + Mikey review because it crosses platform and product boundaries, but it is the safest backend shape I see right now.
+
+---
+
+### 2026-04-18T00:40:33Z: User directive for issue #42 platform scope
+**By:** FFMikha (via Copilot)
+
+**What:** For issue #42, plan around a real Kubernetes/container platform rather than a throwaway spike: likely per-instance containers, subdomain routing with non-obvious names, rolling updates, service status page, and freedom to change the auth model now; evaluate shared Keycloak realms, SQLite-backed control-plane persistence, and tenant SQLite persistence/backup strategy.
+
+**Why:** User request — captured for team memory to anchor platform architecture decisions around real production constraints rather than minimal spike assumptions.
+
+---
+
+### 2026-04-18: Issue #42 infrastructure choices for first hosted target
+**By:** Brand (Infra)
+
+**What:** For the current dnd-notes stack, ARM64 is not a hard no, but it is not the boring first hosted default. Start x64-first for the first hosted slice because the repo is currently validated on x64 CI, the API depends on better-sqlite3 (a native Node addon), and there is no multi-arch image pipeline or ARM smoke coverage yet.
+
+If Kubernetes is mandatory, the first hosted shape should be: managed AKS control plane, small x64 general-purpose node pool (not burstable B-series), one same-origin tenant workload + one Azure Disk PVC per tenant, ingress-nginx for shared host-based routing, cert-manager for TLS automation, Azure DNS wildcard DNS as the initial DNS model, and internal fleet status first with optional simple hosted public status page.
+
+For local Kubernetes beyond kind, use k3d for fast daily work and k3s on a VM for realistic stateful rehearsals around PVCs, restarts, upgrades, and backup/restore.
+
+**Why:** ARM64 is mainly a confidence gap right now — the repo pins Node 22.21.1 and CI runs on x64, the API uses better-sqlite3 (native module), there is no multi-arch container build or ARM test lane yet. Burstable nodes hide uncertainty when the workload includes provisioning, cold starts, SQLite attach/remount, backup, and restore. The cost delta is often smaller than the extra operational drag of Kubernetes itself.
+
+---
+
+### 2026-04-18: Issue #42 Kubernetes-first platform direction
+**By:** Brand (Infra)
+
+**What:** If the team insists on Kubernetes, use the smallest boring shape that still looks like production: one small managed cluster with a provider-managed Kubernetes control plane, a thin app-level control plane that talks to the Kubernetes API, and one same-origin tenant workload plus one PVC per tenant. Do not start with a custom operator, CRDs, or a self-managed cluster control plane.
+
+Practical first shape: one cluster/region/environment, provider-managed control plane, shared platform namespace for ingress/cert-manager/control-plane, one tenant namespace per customer with single-replica workload/Service/PVC/Ingress, one control-plane database outside tenant data. Use thin control-plane service + worker (not operator), where the control-plane DB is the system of record and the worker creates/updates Kubernetes resources and waits for readiness.
+
+Best operational model for tenant SQLite persistence: keep the tenant workload definition and PVC, scale the tenant workload to zero when idle. Ingress, TLS, and cert-manager should be part of the first real hosted platform slice but not the first spike. Keep same-origin per-tenant host, prefer wildcard DNS and DNS-01 for certs.
+
+Not as a custom product — early on, the higher-value move is an internal fleet/admin status view inside the control plane. If customer-facing status becomes necessary early, use a very simple hosted or static status page.
+
+**Why:** Managed Kubernetes avoids early engineering time on control-plane operations. Provider-managed control planes, good persistent block storage, low-friction small-cluster entry, boring ingress + LB + DNS story, strong snapshot/backup primitives, and simple automation surface all matter more than headline pricing for this workload. Shared ingress + cert-manager keep platform plumbing simple; per-tenant snowflakes create operational debt.
+
+---
+
+### 2026-04-18: Issue #42 backend direction for control plane, auth, and SQLite-backed tenant instances
+**By:** Data (Backend Dev)
+
+**What:** SQLite is acceptable for the control plane first only under these constraints: one active writer process per environment, low write volume (tenant create/update, rollout records, backup catalog updates, audit entries), no need for active/active control-plane replicas, no cross-tenant analytics workload in control-plane DB, provisioning and rollout jobs are serialized or guarded by explicit per-tenant locks, backups and restore rehearsal and integrity checks exist from day one, and the schema is designed so moving the control plane to Postgres later is mechanical.
+
+Control plane owns: tenant registry, provisioning workflow, DNS/TLS/subdomain wiring, desired vs current version per tenant, backup inventory and restore requests, auth configuration metadata, platform audit trail, fleet health summaries (not tenant note data).
+
+Tenant instance owns: campaigns, notes, memberships, share links, tenant content, tenant-local authorization decisions, local schema migrations, local backup creation and restore execution, request-serving health/readiness/maintenance mode.
+
+Auth should evolve now if the team has freedom to change it — current app-issued bearer-token model is wrong to multiply across a control plane plus many tenant subdomains. Recommended direction: OIDC Authorization Code + PKCE for browser sign-in, move away from long-lived localStorage bearer tokens, keep platform operators in separate admin/workforce realm, keep customer users in one shared end-user realm with tenant-aware organization/group membership and explicit tenant claims in tokens, let each tenant instance validate tokens locally from Keycloak JWKS and enforce tenantId/org/role claims itself.
+
+Admin realm + note-takers realm is a reasonable shape (admin for operators/support/automation, note-takers for customer users with tenant separation via organizations/groups/claims). Do not recommend realm-per-tenant for customer users — realm explosion becomes operational drag fast. Per-tenant realms only when a tenant truly needs hard IdP isolation, custom federation, or compliance-driven separation.
+
+**Why:** SQLite is fine for "a small operator brain" but not for "a distributed control system." The hard part is not CRUD — it is lifecycle coordination: single-writer enforcement during rollouts, persistent volume semantics, consistent backups under write load, restore with live traffic, rolling updates and migrations, fleet operations at scale. If issue #42 proves the model works and the team expects meaningful concurrency/HA/simultaneous lifecycle jobs, the control plane should be the first thing moved off SQLite. Shared auth is cleaner than per-tenant identity isolation; per-tenant realms create operational surface that is not justified early.
+
+---
+
+### 2026-04-18: Issue #42 persistence, auth, and versioning guidance
+**By:** Data (Backend Dev)
+
+**What:** For the first real multi-instance shape, treat each SQLite-backed tenant as a single-writer appliance; do not treat WAL as permission to run multiple app pods against one tenant database. Allow a thin SQLite control plane first only while it remains single-writer and low-concurrency. Keep one release train across control plane, portal, and tenant code at first, but tolerate short-lived tenant version skew during rollouts.
+
+If shared SSO is introduced, use two Keycloak realms at most: admin/workforce realm for platform operators, and shared customer realm for tenant users. Keep authorization local to each tenant instance even when authentication is centralized.
+
+WAL does not make "many pods on one SQLite PVC" a safe default — it gives better concurrency between readers and a writer but still only one writer at a time. SQLite's own documentation says all processes must be on the same host and WAL does not work over a network filesystem because readers and writers must share memory. In Kubernetes, a shared PVC often means storage semantics that should not be treated as same-host shared-memory SQLite. Backend rule: one tenant database file should have exactly one writable app pod serving it.
+
+Safe rolling-update model: mark the tenant instance maintenance/read-only, finish or reject in-flight writes, trigger a final checkpoint/backup step if needed, stop the old pod and wait until it fully exits and releases the volume, start the new pod on the same PVC, run any startup migration with no competing writer, wait for readiness and clear maintenance mode. Operational implications: prefer one replica per tenant, avoid surge-style updates that create overlapping pods, treat tenant upgrades as serial or bounded-batch control-plane jobs, track desired version, current version, and last migration result per tenant.
+
+**Why:** SQLite on Kubernetes requires operational discipline around ownership handoff. If the platform cannot guarantee single-writer rollout discipline, SQLite is the wrong tenant-database choice. One tenant database file is easy; hundreds are operational inventory: backup age, restoreability, schema version skew, WAL growth, disk pressure, failed checkpoints, and corrupted-file detection. Versioning guidance: keep control plane, portal, and tenant code on the same release train early (easier debugging, fewer compatibility questions) but do not require perfect lockstep at runtime because tenant rollouts are inherently staggered.
+
+---
+
+### 2026-04-18: Issue #42 — canonical epic shape and child-issue breakdown
+**By:** Mikey (Lead)
+
+**What:** Issue #42 becomes the canonical epic that tracks the evolution of dnd-notes from a single-instance Express + SQLite app to a Kubernetes-hosted, per-tenant container platform with centralized auth, opaque subdomain routing, rolling updates, and operator-grade lifecycle tooling. The throwaway-spike framing is retired.
+
+Proposed new title: "Define and deliver the multi-tenant container platform for dnd-notes"
+
+Epic acceptance criteria: (1) A single container image serves both API and static web per tenant. (2) A thin control plane can create, pause, resume, and delete tenant instances via the Kubernetes API. (3) Each tenant has an opaque subdomain and a dedicated PVC-backed SQLite database. (4) Rolling updates with zero planned downtime are proven. (5) Keycloak provides centralized OIDC auth with an admin realm and a note-takers realm. (6) An aggregated status/health surface exists (internal at minimum, public stretch goal). (7) Backup, restore, and upgrade workflows are validated with measured data.
+
+Four phases: (0) Containerize + single-instance K8s deploy — prove the app runs in a container with rolling updates. (1) Control plane skeleton + second tenant — programmatic provisioning of isolated tenant instances. (2) Auth integration (Keycloak) — replace app-issued tokens with OIDC. (3) Operational maturity — backup, restore, status page, tenant lifecycle.
+
+~20 child issues covering containerization, control plane, auth, operations, and failure drills. Brand and Data carry most of the load; Chunk owns the drill runbook; Mikey gates each phase.
+
+Monorepo stays — re-evaluate after Phase 1 only if release cadence diverges. Same-version constraint acceptable for now — one tag, one image matrix, one release. Keycloak: two realms (admin vs. note-takers) is the right call. One identity per human, tenant isolation at the app layer, no realm-per-tenant.
+
+**Why:** The original acceptance criteria already describe a decision-making vehicle, not a disposable prototype. FFMikha is saying the decision is "go" — now make the prototype into the plan. Monorepo is still right because the control plane is tightly coupled to the tenant image, shared tooling is already wired for workspaces, and the team is small with one CI pipeline. Multi-repo coordination tax hurts velocity at this scale. Two Keycloak realms work because different security postures (admin vs. users) justify realm separation; admin tokens and user tokens come from different issuers so a user token can never accidentally satisfy an admin gate. One note-takers realm with tenant-aware claims avoids realm explosion — tenant isolation happens at the app layer via campaign_memberships, which already exists.
+
+---
+
+### 2026-04-18: Issue #42 — Expanded Platform Architecture Plan
+**By:** Mikey (Lead)
+
+**What:** FFMikha's directive on #42 upgrades the issue from a disposable provisioning spike to the canonical place where the team documents and de-risks the real multi-tenant platform model. Target architecture splits into three concerns: control plane (tenant registry, provisioning API, routing config, status page, admin auth — its own SQLite database), data plane (per-tenant dnd-notes instances with API + web in one container — per-tenant SQLite database), and auth service (Keycloak shared across all tenants).
+
+Recommended phasing: Phase 0 — Containerize and prove the single-instance deploy (Brand); prove the app runs correctly in a container on K8s with zero-downtime updates. Phase 1 — Control plane skeleton + second tenant (Brand + Data); programmatically create a second tenant instance from the control plane. Phase 2 — Auth integration (Data + Brand); tenant instances authenticate users via Keycloak. Phase 3 — Operational maturity (Brand); backup/restore for tenant SQLite databases, status page, tenant lifecycle, logging/monitoring/alerting, WAL mode evaluation per issue #39.
+
+Cross-tenant identity: all note-takers live in one realm, each tenant instance registers as a separate OIDC client (or uses a shared client with audience restriction), a user authenticates once and can access any tenant they've been invited to, tenant isolation happens at the application layer (membership model), not the auth layer. The claim flow from issue #20 maps cleanly: a guest claims a membership by linking their Keycloak identity to the existing membership row.
+
+Relationship to existing issues: #43 (deployment artifacts) is unblocked by Phase 0; update #43 to track the Dockerfile + K8s manifests. #39 (WAL mode) feeds into Phase 3 backup strategy. #40 (restore safety) becomes a tenant-level concern in Phase 3.
+
+**Why:** The monorepo is still the right choice — TypeScript config, lint, commit hooks, and CI are already wired for workspaces; control plane is tightly coupled to the tenant app; the team is small with one CI pipeline. Revisit after Phase 1 if the control plane gets its own deployment cadence or a separate team starts owning it. Keycloak operational weight should not be underestimated — it needs its own database (Postgres recommended), its own backup, its own updates. Local development needs a lightweight Keycloak (docker-compose with realm import). The current app has no auth — adding Keycloak means the API needs OIDC token validation middleware; design this as a middleware layer so it can be swapped if needed.
+
+---
+
+### 2026-04-18: Cross-Agent History Propagation Scope
+**By:** Scribe
+
+**What:** When the Scribe propagates team update entries to agent histories during decision merging, target only the agents who were directly involved in the work or decision. Misplaced propagations (e.g., issue #42 backend/platform direction updates appearing in Copilot's history when Copilot was not a participant) create noise in personal history logs and obscure individual agent accountability.
+
+Rule: Scope history propagation to involved agents only. When appending 📌 team update entries to agent histories, identify participants from the decision metadata (the "By:" field or parties mentioned in the decision intent) and append the update only to those agents' histories, not to all agents. Copilot's history should capture: work that Copilot performed (code, PR reviews, investigations), user directives routed through Copilot (e.g., FFMikha's issue #42 platform request), team updates that involved Copilot as a reviewer or co-author. Avoid propagating decisions about architecture, platform, or backend design to Copilot's history if Copilot was merely a conduit or logging agent and not a primary participant.
+
+Practical example — issue #42 orchestration: Data's backend direction decision → append to Data's history (Data authored it). Brand's platform direction decision → append to Brand's history (Brand authored it). Mikey's architecture planning → append to Mikey's history (Mikey is the Lead). Copilot's user directive → append to Copilot's history ONLY if Copilot captured it from the user request; do NOT also append Data/Brand decisions to Copilot's history.
+
+When merging decision inbox files and propagating team updates, parse the decision's "By:" field to identify the originating agent, append the team update to that agent's history (and any co-authors if explicitly listed), only propagate to secondary agents if they are explicitly called out as reviewers or co-decision-makers in the decision itself, and log correction passes in .squad/log/ if you discover and fix misplaced propagations after the fact.
+
+**Why:** Clarity — each agent's history reflects their actual work and decisions, not decisions they observed or heard about. Signal — when reviewing Copilot's history, readers should see Copilot's contributions, not a full team transcript. Accountability — architecture decisions should be visible in the originating agent's history (Data, Brand), not scattered across all agents' logs. Scalability — as the team grows, scoped history propagation prevents history logs from becoming noise archives.
+
