@@ -101,3 +101,6 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 📌 Team update (2026-04-17T23:10:00Z): COPILOT YOLO GH FALLBACK — `scripts/copilot-yolo.sh` still forwards the SSH agent exactly as before, now prefers an already-exported `GH_TOKEN`, and otherwise tries a non-fatal `gh auth token` fallback before launching the sandbox. Dry-run output now reports whether GitHub auth will come from the host env, `gh`, or not be forwarded at all, and `npm run copilot:yolo -- --dry-run -- --help` was validated for host-token, derived-token, and no-token cases.
 📌 Team update (2026-04-17T23:15:00Z): COPILOT YOLO GH AUTH ENFORCED — `scripts/copilot-yolo.sh` still preserves SSH agent forwarding and still prefers a host-exported `GH_TOKEN`, but fallback-required launches now hard-stop unless `gh auth token` returns a token. Help/dry-run output now points users to `gh auth login`, and `npm run copilot:yolo -- --dry-run -- --help` was revalidated for host-token, gh-derived-token, missing-gh, and unauthenticated-gh scenarios.
+
+## 2026-04-18: Issue #42 Epic Restructure (User Directive Captured)
+
