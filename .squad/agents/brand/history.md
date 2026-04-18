@@ -77,3 +77,25 @@ Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-han
 
 *73 older learning items archived.*
 
+
+## 2026-04-18T23:08:15Z: PR #60 Remediation Pass Complete
+
+**Action:** Completed full remediation cycle on PR #60 (control-plane skeleton, Issue #53).
+
+**What was addressed:**
+- All 10 Copilot review threads resolved
+- Probe test integration coverage added
+- `/readyz` docs aligned to implementation
+- Real SIGTERM draining implemented with signal handlers
+- Docker runtime dependencies cleaned up
+- Lightweight health endpoint DB check optimized
+- GET/HEAD-only SPA fallback route restriction added
+- All review comments addressed inline
+
+**Outcome:**
+- Commit c70a76e pushed to `52-containerize-tenant-app` worktree
+- PR #60 status: pending Copilot re-review / final approval
+- Next step: Await Copilot re-review verdict before merge
+
+**Context:**
+Both PR #59 (Issue #52 — Containerize dnd-notes) and PR #60 (Issue #53 — Control-plane skeleton) are now in active re-review after remediation. Wave 1 is converging toward final approval and merge.
