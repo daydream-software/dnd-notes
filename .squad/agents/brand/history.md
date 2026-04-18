@@ -18,6 +18,7 @@ Brand initialized as Platform Dev for the initial project squad.
 
 ## Learnings
 
+- **PR #60 mergeability repair (2026-04-19):** Treat `mergeable_state: dirty` as a first-class blocker even when review is already green. The safest repair in this repo was to merge current `origin/main` into the issue branch, confirm the post-merge diff still only carries the intended issue slice, and keep ignored `.squad/decisions/inbox/*` artifacts out of the repair. Only rerequest Copilot when the resolved diff materially changes; a clean base-sync merge should preserve reviewer signal.
 - **PR #60 reround cleanup (2026-04-19):** In Copilot rereviews, classify against the branch's *current diff to main*, not the stale first-pass patch set. If a `.squad/decisions/inbox/*` comment points at files the branch no longer changes, resolve it as stale/rebased noise instead of reintroducing inbox artifacts just to appease the thread. For same-origin SPA serving, also gate the `index.html` fallback on HTML-accepting, extensionless navigation requests so missing JS/CSS assets stay honest 404s.
 - **PR #60 container follow-ups (2026-04-19):** Keep tenant readiness probes cheap (`NoteStore.checkHealth()` / `SELECT 1`), scope SPA fallbacks to browser navigation (`GET`/`HEAD`) so bad non-API verbs still 404, and let the runtime image rely on root workspace production deps instead of copying workspace-local `node_modules`. Also document the split between app default `PORT=3001` and container default `PORT=3000`, and only claim SIGTERM draining when the entrypoint actually closes the HTTP server first.
 - **Issue #42 remaining-four clarifications (2026-04-19):** Platform recommendation written for the 4 remaining #42 clarification points: (1) state machine — 7 states (provisioning, ready, maintenance, upgrading, restoring, failed, deprovisioned); control-plane DB = desired, K8s = observed; lock now. (2) Version-skew — N-only for Phase 0–1, no N-1 commitment; control plane upgrades first; additive-only migrations; no downgrade support. (3) Local Keycloak — Docker Compose + realm JSON import at `infra/keycloak/`; not Helm, not K8s; realm JSON version-controlled. (4) Auth migration — Phase 2 concern; dual auth with grace period; control-plane admin auth independent (API key in Phase 1); share-links survive without Keycloak login. None of these affect Phase 0 execution. See `.squad/decisions/inbox/brand-42-remaining-four.md`.
@@ -281,4 +282,3 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 
 
 ---
-
