@@ -5398,3 +5398,1282 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 - ✅ Migration safety (R5) verified
 - ✅ Auth persistence (R6) tested
 
+
+
+# Issue #42 Clarification Points — Platform Review
+
+**Reviewer:** Brand (Platform Dev)  
+**Date:** 2026-04-18  
+**Scope:** Assess which of the 9 clarification points need early answers for Phase 0 execution  
+
+---
+
+## Executive Summary
+
+**3 points block Phase 0 execution immediately.** The other 6 can defer or answer in parallel without breaking the local dev loop or CI pipeline.
+
+---
+
+## Critical (Block Coding Immediately) 🔴
+
+### 1. **k3d/k3s dev loop + parity** (Point #1)
+**Why it matters:**
+- Every developer needs a local cluster that behaves like AKS/GCP in essence (ingress, storage, rolling updates, Postgres).
+- Without this, Phase 0 (#52 containerization, #43 artifacts, #46 Postgres port) stumbles on "does it work on my laptop?"
+- Risk: Devs discover incompatibilities post-code, delaying Phase 0 gate.
+
+**Minimum spec to unblock:**
+- k3d ≥ 1.28 on Linux, macOS; volume mounts from repo work
+- Embedded Postgres or external single-replica mode for dev
+- Manifest validation (kubectl dry-run) before deploy
+- SQLite fallback works in container for quick iteration
+
+**Owner:** Brand + Data (parallel with #52)  
+**Blocker for:** #52, #43, #46
+
+---
+
+### 2. **Ingress/DNS/TLS for Phase 1 hosted slice** (Point #2)
+**Why it matters:**
+- Reference architecture for the first real deployment.
+- Shapes Dockerfile, Service/Ingress manifests, cert-manager setup, wildcard DNS assumptions.
+- Without this locked, manifests drift; CI can't validate a deployable artifact.
+- Locked decisions already exist (ingress-nginx, wildcard cert-manager), but the concrete DNS choreography + TLS flow is missing.
+
+**Minimum spec to unblock:**
+- Hostname template for tenants (e.g., `{tenant}.app.example.com` vs. path-based)
+- Who provisions DNS records (manual, webhook, external-dns)?
+- Wildcard cert renewal lifecycle (how does renewal work at scale?)
+- CDN / reverse proxy placement (Cloudflare, Azure FrontDoor, none for first slice?)
+- TLS termination: ingress-nginx or load balancer?
+
+**Owner:** Brand (Phase 1 architecture)  
+**Blocker for:** Manifest design, Phase 1 acceptance criteria
+
+---
+
+### 3. **CI coverage for containers, manifests, platform workflows** (Point #8)
+**Why it matters:**
+- Phase 0 gate: "App runs against Postgres (all API tests pass), rolling update is stateless, SQLite fallback works, Dockerfile is maintainable."
+- Without CI, "maintainable" is a subjective gate. No automated regression detection for manifests or build failures.
+- Risk: Silent container build failures, manifest syntax errors, security scanner skips.
+
+**Minimum spec to unblock:**
+- GitHub Actions: container build + push to ghcr.io (exists skeleton, needs Phase 0 trigger)
+- Manifest validation: `kubectl apply --dry-run=client` or `kubeval`
+- Security scanning: `trivy` image scan before push (optional Phase 1, but nice-to-have Phase 0)
+- Test gate: all API tests pass before manifest/container stage
+
+**Owner:** Brand (already started in `.now.md`, full CI by Phase 0 gate)  
+**Blocker for:** Phase 0 merge, Phase 1 deployment safety
+
+---
+
+## Early Answers (Needed Phase 0 → Phase 1) 🟡
+
+### 4. **Backup / restore strategy for tenant Postgres** (Point #3)
+**Why it matters:**
+- Phase 0 doesn't require operational restore. But the model (continuous replication vs. snapshots vs. WAL archival) affects whether tenant instances can stateless-restart or hold PVCs at rest.
+- Phase 1 scale-to-zero behavior depends on this: can we checkpoint a PVC and restore from backup, or must replicas stay hot?
+
+**Answer needed (not necessarily implemented) by Phase 1:**
+- RPO/RTO targets (e.g., "5 min RPO, 30 min RTO")
+- Point-in-time recovery window (e.g., "last 7 days")
+- Backup destination (blob storage, separate backup cluster?)
+- Restore procedure (operator-initiated, automatic on PVC loss?)
+- Single-tenant or fleet-level orchestration?
+
+**Owner:** Data (backup archetype) + Brand (scheduling, automation)  
+**Target:** Phase 1–2 design, Phase 0 gate documents the deferred model
+
+---
+
+### 5. **Control-plane ↔ tenant contract** (Point #4)  
+### 6. **Control-plane state machine (lifecycle states)** (Point #5)
+**Why it matters (combined):**
+- Phase 1 provisioning (#54) cannot start until the tenant API shape is clear: `POST /tenants` → what happens? What states can a tenant occupy?
+- Phase 0 is single-tenant, but the state machine design influences how multi-tenant provisioning unfolds.
+- Affects Phase 1 operator behavior, error handling, rollback choreography.
+
+**Minimum spec to unblock Phase 1:**
+- Tenant states: `provisioning` → `bootstrapping` → `ready` → `upgrading` → `failed` → `deprovisioned`
+- State transitions: what triggers each? What's irreversible?
+- Control-plane API shape: `POST /api/v1/tenants`, `PATCH /tenants/{id}`, `DELETE /tenants/{id}`?
+- Required internal calls (container → control-plane for logs, status, drain signals)?
+
+**Owner:** Data (API design) + Brand (orchestration, state machines)  
+**Target:** Phase 1 design, Phase 0 gate can defer or mock a simple state machine
+
+---
+
+### 7. **Rollout / version-skew policy** (Point #7)
+**Why it matters:**
+- Phase 0 tests single-version rollout (all containers same tag, zero-downtime restart).
+- Phase 1 tests multi-tenant rollout: can we upgrade control plane while tenants stay up? Can tenant N run while N-1 still initializing?
+- Affects CI matrix (do we test N-1 compatibility, or only N?), deployment choreography, compatibility spans.
+
+**Answer needed:**
+- Same-train (unified release) or per-component semver?
+- N / N-1 compat window (e.g., "control plane N-1 + tenant N, but not N-2 + N")?
+- Rollout order (control plane first, then tenants? Or canary tenants first?)
+- Downgrade policy (must we support rollback, or only forward upgrades?)
+
+**Owner:** Brand (release/rollout process) + Data (compat testing)  
+**Target:** Phase 1 rollout choreography (#55), Phase 0 documents the single-version assumption
+
+---
+
+## Later (Phase 2+ or parallel) 🟢
+
+### 8. **Auth migration path to OIDC / Keycloak** (Point #6)
+**Why it matters:**
+- Phase 0–1 can use the current auth (HTTP Basic or JWT + local users).
+- Phase 2 hardwires Keycloak (#56), but coexistence isn't a Phase 0–1 blocker.
+- Can be designed in parallel without blocking container or provisioning work.
+
+**Can defer to:** Phase 2 planning, parallel design track
+
+---
+
+### 9. **Local Keycloak ops model (Docker Compose + realm import)** (Point #9)
+**Why it matters:**
+- Needed for Phase 2 local iteration, not Phase 0–1.
+- Non-blocking until auth integration starts.
+
+**Can defer to:** Phase 2 planning
+
+---
+
+## Recommended Action
+
+**Do this in the live discussion:**
+1. **Lock points #1, #2, #8** to specific decision artifacts (or accept defaults listed above).
+2. **Schedule point #3** design for Phase 1 planning; document Phase 0 assumption (manual backup).
+3. **Point #4 & #5**: Start design immediately (can mock in Phase 0, refine in Phase 1); unblock #54.
+4. **Point #7**: Make a binary call — same-train or N/N-1? Lock it. Unblocks CI/testing strategy.
+5. **Points #6 & #9**: Accept as Phase 2 scope, move to separate issue if needed.
+
+**Estimated impact:**
+- **Now**: 3–4 hours total discussion + design sketches
+- **Phase 0 execution**: Unblocked (k3d parity + CI pipeline defined)
+- **Phase 1 design**: Unblocked (contracts + state machine + rollout policy in hand)
+
+---
+
+## Already Locked (Reference)
+
+From `.now.md`:
+- ✅ Registry: ghcr.io
+- ✅ Ingress: ingress-nginx
+- ✅ TLS: cert-manager with wildcard DNS-01
+- ✅ Secrets: K8s Secrets (Phase 0–1)
+- ✅ Persistence: Postgres per-tenant
+
+These are solid; points #1, #2, #8 refine the implementation details.
+
+
+---
+# Issue #42 — Remaining 4 Clarifications: Platform/Ops Recommendation
+
+**Author:** Brand (Platform Dev)  
+**Date:** 2026-04-19  
+**Epic:** #42 (Multi-tenant K8s platform)  
+**Status:** RECOMMENDATION — Do NOT edit GitHub yet
+
+---
+
+## Scope
+
+The four remaining "Next points to clarify together" from the #42 epic body:
+
+1. Control-plane state machine and tenant lifecycle states
+2. Auth migration path from current auth to OIDC / Keycloak
+3. Rollout / version-skew policy
+4. Local Keycloak operational model for developer iteration
+
+Everything below is written from the platform/ops angle — what operations needs to reason about safely, not what the backend schema looks like.
+
+---
+
+## 1. State Machine — Minimum Shape Ops Needs
+
+### Context
+
+The tenant contract is locked: control plane is the sole orchestrator, tenant app never calls back, coordination runs through K8s API + `/_control/*` endpoints, Postgres backups are direct DB ops. The state machine must tell the control-plane worker **what it can safely do next** and **what it must not touch**.
+
+### Recommended States (Platform-Minimum)
+
+```
+provisioning → ready ⇄ maintenance → ready
+                 ↓          ↓
+              upgrading   restoring → ready
+                 ↓          ↓
+               ready      failed
+                 ↓
+              failed
+                 ↓
+          deprovisioned
+```
+
+| State | Ops Meaning | Writes? | Backups? | Rollout? |
+|-------|-------------|---------|----------|----------|
+| `provisioning` | K8s resources + Postgres DB being created | No (DB may not exist) | No | No |
+| `ready` | Normal operation, serving traffic | Yes | Yes | Can start |
+| `maintenance` | Drain mode, finishing in-flight requests | Read-only | Yes (preferred pre-action snapshot) | No |
+| `upgrading` | Pod being replaced, new image version | No (old pod stopping, new starting) | No | In progress |
+| `restoring` | `pg_restore` running against tenant DB | No | Safety snapshot taken before entry | No |
+| `failed` | A transition broke; needs operator attention | Depends on failure point | If DB exists | No |
+| `deprovisioned` | Tenant archived or deleted, resources released | No | Retention policy only | No |
+
+### What I'd Lock Now
+
+- **These 7 states are sufficient for Phase 1.** Don't add `suspended`, `scaling`, or `bootstrapping` until a real use case demands them. `suspended` is just `maintenance` with no planned exit; `scaling` doesn't apply (one pod per tenant); `bootstrapping` was already deferred from the contract decision.
+- **Transitions must be control-plane-initiated, never tenant-initiated.** The tenant just answers `/_control/info` and `/_control/maintenance`.
+- **Every transition must be idempotent except restore.** The pre-restore safety snapshot is the escape hatch (already locked in backup/restore decision).
+- **`failed` is a sink state with manual recovery.** Control plane logs the failure reason and stops retrying. Operator investigates, then explicitly transitions to `provisioning` (rebuild) or `maintenance` (manual fix) → `ready`.
+- **State persists in control-plane DB.** K8s resource status is the observed truth; control-plane DB state is the desired/intended truth. Reconciliation loop compares the two.
+
+### What Should Stay Open
+
+- **Timeout policy per state.** How long can a tenant sit in `provisioning` before it's marked `failed`? This needs real data from Phase 0/1. Placeholder: 5 minutes for provisioning, 10 minutes for upgrading, 30 minutes for restoring.
+- **Retry semantics for `failed`.** Auto-retry count, backoff strategy, escalation — defer until we see real failure modes.
+- **`deprovisioned` retention.** How long do we keep the control-plane record after resources are released? Compliance question, not ops.
+
+---
+
+## 2. Rollout / Version-Skew Policy
+
+### Context
+
+Locked direction: one monorepo, one release train, one image tag, control plane + tenant app deploy from the same image matrix. Persistence is Postgres (not SQLite). Rolling updates are stateless container restarts with connection pooling and graceful shutdown.
+
+### Recommended Policy (Phase 0–1)
+
+**Same-train, same-version, coordinated upgrade. No N/N-1 commitment.**
+
+| Rule | Detail |
+|------|--------|
+| **Release unit** | One semver tag. Control plane and tenant app share the same version number. |
+| **Rollout order** | Control plane first, then tenants in small batches (5–10% canary, wait, then remaining). |
+| **Version skew tolerance** | **N only.** Control plane at version N must manage tenants at version N. No N-1 tenants left running after rollout completes. |
+| **Rollout window** | Brief (minutes per tenant, not hours). Acceptable because Postgres restarts are stateless — no PVC handoff, no single-writer drain. |
+| **Schema migrations** | Run on app startup (`knex migrate:latest` or equivalent). Migrations must be backwards-compatible within the same version (additive columns, no destructive changes mid-version). |
+| **Downgrade** | Not supported. If a version is bad, roll forward with a fix. Pre-rollout safety snapshot (already locked in backup decision) is the escape hatch. |
+| **Canary failure** | If canary batch fails health checks within 2 minutes, halt rollout. Operator decides: fix-forward or restore from pre-rollout backup. |
+
+### What I'd Lock Now
+
+- **N-only tolerance.** Don't promise N-1 compatibility. It adds testing cost (CI must run both versions against both schema states), migration complexity (schema must be forward-compatible *and* backward-compatible), and operational confusion (which version is canonical?). At this scale (single-digit tenants), coordinated upgrade is cheap.
+- **Control plane upgrades first.** Always. If control-plane schema changes (tenant registry, backup catalog), tenants must talk to the new control plane, not the other way around.
+- **Additive-only migrations within a version.** No column drops, no renames, no type changes in the same release that introduces them. Destructive cleanup happens in the *next* release after the old code path is removed.
+
+### What Should Stay Open
+
+- **N/N-1 tolerance for Phase 2+.** When tenant count reaches double digits and rollout takes >30 minutes, brief version skew becomes unavoidable. Design the migration strategy to be forward-compatible (new code reads old schema gracefully) so N/N-1 can be introduced later without rework. But don't commit to testing or supporting it now.
+- **Blue-green vs. rolling.** Phase 1 uses simple rolling (one tenant at a time). Blue-green (full parallel fleet) is a Phase 3 optimization if rollout speed matters.
+- **Automated canary analysis.** Phase 1 canary is manual (operator watches health checks). Automated canary promotion/rollback is Phase 3.
+
+---
+
+## 3. Local Keycloak Developer Model
+
+### Context
+
+Keycloak is the target IdP (two realms: admin + note-takers). Phase 2 is the integration point. But developers need a local Keycloak before Phase 2 coding starts — you can't write OIDC middleware against air.
+
+### Recommended Model
+
+**Docker Compose sidecar with realm-import JSON. Not Helm, not K8s, not embedded.**
+
+```
+infra/keycloak/
+├── docker-compose.yml        # Keycloak + Postgres (dev-only)
+├── realm-admin.json          # Admin realm export (operators)
+├── realm-note-takers.json    # Note-takers realm export (customers)
+├── .env.example              # KEYCLOAK_ADMIN, KEYCLOAK_ADMIN_PASSWORD, etc.
+└── README.md                 # "docker compose up" + "here's your test users"
+```
+
+| Component | Choice | Why |
+|-----------|--------|-----|
+| **Keycloak image** | `quay.io/keycloak/keycloak:latest` (pin version when stable) | Official, widely documented, ARM64 available |
+| **Keycloak DB** | Postgres container in the same Compose file | Keycloak requires persistent storage; H2 is fragile for dev |
+| **Realm provisioning** | `--import-realm` flag on container startup | Keycloak natively imports JSON realm files from `/opt/keycloak/data/import/` |
+| **Test users** | Seeded in realm JSON (admin user, 2 test note-takers, 1 guest-claimable user) | Repeatable, no manual setup |
+| **Network** | `localhost:8080` for Keycloak, tenant apps reach via Docker network or host | Simple; no DNS hacks needed for dev |
+| **Persistence** | Named Docker volume for Keycloak Postgres | Survives `docker compose stop`; `docker compose down -v` resets |
+
+### Parity Expectations
+
+**Local Keycloak is NOT production-identical.** Accept these differences:
+
+| Aspect | Local | Production |
+|--------|-------|------------|
+| TLS | None (HTTP only) | Required (cert-manager) |
+| HA | Single instance | 2+ replicas with Infinispan cache |
+| DNS | `localhost:8080` | `auth.dnd-notes.app` |
+| Realm config | JSON import on start | GitOps-managed realm export (Phase 3) |
+| User federation | None | Possibly LDAP/social (Phase 4+) |
+
+**Parity contract:** Local Keycloak must produce valid OIDC tokens with the same claim shape as production (tenant ID, realm, roles, groups). Token validation code in the tenant app must work identically against local and production Keycloak — the only difference is the issuer URL (`localhost:8080` vs. `auth.dnd-notes.app`).
+
+### What I'd Lock Now
+
+- **Docker Compose, not Helm.** Keycloak-on-K8s is a Phase 2 production concern. Local dev should not require k3d just to test OIDC flows.
+- **Realm JSON is version-controlled.** Changes to realm config (new roles, new groups, new client scopes) go through PR review. No manual realm editing in the Keycloak admin console.
+- **`docker compose up` is the entire setup.** No init scripts, no post-start curl commands, no manual admin console clicks. If the realm JSON can't express it, it's not in local dev.
+
+### What Should Stay Open
+
+- **Keycloak version pin.** Use latest during Phase 1.5 spike; pin to a specific minor before Phase 2 implementation starts.
+- **Production Keycloak deployment model.** Helm chart vs. K8s manifests vs. managed Keycloak service — production decision, not local dev decision.
+- **Theme customization.** Branding the login page is a UI concern (Stef's domain), not a platform concern.
+
+---
+
+## 4. Auth Migration — Platform Sequencing Impact
+
+### Context
+
+Current app uses email/password + app-issued bearer tokens stored in localStorage. Target is Keycloak OIDC with two realms. The question for platform is: **how does this migration affect the build order and phase gates?**
+
+### Recommended Sequencing
+
+**Auth migration is a Phase 2 concern. It does not block Phase 0 or Phase 1. But platform must prepare the plumbing in Phase 1.**
+
+| Phase | Auth Posture | Platform Action |
+|-------|-------------|-----------------|
+| **Phase 0** | Current app auth (email/password + bearer tokens) | None. Container runs with existing auth. |
+| **Phase 1** | Current app auth, but control-plane admin API is separate | Control-plane admin endpoints use a separate auth mechanism (API key or basic auth). Do NOT couple control-plane admin auth to tenant app auth. |
+| **Phase 1.5** (optional) | Local Keycloak spike | Stand up `infra/keycloak/` Docker Compose. Validate realm import, token shape, OIDC discovery. No app integration yet. |
+| **Phase 2** | Dual auth: current + Keycloak | Tenant app accepts both old bearer tokens AND Keycloak JWTs. `AuthAdapter` middleware checks token type and validates accordingly. Grace period: 2–4 weeks for existing users to migrate. |
+| **Phase 2 exit** | Keycloak-only | Old bearer token validation removed. All login flows redirect to Keycloak. localStorage tokens invalidated. |
+
+### What I'd Lock Now
+
+- **Phase 1 control-plane auth is independent.** Don't wait for Keycloak to build admin endpoints. Use API key or basic auth with a shared secret in K8s Secrets. Swap to Keycloak admin realm token validation in Phase 2.
+- **Tenant app auth stays untouched until Phase 2.** No feature flags, no "prepare for OIDC" middleware in Phase 0–1. The app works as-is. OIDC middleware lands in one focused PR during Phase 2.
+- **Grace period is mandatory.** No big-bang cutover. Dual auth runs for a defined window. Old tokens expire naturally or are invalidated at the end of the grace period.
+- **Guest/share-link flows survive migration.** Share links must work without Keycloak login (anonymous access). Guest-to-user claim (#20) happens post-Keycloak-login, not during share-link access. Platform must not require authenticated sessions for share-link rendering.
+
+### What Should Stay Open
+
+- **Grace period duration.** 2 weeks? 4 weeks? Depends on user base size at Phase 2 start. Product decision, not platform.
+- **User account linking UX.** How existing email/password users link to Keycloak accounts — Stef/Mikey territory.
+- **Token revocation strategy.** Per-user, per-tenant, or fleet-wide? Depends on Keycloak setup. Design during Phase 2 implementation.
+- **Social login / federation.** Phase 4+. Don't design for it now.
+
+---
+
+## Summary: Lock vs. Open
+
+### Lock Now ✅
+
+| Item | Decision |
+|------|----------|
+| State machine shape | 7 states (provisioning → ready ⇄ maintenance, upgrading, restoring, failed, deprovisioned) |
+| State ownership | Control-plane DB = desired/intended; K8s = observed. Reconciliation loop bridges them. |
+| Version-skew | N-only for Phase 0–1. No N-1 commitment. |
+| Rollout order | Control plane first, then tenants in batches. |
+| Migrations | Additive-only within a version. Run on startup. |
+| Downgrade | Not supported. Fix-forward + backup is the escape. |
+| Local Keycloak model | Docker Compose + realm JSON import. Not Helm, not K8s. |
+| Realm JSON | Version-controlled, PR-reviewed. No manual admin console changes. |
+| Auth migration timing | Phase 2. Dual auth with grace period. No Phase 0–1 impact. |
+| Control-plane admin auth | Independent of tenant auth. API key/basic auth in Phase 1. |
+| Share-link survival | Anonymous access preserved across auth migration. |
+
+### Intentionally Open 🟡
+
+| Item | Reason |
+|------|--------|
+| State timeout policy | Need real provisioning/restore timers from Phase 0–1. |
+| Retry/backoff for `failed` state | Need real failure modes before designing. |
+| N/N-1 tolerance | Defer to Phase 2+ when rollout duration justifies it. |
+| Keycloak version pin | Pin when Phase 2 starts, not before. |
+| Production Keycloak deployment | Helm vs. manifests — production concern, not local. |
+| Grace period duration | Product decision at Phase 2 start. |
+| Token revocation strategy | Depends on Keycloak config. |
+| Automated canary analysis | Phase 3 optimization. |
+
+---
+
+## Platform Sequencing Impact
+
+These four decisions do NOT change Phase 0 execution. They refine Phase 1 exit criteria and define Phase 2 entry conditions:
+
+- **Phase 1 exit now requires:** state machine implemented in control-plane DB, rollout choreography tested (control plane first → tenant batches), pre-rollout safety snapshot verified.
+- **Phase 2 entry now requires:** local Keycloak running (`docker compose up`), realm JSON producing valid OIDC tokens, dual-auth middleware design reviewed.
+- **Phase 0 is unaffected.** Keep building containers and manifests.
+
+---
+
+**Next:** Mikey + Data review. If consensus, Mikey updates #42 epic body and removes these four items from "Next points to clarify together." Scribe merges to `.squad/decisions.md`.
+
+
+---
+---
+author: Chunk (Tester)
+date: 2026-04-19
+pr: 60
+issue: 52
+verdict: APPROVE
+---
+
+# PR #60 Review: Containerize Tenant App
+
+## Verdict: ✅ APPROVE
+
+Brand's containerization implementation for issue #52 is production-minded, correctly scoped, and ready to merge.
+
+## What Was Reviewed
+
+**Scope:** Multi-stage Dockerfile + K8s health probes + same-origin runtime contract for Epic #42 Phase 0.
+
+**Validation:**
+- ✅ All 60 API tests pass
+- ✅ Lint clean
+- ✅ No CI workflow changes (respects "no auto-push to GHCR" decision)
+- ✅ No deployment manifests added (correct deferral to #43)
+- ✅ DATABASE_URL reserved but not yet wired (correct for Phase 0)
+- ✅ Single commit with proper conventional format
+
+## Acceptance Criteria Pass
+
+From issue #52:
+
+1. **Reproducible tenant image exists** ✅
+   - Multi-stage Dockerfile with deps/build/runtime stages
+   - Non-root execution (appuser:appuser)
+   - Node.js 22.21.1-bookworm-slim base
+
+2. **Single tenant instance can run in K8s-shaped environment** ✅
+   - Health endpoints: `/healthz` (liveness), `/readyz` (readiness), `/health` (legacy)
+   - SQLite volume mount point: `/app/data`
+   - SIGTERM graceful shutdown implemented
+   - Port 3000 exposed correctly
+
+3. **Runtime requirements and health contract are documented** ✅
+   - RUNTIME.md is comprehensive (301 lines)
+   - Documents env vars, health probes, lifecycle hooks, migration notes
+   - Includes K8s probe examples and smoke test script
+   - README.md updated with container quickstart
+
+4. **Same-origin web/API behavior** ✅
+   - `SERVE_WEB=true` flag enables production mode
+   - SPA fallback correctly excludes health/API routes
+   - Static assets served from `/app/apps/web/dist`
+
+## Epic #42 Alignment
+
+**No scope drift detected:**
+- ❌ No #43 manifests or provider-specific artifacts (correct)
+- ❌ No automatic GHCR push in CI (respects locked decision)
+- ✅ DATABASE_URL reserved for #46 Postgres adapter (correct forward planning)
+- ✅ Same-origin deployment as default (aligns with locked decision)
+
+**Health probe semantics are correct:**
+- `/healthz` = process alive (always returns 200 OK)
+- `/readyz` = database healthy (503 when `noteStore.getAdminOverview()` throws)
+- `/health` = legacy compatibility (same as healthz)
+
+**Container shape is production-minded:**
+- Non-root user, multi-stage build, minimal base image
+- Graceful shutdown (SIGTERM → close DB → exit 0)
+- Security posture documented (non-root, read-only code, write-only to data volume)
+
+## Edge Cases Checked
+
+1. **Port consistency:** ✅
+   - Dockerfile sets PORT=3000
+   - index.ts defaults to 3001 (for local dev split mode)
+   - Container behavior correct (ENV override works)
+
+2. **SPA fallback safety:** ✅
+   - Health routes registered BEFORE static middleware
+   - Fallback correctly excludes `/api/`, `/health*`, `/readyz`
+   - No route shadowing detected
+
+3. **Readiness probe failure mode:** ✅
+   - Returns 503 on DB error (correct K8s semantics)
+   - Uses `noteStore.getAdminOverview()` as health check
+   - Response body is valid ErrorResponse type
+
+4. **Same-origin CORS:** ✅
+   - `ALLOWED_ORIGINS` defaults include localhost:3000 for container testing
+   - Same-origin mode bypasses CORS (no Origin header)
+   - Documented correctly in README.md
+
+5. **Secrets/credentials:** ✅
+   - No hardcoded secrets
+   - DATABASE_URL documented but not yet read (correct for Phase 0)
+   - SITE_ADMIN_EMAILS, PUBLIC_WEB_URL properly externalized
+
+## No Regressions Detected
+
+- Existing test suite (60 tests) passes
+- No changes to test files
+- No changes to .github/workflows/
+- No changes to feature code outside of health endpoints
+
+## Post-Merge Next Steps
+
+1. **Phase 0 completion blockers:**
+   - Issue #46: Migrate note-store to Postgres (DATABASE_URL wiring)
+   - Local k3d validation (health probes, volume mounts, same-origin serving)
+
+2. **Phase 1 prerequisites:**
+   - Issue #43: Kubernetes manifests (after #46 lands)
+   - Issue #53: Control-plane skeleton (parallel to this work)
+
+3. **Production readiness:**
+   - CI pipeline (#43 rescope) for container build + smoke tests
+   - Manual GHCR promotion after Phase 0 acceptance gate
+
+## Review Quality Notes
+
+- RUNTIME.md is exceptionally thorough (covers Phase 0–1 migration, Postgres notes, observability deferral)
+- Commit message follows conventional format and includes Co-authored-by trailer
+- PR description clearly calls out epic alignment and non-scope
+- No test additions needed (health endpoints are smoke-testable, not unit-testable)
+
+## Team Decision
+
+**No new team-wide decisions made.** This PR implements existing locked decisions from Epic #42.
+
+## Approval
+
+Brand delivered exactly what was asked for in issue #52 without drift. Ship it.
+
+**Merge recommendation:** Squash or keep single commit (author's choice).
+**Follow-up:** FFMikha should merge this and move to #46 (Postgres adapter) as the next Phase 0 blocker.
+
+
+---
+### 2026-04-18T16:00:49Z: User directive
+**By:** FFMikha (via Copilot)
+**What:** Le dev normal doit être monté sur k3d, avec Keycloak disponible en tout temps; ne pas supporter un mode basic séparé juste pour le dev.
+**Why:** User request — captured for team memory
+
+
+---
+# Control Plane Persistence Strategy (Phase 1)
+
+**Decided by:** Data (Backend Dev)  
+**Date:** 2026-04-18  
+**Issue:** #53  
+**Type:** Implementation Decision
+
+## Decision
+
+Control plane uses **SQLite** for tenant registry persistence in Phase 1, with explicit upgrade path to Postgres at multi-tens-of-tenants scale.
+
+## Context
+
+Epic #42 requires a control plane to track tenant instances and lifecycle state. The registry has low write volume (tenant creation/state transitions), high read volume (orchestration queries), and requires transactional consistency for state transitions.
+
+## Rationale
+
+### Why SQLite for Phase 1:
+
+1. **Write Volume Fits:** Tenant creation and state transitions are infrequent (measured in minutes/hours, not seconds).
+2. **Simplicity:** Single-file database, no separate server process, straightforward backups.
+3. **Proven Pattern:** Tenant app already uses SQLite successfully; team has operational experience.
+4. **Low Operational Overhead:** No connection pooling, authentication, or network layer to manage.
+5. **Sufficient Performance:** Registry queries are simple lookups and small result sets.
+
+### Upgrade Path to Postgres (deferred):
+
+- **Trigger:** When fleet reaches multi-tens of tenants OR write contention becomes observable.
+- **Migration:** Control plane already abstracts registry behind `TenantRegistry` class; swap SQLite driver for `node-postgres`.
+- **Compatibility:** Schema is simple (two tables, no SQLite-specific features).
+
+## Constraints
+
+- **Single-writer:** Control plane must run as single replica in Phase 1 (no concurrent writes).
+- **Backups:** SQLite file must be backed up regularly (copy-on-snapshot safe due to low write frequency).
+- **Recovery:** Restore from backup is simple file replacement.
+
+## Implementation
+
+- Database path: `data/control-plane.sqlite`
+- Schema: `tenants` table (registry) + `state_transitions` table (audit log)
+- Connection: Direct `better-sqlite3` (sync API, no pooling needed)
+
+## Future Work
+
+When migrating to Postgres:
+1. Update `TenantRegistry` constructor to accept connection pool
+2. Swap `better-sqlite3` for `node-postgres`
+3. Update queries to use parameterized async API
+4. Deploy control-plane with multiple replicas + connection pooling
+
+## Status
+
+ **IMPLEMENTED** in PR #59
+
+
+---
+# Issue #42 Epic Clarification Review
+
+**Author:** Mikey (Lead)  
+**Date:** 2026-04-18  
+**Status:** Ready for team discussion  
+
+---
+
+## Summary
+
+Issue #42 lists 9 clarification points necessary to move from locked platform direction → concrete Phase 0/1 execution. This memo groups them into a practical decision sequence for team alignment. 
+
+**Outcome:** 3 MUST-DECIDE-NOW (Phase 0 blockers), 4 DECIDE-IN-PHASE-1, 2 DEFER-EXPLICITLY.
+
+---
+
+## Decision Sequence
+
+### Tier 1: Phase 0 Blockers (Decide This Week)
+
+These must be locked *before* Phase 0 work starts (Postgres migration, containerization, k3d dev loop).
+
+#### 1️⃣ Local Kubernetes Dev Loop (k3d / k3s + Parity Definition)
+**Issue:** #42 point 1  
+**Blocker Level:** CRITICAL  
+**Rationale:**  
+- Phase 0 acceptance criteria state "rolling update is stateless (zero-downtime), Dockerfile is maintainable"
+- Cannot validate rolling updates or K8s manifests without a working local dev loop
+- Determines whether tracks B (Brand) and early C (CI) validate locally first or in CI-only
+
+**Must answer:**
+- k3d single-node or k3s? (k3d with default settings typically sufficient for feature work, k3s heavier)
+- Parity contract: Must locally test (1) Deployment + rolling restart, (2) Postgres schema migration safety, (3) StatefulSet for dev Postgres
+- Fallback? SQLite for feature dev, migrate to k3d for platform-specific tests
+
+**Owner:** Brand (infrastructure/Docker lead), Copilot (hands-on setup validation)  
+**Delivery:** Spike or short decision doc + proof-of-concept Dockerfile + k3d instructions in README  
+**Timeline:** Must close before #52 (containerization) starts major work  
+
+---
+
+#### 2️⃣ Ingress + Wildcard DNS + TLS Model for Phase 1 Hosted Slice
+**Issue:** #42 point 2  
+**Blocker Level:** CRITICAL (Phase 1 gate, not Phase 0)  
+**Rationale:**
+- Phase 1 acceptance criteria explicitly require "ingress, wildcard DNS, and K8s Secrets"
+- Locking this now prevents rework mid-Phase-1
+- Constraints already decided: ingress-nginx, cert-manager, wildcard DNS-01; now must specify *how* they wire together
+
+**Must answer:**
+- Wildcard domain strategy: `*.tenants.example.com` (per-tenant) or `example.com/*.tenants` (path-based)?
+  - Recommendation: Opaque subdomains (locked direction) → `*.tenants.example.com` with per-tenant cert or single wildcard
+- DNS provider: Route53, Azure DNS, Cloudflare? (affects cert-manager DNS-01 configuration)
+- TLS: Single wildcard cert for all tenants, or per-tenant certs?
+  - Recommendation: Single wildcard (simpler, `cert-manager` renews automatically)
+- Ingress routing: How does nginx route subdomain → tenant service? Annotation? Custom controller?
+
+**Owner:** Brand + Mikey (architecture checkpoint)  
+**Delivery:** Kubernetes Ingress manifest template (not full deploy, just shape) + decision doc linking to Phase 1 issues #53–#55  
+**Timeline:** Lock before Phase 1 starts (after Phase 0 gate); not a Phase 0 blocker, but must decide before #54 (provisioning) writes code  
+
+---
+
+#### 3️⃣ CI Coverage Scope for Phase 0 Handoff
+**Issue:** #42 point 8  
+**Blocker Level:** MEDIUM (not a blocking gate, but defines Phase 0 → Phase 1 handoff health)  
+**Rationale:**
+- Phase 0 acceptance: "container is maintainable" — CI validates this
+- Needed for Phase 1 (control plane code safety)
+- Scope: container build + push to ghcr.io (GitHub Actions via existing patterns), manifest linting (kube-lint or kubeval), API tests still pass
+
+**Must answer:**
+- Minimal Phase 0 CI: Container build + push + API tests pass + manifest lint. Yes/no?
+- Full Phase 0 CI (nice-to-have): k3d smoke test (basic deploy + health check)? Defer to Phase 1 if infrastructure cost too high
+- Manifest drift: Should CI also validate that manifests match actual Kubernetes state? (Defer to ops/Phase 3)
+
+**Owner:** Brand (GitHub Actions), Data (API tests keep passing)  
+**Delivery:** GitHub Action workflow in `.github/workflows/` + decision on k3d smoke test (defer vs now)  
+**Timeline:** Lock scope by end of Phase 0, implement in parallel with Track B (Dockerfile)  
+
+---
+
+### Tier 2: Phase 1 Decisions (Revisit Before Phase 1 Sprint)
+
+Lock these before Phase 1 work starts, but they don't block Phase 0. Revisit 1 week before Phase 1 kickoff.
+
+#### 4️⃣ Control-Plane ↔ Tenant Contract + Internal APIs
+**Issue:** #42 point 4  
+**Blocker Level:** Phase 1 critical  
+**Rationale:**
+- Issue #53 (control plane skeleton) depends on this; issue #54 (provisioning) must implement it
+- Determines Kubernetes API client patterns, service discovery, network policy
+- Shapes control-plane schema and state transitions
+
+**Must answer:**
+- Service discovery: DNS (`tenant-{id}.default.svc`), Kubernetes API, or hardcoded?
+- Internal API contract: Does control plane push workload specs to tenants, or tenants poll control plane? (Recommendation: push via Kubernetes API, not custom gRPC/REST yet)
+- Configuration delivery: Environment variables, ConfigMap mounts, or secrets? (Recommendation: ConfigMap for non-sensitive, Secrets for sensitive, K8s standard)
+- Graceful handoff during rolling updates: tenant signals readiness, control plane waits before draining? (Yes, via Kubernetes lifecycle hooks or API contract)
+
+**Owner:** Mikey (architecture), Data (backend implementation lead)  
+**Delivery:** API contract document (YAML/OpenAPI or markdown decision) + 1 example control-plane → tenant call flow  
+**Timeline:** Finalize 1 week before Phase 1 sprint; unblock #53 and #54  
+
+---
+
+#### 5️⃣ Control-Plane State Machine + Tenant Lifecycle States
+**Issue:** #42 point 5  
+**Blocker Level:** Phase 1 critical (tightly coupled with point 4)  
+**Rationale:**
+- Control-plane schema, provisioning logic, and error recovery all depend on this
+- Example: If a tenant is in `upgrading` state, can it still accept writes? Must be explicit.
+- Determines control-plane database schema and Kubernetes Operator expectations (if we build one later)
+
+**Must answer:**
+- Tenant state transition diagram: Start → provisioning → bootstrapping → ready → (upgrading | maintenance | restore)? → (deprovisioned | failed | suspended)?
+- Timeouts + retry: How long does provisioning wait before failing? Does control plane auto-retry or require human intervention?
+- Failure recovery: If a tenant enters `failed` state, what are the recovery paths? (Recommendation: explicit `restore` path via backup, manual or via control plane)
+- Idempotency: Can control plane safely re-apply the same request twice? (Recommendation: yes, via Kubernetes idempotent API patterns)
+
+**Owner:** Data (backend), Mikey (validation)  
+**Delivery:** State machine diagram (PlantUML or markdown) + control-plane schema (partial) showing state field and constraints  
+**Timeline:** Finalize 1 week before Phase 1; pair with point 4  
+
+---
+
+#### 6️⃣ Backup / Restore Strategy for Tenant Postgres Databases
+**Issue:** #42 point 3  
+**Blocker Level:** Phase 1 critical  
+**Rationale:**
+- Issue #40 (protect active sessions during admin restore) depends on backup/restore choreography
+- Determines disaster recovery procedures, RPO/RTO SLAs, and operational runbooks
+- Shapes Phase 2 decisions on Postgres replication and monitoring
+
+**Must answer:**
+- Backup mechanism: `pg_dump` snapshots (simple), continuous WAL archiving (safer), or managed provider backups (easiest)?
+  - Recommendation: Start with daily snapshots to object storage (cheap, simple, ~4h RPO is acceptable for hobby/small-team platform)
+  - WAL archiving can follow in Phase 2 if continuous replication needed
+- Restore: Full database restore only, or point-in-time recovery (PITR)?
+  - Recommendation: Full restore first (simpler, acceptable for Phase 1); PITR in Phase 2
+- Storage: Which object storage? (GCS, Azure Blob, AWS S3 provider-dependent; recommend managed provider backup if available)
+- Tenant-level restore API: Does control plane expose a restore endpoint, or is this a manual admin runbook?
+  - Recommendation: Manual runbook first (Phase 1 simple); control-plane API in Phase 2
+
+**Owner:** Data (Postgres expertise), Mikey (validation)  
+**Delivery:** Decision doc + operational runbook (markdown) + Phase 1 scope (snapshots only) vs Phase 2 (WAL/PITR)  
+**Timeline:** Lock scope before Phase 1; implement in Phase 2 unless critical backup use case emerges  
+
+---
+
+### Tier 3: Post-Phase-1 Decisions (Explicitly Defer)
+
+These are important but do not block Phase 0/1 execution. Revisit after Phase 1 acceptance.
+
+#### 7️⃣ Auth Migration Path: Current → OIDC / Keycloak (Coexistence + Cutover)
+**Issue:** #42 point 6  
+**Blocker Level:** Phase 2 (explicitly defer)  
+**Rationale:**
+- Phase 0/1 only require control-plane and tenant infra; auth can coexist in parallel
+- Current in-app auth stays live; Keycloak is additive in Phase 2
+- Cutover is a product decision (when to flip users), not a platform decision (can it be done)
+
+**Must answer (in Phase 2 planning):**
+- Coexistence: Do both auth systems run in parallel? Yes (Keycloak provides new tenant auth, old app auth stays for legacy)
+- Cutover: When do existing users switch to Keycloak? (Recommendation: admin-initiated, opt-in first, then mandatory after notice period)
+- Session migration: Can existing sessions stay valid after Keycloak launch, or must users re-authenticate?
+  - Recommendation: Old sessions remain valid; only new logins use Keycloak
+- User account linking: Do we link old app users to Keycloak accounts, or treat them as separate?
+  - Recommendation: Explicit linking UI in Phase 2 (after Keycloak is live)
+
+**Owner:** Mikey + FFMikha (product decision on cutover timing)  
+**Delivery:** Decision doc + cutover runbook (Phase 2 epic)  
+**Timeline:** Defer to Phase 2; explicitly note in Phase 1 acceptance that auth can stay unchanged  
+
+---
+
+#### 8️⃣ Rollout / Version-Skew Policy (N / N-1 Compatibility)
+**Issue:** #42 point 7  
+**Blocker Level:** Phase 2+ (explicitly defer)  
+**Rationale:**
+- Phase 0/1: "same train at first" (control plane, tenant workloads, databases all upgrade together)
+- N / N-1 becomes important only when multi-tenant deployments run long enough to overlap versions (Phase 2+)
+- Current decision: No N / N-1 commitment; explicit same-version upgrade required
+
+**Must answer (in Phase 2 planning):**
+- Backward compatibility guarantee: Do we commit to N / N-1 support (e.g., control plane v2.0 can manage tenants on v1.9)?
+  - Recommendation: "NOT before Phase 2"; document in Phase 0/1 that upgrades are coordinated, not rolling
+- Schema migration: If schemas change between versions, how do we avoid downtime?
+  - Recommendation: Deferred to Phase 2 operational procedures (blue-green tenant upgrades)
+- Client → Server compatibility: Can a v1.9 tenant talk to a v2.0 control plane?
+  - Recommendation: Ensure via explicit API versioning, defer implementation to Phase 2
+
+**Owner:** Mikey + Data (architecture & implementation)  
+**Delivery:** Decision doc + Phase 2 upgrade runbook  
+**Timeline:** Defer entirely; explicitly note in Phase 0 acceptance: "Coordinated full-platform upgrades only"  
+
+---
+
+#### 9️⃣ Local Keycloak Operational Model (Docker Compose + Realm Import)
+**Issue:** #42 point 9  
+**Blocker Level:** Phase 2 (deferred, nice-to-have for Phase 1 dev prep)  
+**Rationale:**
+- Keycloak integration is Phase 2; can wait
+- *However*, if Brand or another agent wants to prototype Keycloak dev setup before Phase 2 starts, the decision is simple and low-cost
+- Recommendation: Defer formal decision to Phase 2 sprint, but allow optional spike if developer wants early proof-of-concept
+
+**Must answer (in Phase 2 planning):**
+- Local Keycloak: Docker Compose (simplest) or Helm chart (overkill)?
+  - Recommendation: Docker Compose + realm import from YAML (batteries included, standard Keycloak pattern)
+- Developer experience: Should `docker compose up` in a keycloak-dev folder auto-seed test realms and users?
+  - Recommendation: Yes, import script or `docker-compose-init.sh`
+- Integration: How do dev tenants talk to local Keycloak? (DNS, localhost, `.localhost` tunnel?)
+  - Recommendation: Keycloak on `localhost:8080`, tenants reach via container network or host tunnel
+
+**Owner:** Brand (infrastructure), optional Copilot spike for Phase 1.5 (between Phase 1 acceptance and Phase 2 kickoff)  
+**Delivery:** Docker Compose template + realm seeding script (Phase 2), or optional early spike (Phase 1.5)  
+**Timeline:** Defer to Phase 2; offer optional early POC  
+
+---
+
+## Practical Decision Sequence for Team Sync
+
+### This Week (Before Phase 0 Ramp)
+1. **Lock the local K8d dev loop** → can #52 (containerize) and #43 (artifacts) start work?
+2. **Clarify CI scope for Phase 0** → what validation gates does container + API tests need?
+3. **Light spec on Phase 1 ingress/DNS/TLS** → Brand knows what to prepare for Phase 1, doesn't block Phase 0
+
+### Before Phase 1 Kickoff (1 Week Prior)
+4. Control-plane ↔ tenant contract (internal APIs)
+5. Control-plane state machine + lifecycle states
+6. Backup / restore strategy scope (snapshots in Phase 1? WAL in Phase 2?)
+
+### Before Phase 2 Kickoff
+7. Auth migration + cutover (product decision: when do existing users move to Keycloak?)
+8. Rollout / version-skew policy (explicitly: coordinated upgrades only in Phase 0/1)
+9. Local Keycloak dev (Docker Compose + realm import; optional early spike in Phase 1.5)
+
+---
+
+## Recommendation: Decision Rhythm
+
+- **2026-04-18 (Today):** Mikey & FFMikha review this memo; flag any disagreements
+- **2026-04-18 (Evening):** Sync with Brand, Data on Tier 1 blockers (k3d loop, CI scope, Phase 1 ingress prep)
+  - Goal: 30 min, outcome = three yes/no questions resolved
+- **2026-04-18 (Before #52 starts):** Brand publishes k3d setup doc (even if rough) in README or CONTRIBUTING.md
+- **2026-04-25 (Phase 1 sprint planning):** Revisit Tier 2 (control-plane contract, state machine, backup strategy) with full team
+- **2026-04-30 (Phase 2 sprint planning):** Revisit Tier 3 (auth migration, version-skew, Keycloak dev) with FFMikha + Data
+
+---
+
+## Open Questions for Sync
+
+1. **k3d or k3s?** Brand + Mikey decision
+2. **Wildcard domain strategy** for Phase 1? (Subdomain-based or path-based?) Brand input
+3. **CI scope:** Container + push + API tests only, or include k3d smoke test? Brand + Data
+4. **Backup strategy:** Daily snapshots to object storage, or investigate WAL archiving now? Data + Mikey
+5. **Keycloak dev setup:** Optional early spike (Phase 1.5) or strictly Phase 2? FFMikha's product call
+
+---
+
+**Next:** Await team feedback. Mikey ready to facilitate sync.
+
+
+---
+# Issue #42 — Lead Recommendation: Closing the Four Remaining Clarifications
+
+**By:** Mikey (Lead)  
+**Date:** 2026-04-19  
+**Epic:** #42  
+**Status:** RECOMMENDATION (not yet locked)  
+**Requested by:** FFMikha
+
+---
+
+## The Four Open Items
+
+From the epic's "Next points to clarify together" list:
+
+1. Control-plane state machine / tenant lifecycle states
+2. Migration path from current auth to OIDC / Keycloak (coexistence + cutover)
+3. Rollout / version-skew policy (same train first, N / N-1 expectations)
+4. Local Keycloak operational model for developer iteration
+
+---
+
+## Recommended Locking Order
+
+**Lock first → lock last, based on what blocks execution soonest.**
+
+| Order | Item | Lock Now? | Blocks |
+|-------|------|-----------|--------|
+| 1 | Tenant lifecycle state machine | ✅ YES | #53 (control-plane skeleton), #54 (provisioning), #55 (rollout) |
+| 2 | Rollout / version-skew policy | ✅ YES (Phase 1 shape) | #55 (rollout rules) |
+| 3 | Local Keycloak operational model | ✅ YES | Dev iteration on #56 |
+| 4 | Auth migration path (OIDC coexistence + cutover) | ⚠️ SHAPE only | #56 (Keycloak integration) — Phase 2 work |
+
+**Items 1–3 can be locked now.** They are either immediate blockers or simple enough that deferral adds no value. Item 4 needs a locked shape (which path, not the implementation details) — full specification deferred to pre-Phase 2 design.
+
+---
+
+## 1. Tenant Lifecycle State Machine — LOCK NOW
+
+**Why first:** The control-plane skeleton (#53) cannot be built without knowing which states tenants transition through. Every downstream issue (#54 provisioning, #55 rollout, backup/restore) references tenant states. This is the single biggest architectural gap blocking Phase 1 code.
+
+**Thinnest acceptable Phase 1 shape:**
+
+```
+                    ┌──────────────┐
+         ┌────────▶│  failed      │◀───── any transition can fail
+         │         └──────────────┘
+         │
+┌────────┴───┐     ┌──────────────┐     ┌──────────────┐
+│ provisioning│────▶│   ready      │────▶│  maintenance │
+└────────────┘     └──────┬───────┘     └──────┬───────┘
+                          │    ▲               │    ▲
+                          │    │               │    │
+                          │    └───────────────┘    │
+                          │                         │
+                          ▼                         │
+                   ┌──────────────┐                 │
+                   │  upgrading   │─────────────────┘
+                   └──────────────┘
+                          │
+                          ▼
+                   ┌──────────────┐
+                   │  restoring   │──────▶ ready | failed
+                   └──────────────┘
+
+         ┌──────────────┐
+         │ deprovisioned│  (terminal — resources cleaned up)
+         └──────────────┘
+```
+
+**Phase 1 states (7):**
+
+| State | Entry | Exit | Who triggers |
+|-------|-------|------|-------------|
+| `provisioning` | CP creates K8s resources + DB | → `ready` (pod healthy) or → `failed` | CP admin API |
+| `ready` | Pod serving, probes green | → `maintenance`, `upgrading`, `deprovisioned` | Automatic (probes) |
+| `maintenance` | CP calls `POST /_control/maintenance` | → `ready` (drain lifted) or → `restoring` | CP orchestration |
+| `upgrading` | CP initiates version bump | → `ready` (new version healthy) or → `failed` | CP rollout worker |
+| `restoring` | CP initiates pg_restore | → `ready` (restore verified) or → `failed` | CP backup worker |
+| `failed` | Any transition errors out | → `provisioning` (retry) or → `deprovisioned` (give up) | Automatic |
+| `deprovisioned` | CP tears down resources | Terminal | CP admin API |
+
+**Phase 2 additions (defer):** `suspended` (billing/abuse hold — scale to zero, keep data), `migrating` (cross-cluster move). Not needed until we have paying customers or multi-cluster.
+
+**Key rules:**
+- State lives in the control-plane DB (`tenants.state` column), not in K8s labels. K8s is observed state; CP DB is desired/declared state.
+- Every state transition is logged in an `audit_log` table (tenant_id, from_state, to_state, triggered_by, timestamp, reason).
+- `failed` is not a dead end — CP can retry provisioning or an operator can manually deprovision.
+- Only one active transition per tenant at a time (no concurrent upgrade + restore).
+
+**Dependency:** None — already informed by the locked CP↔tenant contract. Can lock today.
+
+---
+
+## 2. Rollout / Version-Skew Policy — LOCK NOW (Phase 1 shape)
+
+**Why second:** Depends lightly on the state machine (#1) for upgrade/maintenance state definitions, but the policy question is independent. Blocks #55 (rollout rules).
+
+**Thinnest acceptable Phase 1 shape:**
+
+**Same release train, tolerate brief skew during rollout.**
+
+- **One image tag = one version.** Control plane, portal, and tenant app ship from the same Git tag and container image. No independent versioning in Phase 1.
+- **Rollout is serial per tenant.** CP upgrades one tenant at a time (or bounded batch of N). No big-bang fleet update. Tenant enters `maintenance` → `upgrading` → `ready` or `failed`.
+- **N / N-1 tolerance window:** During a rollout, some tenants are on version N and others are still on N-1. This is expected and acceptable. The contract:
+  - **Schema migrations must be forward-compatible.** A migration in version N must not break a tenant still running N-1 code. Additive-only changes (new columns with defaults, new tables). Destructive migrations (drop column, rename) require a two-step release: N adds the new path, N+1 removes the old one.
+  - **API contract between CP and tenant is versioned.** `/_control/info` returns `app_version` and `schema_version`. CP uses these to decide if a tenant is safe to upgrade.
+  - **Rollback = re-deploy N-1 image.** No automatic rollback in Phase 1. CP can be manually told to set desired_version back to N-1 for a tenant. Pre-upgrade backup is the safety net.
+- **Control plane upgrades itself first**, before any tenants. If CP breaks on N, no tenant rollout starts.
+- **Schema version tracked separately from app version.** `schema_version` is an integer that increments with every migration. App version is a semver tag. Both stored in CP tenant registry.
+
+**Phase 2 additions (defer):** Canary rollout (upgrade 1 tenant, observe, then fleet), automated rollback triggers, N-2 compatibility for slow-upgrading tenants. Not needed until we have >10 tenants or a customer SLA.
+
+**Dependency:** Lightly depends on #1 (state machine defines `upgrading`/`maintenance` states). Can lock in the same pass.
+
+---
+
+## 3. Local Keycloak Operational Model — LOCK NOW
+
+**Why third:** Simplest decision of the four. Doesn't block Phase 0–1 execution, but unblocked devs need to know the shape before writing #56 code. Multiple existing decisions already point at "Docker Compose with realm import" — just make it official.
+
+**Thinnest acceptable shape:**
+
+- **Docker Compose service** alongside the existing dev stack. One `docker-compose.keycloak.yml` (or a profile in the main compose file) that starts Keycloak + its own Postgres.
+- **Realm import on startup.** Two realm JSON files checked into the repo under `infra/keycloak/realms/`: `admin-realm.json` and `notetakers-realm.json`. Keycloak `--import-realm` flag loads them on first boot.
+- **Pre-seeded test users.** Each realm file includes 2–3 test users (admin user, regular note-taker, guest-claim test user) with known passwords for local dev.
+- **Keycloak version pinned.** Use a specific Keycloak Docker image tag (not `latest`). Pin in compose file and document in `infra/keycloak/README.md`.
+- **Tenant app dev mode.** When `AUTH_PROVIDER=keycloak` env var is set, tenant app validates JWTs against local Keycloak JWKS endpoint. When unset or `AUTH_PROVIDER=local`, app uses current email/password auth. This coexistence flag is the bridge between current dev workflow and OIDC dev workflow.
+- **No Keycloak in CI (Phase 1).** CI tests use `AUTH_PROVIDER=local`. Keycloak integration tests are manual or run in a dedicated CI job with Docker Compose (Phase 2+).
+
+**Phase 2 additions (defer):** Realm config-as-code pipeline (Keycloak Terraform provider or keycloak-config-cli), CI integration tests with Keycloak container, production Keycloak HA topology.
+
+**Dependency:** None — purely operational. Can lock today.
+
+---
+
+## 4. Auth Migration Path (OIDC Coexistence + Cutover) — LOCK SHAPE, DEFER DETAILS
+
+**Why last:** This is Phase 2 work (#56). Locking the full migration procedure now would be premature — the tenant app hasn't been ported to Postgres yet (#46), and the control plane doesn't exist yet (#53). But the **shape** of the migration matters now because it affects how #53 models identity and how the tenant app structures its auth layer.
+
+**Thinnest acceptable shape to lock now:**
+
+### Migration model: Coexistence → Cutover (two releases)
+
+**Release A (coexistence):**
+- Tenant app accepts BOTH auth methods simultaneously.
+- `AUTH_PROVIDER` env var controls which is active: `local` (current email/password) or `keycloak` (OIDC).
+- When `keycloak`: app validates Keycloak JWTs, maps `sub` claim to internal user. New users auto-provisioned on first login. Existing users matched by email (case-insensitive, verified email only).
+- When `local`: current behavior unchanged.
+- Share links and guest access remain unauthenticated (no Keycloak redirect). Guest claim flow (#20) links to Keycloak identity only when guest explicitly signs up.
+- Control plane admin API protected by admin-realm JWT from Release A onward.
+
+**Release B (cutover):**
+- `AUTH_PROVIDER=local` removed. Keycloak is mandatory.
+- Email/password auth code deleted.
+- All users must have Keycloak accounts. Migration script: for each user in tenant DB, create Keycloak user (email match) if not already present, send password-reset email.
+- Grace period: Release A runs for ≥2 weeks before Release B ships, to catch edge cases.
+
+### What to lock now (affects Phase 1 design):
+- **User identity column:** `users.keycloak_sub` (nullable) added in Phase 1 schema alongside existing `users.email`. Keycloak `sub` claim becomes the canonical identifier once populated. Email remains fallback for matching.
+- **Auth middleware interface:** Single `AuthMiddleware` that delegates to `LocalAuthStrategy` or `KeycloakAuthStrategy` based on `AUTH_PROVIDER`. Both strategies produce the same `AuthenticatedUser` shape (`{ userId, email, tenantId, roles }`).
+- **Share links stay anonymous.** No Keycloak redirect for share-link access. Guest elevation to authenticated user is opt-in.
+
+### What to defer to pre-Phase 2 design:
+- Token refresh and session lifecycle details.
+- Keycloak client registration model (one client per tenant vs. shared client with audience).
+- Cross-subdomain SSO cookie/token sharing mechanics.
+- Exact migration script implementation and rollback path.
+- Whether Release A and Release B are one phase apart or can be collapsed.
+
+**Dependency:** Depends on #1 (state machine — `upgrading` state handles the auth cutover release) and #3 (local Keycloak model — devs need a working Keycloak to build the coexistence layer).
+
+---
+
+## Dependency Map
+
+```
+#1 State Machine ──────┬──────▶ #53, #54, #55 (Phase 1)
+                       │
+#2 Version-Skew ───────┤──────▶ #55 (Phase 1)
+                       │
+#3 Local Keycloak ─────┤──────▶ #56 dev workflow (Phase 2)
+                       │
+#4 Auth Migration ─────┘──────▶ #56 implementation (Phase 2)
+    (depends on #1, #3)
+```
+
+Items #1 and #2 are load-bearing for Phase 1. Items #3 and #4 are load-bearing for Phase 2 but cheap to decide now.
+
+---
+
+## Recommended Next Steps
+
+1. **FFMikha reviews and approves this ordering.** If agreed, Mikey locks #1–#3 immediately and writes the locked shape into the #42 epic body.
+2. **#4 shape gets locked as-is** (coexistence → cutover). Full spec deferred to a pre-Phase 2 design task.
+3. **After locking:** Remove all four bullets from #42's "Next points to clarify together" section. The open clarifications list becomes empty — the epic is fully scoped.
+4. **Downstream impact:** Update #53, #55, #56 acceptance criteria to reference the newly locked decisions.
+
+
+---
+# Issue #42 — Three Clarifications Locked (2026-04-19)
+
+**By:** Mikey (Lead)  
+**Status:** LOCKED  
+**Approved by:** FFMikha  
+
+---
+
+## Summary
+
+Three of the four remaining "Next points to clarify together" items in #42 are now locked. These decisions are based on the independent recommendations from Data, Brand, and the Lead, and represent consensus on the Phase 1 shape.
+
+---
+
+## Locked Decisions
+
+### 1. Tenant Lifecycle / State Machine
+
+**7-state thin model:**
+
+```
+provisioning → ready ⇄ maintenance ⇄ upgrading
+                ↓          ↓           ↓
+              ready    restoring    ready
+                ↓          ↓
+              failed    failed
+                ↓
+          deprovisioned
+```
+
+**Key properties:**
+- States live in control-plane DB (`tenants.state` column); K8s is observed truth.
+- Only one active transition per tenant at a time (no concurrent ops).
+- `failed` requires explicit operator action to recover; not a dead end.
+- `provisioning` → `ready` or `failed` (K8s probes + app `/ready` check)
+- `ready` ⇄ `maintenance` (drain mode, reads allowed, writes rejected)
+- `ready` → `upgrading` → `ready` or `failed` (rolling update via CP)
+- `ready` → `restoring` → `ready` or `failed` (pre-restore safety snapshot mandatory)
+- `ready` → `deprovisioned` (terminal; resources cleaned, backup retained)
+
+**Rationale:** Minimal, explicit, load-bearing for Phase 1 control-plane skeleton (#53), provisioning (#54), rollout (#55), and backup/restore (#40).
+
+---
+
+### 2. Rollout / Version-Skew Policy (Phase 1 shape)
+
+**Same train, same version, no N-1 support after rollout completes.**
+
+- One image tag = one version. Control plane, portal, and tenant app ship from the same Git tag.
+- Rollout is serial per tenant. CP upgrades one tenant at a time (or bounded batch).
+- Brief transient skew during rollout is acceptable (some tenants on N, others on N-1).
+- **After rollout completes, all tenants are on N.** No supported steady-state N-1.
+- Schema migrations are additive-only within a release. No destructive changes in the same release.
+- Control plane upgrades itself first, before any tenant rollout.
+- Rollback = re-deploy N-1 image + restore from pre-upgrade backup (no in-place rollback).
+
+**Phase 2+ additions (defer):** Canary rollout, automated rollback triggers, N-2 compatibility for slow upgraders.
+
+**Rationale:** Coordinated upgrades are cheap at single-digit tenant scale. Widens testing cost and migration complexity; defer N-1 support until fleet size justifies it.
+
+---
+
+### 3. Auth Migration Shape (Phase 2 work, but Phase 1 must prepare)
+
+**Coexistence → cutover model, no flag day.**
+
+**Phase 1 prep:**
+- Add `users.keycloak_sub` (nullable) column in Phase 1 schema alongside `users.email`.
+- Keycloak `sub` claim becomes canonical identifier; email is fallback for matching.
+- Single `AuthMiddleware` that delegates to `LocalAuthStrategy` or `KeycloakAuthStrategy` based on `AUTH_PROVIDER` env var.
+- Both strategies produce same `AuthenticatedUser` shape (`{ userId, email, tenantId, roles }`).
+
+**Phase 2a (coexistence):**
+- Tenant app accepts both auth methods simultaneously.
+- `AUTH_PROVIDER=local` (current) or `AUTH_PROVIDER=keycloak` (OIDC).
+- When keycloak: app validates Keycloak JWTs, maps `sub` to internal user. New users auto-provisioned on first login. Existing users matched by email.
+- When local: current behavior unchanged.
+- Share links and guest access remain anonymous; no Keycloak redirect.
+- Control-plane admin API protected by admin-realm JWT.
+
+**Phase 2b (cutover):**
+- `AUTH_PROVIDER=local` removed. Keycloak mandatory.
+- Email/password auth code deleted.
+- Grace period: ≥2 weeks between Phase 2a and Phase 2b.
+- Migration script provisions all users in Keycloak.
+
+**Key safety properties:**
+- No flag day — dual auth runs for defined window.
+- Share links / guest access survive migration (stay anonymous).
+- Membership rows (source of truth for permissions) never change shape.
+- Phase 1 control-plane admin auth stays independent from tenant auth.
+
+**Rationale:** Shapes how Phase 1 schema is designed (keycloak_sub column) and Phase 2 implementation proceeds (middleware strategy pattern). Full spec deferred to pre-Phase 2 design task.
+
+---
+
+## Remaining Open Item
+
+**Local Keycloak operational model** stays intentionally open. The shape is clear (Docker Compose + realm import), but the details (Keycloak version pin, test user list, realm structure) belong in Phase 1.5 spike (#56 dev prep), not in the epic lock. No architectural risk — it's a developer convenience, not a platform blocker.
+
+---
+
+## Updated #42 Acceptance Criteria
+
+- ✅ Three clarifications locked: state machine, rollout/version-skew, auth migration shape.
+- ⏳ One clarification open: local Keycloak operational model (deferred to Phase 1.5 spike).
+- The epic body "Next points to clarify together" section now lists only Keycloak dev model.
+- Downstream issues (#53, #54, #55, #56, #40) acceptance criteria will reference these locked decisions.
+
+---
+
+## Cross-team Alignment
+
+- **Data:** Verified state machine and auth migration shape against backend model (audit_log table, keycloak_sub column, AuthAdapter pattern).
+- **Brand:** Verified state machine and rollout policy against ops needs (idempotent transitions, control-plane-first upgrade, pre-upgrade safety snapshot).
+- **Mikey:** Locked the thin slices and explicit boundaries to keep Phase 1 execution fast.
+
+---
+
+## Next Steps
+
+1. Mikey updates #42 epic body to reflect locked decisions (inline in the issue, not in a separate section).
+2. Scribe merges this decision note + supporting inbox notes (mikey-42-remaining-four.md, data-42-remaining-four.md, brand-42-remaining-four.md) into `.squad/decisions.md`.
+3. Update #53, #54, #55, #56, #40 acceptance criteria to reference locked decisions.
+4. Remove all three bullets from "Next points to clarify together" in #42. Leave only "Decide on local Keycloak operational model for developer iteration".
+
+---
+
+
+---
+# Epic #42 Hygiene Sync — Mikey
+
+**Date:** 2026-04-19T21:00Z  
+**Scope:** Clean up GitHub issue tracking to match locked Phase 0 Postgres direction
+
+## Actions Taken
+
+### 1. Retitled Issue #55
+- **From:** "Define single-writer rollout rules for SQLite tenant instances on Kubernetes"
+- **To:** "Define tenant rolling-update and database connection-draining choreography (Postgres-backed)"
+- **Reason:** Decisions locked Postgres-based persistence (2026-04-18); SQLite references are stale
+- **GitHub:** https://github.com/daydream-software/dnd-notes/issues/55
+
+### 2. Unblocked Issue #43 with Context
+- **Status change:** Blocked → Ready (hosting target now locked)
+- **Clarification:** Added comment explaining Phase 0 Track B scope: Dockerfile, K8s manifests (Deployment/Service/StatefulSet), CI pipeline for Postgres-based rollout
+- **Connection:** Explicitly linked to Phase 0 gate and Track A/C parallel execution
+- **GitHub:** https://github.com/daydream-software/dnd-notes/issues/43#issuecomment-4274696089
+
+### 3. Created Missing Issue #58 — NoteStore Postgres Adapter Port
+- **Title:** "Port NoteStore adapter from SQLite (better-sqlite3) to Postgres (node-postgres)"
+- **Scope:** Phase 0 Track A execution slice; separate from SQL refactoring (issue #46)
+- **Assignment:** squad:data (Data)
+- **Labels:** go:yes, release:backlog, type:feature
+- **Rationale:** `.squad/identity/now.md` describes Track A as "NoteStore Postgres adapter (5–7 days)" but this was missing from GitHub issue tracker
+- **GitHub:** https://github.com/daydream-software/dnd-notes/issues/58
+
+### 4. Verified `.squad/identity/now.md` is Current
+- Phase 0 execution tracks accurately reflect locked decisions
+- Tracked platform issues list is complete (after #58 addition)
+- No updates needed; document is in sync
+
+## Rationale
+
+GitHub epic #42 is the public source of truth for stakeholder visibility. Stale issue titles and blocked status cause confusion in child issues and misaligned execution. The Postgres decision (2026-04-18) materially changes:
+- Issue #55 scope (no longer single-writer SQLite rules; now Postgres rolling-update choreography)
+- Issue #43 status (hosting is locked; no longer a blocker; ready for Phase 0 Track B execution)
+- Child issue roster (missing Postgres port issue creates Gap in Phase 0 delivery plan)
+
+Synchronizing GitHub immediately after decision-lock ensures team and stakeholders see the current plan, avoiding downstream confusion and rework.
+
+## Next Steps
+
+- Brand starts Phase 0 Track B (#43) — Dockerfile/K8s manifests
+- Data starts Phase 0 Track A (#58) — Postgres adapter port
+- Data continues parallel SQL refactoring (#46)
+- Monitor Phase 0 gate criteria in `.squad/decisions.md` for completion tracking
+
+
+---
+
+---
+
+### 2026-04-19: PR #59 / Issue #53 Control-Plane Skeleton Review — APPROVED
+**Decided by:** Chunk (Tester)
+**Date:** 2026-04-19
+**Type:** Review Verdict
+**What:** Control-plane skeleton implementation approved for merge. All 15 tests passing, lint clean, build succeeds. 7-state lifecycle model and tenant registry fully meet Phase 1 requirements.
+**Why:** Thin registry contract with explicit state tracking provides clean integration points for orchestration (#54, #55, #40). Type-safe state enforcement at DB and API boundaries. Audit-first design (every transition logged).
+**Next:** Merge PR #59, start #54 (K8s provisioning) and #55 (rolling update choreography) in parallel.
+
+---
+
+### 2026-04-19: PR #60 / Issue #52 Containerize Tenant App — APPROVED
+**Decided by:** Chunk (Tester)
+**Date:** 2026-04-19
+**Type:** Review Verdict
+**What:** Multi-stage Dockerfile implementation approved for merge. 60 API tests passing, lint clean. Health probe semantics correct, same-origin runtime contract complete, no CI drift detected.
+**Why:** Production-minded containerization without scope drift. Correct K8s health semantics (/healthz for liveness, /readyz for readiness). DATABASE_URL reserved but not wired (correct for Phase 0). RUNTIME.md comprehensive and clear.
+**Next:** Merge PR #60, move to #46 (Postgres adapter port) as next Phase 0 blocker.
