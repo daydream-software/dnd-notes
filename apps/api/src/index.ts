@@ -32,11 +32,6 @@ function shutdown(exitCode: number) {
 
   shuttingDown = true
 
-  if (!server) {
-    finishShutdown(exitCode)
-    return
-  }
-
   const forceShutdownTimer = setTimeout(() => {
     server?.closeAllConnections?.()
     finishShutdown(exitCode)
