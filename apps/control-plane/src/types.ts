@@ -1,11 +1,14 @@
-export type TenantState =
-  | 'provisioning'
-  | 'ready'
-  | 'maintenance'
-  | 'upgrading'
-  | 'restoring'
-  | 'failed'
-  | 'deprovisioned'
+export const tenantStates = [
+  'provisioning',
+  'ready',
+  'maintenance',
+  'upgrading',
+  'restoring',
+  'failed',
+  'deprovisioned',
+] as const
+
+export type TenantState = (typeof tenantStates)[number]
 
 export interface Tenant {
   id: string

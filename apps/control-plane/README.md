@@ -26,11 +26,11 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
           deprovisioned
 ```
 
-- `provisioning`: K8s resources + Postgres DB being created
+- `provisioning`: K8s resources + tenant storage being created
 - `ready`: Normal operation, serving traffic
 - `maintenance`: Drain mode initiated (read-only, probes grace)
 - `upgrading`: Rolling update in progress (pod replaced, schema migrated)
-- `restoring`: `pg_restore` in progress (post-safety-snapshot)
+- `restoring`: tenant restore workflow in progress (post-safety-snapshot)
 - `failed`: Terminal error; requires operator action
 - `deprovisioned`: Resources deleted, backup retained
 

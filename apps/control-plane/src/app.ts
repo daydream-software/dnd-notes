@@ -1,7 +1,7 @@
-import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
 import { z } from 'zod'
 import type { TenantRegistry } from './tenant-registry.js'
+import { tenantStates } from './types.js'
 import type {
   ErrorResponse,
   HealthResponse,
@@ -22,30 +22,16 @@ const createTenantSchema = z.object({
   version: z.string().min(1),
 })
 
+const tenantStateSchema = z.enum(tenantStates)
+
 const updateStateSchema = z.object({
-  state: z.enum([
-    'provisioning',
-    'ready',
-    'maintenance',
-    'upgrading',
-    'restoring',
-    'failed',
-    'deprovisioned',
-  ]),
+  state: tenantStateSchema,
   triggeredBy: z.string().min(1),
   reason: z.string().optional(),
 })
 
 const updateDesiredStateSchema = z.object({
-  desiredState: z.enum([
-    'provisioning',
-    'ready',
-    'maintenance',
-    'upgrading',
-    'restoring',
-    'failed',
-    'deprovisioned',
-  ]),
+  desiredState: tenantStateSchema,
 })
 
 const updateStorageSchema = z.object({
@@ -56,15 +42,35 @@ const updateBackupSchema = z.object({
   backupMetadata: z.string().min(1),
 })
 
+function isSqliteConstraintError(
+  error: unknown,
+): error is Error & { code?: string } {
+  const sqliteCode = (error as Error & { code?: string })?.code
+
+  return (
+    error instanceof Error &&
+    (typeof sqliteCode === 'string'
+      ? sqliteCode.startsWith('SQLITE_CONSTRAINT')
+      : error.message.includes('UNIQUE constraint failed'))
+  )
+}
+
+function getTenantConflictResponse(error: Error): ErrorResponse {
+  if (error.message.includes('tenants.id')) {
+    return { error: 'Tenant ID already exists' }
+  }
+
+  if (error.message.includes('tenants.slug')) {
+    return { error: 'Tenant slug already exists' }
+  }
+
+  return { error: 'Tenant already exists' }
+}
+
 export function createApp({ tenantRegistry }: CreateAppOptions): Express {
   const app = express()
 
-  app.use(
-    cors({
-      origin: '*',
-      credentials: false,
-    }),
-  )
+  app.disable('x-powered-by')
   app.use(express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
@@ -140,6 +146,11 @@ export function createApp({ tenantRegistry }: CreateAppOptions): Express {
         })
         response.status(201).json({ tenant })
       } catch (error) {
+        if (isSqliteConstraintError(error)) {
+          response.status(409).json(getTenantConflictResponse(error))
+          return
+        }
+
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error'
         response.status(500).json({
@@ -185,7 +196,7 @@ export function createApp({ tenantRegistry }: CreateAppOptions): Express {
         )
 
         const updatedTenant = tenantRegistry.getTenant(tenantId)
-        
+
         if (!updatedTenant) {
           response.status(500).json({ error: 'Failed to retrieve updated tenant' })
           return
@@ -221,6 +232,12 @@ export function createApp({ tenantRegistry }: CreateAppOptions): Express {
       }
 
       const { desiredState } = parseResult.data
+
+      const existingTenant = tenantRegistry.getTenant(tenantId)
+      if (!existingTenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
 
       try {
         tenantRegistry.updateTenantDesiredState(
@@ -265,6 +282,12 @@ export function createApp({ tenantRegistry }: CreateAppOptions): Express {
 
       const { storageReference } = parseResult.data
 
+      const existingTenant = tenantRegistry.getTenant(tenantId)
+      if (!existingTenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+
       try {
         tenantRegistry.updateTenantStorageReference(tenantId, storageReference)
         const tenant = tenantRegistry.getTenant(tenantId)
@@ -304,6 +327,12 @@ export function createApp({ tenantRegistry }: CreateAppOptions): Express {
       }
 
       const { backupMetadata } = parseResult.data
+
+      const existingTenant = tenantRegistry.getTenant(tenantId)
+      if (!existingTenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
 
       try {
         tenantRegistry.updateTenantBackupMetadata(tenantId, backupMetadata)

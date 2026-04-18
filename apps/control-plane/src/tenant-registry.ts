@@ -1,5 +1,7 @@
 import Database, { type Database as DatabaseType } from 'better-sqlite3'
-import type { Tenant, TenantState, StateTransition } from './types.js'
+import { tenantStates, type Tenant, type TenantState, type StateTransition } from './types.js'
+
+const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
 
 export class TenantRegistry {
   private db: DatabaseType
@@ -16,8 +18,8 @@ export class TenantRegistry {
         id TEXT PRIMARY KEY,
         slug TEXT UNIQUE NOT NULL,
         owner_id TEXT NOT NULL,
-        desired_state TEXT NOT NULL CHECK (desired_state IN ('provisioning', 'ready', 'maintenance', 'upgrading', 'restoring', 'failed', 'deprovisioned')),
-        current_state TEXT NOT NULL CHECK (current_state IN ('provisioning', 'ready', 'maintenance', 'upgrading', 'restoring', 'failed', 'deprovisioned')),
+        desired_state TEXT NOT NULL CHECK (desired_state IN (${tenantStateSqlList})),
+        current_state TEXT NOT NULL CHECK (current_state IN (${tenantStateSqlList})),
         version TEXT NOT NULL,
         storage_reference TEXT,
         backup_metadata TEXT,
@@ -28,8 +30,8 @@ export class TenantRegistry {
       CREATE TABLE IF NOT EXISTS state_transitions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        from_state TEXT NOT NULL,
-        to_state TEXT NOT NULL,
+        from_state TEXT NOT NULL CHECK (from_state IN (${tenantStateSqlList})),
+        to_state TEXT NOT NULL CHECK (to_state IN (${tenantStateSqlList})),
         triggered_by TEXT NOT NULL,
         reason TEXT,
         created_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -87,26 +89,31 @@ export class TenantRegistry {
   }): Tenant {
     const { id, slug, ownerId, version } = params
 
-    this.db
-      .prepare(
-        `INSERT INTO tenants (id, slug, owner_id, desired_state, current_state, version)
-         VALUES (?, ?, ?, 'provisioning', 'provisioning', ?)`,
-      )
-      .run(id, slug, ownerId, version)
+    const createTenantTransaction = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO tenants (id, slug, owner_id, desired_state, current_state, version)
+           VALUES (?, ?, ?, 'provisioning', 'provisioning', ?)`,
+        )
+        .run(id, slug, ownerId, version)
 
-    this.recordTransition({
-      tenantId: id,
-      fromState: 'provisioning',
-      toState: 'provisioning',
-      triggeredBy: 'system',
-      reason: 'Tenant creation',
+      this.recordTransition({
+        tenantId: id,
+        fromState: 'provisioning',
+        toState: 'provisioning',
+        triggeredBy: 'system',
+        reason: 'Tenant creation',
+      })
+
+      const tenant = this.getTenant(id)
+      if (!tenant) {
+        throw new Error('Failed to retrieve created tenant')
+      }
+
+      return tenant
     })
 
-    const tenant = this.getTenant(id)
-    if (!tenant) {
-      throw new Error('Failed to retrieve created tenant')
-    }
-    return tenant
+    return createTenantTransaction()
   }
 
   updateTenantState(

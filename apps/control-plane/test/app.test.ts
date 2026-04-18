@@ -94,7 +94,7 @@ describe('Control Plane API', () => {
         .post('/api/tenants')
         .send({
           id: 'tenant-123',
-          slug: 'Invalid_Slug!',
+          slug: '-invalid-slug',
           ownerId: 'owner-456',
           version: '1.0.0',
         })
@@ -223,6 +223,17 @@ describe('Control Plane API', () => {
 
       assert.strictEqual(response.body.tenant.desiredState, 'ready')
     })
+
+    it('returns 404 when updating desired state of non-existent tenant', async () => {
+      const response = await request(app)
+        .patch('/api/tenants/non-existent/desired-state')
+        .send({
+          desiredState: 'ready',
+        })
+        .expect(404)
+
+      assert.strictEqual(response.body.error, 'Tenant not found')
+    })
   })
 
   describe('PATCH /api/tenants/:tenantId/storage', () => {
@@ -242,6 +253,17 @@ describe('Control Plane API', () => {
         .expect(200)
 
       assert.strictEqual(response.body.tenant.storageReference, 'pvc-abc123')
+    })
+
+    it('returns 404 when updating storage for non-existent tenant', async () => {
+      const response = await request(app)
+        .patch('/api/tenants/non-existent/storage')
+        .send({
+          storageReference: 'pvc-abc123',
+        })
+        .expect(404)
+
+      assert.strictEqual(response.body.error, 'Tenant not found')
     })
   })
 
@@ -267,6 +289,17 @@ describe('Control Plane API', () => {
         .expect(200)
 
       assert.strictEqual(response.body.tenant.backupMetadata, metadata)
+    })
+
+    it('returns 404 when updating backup metadata for non-existent tenant', async () => {
+      const response = await request(app)
+        .patch('/api/tenants/non-existent/backup')
+        .send({
+          backupMetadata: '{"location":"blob://missing"}',
+        })
+        .expect(404)
+
+      assert.strictEqual(response.body.error, 'Tenant not found')
     })
   })
 
