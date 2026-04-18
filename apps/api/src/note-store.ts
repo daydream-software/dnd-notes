@@ -259,6 +259,7 @@ export interface NoteStore {
   resetNotes(inputs: NoteInput[], campaignId?: string): Note[]
   getStats(campaignId?: string): NoteStats
   getAdminOverview(): AdminOverview
+  checkHealth(): void
   backupDatabase(destinationPath: string): Promise<void>
   close(): void
 }
@@ -729,6 +730,7 @@ export function createNoteStore(
       (SELECT COUNT(*) FROM notes WHERE status = 'active') AS active_note_count,
       (SELECT COUNT(*) FROM notes WHERE status = 'archived') AS archived_note_count
   `)
+  const checkDatabaseConnection = database.prepare('SELECT 1')
 
   const selectOwnerAccountById = database.prepare(`
     SELECT
@@ -2097,6 +2099,9 @@ export function createNoteStore(
         },
       }
     },
+    checkHealth() {
+      checkDatabaseConnection.get()
+    },
     backupDatabase(destinationPath) {
       return database.backup(destinationPath).then(() => undefined)
     },
@@ -2153,7 +2158,7 @@ export function restoreNoteStoreFromBackup(
   const validationStore = createNoteStore({ ...options, dbPath: sourcePath })
 
   try {
-    validationStore.getAdminOverview()
+    validationStore.checkHealth()
   } catch {
     throw new InvalidBackupDatabaseError(
       'The uploaded database could not be opened as a dnd-notes backup.',

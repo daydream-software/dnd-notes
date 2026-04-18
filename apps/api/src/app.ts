@@ -150,7 +150,7 @@ export function createApp({
   // Readiness probe - ready to serve traffic
   app.get('/readyz', (_request: Request, response: Response<HealthResponse | ErrorResponse>) => {
     try {
-      noteStore.getAdminOverview()
+      noteStore.checkHealth()
       response.json({ status: 'ok', service: 'dnd-notes-api' })
     } catch {
       response.status(503).json({
@@ -178,10 +178,18 @@ export function createApp({
     
     app.use(express.static(webDistPath))
     
-    // SPA fallback - serve index.html for all non-API/health routes
-    app.use((_request: Request, response: Response, next) => {
-      const path = _request.path
-      if (path.startsWith('/api/') || path.startsWith('/health') || path.startsWith('/readyz')) {
+    // SPA fallback - serve index.html for browser navigation requests only
+    app.use((request: Request, response: Response, next) => {
+      const isDocumentRequest = request.method === 'GET' || request.method === 'HEAD'
+      const path = request.path
+
+      if (
+        !isDocumentRequest ||
+        path.startsWith('/api/') ||
+        path === '/health' ||
+        path === '/healthz' ||
+        path === '/readyz'
+      ) {
         next()
       } else {
         response.sendFile(join(webDistPath, 'index.html'))

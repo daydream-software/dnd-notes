@@ -25,8 +25,6 @@ WORKDIR /app
 
 # Install runtime dependencies
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=deps /app/apps/web/node_modules ./apps/web/node_modules
 
 # Copy built artifacts
 COPY --from=build /app/apps/api/dist ./apps/api/dist

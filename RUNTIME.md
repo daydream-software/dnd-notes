@@ -10,8 +10,9 @@ None. The application will start with defaults.
 
 ### Application Configuration
 
-- **`PORT`** (default: `3000`)  
-  HTTP listener port for the combined web + API server.
+- **`PORT`** (app default: `3001`; container image default: `3000`)  
+  HTTP listener port for the combined web + API server.  
+  **Note:** Local `apps/api/src/index.ts` defaults to `3001`; the container image sets `PORT=3000`.
 
 - **`NODE_ENV`** (default: `production`)  
   Node.js environment mode. Set to `production` in container deployments.
@@ -72,9 +73,9 @@ livenessProbe:
 **Purpose:** Ready-to-serve-traffic check for Kubernetes.  
 **Response:**  
 - `200 OK` with `{ "status": "ok", "service": "dnd-notes-api" }` when database is healthy  
-- `503 Service Unavailable` with `{ "status": "unavailable", "service": "dnd-notes-api" }` when database connection fails
+- `503 Service Unavailable` with `{ "error": "Database unavailable" }` when database connection fails
 
-**Failure mode:** Returns 503 if the database is unreachable or locked.
+**Failure mode:** Returns 503 if a lightweight database connectivity check fails.
 
 **Kubernetes usage:**
 ```yaml
@@ -128,14 +129,17 @@ volumes:
 ### Shutdown (SIGTERM)
 1. Stop accepting new HTTP connections
 2. Wait for in-flight requests to complete (default: 30s grace period)
-3. Close database connection cleanly
-4. Exit with code 0
+3. Close idle keep-alive connections so shutdown is not blocked by unused sockets
+4. Close database connection cleanly
+5. Exit with code 0 (or force-exit after the 30s grace period)
 
 ### Graceful Termination
 The container handles `SIGTERM` for zero-downtime rolling updates:
 ```javascript
 process.on('SIGTERM', () => shutdown(0))
 ```
+
+`shutdown()` now closes the HTTP server first, drains in-flight requests for up to 30 seconds, closes idle keep-alive sockets, and only then closes the database handle.
 
 **Kubernetes recommendation:**
 ```yaml

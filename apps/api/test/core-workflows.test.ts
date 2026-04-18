@@ -24,6 +24,39 @@ test('GET /health returns service metadata', async (t) => {
   assert.equal(response.body.service, 'dnd-notes-api')
 })
 
+test('GET /healthz and /readyz return probe metadata while the database is available', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const [livenessResponse, readinessResponse] = await Promise.all([
+    request(app).get('/healthz'),
+    request(app).get('/readyz'),
+  ])
+
+  assert.equal(livenessResponse.status, 200)
+  assert.deepEqual(livenessResponse.body, {
+    status: 'ok',
+    service: 'dnd-notes-api',
+  })
+  assert.equal(readinessResponse.status, 200)
+  assert.deepEqual(readinessResponse.body, {
+    status: 'ok',
+    service: 'dnd-notes-api',
+  })
+})
+
+test('GET /readyz returns 503 when the database is unavailable', async (t) => {
+  const { app, cleanup, closeNoteStore } = await createTestApp()
+  t.after(cleanup)
+
+  closeNoteStore()
+
+  const response = await request(app).get('/readyz')
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(response.body, { error: 'Database unavailable' })
+})
+
 test('site admins can download a SQLite backup and non-admins cannot', async (t) => {
   const { app, cleanup } = await createTestApp({
     siteAdminEmails: ['site-admin@example.com'],
