@@ -354,3 +354,35 @@ Decision merged to `.squad/decisions.md`. Awaiting Brand background agent start.
 
 
 📌 Team update (2026-04-18T02:20:06Z): Platform gap analysis complete — 11 cross-cutting risks identified for #42 epic. Critical gaps: local K8s dev loop (k3d), ingress/wildcard DNS/TLS, SQLite backup strategy, control-plane SPOF, CI for containers/manifests. All gaps prioritized by phase and assigned to Brand/Data. Awaiting Mikey + FFMikha review and timeline adjustment.
+
+## 2026-04-18: Issue #42 Planning Resumed — Phase 0 Kickoff & Decision Points
+
+📌 **Planning decision:** Resolved Data's four blocking decision points and produced concrete Phase 0 execution plan.
+
+**Decisions made:**
+1. **Auth migration:** Dual-mode with `AuthAdapter` interface. Local auth + OIDC coexist. OIDC not mandatory until Phase 3 production cutover.
+2. **Versioning:** Semver + explicit `schema_version` integer per tenant DB. N reads N and N-1.
+3. **Backup ownership:** Control plane orchestrates (schedule, inventory, retention), tenant app executes (`/internal/backup`, `/internal/restore`). Control plane never touches tenant data.
+4. **Keycloak timing:** Phase 2 as planned, but mock OIDC in Phase 1 validates `AuthAdapter` early.
+
+**Phase 0 is unblocked — two parallel tracks:**
+- Track A: #52 Containerize (Brand) — Dockerfile, k3d dev loop (`scripts/dev-cluster.sh`), K8s manifests, CI container build
+- Track B: #39 WAL investigation (Data) — measured WAL behavior, crash recovery, backup consistency
+- Track C: #43 Deployment artifacts (Brand, companion to #52)
+
+**Phase 0→1 design overlap (start now, parallel with Phase 0):**
+- Control-plane state machine (Data → feeds #53)
+- Internal API contract `/internal/*` (Data → feeds #53, #54)
+- Ingress/wildcard DNS/TLS spike (Brand → feeds #54)
+- `AuthAdapter` interface draft (Data → feeds #56)
+
+**Full sequencing:** Phase 0 → Phase 1 (#53 → #54 → #55) → Phase 2 (#56, #40) → Phase 3 (#57). Design work overlaps Phase 0 to prevent Phase 1 stall.
+
+**Decision document:** `.squad/decisions/inbox/mikey-issue-42-planning.md`
+
+## Learnings
+
+- **Epic #42 planning pattern:** Architecture spike (multiple risk reviews) → decision resolution (Mikey answers blocking questions) → execution kickoff (parallel tracks with measured acceptance). The gap between "architecture decided" and "Phase 0 underway" was the real planning debt.
+- **Decision point triage:** Data's 4 blocking questions were the right forcing function. Without explicit answers to auth strategy, versioning, backup ownership, and Keycloak timing, no child issue can be confidently scoped.
+- **Phase overlap reduces idle time:** Design tasks for Phase N+1 can start during Phase N implementation when outputs are interfaces/contracts rather than code. State machine, API contract, and adapter interface drafts are all non-blocking on Phase 0 code.
+- **Key file paths:** Epic decisions consolidated in `.squad/decisions.md` lines 3492–4180. Sub-issues: #52 (containerize), #43 (artifacts), #39 (WAL), #53 (control plane), #54 (provisioning), #55 (rollout), #56 (OIDC), #40 (restore), #57 (fleet status).
