@@ -30,6 +30,10 @@ Mikey initialized as Lead for the initial project squad.
 
 ## Learnings
 
+- **Issue #42 Backup/Restore Decision Sync (2026-04-18):** Consolidated Data's and Brand's backup strategy recommendations into a single locked decision: Phase 1 uses two-layer backup (managed Postgres PITR for fleet-wide disaster recovery + daily per-tenant logical backups for routine single-tenant restore). Removed the backup/restore bullet from the open clarifications list in the epic body. Updated issue #42 with concise explanation under "Locked Phase 0–1 clarifications" (#5) and added sync comment linking to decision record (`.squad/decisions/inbox/mikey-42-backup-sync.md`). **Key lesson:** When consolidating multi-author recommendations, keep the decision statement high-level and defer detailed implementation tradeoffs to Phase 2+ work. The merged decision is a public contract that child issues (#53–#55) will reference; it should be clear enough to guide work without overwhelming readers with backup-strategy trivia.
+
+- **Issue #42 Phase 0–1 Sync Correction (2026-04-18):** Reopened issue #42 and updated the epic body to explicitly include four locked Phase 0–1 clarifications from real-time discussion: k3d local dev loop, Phase 0 CI scope (no auto-GHCR push), opaque wildcard ingress/TLS model, and GHCR private images via imagePullSecrets. Removed these from the open clarifications list. Added sync comment linking to decision record. **Key lesson:** Epic bodies must stay current with decision inbox merges — GitHub issues are the public-facing contract, and stale clarifications create downstream confusion in child-issue acceptance criteria. FFMikha's directive to keep #42 updated applies to every locked decision touching the epic scope.
+
 - Initial squad setup complete.
 - **PR #51 review (2026-04-17):** For docs-focused PRs, keep merge scope to the user-facing docs plus any required tracked squad history; a repo-root `plan.md` is session-planning residue, not ship material, and should be removed before merge.
 - **PR #51 re-review (2026-04-17):** Once the stray `plan.md` is gone, the remaining shape is acceptable: the restore-rehearsal checklist belongs in `README.md`, and `.squad/agents/copilot/history.md` is valid only as durable squad context, not as a substitute for product docs.
@@ -427,3 +431,66 @@ Decision merged to `.squad/decisions.md`. Awaiting Brand background agent start.
 **Next:** FFMikha approves 5 NOW decisions → Brand starts #52 → Data + Brand design state machine (Phase 0→1 pre-work).
 
 **Artifact:** `.squad/decisions/inbox/mikey-issue-42-planning.md` (updated from earlier version)
+
+## 2026-04-18: Issue #42 Phase 0–1 Clarifications Locked
+
+**Action Taken:**
+Locked three critical Phase 0–1 clarifications into GitHub issue #42 body and squad decisions inbox. These items moved from "open clarifications" to locked decisions with clear owners and downstream implications.
+
+**Three Decisions Locked:**
+
+1. **Local K8s dev loop: k3d** (2026-04-18)
+   - k3d for daily fast iterations; k3s on VM for stateful rehearsals (PVCs, rolling restarts, backup/restore).
+   - Accepted divergence: k3d local storage vs. managed Postgres on cloud. Phase 1 acceptance includes manifest validation on both k3d and AKS.
+   - Owner: Brand (deployment); Data (backup assumptions).
+   - Implication: #52 Containerize must include `scripts/dev-cluster.sh` spike.
+
+2. **Phase 0 CI scope: Build + smoke test + validate** (2026-04-18)
+   - Container image build + API smoke tests + K8s manifest validation. **No automatic GHCR push on PR.**
+   - Rationale: Phase 0 images not production-ready; manual promotion post-Phase-0-acceptance reduces noise and registry churn.
+   - Cost impact: Lower CI spend (no every-PR push).
+   - Owner: Brand (CI/CD).
+
+3. **Phase 1 ingress/TLS model: Opaque wildcard subdomains** (2026-04-18)
+   - One subdomain per tenant (`tenant-slug.dnd-notes.app`); web + API same-origin.
+   - Architecture: cert-manager + ingress-nginx + wildcard DNS-01.
+   - Control-plane contract: Each tenant record includes `subdomain` field; provisioning reserves subdomains + creates ingress rules atomically.
+   - **GHCR private images:** Explicit clarification: Images stay private in production. Cluster pulls via Kubernetes `imagePullSecrets` (K8s Secrets with package-read credentials). No special tooling needed Phase 0–1.
+   - Owner: Brand (ingress/provisioning); Data (tenant contract).
+   - Implication: #53 (control-plane skeleton) and #54 (provisioning) must implement subdomain + ingress state machine.
+
+**Removed from "Next points to clarify together":**
+- ~~Local K8s dev loop (k3d/k3s)~~
+- ~~Phase 1 ingress/wildcard DNS/TLS model~~
+- ~~CI coverage scope~~
+
+**Issue #42 updated:** Body now includes locked Phase 0 decisions section + clarified GHCR private-image strategy + updated "Next points to clarify" list (7 items remain, 3 resolved).
+
+**Team decision artifact:** `.squad/decisions/inbox/mikey-42-phase0-sync.md` — Scribe will merge into `.squad/decisions.md` and sync child-issue (#52, #43, #53, #54, #55) descriptions to reference k3d choice and CI scope.
+
+**Learnings:**
+- **GitHub issues as living docs:** Issue #42 is the public platform specification. Keeping it synchronized with squad decisions avoids stale architecture in comments and child-issue understanding. Standing practice: any decision made on the epic must update the issue body within the same day.
+- **Phase contracts over features:** The three locked decisions clarify *boundaries* (dev ↔ prod, tenant ↔ platform, control-plane ↔ ingress) rather than new features. This is the right shape for Phase 0–1 gates — they are contracts, not code features.
+- **Subdomain as immutable tenant identity:** The Phase 1 contract (each tenant has a `subdomain` field assigned at provisioning) becomes the stable foreign key for wildcard DNS and ingress rule lifecycle. This is a material decision on data model shape that feeds #54 PR acceptance and #55 update choreography.
+- **k3d + k3s split for dev realism:** Accepting that k3d local storage differs from cloud PVCs is pragmatic. The bridge is k3s on a VM for stateful rehearsals. This unblocks #52 fast iteration without deferring PVC validation.
+
+## 2026-04-18T15:18:25Z: Issue #42 Phase 1 Backup/Restore Decision & Planning Complete
+
+**Status:** ✅ Phase 0–1 clarifications locked; Phase 1 backup/restore strategy finalized and merged to decisions.md
+
+**Completed** (Mikey role):
+1. Phase 0–1 clarifications grouped into blocking (Phase 0) vs. Phase 1 vs. Phase 2+ deferrals
+2. Backup/restore strategy finalized with Data + Brand
+3. User acceptance (FFMikha) captured on Phase 1 backup cadence (daily logical backups)
+4. All decisions merged to `.squad/decisions.md` (Scribe orchestration)
+5. Child-issue directions clarified (k3d, CI scope, opaque wildcard, GHCR secrets, backup/restore ownership)
+
+**Next:** Mikey phase-0 sync comment to GitHub issue #42 with links to locked decisions. Brand + Data can begin Phase 0 pre-work (state machine design) in parallel with Phase 0 container work.
+
+**Artifact summary:**
+- `.squad/decisions.md` lines 4167–4275: Phase 1 backup/restore locked decision (two-layer strategy, daily cadence, Phase 1 scope)
+- `.squad/log/2026-04-18T15-18-25Z-issue-42-planning-session-summary.md`: Session recap with all Tier 1–3 clarifications
+- `.squad/orchestration-log/2026-04-18T15-18-25Z-issue-42-backup-restore-decision.md`: Decision details + cross-team notes
+- GitHub issue #42 body (pending sync comment linking to decisions)
+
+

@@ -183,3 +183,24 @@ Team update (2026-04-18T14:45:11Z): ISSUE #42 POSTGRES DIRECTION REVIEWED - Data
 - Pre-restore safety backup is a non-negotiable control-plane requirement — never overwrite a tenant database without first snapshotting current state.
 - Backup catalog and restore log are control-plane schema concerns (tied to #53 control-plane skeleton work).
 - Schema version tracking in backup metadata is essential to prevent restoring a backup into an incompatible forward-migrated database.
+
+## 2026-04-18T15:18:25Z: Issue #42 Phase 0–1 Clarifications Locked & Planning Session Complete
+
+**Status:** ✅ Decision merged to `.squad/decisions.md`
+
+Backup/restore strategy is now locked for Phase 1:
+
+- **Two-layer approach:** managed Postgres PITR (fleet disaster recovery, ~5 min RPO) + daily per-tenant `pg_dump` (single-tenant restore, 24h RPO)
+- **Phase 1 build scope:** Backup CronJob, Blob lifecycle policy, backup catalog table (schema), manual restore runbook, backup health check
+- **Phase 1 acceptance:** Backup catalog + restore log integrated into control-plane schema (#53). Tenant lifecycle state machine includes `restoring` state with connection draining and pre-restore safety backup enforcement.
+- **User acceptance:** Daily backup cadence approved by FFMikha (2026-04-18)
+
+**Deliverables for Phase 1 integration:**
+- Data: Backup catalog schema + restore procedure logic + verification job design
+- Brand: Kubernetes CronJob implementation + Blob lifecycle policy + health monitoring
+- Shared: Control-plane tenant lifecycle state machine refinement (pre-work for #53)
+
+This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0 blockers and 3 other Phase 1 decisions in the locked state).
+
+**Next:** Mikey phase-0 sync comment to issue #42; Brand + Data can begin Phase 0 pre-work (state machine design) in parallel.
+
