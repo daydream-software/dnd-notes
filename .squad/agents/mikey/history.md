@@ -17,6 +17,17 @@ Mikey initialized as Lead for the initial project squad.
 📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
 📌 Team update (2026-04-18T03:15:00Z): Issue #42 platform planning — consolidated Brand's dependency graph into lead execution recommendation with clear NOW/LATER decision boundaries and 4-phase roadmap. Decision: `.squad/decisions/inbox/mikey-issue-42-planning.md` — Mikey
 
+## 2026-04-18: Issue #42 Epic Sync to Accepted Decisions
+
+📌 Updated GitHub issue #42 body to reflect the locked platform direction:
+- **Tenant persistence pivoted from SQLite to Postgres** — one DB per tenant on managed block storage, backups to object storage.
+- **5 locked infrastructure decisions:** ghcr.io, ingress-nginx, cert-manager wildcard DNS-01, K8s Secrets, Postgres persistence.
+- **Dropped:** OKE/ARM from current plan.
+- **Updated phases:** Phase 0 now includes data migration (#46) to port note-store to async Postgres adapter; rolling updates are stateless.
+- Added syncing comment linking to squad decisions log.
+
+**Learning:** FFMikha's directive to "keep the epic updated when we make decisions on the epic" is now a standing practice — GitHub issues are the public-facing source of truth and must stay synchronized with `.squad/decisions.md` to avoid stale architecture in issue comments and child-issue understanding.
+
 ## Learnings
 
 - Initial squad setup complete.
