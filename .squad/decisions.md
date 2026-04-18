@@ -4880,3 +4880,98 @@ Owners for Phase 1 implementation:
 **Approved by:** FFMikha (User)  
 **Date approved:** 2026-04-18  
 **Decision status:** LOCKED for Phase 1
+# Decision Sync: Phase 1 Control-Plane ↔ Tenant Contract (Locked)
+
+**Locked by:** Mikey (Lead)  
+**Date:** 2026-04-19  
+**Epic:** #42  
+**Status:** LOCKED  
+
+---
+
+## Summary
+
+The Phase 1 control-plane ↔ tenant contract is now **decided and locked**. Team consensus reached on Option 1 (compromise shape).
+
+---
+
+## Locked Shape
+
+### Orchestration Model
+- **Control plane is the sole active orchestrator.** It drives all tenant lifecycle transitions (provisioning, rolling updates, maintenance, restore, deprovisioning).
+- **Tenant app never calls back to control plane.** Zero outbound dependencies. The tenant does not know the control plane exists.
+
+### Tenant Internal API Surface (Cluster-Internal Only)
+- **`GET /health`** — Process liveness; returns 200 if alive.
+- **`GET /ready`** — Readiness for traffic; returns 200 when DB is connected and migrations are complete. Returns 503 during startup, drain, or maintenance.
+- **`GET /_control/info`** — Runtime state (tenant ID, app version, schema version, maintenance mode flag, optional stats).
+- **`POST /_control/maintenance`** — Drain mode control. Body: `{ "enabled": true|false, "reason": "..." }`. Tenant stops accepting writes, finishes in-flight requests, responds 200 when drained.
+
+### Explicitly NOT Included in Phase 1
+- **No `/_control/bootstrap`** — Deferred to Phase 2 if tenant self-registration is needed.
+- **No tenant → control plane callbacks** — Control plane polls. No heartbeat, no webhooks, no state push from tenant.
+- **No shared authentication tokens or credentials.** Each tenant manages its own auth; control plane has no session coupling.
+
+### Coordination Layer & Backup Strategy
+- **Kubernetes is the orchestration layer.** Control plane reads K8s API (Deployment, Pod, Service, Ingress) for workload state.
+- **Postgres backups are direct DB operations.** Control plane runs `pg_dump` / `pg_restore` against the tenant database directly; tenant app is not involved in the data path.
+- **Restore lifecycle:** pre-restore safety snapshot → maintenance mode drain → `pg_restore` → verify → exit maintenance mode.
+
+### Failure & Idempotency
+- Provisioning steps are idempotent and ordered. Control plane retries on failure.
+- Restore is not idempotent; pre-restore safety backup is the escape hatch.
+- Health polling is independent per tenant; one tenant's degraded status does not block others.
+
+---
+
+## Why This Shape
+
+1. **Simplicity:** Thin control plane (registry + K8s orchestration) with no bidirectional API or message queue.
+2. **Decoupling:** Tenant app can be restarted, updated, or re-provisioned without control plane involvement in the app's internal logic.
+3. **Observability:** Polling is boring and debuggable; push/callback models introduce async failure modes that are harder to reason about.
+4. **Resilience:** If control plane is down, tenant apps keep serving. Blast radius is "no provisioning, no backups, no fleet visibility" — not "all tenants offline."
+5. **Proven pattern:** This mirrors the relationship between Kubernetes nodes and `kubelet` — orchestrator polls and pushes, workload answers questions.
+
+---
+
+## What Changes from the Three Options
+
+**Option 1 (accepted):**
+- Thin coordination via Kubernetes and polling.
+- Tenant probes + minimal `/_control/*` surface.
+- No bootstrap, no callbacks.
+- Boring and maintainable. ✅
+
+**Option 2 (rejected):**
+- Would have added tenant → control plane heartbeat and callback endpoints.
+- Increased complexity, bidirectional coupling, async failure modes.
+
+**Option 3 (rejected):**
+- Over-specified state machine details.
+- Introduced deferred complexity we don't need to solve in Phase 1.
+
+---
+
+## Implementation Sequencing
+
+1. **#53 (control-plane skeleton):** Build tenant registry with `desired_state`/`observed_state`. Admin API. SQLite-backed.
+2. **Tenant app prep (before #54):** Add `GET /ready`, `GET /_control/info`, `POST /_control/maintenance`. Refactor for Postgres env var. Verify SIGTERM drain.
+3. **#54 (provisioning):** Wire control plane to create K8s resources and Postgres databases. Call health probes.
+4. **#55 (rollout rules):** Implement upgrade and maintenance transitions using K8s rolling update + `/_control/maintenance` drain.
+
+---
+
+## Decision Closure
+
+- **Clarification item removed** from #42 roadmap ("Specify the control-plane ↔ tenant contract").
+- **Full contract details** (including failure modes, idempotency, and examples) are in `.squad/decisions.md` under the locked decision from 2026-04-18.
+- **Phase 1 execution can now begin** without further architecture debate on this surface.
+
+---
+
+## Handoff Notes for Scribe
+
+Merge this into `.squad/decisions.md` as:
+- Confirm the "Control-Plane ↔ Tenant Contract (Phase 1)" decision status: **LOCKED**.
+- Update epic #42 body to reflect the locked decision (done by Mikey 2026-04-19).
+- Link this sync to #42 comment for audit trail.
