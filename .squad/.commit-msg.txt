@@ -1,9 +1,0 @@
-squad: log PR #51 review, merge decision on session planning scope
-
-- Add orchestration log for Mikey's PR #51 review (2026-04-17T23:35:09Z)
-- Add session log documenting the scope decision
-- Merge decision from inbox to decisions.md: session plans should not be included in docs-focused PRs
-- Update Mikey's history.md with team notification
-- Inbox cleaned
-
-Co-authored-by: Scribe <session-logger@squad.local>
