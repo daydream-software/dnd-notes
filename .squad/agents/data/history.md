@@ -68,3 +68,37 @@ Data initialized as Backend Dev for the initial project squad.
 **Evidence:**
 
 *94 older learning items archived.*
+
+## 2026-04-19: PR #59 Review Feedback Resolution
+
+**Work:** Addressed all Copilot review threads on PR #59 (control-plane skeleton).
+
+**Fixed blocking issues:**
+- PORT validation: Parse `process.env.PORT` string to number with range check (prevents named-pipe misinterpretation)
+- Foreign key enforcement: Enable SQLite FK pragma on initialization (ensures CASCADE works)
+- Transaction atomicity: Wrap tenant state update + audit log insert in single transaction (prevents broken audit trail)
+- 404 for missing tenant: Check existence before update, return 404 not 500 (correct HTTP contract)
+- Slug validation: Enforce DNS-label rules via regex (no leading/trailing hyphens)
+- Added test coverage for 404 on state update to non-existent tenant
+
+**Follow-up fixes:**
+- Updated README to clarify concurrent state-change protection is a target, not enforced yet
+- Removed gitignored inbox files from commit history
+- Fixed decision doc inconsistency: weekly backup verification IS Phase 1 scope
+- Cleaned up broken inbox references in decisions.md
+
+**Deferred to Phase 1:**
+- CORS + admin-realm JWT (per locked decision, integrates with #54)
+- Concurrent state-change locking (needs orchestration context)
+
+**Validation:** All 16 tests pass, lint clean, build succeeds.
+
+**Commit:** b0091ae, pushed to `squad/53-control-plane-skeleton`
+
+**Learnings:**
+- `better-sqlite3` transactions require the explicit `.transaction()` method; wrapping UPDATE + INSERT in a function passed to `.transaction()` ensures atomicity
+- SQLite foreign key constraints are OFF by default; enable with `db.pragma('foreign_keys = ON')` immediately after opening the database
+- `process.env.PORT` is always a string when set; passing it directly to `app.listen()` makes Node treat it as a named pipe path rather than a TCP port number
+- DNS-label validation regex: `/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/` enforces start/end with alphanumeric, max 63 chars
+- Review feedback classification matters: distinguish blocking issues (fix now) vs follow-up (defer with rationale) vs not-applicable (explain and close)
+
