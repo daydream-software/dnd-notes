@@ -165,3 +165,5 @@ Data initialized as Backend Dev for the initial project squad.
 ## 2026-04-18: Issue #42 Epic Restructure (Orchestrated by Coordinator)
 
 
+
+📌 Team update (2026-04-18T02:20:06Z): Backend data safety gap analysis complete — 12 unresolved design questions identified for #42 epic. 7 blocking risks (Phase 0–2): control-plane data model, tenant boundary contract, SQLite safety on K8s, auth migration path, N/N-1 compatibility, backup/restore semantics, local→OIDC migration. 5 later (operational maturity). Critical dependencies: #39 (WAL)→#54, #40 (restore)→multi-tenant, #53 (state machine), #55 (single-writer rules), #56 (AuthAdapter). Decision points for Mikey: auth migration strategy, versioning scheme, backup ownership, Keycloak timing.

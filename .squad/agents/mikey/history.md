@@ -352,3 +352,5 @@ Decision merged to `.squad/decisions.md`. Awaiting Brand background agent start.
 ## 2026-04-18: Issue #42 Epic Restructure (Orchestrated by Coordinator)
 
 
+
+📌 Team update (2026-04-18T02:20:06Z): Platform gap analysis complete — 11 cross-cutting risks identified for #42 epic. Critical gaps: local K8s dev loop (k3d), ingress/wildcard DNS/TLS, SQLite backup strategy, control-plane SPOF, CI for containers/manifests. All gaps prioritized by phase and assigned to Brand/Data. Awaiting Mikey + FFMikha review and timeline adjustment.

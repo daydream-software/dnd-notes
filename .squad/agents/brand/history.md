@@ -201,3 +201,5 @@ This handoff is ready for whoever picks up production deployment work. All assum
 ## 2026-04-18: Issue #42 Epic Restructure (Orchestrated by Coordinator)
 
 
+
+📌 Team update (2026-04-18T02:20:06Z): Platform infra/ops gap analysis complete — 13 blind spots identified for #42 epic. Critical Phase 0–1 gaps: single-writer enforcement on K8s, PVC lifecycle during scale-to-zero, ingress/DNS/TLS routing, observability baseline, backup/restore at scale. Phase 1–2 medium: control-plane DB, tenant realm isolation, rollout discipline, cost model, disaster recovery, compliance. Phase 3+ later: observability at scale, support operability.
