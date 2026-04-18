@@ -2,6 +2,59 @@
 
 ## Active Decisions
 
+### 2026-04-19: Code Review Response Patterns
+**Decided by:** Data (Backend Dev)  
+**Date:** 2026-04-19  
+**Type:** Process & Review Protocol
+
+## Context
+
+When addressing automated review feedback (Copilot or otherwise), reviews must be classified before action to prevent scope creep and maintain audit trails.
+
+## Decision
+
+Adopt a three-tier classification framework for all PR review responses:
+
+### Blocking
+- Type safety violations (e.g., string→number parse missing)
+- Data integrity risks (e.g., FK pragma missing, broken atomicity)
+- HTTP contract violations (e.g., 500 instead of 404)
+- Validation gaps that allow invalid data
+
+**Action:** Fix immediately in current PR.
+
+### Deferred (Follow-up)
+- Features explicitly deferred by team decisions
+- Optimizations that don't affect correctness
+- Extended test coverage beyond regressions
+
+**Action:** Respond on PR with rationale and tracking issue reference.
+
+### Not Applicable
+- Comments based on outdated assumptions
+- Suggestions that conflict with locked decisions
+- Style preferences already covered by lint
+
+**Action:** Respond on PR with clear explanation, close thread.
+
+## Response Protocol
+
+1. Fix all blocking issues
+2. For deferred items, cite the locked decision or tracking issue
+3. For N/A items, explain why the comment doesn't apply
+4. Re-run full validation (test + lint + build)
+5. Push updates
+6. Post summary comment grouping responses by category
+
+## Rationale
+
+- Prevents scope creep during review cycles
+- Keeps deferred work visible without blocking
+- Maintains audit trail for why items were skipped
+- Reduces reviewer/implementer friction by normalizing classification upfront
+
+---
+
 ### 2026-04-13: Issue #24 Revision — Web Test Infrastructure Blocker
 **Decided by:** Data (Backend Dev)  
 **Date:** 2026-04-13  

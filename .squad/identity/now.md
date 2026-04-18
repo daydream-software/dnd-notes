@@ -1,11 +1,11 @@
 # Current Focus
 
-- **Updated:** 2026-04-18T22:59:49Z
+- **Updated:** 2026-04-18T23:03:01Z
 - **Active slice:** Epic #42 Phase 0 Wave 1 — 🔄 UNDER COPILOT REVIEW (remediation in progress)
 - **Execution status:** All five cross-cutting decisions locked (registry: ghcr.io, ingress: ingress-nginx, TLS: wildcard cert-manager, secrets: K8s Secrets Phase 0–1, persistence: Postgres per-tenant databases). OKE/ARM dropped. Decision gate resolved.
 - **Phase 0 Wave 1 Review Status (Active Remediation):**
-  - **Track A (Brand) — Issue #52:** 🔄 PR #59 — Containerize dnd-notes (multi-stage Dockerfile, health/readiness endpoints, runtime contract doc). Under Copilot review; Brand actively addressing feedback. Re-review pending.
-  - **Track B (Data) — Issue #53:** 🔄 PR #60 — Control-plane skeleton (`apps/control-plane/` service, SQLite tenant registry, 7-state lifecycle, thin API, audit table). Under Copilot review; Data actively addressing feedback. Re-review pending.
+  - **Track A (Brand) — Issue #52:** 🔄 PR #59 — Containerize dnd-notes (multi-stage Dockerfile, health/readiness endpoints, runtime contract doc). Updated commit b0091ae pushed; 9 blocking fixes landed. Copilot re-review pending.
+  - **Track B (Data) — Issue #53:** 🔄 PR #60 — Control-plane skeleton (`apps/control-plane/` service, SQLite tenant registry, 7-state lifecycle, thin API, audit table). Under Copilot review; Brand actively addressing feedback. Re-review pending.
   - **Track C (Data) — NEXT BLOCKER:** Issue #58 (Postgres adapter port) — better-sqlite3 → node-postgres async. Needed for Phase 0 tenant containers to run against Postgres. Priority: file issue and start immediately post-Wave1-merge.
 - **Phase 0 gate (Postgres-based):** App containerizes successfully (health/readiness probes ✅), Postgres adapter next (blocking), SQLite fallback ready (no CONFIG_ERR), control-plane skeleton ready for Phase 1 integration.
 - **Reviewer process:** Copilot is the designated reviewer for this epic. Local team (Brand, Data) fixes Copilot-reported issues directly in their branches. No extra Chunk review unless explicitly requested. Re-review cycle repeats until both PRs pass.

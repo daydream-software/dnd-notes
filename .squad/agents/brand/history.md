@@ -76,3 +76,4 @@ Documented handoff integrity check in `.squad/decisions/inbox/brand-issue-28-han
 - Clean main history: only shipped functionality + team decisions, no development trail noise
 
 *73 older learning items archived.*
+
