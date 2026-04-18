@@ -4146,3 +4146,34 @@ When merging decision inbox files and propagating team updates, parse the decisi
 
 **Next:** Mikey reviews with FFMikha, clarifies decision points, updates issue descriptions for #39, #40, #53–56 to reflect resolved gaps. Adjust Phase 0–1 timeline to include k3d dev loop + ingress/TLS + backup verification.
 
+# 2026-04-18: Epic #42 clarification backlog
+
+**By:** Mikey (Lead)  
+**Requested by:** FFMikha  
+**Status:** DOCUMENTED
+
+## Decision
+
+Keep the existing epic framing for issue #42, but add an explicit clarification backlog near the end of the epic so unresolved platform design and operational gaps stay visible as first-class tracked work.
+
+## Why
+
+The platform direction is already set at the epic level, but several cross-cutting questions still need alignment before implementation fans out too far. Capturing them in the epic avoids losing them in comments while keeping the main plan intact.
+
+## Tracked clarification points
+
+- local Kubernetes dev loop (k3d / k3s)
+- ingress / wildcard DNS / TLS model
+- backup / restore strategy for tenant SQLite PVCs
+- single-writer rollout choreography for SQLite tenants
+- control-plane ↔ tenant internal contract and state transitions
+- control-plane state machine / tenant lifecycle states
+- auth migration path to OIDC / Keycloak
+- version-skew / rollout compatibility policy
+- CI coverage for containers, manifests, and platform workflows
+
+## Impact
+
+- The epic remains the canonical platform tracker.
+- Future child issues should either resolve or explicitly narrow one of these clarification points.
+- The team has a visible checklist of contracts and operational assumptions to settle before broad platform execution.

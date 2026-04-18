@@ -104,3 +104,4 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## 2026-04-18: Issue #42 Epic Restructure (User Directive Captured)
 
+📌 Team update (2026-04-18T02:25:33Z): Epic #42 clarification backlog added to GitHub issue #42. Platform gaps tracked for next discussion: local k3d/k3s dev loop, ingress/DNS/TLS, SQLite backup, single-writer choreography, control-plane/tenant contract, lifecycle state machine, auth migration to OIDC, version-skew policy, CI coverage. — Scribe

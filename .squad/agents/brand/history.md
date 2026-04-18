@@ -203,3 +203,4 @@ This handoff is ready for whoever picks up production deployment work. All assum
 
 
 📌 Team update (2026-04-18T02:20:06Z): Platform infra/ops gap analysis complete — 13 blind spots identified for #42 epic. Critical Phase 0–1 gaps: single-writer enforcement on K8s, PVC lifecycle during scale-to-zero, ingress/DNS/TLS routing, observability baseline, backup/restore at scale. Phase 1–2 medium: control-plane DB, tenant realm isolation, rollout discipline, cost model, disaster recovery, compliance. Phase 3+ later: observability at scale, support operability.
+📌 Team update (2026-04-18T02:25:33Z): Epic #42 clarification backlog added to GitHub issue #42. Platform gaps tracked for next discussion: local k3d/k3s dev loop, ingress/DNS/TLS, SQLite backup, single-writer choreography, control-plane/tenant contract, lifecycle state machine, auth migration to OIDC, version-skew policy, CI coverage. — Scribe
