@@ -341,3 +341,47 @@ Conducted advisory QA review for Stef's `NoteEditorActions.tsx` extraction work.
 - **Memoization opportunity:** Component is a good candidate for `React.memo()` to prevent re-renders when parent App updates unrelated state
 - **Risk assessment:** Zero behavioral changes; extraction preserves all existing behavior and event handling
 - **Ready for merge:** Lint/build/test all pass; no regressions detected
+
+## 2026-04-18: Phase 0 Test-Readiness Analysis (Epic #42)
+
+**What:**
+Drafted comprehensive test-readiness analysis for Phase 0 of epic #42 (containerization + single-tenant Kubernetes). Analyzed three slices (#52 containerization, #43 artifact tracking, #46 Postgres porting) against platform decisions locked on 2026-04-18 and identified minimal acceptance gates, parallel prep work, and riskiest regressions for Phase 1 transition.
+
+**Key Findings:**
+
+1. **Phase 0 Entry Gates (7 acceptance checks):**
+   - Container image reproducibility and K8s-readiness (docker build, `docker run`, health checks)
+   - Runtime environment contract documentation (PORT, POSTGRES_URL fallback to SQLite)
+   - Health/readiness probe semantics (liveness vs. readiness distinction is load-bearing for K8s lifecycle)
+   - Postgres backend + async adapter (node-postgres) swap from SQLite
+   - Local SQLite fallback seamless for `npm run dev` (POSTGRES_URL absent)
+   - Schema forward-compatibility (preps for Phase 1 auth columns per decision #9: keycloak_sub)
+
+2. **Parallel Prep Tracks (can start before implementation):**
+   - T1: Containerized test suite (docker-compose.test.yml, runs full npm test in-container)
+   - T2: K8s manifest validation harness (kubeval/kube-score against Kustomize/Helm scaffolds)
+   - T3: Health/readiness probe spec + integration tests (readiness guard semantics)
+   - R1–R7: Regression scenarios for pod lifecycle, storage isolation, graceful shutdown, connection pool exhaustion, migration idempotence, auth persistence, schema compatibility
+
+3. **Riskiest Phase 1 Blockers (watch early):**
+   - Pod identity & storage isolation (PVC label selectors must not cross-leak; security context) — **CRITICAL**
+   - Graceful shutdown under load (SIGTERM draining, Postgres connection closure before K8s kill) — **HIGH**
+   - Liveness vs. readiness probe semantics (K8s KILL vs. LB REMOVE decision) — **HIGH**
+   - Connection pool exhaustion during rolling updates (size tuning, idle cleanup) — **HIGH**
+   - Schema migration idempotence & rollback safety (IF NOT EXISTS guards, version tracking) — **HIGH**
+   - Auth state persistence across pod restarts (tokens in DB, not memory) — **MEDIUM**
+   - Postgres schema changes don't crash app startup (defensive code, pre-migration hooks) — **MEDIUM**
+
+**Why It Matters:**
+Phase 1 (#53 control plane, #54 provisioning, #55 rolling updates) depends heavily on Phase 0 assumptions about container health, storage isolation, and graceful shutdown. Early identification of these regressions and parallel test harness prep will accelerate Phase 1 validation and reduce cascading failures during multi-tenant provisioning and rolling-update choreography.
+
+**Decision Impact:**
+- FFMikha can prioritize team members for parallel test infrastructure (Brand → K8s manifests, Data → connection pool load testing)
+- Implementation teams (#52, #43, #46) know exactly what acceptance gates to target before shipping
+- Chunk's QA gates are defined upfront; no surprise quality escalations mid-phase
+- Decision document (chunk-phase0-checks.md) lives in .squad/decisions/inbox/ for Scribe to merge into shared decisions.md
+
+**Files Created:**
+- `.squad/decisions/inbox/chunk-phase0-checks.md` — 450-line comprehensive test-readiness plan for Phase 0
+
+**Status:** DRAFT — Ready for FFMikha product sign-off and team feedback before implementation starts
