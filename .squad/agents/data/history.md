@@ -204,3 +204,22 @@ This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0
 
 **Next:** Mikey phase-0 sync comment to issue #42; Brand + Data can begin Phase 0 pre-work (state machine design) in parallel.
 
+## 2026-04-18: Issue #42 — Control-Plane ↔ Tenant Contract Recommendation
+
+📌 Wrote `.squad/decisions/inbox/data-42-tenant-contract.md` defining the Phase 1 internal API contract between control plane and tenant app.
+
+**Key decisions:**
+- Tenant app exposes exactly three internal endpoints: `GET /_control/health`, `GET /_control/info`, `POST /_control/maintenance`. All cluster-internal only.
+- Pure push model — control plane drives all interactions. Tenant app never phones home, never heartbeats, never registers itself. Zero outbound dependency on control plane.
+- Provisioning, backup, restore, updates, deprovisioning — all orchestrated by control plane via K8s API + direct Postgres access + the three tenant endpoints.
+- Maintenance mode (drain + 503 to users) is the sole point of required tenant cooperation, used only for restore and risky upgrades. Has timeout-and-abort safety.
+- Backup (`pg_dump`) runs directly against tenant DB — no tenant app involvement, no maintenance required (Postgres MVCC snapshot).
+- No event bus, no callbacks, no shared state, no auto-rollback in Phase 1.
+
+**Learnings:**
+- The control-plane ↔ tenant contract should be as asymmetric as possible. Control plane has intent; tenant has truth. Neither caches the other's data.
+- Maintenance mode should be in-memory only (resets on restart) — the control plane re-asserts if needed, which avoids stuck maintenance states.
+- `schemaVersion` must be independent of `appVersion` — schema and container image can diverge during rollouts.
+- Health endpoint must verify DB connectivity (`SELECT 1`), not just app process liveness — a running app with a dead DB connection is not healthy.
+- Restore is the only non-idempotent operation in the contract. Pre-restore safety backup is the mandatory escape hatch.
+
