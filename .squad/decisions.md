@@ -4761,3 +4761,19 @@ Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 cod
 This is not a spike — it's a measured build. Team can stop at any gate if operational cost looks wrong.
 
 **Next commit:** Brand starts #52. Data + Brand design state machine. Real work in 24 hours.
+
+---
+
+### 2026-04-18: Issue #42 User Directive — Postgres & Per-Instance DB Users Evaluation
+**By:** FFMikha (User)  
+**Date:** 2026-04-18T14:40:44Z  
+**What:** For the #42 cross-cutting review, seriously evaluate a Postgres-backed direction with per-instance users and centralized backups, and drop the OKE/ARM path from current planning.  
+**Why:** User request — captured for team memory.
+
+---
+
+### 2026-04-18: Issue #42 Accepted Cross-Cutting Decisions
+**By:** Squad (Coordinator) via FFMikha  
+**Date:** 2026-04-18  
+**What:** FFMikha accepted the Postgres-based direction for issue #42 after reviewing Mikey, Data, and Brand inputs. The locked decisions are: (1) GitHub Container Registry, (2) ingress-nginx, (3) cert-manager wildcard DNS-01 TLS shape, (4) Kubernetes Secrets for Phase 0–1, and (5) Postgres for tenant data with live database state on block/managed storage and backup artifacts in Blob/object storage. OKE/ARM is dropped from the current platform plan.  
+**Why:** The user explicitly confirmed that moving tenant persistence to Postgres materially solves the rolling-update problem tied to SQLite single-writer constraints. The remaining operational concerns (version skew, draining, restore, rollback, pooling, quotas) stay in scope, but they no longer block this persistence choice.

@@ -105,3 +105,5 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 ## 2026-04-18: Issue #42 Epic Restructure (User Directive Captured)
 
 📌 Team update (2026-04-18T02:25:33Z): Epic #42 clarification backlog added to GitHub issue #42. Platform gaps tracked for next discussion: local k3d/k3s dev loop, ingress/DNS/TLS, SQLite backup, single-writer choreography, control-plane/tenant contract, lifecycle state machine, auth migration to OIDC, version-skew policy, CI coverage. — Scribe
+
+Team update (2026-04-18T14:45:11Z): ISSUE #42 POSTGRES DIRECTION REVIEWED - Backend recommendation rejects Postgres as the default tenant database in the first hosted slice. Centralized backups stay required but are only one part of restore safety; per-instance DB users are defense-in-depth only; live databases belong on block storage while Blob/object storage should hold backup/export artifacts. If Postgres is introduced early, it should be for the control plane only after concrete concurrency or HA pressure appears. - Data
