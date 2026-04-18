@@ -1,5 +1,7 @@
 import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
 import type { NoteStore } from './note-store.js'
 import { registerAdminRoutes } from './routes/admin-routes.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
@@ -21,6 +23,7 @@ interface CreateAppOptions {
   publicWebUrl?: string
   allowedOrigins?: string
   restoreNoteStore?: (sourcePath: string) => NoteStore
+  serveWeb?: boolean
 }
 
 function readRateLimitClientId(request: Request) {
@@ -32,6 +35,7 @@ export function createApp({
   publicWebUrl: configuredPublicWebUrl,
   allowedOrigins: configuredAllowedOrigins,
   restoreNoteStore,
+  serveWeb = false,
 }: CreateAppOptions): Express {
   const app = express()
   let noteStore = initialNoteStore
@@ -138,6 +142,24 @@ export function createApp({
 
   app.use(express.json())
 
+  // Liveness probe - process is alive
+  app.get('/healthz', (_request: Request, response: Response<HealthResponse>) => {
+    response.json({ status: 'ok', service: 'dnd-notes-api' })
+  })
+
+  // Readiness probe - ready to serve traffic
+  app.get('/readyz', (_request: Request, response: Response<HealthResponse | ErrorResponse>) => {
+    try {
+      noteStore.getAdminOverview()
+      response.json({ status: 'ok', service: 'dnd-notes-api' })
+    } catch {
+      response.status(503).json({
+        error: 'Database unavailable',
+      })
+    }
+  })
+
+  // Legacy health endpoint for backward compatibility
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json({ status: 'ok', service: 'dnd-notes-api' })
   })
@@ -147,6 +169,25 @@ export function createApp({
   registerOwnerCampaignRoutes(app, routeContext)
   registerOwnerNoteRoutes(app, routeContext)
   registerSharedRoutes(app, routeContext)
+
+  // Serve static web assets when in production container mode
+  if (serveWeb) {
+    const __filename = fileURLToPath(import.meta.url)
+    const __dirname = dirname(__filename)
+    const webDistPath = join(__dirname, '..', '..', 'web', 'dist')
+    
+    app.use(express.static(webDistPath))
+    
+    // SPA fallback - serve index.html for all non-API/health routes
+    app.use((_request: Request, response: Response, next) => {
+      const path = _request.path
+      if (path.startsWith('/api/') || path.startsWith('/health') || path.startsWith('/readyz')) {
+        next()
+      } else {
+        response.sendFile(join(webDistPath, 'index.html'))
+      }
+    })
+  }
 
   return app
 }
