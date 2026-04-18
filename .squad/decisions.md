@@ -4777,3 +4777,10 @@ This is not a spike — it's a measured build. Team can stop at any gate if oper
 **Date:** 2026-04-18  
 **What:** FFMikha accepted the Postgres-based direction for issue #42 after reviewing Mikey, Data, and Brand inputs. The locked decisions are: (1) GitHub Container Registry, (2) ingress-nginx, (3) cert-manager wildcard DNS-01 TLS shape, (4) Kubernetes Secrets for Phase 0–1, and (5) Postgres for tenant data with live database state on block/managed storage and backup artifacts in Blob/object storage. OKE/ARM is dropped from the current platform plan.  
 **Why:** The user explicitly confirmed that moving tenant persistence to Postgres materially solves the rolling-update problem tied to SQLite single-writer constraints. The remaining operational concerns (version skew, draining, restore, rollback, pooling, quotas) stay in scope, but they no longer block this persistence choice.
+
+---
+
+### 2026-04-18T14:54:06Z: Epic Synchronization Directive — GitHub Epics Stay In Sync with Squad Decisions
+**By:** FFMikha (user, directive)  
+**What:** When the team makes decisions on an epic, update the GitHub epic so the visible GitHub source stays synchronized with squad decisions. Make this a standing team practice: GitHub epics are the public-facing source of truth and must remain current with `.squad/decisions.md` to avoid stale architecture in issue comments and child-issue understanding.  
+**Why:** User request — GitHub issues are the team's primary communication channel with stakeholders. Stale epic descriptions create confusion in child issues and architectural alignment. Synchronization must happen the same day decisions are made to keep the public view current.
