@@ -17,7 +17,7 @@ interface CreateAppOptions {
 
 const createTenantSchema = z.object({
   id: z.string().min(1),
-  slug: z.string().min(1).max(63).regex(/^[a-z0-9-]+$/),
+  slug: z.string().min(1).max(63).regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/),
   ownerId: z.string().min(1),
   version: z.string().min(1),
 })
@@ -169,6 +169,13 @@ export function createApp({ tenantRegistry }: CreateAppOptions): Express {
 
       const { state, triggeredBy, reason } = parseResult.data
 
+      const tenant = tenantRegistry.getTenant(tenantId)
+
+      if (!tenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+
       try {
         tenantRegistry.updateTenantState(
           tenantId,
@@ -176,14 +183,15 @@ export function createApp({ tenantRegistry }: CreateAppOptions): Express {
           triggeredBy,
           reason,
         )
-        const tenant = tenantRegistry.getTenant(tenantId)
 
-        if (!tenant) {
-          response.status(404).json({ error: 'Tenant not found' })
+        const updatedTenant = tenantRegistry.getTenant(tenantId)
+        
+        if (!updatedTenant) {
+          response.status(500).json({ error: 'Failed to retrieve updated tenant' })
           return
         }
 
-        response.json({ tenant })
+        response.json({ tenant: updatedTenant })
       } catch (error) {
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error'

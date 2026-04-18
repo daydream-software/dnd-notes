@@ -116,7 +116,7 @@ Future: Migrate to Postgres when fleet size justifies it.
 
 - **Thin by design**: No business logic beyond registry CRUD and state tracking
 - **Explicit states**: No implicit state inference; K8s API is observed truth
-- **Single active transition**: No concurrent state changes per tenant
+- **Single active transition (target)**: Transitions are intended to be serialized per tenant, but Phase 1 does not yet enforce this with locking or transactional guards
 - **Audit-first**: Every state transition is logged
 
 ## Follow-Up Work

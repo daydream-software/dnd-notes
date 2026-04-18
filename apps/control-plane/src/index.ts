@@ -9,7 +9,14 @@ dotenv.config()
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-const PORT = process.env.PORT || 3001
+const rawPort = process.env.PORT
+const PORT =
+  rawPort === undefined ? 3001 : Number.parseInt(rawPort, 10)
+
+if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
+  throw new Error(`Invalid PORT value: ${rawPort}`)
+}
+
 const DATABASE_PATH =
   process.env.DATABASE_PATH || path.join(__dirname, '../data/control-plane.sqlite')
 

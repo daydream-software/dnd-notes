@@ -6,6 +6,7 @@ export class TenantRegistry {
 
   constructor(databasePath: string) {
     this.db = new Database(databasePath)
+    this.db.pragma('foreign_keys = ON')
     this.bootstrap()
   }
 
@@ -119,21 +120,25 @@ export class TenantRegistry {
       throw new Error(`Tenant ${tenantId} not found`)
     }
 
-    this.db
-      .prepare(
-        `UPDATE tenants
-         SET current_state = ?, updated_at = datetime('now')
-         WHERE id = ?`,
-      )
-      .run(newState, tenantId)
+    const updateTenantStateTransaction = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `UPDATE tenants
+           SET current_state = ?, updated_at = datetime('now')
+           WHERE id = ?`,
+        )
+        .run(newState, tenantId)
 
-    this.recordTransition({
-      tenantId,
-      fromState: tenant.currentState,
-      toState: newState,
-      triggeredBy,
-      reason: reason || null,
+      this.recordTransition({
+        tenantId,
+        fromState: tenant.currentState,
+        toState: newState,
+        triggeredBy,
+        reason: reason || null,
+      })
     })
+
+    updateTenantStateTransaction()
   }
 
   updateTenantDesiredState(

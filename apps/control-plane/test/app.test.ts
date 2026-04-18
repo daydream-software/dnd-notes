@@ -191,6 +191,18 @@ describe('Control Plane API', () => {
         'provisioner',
       )
     })
+
+    it('returns 404 when updating state of non-existent tenant', async () => {
+      const response = await request(app)
+        .patch('/api/tenants/non-existent/state')
+        .send({
+          state: 'ready',
+          triggeredBy: 'test',
+        })
+        .expect(404)
+
+      assert.strictEqual(response.body.error, 'Tenant not found')
+    })
   })
 
   describe('PATCH /api/tenants/:tenantId/desired-state', () => {
