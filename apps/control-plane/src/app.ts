@@ -50,13 +50,23 @@ const updateBackupSchema = z.object({
 function isSqliteConstraintError(
   error: unknown,
 ): error is Error & { code?: string } {
-  const sqliteCode = (error as Error & { code?: string })?.code
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const sqliteCode = (error as Error & { code?: string }).code
+
+  if (
+    sqliteCode === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    sqliteCode === 'SQLITE_CONSTRAINT_PRIMARYKEY'
+  ) {
+    return true
+  }
 
   return (
-    error instanceof Error &&
-    (typeof sqliteCode === 'string'
-      ? sqliteCode.startsWith('SQLITE_CONSTRAINT')
-      : error.message.includes('UNIQUE constraint failed'))
+    (sqliteCode === 'SQLITE_CONSTRAINT' || typeof sqliteCode !== 'string') &&
+    (error.message.includes('UNIQUE constraint failed') ||
+      error.message.includes('PRIMARY KEY constraint failed'))
   )
 }
 
