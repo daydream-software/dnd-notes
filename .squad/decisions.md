@@ -4784,3 +4784,99 @@ This is not a spike — it's a measured build. Team can stop at any gate if oper
 **By:** FFMikha (user, directive)  
 **What:** When the team makes decisions on an epic, update the GitHub epic so the visible GitHub source stays synchronized with squad decisions. Make this a standing team practice: GitHub epics are the public-facing source of truth and must remain current with `.squad/decisions.md` to avoid stale architecture in issue comments and child-issue understanding.  
 **Why:** User request — GitHub issues are the team's primary communication channel with stakeholders. Stale epic descriptions create confusion in child issues and architectural alignment. Synchronization must happen the same day decisions are made to keep the public view current.
+
+---
+
+## 2026-04-18T15:18:25Z: Issue #42 Phase 1 Tenant Postgres Backup/Restore Strategy — Two-Layer Approach
+
+**Authors:** Data (Backend Dev), Brand (Platform Dev)  
+**Status:** ACCEPTED by FFMikha (User)  
+**Date:** 2026-04-18  
+
+### Summary
+
+Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **managed Azure Postgres PITR** (fleet-level disaster recovery) with **daily per-tenant logical backups** (`pg_dump` → Azure Blob Storage) for single-tenant surgical restore.
+
+**Accepted Phase 1 cadence:** Logical backup runs once per day (RPO ≤ 24 hours).
+
+### Locked Direction
+
+| Layer | Mechanism | Scope | RPO | RTO | Purpose |
+|-------|-----------|-------|-----|-----|---------|
+| **Managed PITR** | Azure Flexible Server built-in continuous WAL archiving + daily snapshots | Entire Postgres server (all tenants) | ~5 min | 15–30 min | Fleet-wide disaster recovery (DRP escalation path) |
+| **Logical backup** | Scheduled `pg_dump --format=custom` per tenant database → Azure Blob Storage | Single tenant database | **1 day** | 5–15 min | Routine single-tenant restore (primary path) |
+
+### Phase 1 Build Scope
+
+- **Backup CronJob:** Kubernetes CronJob iterates tenant list from control-plane registry, runs `pg_dump --format=custom --no-owner` per tenant per day, uploads result to `tenant-backups/{tenant_id}/{timestamp}.dump` in Azure Blob Storage.
+- **Blob lifecycle policy:** Auto-expire backups older than 7 days.
+- **Backup catalog table:** Control-plane persistence tracks metadata: `tenant_id`, `backup_id`, `backup_type` ('logical' | 'pitr_snapshot'), `initiated_by` ('scheduled' | 'pre_restore' | 'manual' | 'pre_upgrade'), `started_at`, `completed_at`, `status` ('in_progress' | 'completed' | 'failed' | 'verified'), `storage_uri` (Blob path), `size_bytes`, `schema_version`, `retention_expires`, `verified_at`, `error_detail`.
+- **Restore log table:** Tracks restore operations with `restore_id`, `tenant_id`, `restore_type`, `source_backup_id`, `pre_restore_backup` (mandatory safety snapshot), `requested_by`, `requested_at`, `started_at`, `completed_at`, `status`, `error_detail`.
+- **Tenant lifecycle state machine:** Adds `restoring` state. Entry: initiate restore → `ready` → `restoring`. During `restoring`: tenant app returns 503, connections drained, no writes. Exit: `restoring` → `ready` (success) or `restoring` → `failed` (with pre-restore backup available for manual recovery).
+- **Manual restore runbook:** 7-step operator procedure (identify dump, download, create fresh database, restore via `pg_restore`, validate, swap control-plane pointer, notify).
+- **Backup health check:** Control-plane `/internal/status` includes `last_backup_age` per tenant. Alert if any tenant backup is stale >12 hours.
+
+### Phase 2+ Deferrals
+
+- Automated restore API (`POST /internal/tenants/{id}/restore?timestamp=...`)
+- Backup verification CronJob (weekly test-restore to scratch DB)
+- Per-tier backup frequency (premium tenants: hourly, free tier: daily)
+- Cross-region replication / geo-redundant backups
+
+### Rationale
+
+**Why both layers?**
+- Managed PITR is free (included in Azure Flexible Server). Fleet-wide sub-5-minute RPO is non-negotiable for catastrophic failure recovery.
+- PITR cannot restore a single tenant in isolation; it restores the entire server to a point in time. Logical backups fill the single-tenant gap.
+- Two-layer approach balances simplicity (no custom WAL archiving, no streaming replication, no pgBackRest), cost (Blob storage ~$3/month at Phase 1 scale: 100 tenants × 100 MB × 28 daily snapshots ≈ 280 GB cool tier), and operational confidence (tested single-tenant restore workflow from day one).
+
+**Why daily, not 6-hourly?**
+- Phase 1 has no paying customers. Internal engineering users accept 24-hour RPO for single-tenant restore.
+- Tenant databases at Phase 1 are small (<100 MB). Cost scales with both tenant count and snapshot retention.
+- If customers later demand tighter single-tenant RPO (e.g., 4-hour), upgrade to hourly `pg_dump` schedule or move to per-tenant Postgres instances with independent PITR (Phase 2+).
+
+**Why not WAL archiving or pgBackRest?**
+- Managed PITR already covers the fleet-level safety net (5-minute RPO, free). Building custom WAL archiving duplicates that.
+- pgBackRest is powerful but adds operational complexity: dedicated storage, config, monitoring, testing burden at scale. Deferred until justifiable (100+ tenants, enterprise SLA).
+- Clear upgrade path exists: if Phase 1 traffic or customer requirements justify tighter RPO, Phase 2 adds WAL-level per-database archiving or moves to per-tenant instance topology.
+
+### Key Operational Constraints
+
+1. **Shared server PITR is all-or-nothing.** Cannot use PITR to cherry-pick a single tenant without restoring all of them. Workaround (PITR to temp server → dump one DB → restore to prod) is clunky. Logical backups are the real single-tenant safety net.
+
+2. **Logical backup frequency sets single-tenant RPO floor.** Daily schedule = up to 24-hour data loss window for a single tenant. If customers later require tighter RPO, increase cadence (hourly, 6-hourly) or switch to per-tenant Postgres instances.
+
+3. **Pre-restore safety backup is mandatory.** Never restore without first snapshotting the current state. If the restore itself is wrong (wrong backup, wrong tenant, corrupted dump), you need the ability to undo the undo. Control plane must always create a pre-restore backup before applying `pg_restore`.
+
+4. **Connection draining before restore is required.** Cannot run `pg_restore` into a live database with active connections. Partial reads and transaction aborts will occur. Control plane must set tenant to `restoring` state (read-only), terminate active connections via `pg_terminate_backend`, then apply restore.
+
+5. **Schema version mismatch will break restore.** A backup from app version N restored into a database that has been migrated to N+1 schema will fail. Control plane must compare `schema_version` in backup catalog against current tenant schema version and refuse incompatible restores, or automatically run forward-migrations post-restore.
+
+6. **Backup verification must be automated from day one.** A backup that has never been tested is a hypothesis, not a backup. Phase 1 must include a weekly automated test-restore job: pick a tenant at random, restore to a scratch database, run schema validation queries, compare row counts against backup metadata, delete the scratch database, record success in backup catalog `verified_at`.
+
+7. **Blob storage access control and encryption.** Backup artifacts in Blob storage must be encrypted at rest (Azure default), access-controlled (control-plane service account identity only), and tenant-isolated by storage path prefix. Do not flatten all backups into one namespace.
+
+### Measurements & Acceptance
+
+- **RTO for single tenant restore:** ≤ 30 minutes (from blob download to data ready, before pointer swap)
+- **RPO for single tenant restore:** ≤ 24 hours
+- **PITR RTO for fleet disaster recovery:** ≤ 2 hours (from decision to all tenants restored and validated)
+- **Backup age alerting:** Alert when any tenant's most recent backup is >12 hours old
+- **Backup success rate:** >99% of scheduled backups complete without error (measured per-tenant)
+
+### Documentation & Handoff
+
+Full technical details and restore procedures documented in:
+- `.squad/decisions/inbox/data-42-backup-restore.md` — Backend/schema assessment + restore state machine
+- `.squad/decisions/inbox/brand-42-backup-restore.md` — Infrastructure/operations details + runbook
+
+Owners for Phase 1 implementation:
+- **Data:** Backup catalog schema + restore procedure + verification logic
+- **Brand:** Kubernetes CronJob + Blob lifecycle policy + health check monitoring
+- **Integration:** Control-plane API + tenant lifecycle state machine (shared)
+
+---
+
+**Approved by:** FFMikha (User)  
+**Date approved:** 2026-04-18  
+**Decision status:** LOCKED for Phase 1

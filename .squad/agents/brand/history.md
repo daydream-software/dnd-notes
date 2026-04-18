@@ -207,3 +207,29 @@ This handoff is ready for whoever picks up production deployment work. All assum
 📌 Team update (2026-04-18T02:20:06Z): Platform infra/ops gap analysis complete — 13 blind spots identified for #42 epic. Critical Phase 0–1 gaps: single-writer enforcement on K8s, PVC lifecycle during scale-to-zero, ingress/DNS/TLS routing, observability baseline, backup/restore at scale. Phase 1–2 medium: control-plane DB, tenant realm isolation, rollout discipline, cost model, disaster recovery, compliance. Phase 3+ later: observability at scale, support operability.
 📌 Team update (2026-04-18T02:25:33Z): Epic #42 clarification backlog added to GitHub issue #42. Platform gaps tracked for next discussion: local k3d/k3s dev loop, ingress/DNS/TLS, SQLite backup, single-writer choreography, control-plane/tenant contract, lifecycle state machine, auth migration to OIDC, version-skew policy, CI coverage. — Scribe
 
+## 2026-04-18T15:18:25Z: Issue #42 Phase 0–1 Clarifications Locked & Planning Session Complete
+
+**Status:** ✅ Decision merged to `.squad/decisions.md`
+
+Backup/restore strategy is now locked for Phase 1 (Brand co-author with Data):
+
+- **Two-layer approach:** managed Postgres PITR (fleet disaster recovery, ~5 min RPO) + daily per-tenant `pg_dump` (single-tenant restore, 24h RPO)
+- **Phase 1 build scope:** Backup CronJob (K8s), Blob lifecycle policy (Azure), backup catalog table schema, manual restore runbook, backup health check integration
+- **Phase 1 acceptance criteria:** Backup works across multi-tenant isolation; restore procedure tested end-to-end; control-plane integration (backup_catalog table, restore_log table, tenant lifecycle state `restoring`) in place before gate
+- **User acceptance:** Daily backup cadence approved by FFMikha (2026-04-18)
+
+**Deliverables for Phase 1 implementation (Brand owned):**
+- Kubernetes CronJob: iterates tenant list from control-plane registry, runs `pg_dump` per tenant per day to `tenant-backups/{tenant_id}/{timestamp}.dump` in Blob
+- Blob lifecycle policy: auto-expire backups >7 days old
+- Backup health monitoring: `/internal/status` endpoint includes `last_backup_age` per tenant; alert if >12h stale
+
+**Integration points with Data & shared work:**
+- Control-plane provides tenant list endpoint for CronJob to iterate
+- Control-plane persists backup catalog + restore log (Data owns schema + restore logic)
+- Tenant lifecycle state machine includes `restoring` state (pre-work parallel to Phase 0)
+
+This completes the Phase 1 critical-decision set. Brand can now spec out the K8s CronJob implementation once state machine pre-work clarifies the control-plane API contract.
+
+**Next:** Phase 0 pre-work on K8s manifests + CI can proceed; Phase 0 gate focuses on PVC rolling-update safety; Phase 1 gate requires functional backup/restore end-to-end.
+
+
