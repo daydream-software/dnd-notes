@@ -11,6 +11,7 @@ The control-plane service maintains the tenant registry and exposes internal API
 - Managing storage references and backup metadata
 
 This service is **cluster-internal only** and not exposed to end users.
+All `/api` routes require a bearer token from `CONTROL_PLANE_ADMIN_TOKEN`.
 
 ## Tenant Lifecycle States
 
@@ -82,7 +83,8 @@ Every state change is logged with:
 Environment variables:
 
 - `PORT` — HTTP port (default: 3001)
-- `DATABASE_PATH` — SQLite database path (default: `data/control-plane.sqlite`)
+- `DATABASE_PATH` — SQLite database path (default: `data/control-plane.sqlite`; relative paths resolve from the app root)
+- `CONTROL_PLANE_ADMIN_TOKEN` — Required bearer token for `/api` routes
 - `NODE_ENV` — Environment mode (development, production)
 
 ## Development

@@ -17,8 +17,18 @@ if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
   throw new Error(`Invalid PORT value: ${rawPort}`)
 }
 
-const DATABASE_PATH =
-  process.env.DATABASE_PATH || path.join(__dirname, '../data/control-plane.sqlite')
+const rawDatabasePath = process.env.DATABASE_PATH
+const DATABASE_PATH = rawDatabasePath
+  ? path.isAbsolute(rawDatabasePath)
+    ? rawDatabasePath
+    : path.resolve(__dirname, '..', rawDatabasePath)
+  : path.join(__dirname, '../data/control-plane.sqlite')
+
+const ADMIN_TOKEN = process.env.CONTROL_PLANE_ADMIN_TOKEN
+
+if (!ADMIN_TOKEN) {
+  throw new Error('CONTROL_PLANE_ADMIN_TOKEN is required')
+}
 
 const databaseDir = path.dirname(DATABASE_PATH)
 
@@ -27,7 +37,7 @@ await import('node:fs/promises').then((fs) =>
 )
 
 const tenantRegistry = new TenantRegistry(DATABASE_PATH)
-const app = createApp({ tenantRegistry })
+const app = createApp({ tenantRegistry, adminToken: ADMIN_TOKEN })
 
 const server = app.listen(PORT, () => {
   console.log(`Control plane listening on port ${PORT}`)

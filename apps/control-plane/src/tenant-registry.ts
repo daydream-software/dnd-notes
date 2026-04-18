@@ -128,13 +128,15 @@ export class TenantRegistry {
     }
 
     const updateTenantStateTransaction = this.db.transaction(() => {
-      this.db
+      const result = this.db
         .prepare(
           `UPDATE tenants
            SET current_state = ?, updated_at = datetime('now')
            WHERE id = ?`,
         )
         .run(newState, tenantId)
+
+      this.assertTenantUpdated(result, tenantId)
 
       this.recordTransition({
         tenantId,
@@ -152,36 +154,42 @@ export class TenantRegistry {
     tenantId: string,
     desiredState: TenantState,
   ): void {
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE tenants
          SET desired_state = ?, updated_at = datetime('now')
          WHERE id = ?`,
       )
       .run(desiredState, tenantId)
+
+    this.assertTenantUpdated(result, tenantId)
   }
 
   updateTenantStorageReference(
     tenantId: string,
     storageReference: string,
   ): void {
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE tenants
          SET storage_reference = ?, updated_at = datetime('now')
          WHERE id = ?`,
       )
       .run(storageReference, tenantId)
+
+    this.assertTenantUpdated(result, tenantId)
   }
 
   updateTenantBackupMetadata(tenantId: string, metadata: string): void {
-    this.db
+    const result = this.db
       .prepare(
         `UPDATE tenants
          SET backup_metadata = ?, updated_at = datetime('now')
          WHERE id = ?`,
       )
       .run(metadata, tenantId)
+
+    this.assertTenantUpdated(result, tenantId)
   }
 
   getStateTransitions(tenantId: string): StateTransition[] {
@@ -212,6 +220,15 @@ export class TenantRegistry {
          VALUES (?, ?, ?, ?, ?)`,
       )
       .run(tenantId, fromState, toState, triggeredBy, reason)
+  }
+
+  private assertTenantUpdated(
+    result: { changes: number },
+    tenantId: string,
+  ): void {
+    if (result.changes === 0) {
+      throw new Error(`Tenant ${tenantId} not found`)
+    }
   }
 
   private mapRowToTenant(row: unknown): Tenant {

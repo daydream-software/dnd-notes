@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module'
 import express, { type Express, type Request, type Response } from 'express'
 import { z } from 'zod'
 import type { TenantRegistry } from './tenant-registry.js'
@@ -13,7 +14,11 @@ import type {
 
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
+  adminToken?: string
 }
+
+const require = createRequire(import.meta.url)
+const { version: appVersion } = require('../package.json') as { version: string }
 
 const createTenantSchema = z.object({
   id: z.string().min(1),
@@ -67,17 +72,38 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
   return { error: 'Tenant already exists' }
 }
 
-export function createApp({ tenantRegistry }: CreateAppOptions): Express {
+function createAdminAuthMiddleware(adminToken?: string): express.RequestHandler {
+  return (request, response, next) => {
+    if (!adminToken) {
+      next()
+      return
+    }
+
+    const authorizationHeader = request.header('authorization')
+    if (authorizationHeader !== `Bearer ${adminToken}`) {
+      response.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    next()
+  }
+}
+
+export function createApp({
+  tenantRegistry,
+  adminToken,
+}: CreateAppOptions): Express {
   const app = express()
 
   app.disable('x-powered-by')
   app.use(express.json())
+  app.use('/api', createAdminAuthMiddleware(adminToken))
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json({
       status: 'healthy',
       uptime: process.uptime(),
-      version: '0.1.0',
+      version: appVersion,
     })
   })
 
