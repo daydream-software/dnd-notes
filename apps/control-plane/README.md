@@ -11,7 +11,7 @@ The control-plane service maintains the tenant registry and exposes internal API
 - Managing storage references and backup metadata
 
 This service is **cluster-internal only** and not exposed to end users.
-All `/api` routes require a bearer token from `CONTROL_PLANE_ADMIN_TOKEN`.
+All `/internal` routes require a bearer token from `CONTROL_PLANE_ADMIN_TOKEN`.
 
 ## Tenant Lifecycle States
 
@@ -69,14 +69,14 @@ Every state change is logged with:
 
 ### Tenant Management
 
-- `GET /api/tenants` — List all tenants
-- `GET /api/tenants/:tenantId` — Get tenant details
-- `POST /api/tenants` — Create a new tenant
-- `PATCH /api/tenants/:tenantId/state` — Update current state (records transition)
-- `PATCH /api/tenants/:tenantId/desired-state` — Update desired state
-- `PATCH /api/tenants/:tenantId/storage` — Update storage reference
-- `PATCH /api/tenants/:tenantId/backup` — Update backup metadata
-- `GET /api/tenants/:tenantId/transitions` — Get state transition history
+- `GET /internal/tenants` — List all tenants
+- `GET /internal/tenants/:tenantId` — Get tenant details
+- `POST /internal/tenants` — Create a new tenant
+- `PATCH /internal/tenants/:tenantId/state` — Update current state (records transition)
+- `PATCH /internal/tenants/:tenantId/desired-state` — Update desired state
+- `PATCH /internal/tenants/:tenantId/storage` — Update storage reference
+- `PATCH /internal/tenants/:tenantId/backup` — Update backup metadata
+- `GET /internal/tenants/:tenantId/transitions` — Get state transition history
 
 ## Configuration
 
@@ -84,7 +84,7 @@ Environment variables:
 
 - `PORT` — HTTP port (default: 3001)
 - `DATABASE_PATH` — SQLite database path (default: `data/control-plane.sqlite`; relative paths resolve from the app root)
-- `CONTROL_PLANE_ADMIN_TOKEN` — Required bearer token for `/api` routes
+- `CONTROL_PLANE_ADMIN_TOKEN` — Required bearer token for `/internal` routes
 - `NODE_ENV` — Environment mode (development, production)
 
 ## Development

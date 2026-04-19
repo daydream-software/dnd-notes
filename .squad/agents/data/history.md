@@ -46,6 +46,8 @@ Data initialized as Backend Dev for the initial project squad.
 - Parse `PORT` strictly in control-plane startup; permissive `parseInt()` behavior can silently accept junk suffixes that should fail fast at boot.
 - Control-plane auth middleware should drain unauthorized request bodies before returning 401 so rejected keep-alive requests do not leave unread payloads behind.
 - Control-plane shutdown should bound `server.close()` with a hard timeout; keep-alive sockets can otherwise block SIGINT/SIGTERM exit and leave SQLite handles open.
+- Locked issue #53 control-plane management routes live under `/internal/tenants*`; keep service code, tests, and README aligned to that internal-only contract instead of drifting to `/api/*`.
+- Control-plane state audit rows should read `current_state` inside the same write transaction used for the update, and `reason` should be omitted or non-empty so transition history never silently collapses `''` into `null`.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 

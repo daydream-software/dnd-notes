@@ -27,11 +27,13 @@ const createTenantSchema = z.object({
 })
 
 const tenantStateSchema = z.enum(tenantStates)
+const internalRoutePrefix = '/internal'
+const tenantRoutePrefix = `${internalRoutePrefix}/tenants`
 
 const updateStateSchema = z.object({
   state: tenantStateSchema,
   triggeredBy: z.string().min(1),
-  reason: z.string().optional(),
+  reason: z.string().min(1).optional(),
 })
 
 const updateDesiredStateSchema = z.object({
@@ -108,8 +110,8 @@ export function createApp({
     response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
     next()
   })
-  app.use('/api', createAdminAuthMiddleware(adminToken))
-  app.use('/api', express.json())
+  app.use(internalRoutePrefix, createAdminAuthMiddleware(adminToken))
+  app.use(internalRoutePrefix, express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json({
@@ -120,7 +122,7 @@ export function createApp({
   })
 
   app.get(
-    '/api/tenants',
+    tenantRoutePrefix,
     (_request: Request, response: Response<TenantListResponse>) => {
       const tenants = tenantRegistry.listTenants()
       response.json({ tenants })
@@ -128,7 +130,7 @@ export function createApp({
   )
 
   app.get(
-    '/api/tenants/:tenantId',
+    `${tenantRoutePrefix}/:tenantId`,
     (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
@@ -146,7 +148,7 @@ export function createApp({
   )
 
   app.post(
-    '/api/tenants',
+    tenantRoutePrefix,
     (
       request: Request,
       response: Response<TenantDetailResponse | ErrorResponse>,
@@ -200,7 +202,7 @@ export function createApp({
   )
 
   app.patch(
-    '/api/tenants/:tenantId/state',
+    `${tenantRoutePrefix}/:tenantId/state`,
     (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
@@ -253,7 +255,7 @@ export function createApp({
   )
 
   app.patch(
-    '/api/tenants/:tenantId/desired-state',
+    `${tenantRoutePrefix}/:tenantId/desired-state`,
     (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
@@ -299,7 +301,7 @@ export function createApp({
   )
 
   app.patch(
-    '/api/tenants/:tenantId/storage',
+    `${tenantRoutePrefix}/:tenantId/storage`,
     (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
@@ -345,7 +347,7 @@ export function createApp({
   )
 
   app.patch(
-    '/api/tenants/:tenantId/backup',
+    `${tenantRoutePrefix}/:tenantId/backup`,
     (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
@@ -391,7 +393,7 @@ export function createApp({
   )
 
   app.get(
-    '/api/tenants/:tenantId/transitions',
+    `${tenantRoutePrefix}/:tenantId/transitions`,
     (
       request: Request<{ tenantId: string }>,
       response: Response<StateTransitionHistoryResponse | ErrorResponse>,

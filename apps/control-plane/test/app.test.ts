@@ -10,6 +10,8 @@ const { version: appVersion } = require('../package.json') as { version: string 
 
 describe('Control Plane API', () => {
   const adminToken = 'test-control-plane-token'
+  const tenantsPath = '/internal/tenants'
+  const tenantPath = (tenantId: string) => `${tenantsPath}/${tenantId}`
   let tenantRegistry: TenantRegistry
   let app: ReturnType<typeof createApp>
 
@@ -47,9 +49,9 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('POST /api/tenants', () => {
+  describe('POST /internal/tenants', () => {
     it('rejects unauthenticated API requests', async () => {
-      const response = await request(app).post('/api/tenants').send({
+      const response = await request(app).post(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
@@ -60,8 +62,21 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.error, 'Unauthorized')
     })
 
+    it('does not expose the legacy /api tenant route prefix', async () => {
+      await request(app)
+        .post('/api/tenants')
+        .set('Authorization', `Bearer ${adminToken}`)
+        .send({
+          id: 'tenant-123',
+          slug: 'test-tenant',
+          ownerId: 'owner-456',
+          version: '1.0.0',
+        })
+        .expect(404)
+    })
+
     it('creates a new tenant', async () => {
-      const response = await authedPost('/api/tenants')
+      const response = await authedPost(tenantsPath)
         .send({
           id: 'tenant-123',
           slug: 'test-tenant',
@@ -79,14 +94,14 @@ describe('Control Plane API', () => {
     })
 
     it('rejects duplicate tenant ID', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
         version: '1.0.0',
       })
 
-      const response = await authedPost('/api/tenants')
+      const response = await authedPost(tenantsPath)
         .send({
           id: 'tenant-123',
           slug: 'another-slug',
@@ -99,14 +114,14 @@ describe('Control Plane API', () => {
     })
 
     it('rejects duplicate tenant slug', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
         version: '1.0.0',
       })
 
-      const response = await authedPost('/api/tenants')
+      const response = await authedPost(tenantsPath)
         .send({
           id: 'tenant-456',
           slug: 'test-tenant',
@@ -119,7 +134,7 @@ describe('Control Plane API', () => {
     })
 
     it('validates slug format', async () => {
-      const response = await authedPost('/api/tenants')
+      const response = await authedPost(tenantsPath)
         .send({
           id: 'tenant-123',
           slug: '-invalid-slug',
@@ -132,29 +147,29 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('GET /api/tenants', () => {
+  describe('GET /internal/tenants', () => {
     it('returns empty list when no tenants exist', async () => {
-      const response = await authedGet('/api/tenants').expect(200)
+      const response = await authedGet(tenantsPath).expect(200)
 
       assert.deepStrictEqual(response.body.tenants, [])
     })
 
     it('returns list of tenants', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-1',
         slug: 'tenant-one',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
 
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-2',
         slug: 'tenant-two',
         ownerId: 'owner-2',
         version: '1.0.0',
       })
 
-      const response = await authedGet('/api/tenants').expect(200)
+      const response = await authedGet(tenantsPath).expect(200)
 
       assert.strictEqual(response.body.tenants.length, 2)
       const ids = response.body.tenants.map((t: { id: string }) => t.id).sort()
@@ -162,40 +177,38 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('GET /api/tenants/:tenantId', () => {
+  describe('GET /internal/tenants/:tenantId', () => {
     it('returns tenant details', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
         version: '1.0.0',
       })
 
-      const response = await authedGet('/api/tenants/tenant-123')
-        .expect(200)
+      const response = await authedGet(tenantPath('tenant-123')).expect(200)
 
       assert.strictEqual(response.body.tenant.id, 'tenant-123')
       assert.strictEqual(response.body.tenant.slug, 'test-tenant')
     })
 
     it('returns 404 for non-existent tenant', async () => {
-      const response = await authedGet('/api/tenants/non-existent')
-        .expect(404)
+      const response = await authedGet(tenantPath('non-existent')).expect(404)
 
       assert.strictEqual(response.body.error, 'Tenant not found')
     })
   })
 
-  describe('PATCH /api/tenants/:tenantId/state', () => {
+  describe('PATCH /internal/tenants/:tenantId/state', () => {
     it('updates tenant state and records transition', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
         version: '1.0.0',
       })
 
-      const response = await authedPatch('/api/tenants/tenant-123/state')
+      const response = await authedPatch(`${tenantPath('tenant-123')}/state`)
         .send({
           state: 'ready',
           triggeredBy: 'provisioner',
@@ -205,8 +218,9 @@ describe('Control Plane API', () => {
 
       assert.strictEqual(response.body.tenant.currentState, 'ready')
 
-      const transitions = await authedGet('/api/tenants/tenant-123/transitions')
-        .expect(200)
+      const transitions = await authedGet(
+        `${tenantPath('tenant-123')}/transitions`,
+      ).expect(200)
 
       assert.strictEqual(transitions.body.transitions.length, 2)
       assert.strictEqual(transitions.body.transitions[0].toState, 'ready')
@@ -216,8 +230,27 @@ describe('Control Plane API', () => {
       )
     })
 
+    it('rejects an empty reason when provided', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      const response = await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({
+          state: 'ready',
+          triggeredBy: 'provisioner',
+          reason: '',
+        })
+        .expect(400)
+
+      assert.strictEqual(response.body.error, 'Invalid request body')
+    })
+
     it('returns 404 when updating state of non-existent tenant', async () => {
-      const response = await authedPatch('/api/tenants/non-existent/state')
+      const response = await authedPatch(`${tenantPath('non-existent')}/state`)
         .send({
           state: 'ready',
           triggeredBy: 'test',
@@ -228,17 +261,18 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('PATCH /api/tenants/:tenantId/desired-state', () => {
+  describe('PATCH /internal/tenants/:tenantId/desired-state', () => {
     it('updates desired state', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
         version: '1.0.0',
       })
 
-      const response = await authedPatch('/api/tenants/tenant-123/desired-state')
-        .send({
+      const response = await authedPatch(
+        `${tenantPath('tenant-123')}/desired-state`,
+      ).send({
           desiredState: 'ready',
         })
         .expect(200)
@@ -247,8 +281,9 @@ describe('Control Plane API', () => {
     })
 
     it('returns 404 when updating desired state of non-existent tenant', async () => {
-      const response = await authedPatch('/api/tenants/non-existent/desired-state')
-        .send({
+      const response = await authedPatch(
+        `${tenantPath('non-existent')}/desired-state`,
+      ).send({
           desiredState: 'ready',
         })
         .expect(404)
@@ -257,16 +292,16 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('PATCH /api/tenants/:tenantId/storage', () => {
+  describe('PATCH /internal/tenants/:tenantId/storage', () => {
     it('updates storage reference', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
         version: '1.0.0',
       })
 
-      const response = await authedPatch('/api/tenants/tenant-123/storage')
+      const response = await authedPatch(`${tenantPath('tenant-123')}/storage`)
         .send({
           storageReference: 'pvc-abc123',
         })
@@ -276,7 +311,7 @@ describe('Control Plane API', () => {
     })
 
     it('returns 404 when updating storage for non-existent tenant', async () => {
-      const response = await authedPatch('/api/tenants/non-existent/storage')
+      const response = await authedPatch(`${tenantPath('non-existent')}/storage`)
         .send({
           storageReference: 'pvc-abc123',
         })
@@ -286,9 +321,9 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('PATCH /api/tenants/:tenantId/backup', () => {
+  describe('PATCH /internal/tenants/:tenantId/backup', () => {
     it('updates backup metadata', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
@@ -300,7 +335,7 @@ describe('Control Plane API', () => {
         location: 'blob://backups/tenant-123',
       })
 
-      const response = await authedPatch('/api/tenants/tenant-123/backup')
+      const response = await authedPatch(`${tenantPath('tenant-123')}/backup`)
         .send({
           backupMetadata: metadata,
         })
@@ -310,7 +345,7 @@ describe('Control Plane API', () => {
     })
 
     it('returns 404 when updating backup metadata for non-existent tenant', async () => {
-      const response = await authedPatch('/api/tenants/non-existent/backup')
+      const response = await authedPatch(`${tenantPath('non-existent')}/backup`)
         .send({
           backupMetadata: '{"location":"blob://missing"}',
         })
@@ -320,23 +355,24 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('GET /api/tenants/:tenantId/transitions', () => {
+  describe('GET /internal/tenants/:tenantId/transitions', () => {
     it('returns state transition history', async () => {
-      await authedPost('/api/tenants').send({
+      await authedPost(tenantsPath).send({
         id: 'tenant-123',
         slug: 'test-tenant',
         ownerId: 'owner-456',
         version: '1.0.0',
       })
 
-      await authedPatch('/api/tenants/tenant-123/state')
+      await authedPatch(`${tenantPath('tenant-123')}/state`)
         .send({
           state: 'ready',
           triggeredBy: 'provisioner',
         })
 
-      const response = await authedGet('/api/tenants/tenant-123/transitions')
-        .expect(200)
+      const response = await authedGet(
+        `${tenantPath('tenant-123')}/transitions`,
+      ).expect(200)
 
       assert.strictEqual(response.body.transitions.length, 2)
       assert.strictEqual(response.body.transitions[0].fromState, 'provisioning')
@@ -344,8 +380,9 @@ describe('Control Plane API', () => {
     })
 
     it('returns 404 for non-existent tenant', async () => {
-      const response = await authedGet('/api/tenants/non-existent/transitions')
-        .expect(404)
+      const response = await authedGet(
+        `${tenantPath('non-existent')}/transitions`,
+      ).expect(404)
 
       assert.strictEqual(response.body.error, 'Tenant not found')
     })

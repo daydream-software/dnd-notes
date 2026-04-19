@@ -167,12 +167,19 @@ export class TenantRegistry {
     triggeredBy: string,
     reason?: string,
   ): void {
-    const tenant = this.getTenant(tenantId)
-    if (!tenant) {
-      throw new Error(`Tenant ${tenantId} not found`)
-    }
-
     const updateTenantStateTransaction = this.db.transaction(() => {
+      const existingTenant = this.db
+        .prepare(
+          `SELECT current_state
+           FROM tenants
+           WHERE id = ?`,
+        )
+        .get(tenantId) as { current_state: TenantState } | undefined
+
+      if (!existingTenant) {
+        throw new Error(`Tenant ${tenantId} not found`)
+      }
+
       const result = this.db
         .prepare(
           `UPDATE tenants
@@ -185,14 +192,14 @@ export class TenantRegistry {
 
       this.recordTransition({
         tenantId,
-        fromState: tenant.currentState,
+        fromState: existingTenant.current_state,
         toState: newState,
         triggeredBy,
-        reason: reason || null,
+        reason: reason ?? null,
       })
     })
 
-    updateTenantStateTransaction()
+    updateTenantStateTransaction.immediate()
   }
 
   updateTenantDesiredState(
@@ -322,7 +329,7 @@ export class TenantRegistry {
       fromState: r.from_state as TenantState,
       toState: r.to_state as TenantState,
       triggeredBy: r.triggered_by as string,
-      reason: (r.reason as string) || null,
+      reason: (r.reason as string | null) ?? null,
       createdAt: r.created_at as string,
     }
   }
