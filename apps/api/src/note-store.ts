@@ -425,6 +425,14 @@ function resolveDatabaseUrl(options: CreateNoteStoreOptions) {
   return options.databaseUrl ?? process.env.DATABASE_URL ?? null
 }
 
+function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl = resolveDatabaseUrl(options)) {
+  if (!options.postgresPool && !databaseUrl) {
+    throw new Error('DATABASE_URL is required when the Postgres note store is selected.')
+  }
+
+  return databaseUrl
+}
+
 function resolveNoteStoreBackend(options: CreateNoteStoreOptions): 'sqlite' | 'postgres' {
   if (options.backend) {
     return options.backend
@@ -562,8 +570,8 @@ export async function createNoteStore(
   options: CreateNoteStoreOptions = {},
 ): Promise<NoteStore> {
   const dbPath = resolveNoteDbPath(options)
-  const databaseUrl = resolveDatabaseUrl(options)
   const backend = resolveNoteStoreBackend(options)
+  const databaseUrl = backend === 'postgres' ? requirePostgresDatabaseUrl(options) : null
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
   const database =
     backend === 'postgres'
@@ -572,10 +580,6 @@ export async function createNoteStore(
           pool: options.postgresPool,
         })
       : createSqliteDatabase(dbPath)
-
-  if (backend === 'postgres' && !options.postgresPool && !databaseUrl) {
-    throw new Error('DATABASE_URL is required when the Postgres note store is selected.')
-  }
 
   await initializeNoteStoreDatabase(database, configuredSiteAdminEmails)
 
@@ -2305,8 +2309,16 @@ export async function createNoteStore(
 
         try {
           await initializeNoteStoreDatabase(snapshotDatabase, new Set())
-          await clearSnapshotTables(snapshotDatabase)
-          await copySnapshotTables(database, snapshotDatabase)
+
+          const writeSnapshot = snapshotDatabase.transaction(async () => {
+            await clearSnapshotTables(snapshotDatabase)
+            await copySnapshotTables(database, snapshotDatabase)
+          })
+          const exportSnapshot = database.transaction(async () => {
+            await writeSnapshot()
+          })
+
+          await exportSnapshot()
         } finally {
           await snapshotDatabase.close()
         }
@@ -2388,8 +2400,9 @@ export async function restoreNoteStoreFromBackup(
     return createNoteStore({ ...options, dbPath, backend: 'sqlite' })
   }
 
+  const databaseUrl = requirePostgresDatabaseUrl(options)
   const destinationDatabase = createPostgresDatabase({
-    connectionString: resolveDatabaseUrl(options) ?? undefined,
+    connectionString: databaseUrl ?? undefined,
     pool: options.postgresPool,
   })
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
