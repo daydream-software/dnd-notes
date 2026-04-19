@@ -11,7 +11,11 @@ const __dirname = path.dirname(__filename)
 
 const rawPort = process.env.PORT
 const PORT =
-  rawPort === undefined ? 3001 : Number.parseInt(rawPort, 10)
+  rawPort === undefined
+    ? 3001
+    : /^\d+$/.test(rawPort)
+      ? Number(rawPort)
+      : Number.NaN
 
 if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
   throw new Error(`Invalid PORT value: ${rawPort}`)

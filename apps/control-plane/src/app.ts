@@ -9,7 +9,6 @@ import type {
   StateTransitionHistoryResponse,
   TenantDetailResponse,
   TenantListResponse,
-  TenantState,
 } from './types.js'
 
 interface CreateAppOptions {
@@ -86,6 +85,7 @@ function createAdminAuthMiddleware(adminToken: string): express.RequestHandler {
   return (request, response, next) => {
     const authorizationHeader = request.header('authorization')
     if (authorizationHeader !== `Bearer ${adminToken}`) {
+      request.resume()
       response.status(401).json({ error: 'Unauthorized' })
       return
     }
@@ -228,7 +228,7 @@ export function createApp({
       try {
         tenantRegistry.updateTenantState(
           tenantId,
-          state as TenantState,
+          state,
           triggeredBy,
           reason,
         )
@@ -278,10 +278,7 @@ export function createApp({
       }
 
       try {
-        tenantRegistry.updateTenantDesiredState(
-          tenantId,
-          desiredState as TenantState,
-        )
+        tenantRegistry.updateTenantDesiredState(tenantId, desiredState)
         const tenant = tenantRegistry.getTenant(tenantId)
 
         if (!tenant) {

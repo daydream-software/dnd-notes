@@ -43,6 +43,8 @@ Data initialized as Backend Dev for the initial project squad.
 - Shared note rendering now lives in `apps/web/src/note-formatting.tsx`, which uses `react-markdown` + `remark-gfm` and is reused by both `apps/web/src/App.tsx` and `apps/web/src/SharedCampaignRoute.tsx`.
 - Rich-formatting regression coverage now lives in `apps/web/src/note-formatting.test.tsx`, with app wiring covered in `apps/web/src/App.test.tsx`.
 - When a locked squad decision supersedes an exploratory history note, point the history entry at `.squad/decisions.md` or mark it explicitly superseded; do not leave PR-visible history pointing at stale inbox artifacts or retired endpoint drafts.
+- Parse `PORT` strictly in control-plane startup; permissive `parseInt()` behavior can silently accept junk suffixes that should fail fast at boot.
+- Control-plane auth middleware should drain unauthorized request bodies before returning 401 so rejected keep-alive requests do not leave unread payloads behind.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
