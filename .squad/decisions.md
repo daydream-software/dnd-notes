@@ -6730,3 +6730,197 @@ Synchronizing GitHub immediately after decision-lock ensures team and stakeholde
 **What:** Multi-stage Dockerfile implementation approved for merge. 60 API tests passing, lint clean. Health probe semantics correct, same-origin runtime contract complete, no CI drift detected.
 **Why:** Production-minded containerization without scope drift. Correct K8s health semantics (/healthz for liveness, /readyz for readiness). DATABASE_URL reserved but not wired (correct for Phase 0). RUNTIME.md comprehensive and clear.
 **Next:** Merge PR #60, move to #46 (Postgres adapter port) as next Phase 0 blocker.
+
+
+---
+
+### 2026-04-19: Worktree + Copilot PR Review Flow — APPROVED FOR PRODUCTION
+**Decided by:** Brand (Platform Dev)
+**Date:** 2026-04-19
+**Type:** Platform & Infrastructure
+
+**What:** The current GitHub Actions workflow setup correctly supports the worktrees architecture and squad/* → main review/automerge path. All critical gates in place and functioning. Ready for Epic #42 Phase 0 execution without platform changes.
+
+**Validation:**
+- ✅ Worktree configuration (.squad/config.json) correct
+- ✅ Branch filtering (squad/* → main) active in review and merge workflows
+- ✅ CI integration properly chained with merge gates
+- ✅ Permissions sufficient for all operations
+- ✅ Edge cases handled (draft PRs, multiple PRs, re-sync, failures)
+
+**Decisions:**
+- Branch naming convention: squad/{issue}-{slug} (enforced by team discipline, not workflow)
+- Merge method: squash (loses individual commits, maintains clean main history)
+- Schedule: automerge evaluates every 5 minutes
+- Pagination: review threads capped at 100 (acceptable for current team)
+
+**Why:** Worktree + review flow is load-bearing for parallel Epic #42 work. All gates working correctly; validated by PRs #52, #59, #60. No platform blocking.
+
+**Next:** Proceed with Issue #58 PR using existing workflow setup.
+
+---
+
+### 2026-04-19: Issue #58 QA Review Gate — CONDITIONAL BLOCKER
+**Decided by:** Chunk (Tester)
+**Date:** 2026-04-19
+**Type:** QA Gate & Test Strategy
+
+**What:** Do not proceed to full implementation of Issue #58 (NoteStore Postgres adapter) until three architectural decisions are confirmed.
+
+**Blocking Points:**
+1. Transaction isolation level: SQLite is effectively SERIALIZABLE; Postgres default is READ COMMITTED. Will you match isolation or use advisory locks?
+2. Connection pool configuration: What are min/max connections, idle timeout, statement timeout?
+3. Fallback logic: Will the adapter use DATABASE_URL env var to choose Postgres vs. SQLite?
+
+**Why:** Six high-risk parity gaps when moving from sync better-sqlite3 to async node-postgres:
+- Transaction semantics (await placement)
+- Connection pooling (race conditions)
+- Schema idempotence (concurrent startup)
+- ACID isolation (dirty reads)
+- Query result types (numeric coercion)
+- Graceful shutdown (connection draining)
+
+**Critical Test Cases (Must-Have):**
+- Transaction rollback on error (atomicity)
+- Concurrent edits (10+ parallel note edits, no lost writes)
+- Reference sync + concurrent deletion (FK constraints hold)
+- Membership consolidation atomicity (counts match changes)
+- Schema idempotence (two API instances start simultaneously, no conflicts)
+- Graceful shutdown (in-flight mutations complete/rollback within 30 seconds)
+- SQLite fallback (all tests pass against both Postgres and SQLite)
+
+**Gate Exit:**
+- Data documents architectural choices
+- Data adds concurrency test (test/concurrent-mutations.test.ts)
+- Data confirms fallback logic in PR description
+- Chunk re-reviews against full QA brief
+
+**Do not merge without Chunk approval.**
+
+---
+
+### 2026-04-19: Issue #58 — Postgres Adapter Architecture (Three Decisions LOCKED)
+**Decided by:** Mikey (Lead)
+**Date:** 2026-04-19
+**Type:** Architecture & Implementation
+**Status:** 🔒 LOCKED — Ready for Data implementation
+
+**Decision 1: Transaction Isolation Level**
+
+**Choice:** SERIALIZABLE isolation on Postgres
+
+**Rationale:** NoteStore assumes strong isolation for reference sync, membership consolidation, and note edits. SQLite better-sqlite3 with WAL is effectively SERIALIZABLE (single-writer model). Postgres default READ COMMITTED allows dirty reads and phantom reads, requiring advisory locks on every multi-step operation. SERIALIZABLE isolation on Postgres matches the contract the code already expects from SQLite. Safety first: correctness > performance at this phase.
+
+**Implementation:**
+- Set `default_transaction_isolation = SERIALIZABLE` in connection string (Postgres 12+) or execute `SET TRANSACTION ISOLATION LEVEL SERIALIZABLE` at start of each transaction scope
+- Wrap all transaction scopes in `withTransaction()` helper that sets isolation level + retry logic
+- Retry with exponential backoff (max 3 attempts) on serialization conflicts
+- Document retry behavior in code and logs for operational clarity
+
+**Test Coverage:**
+- Concurrent edits to same note: 10+ parallel updates, verify no lost writes
+- Reference sync + concurrent deletion: verify FK constraints hold
+- Membership consolidation atomicity: verify counts match applied changes under load
+
+---
+
+**Decision 2: Connection Pool Defaults**
+
+**Choice:** Conservative pooling for safe rolling updates and graceful shutdown
+
+**Settings:**
+```
+minConnections: 2
+maxConnections: 10
+idleTimeout: 30 seconds
+statementTimeout: 30 seconds
+```
+
+**Rationale:**
+- Minimum connections (2): Guarantees at least one connection for health checks during traffic spikes; prevents single query blocking health probes
+- Maximum connections (10): Phase 0 is single-tenant on k3d with ≤ 3 API pods = 30 total connections to Postgres instance, well below managed limits (100–200), leaving headroom for control plane
+- Idle timeout (30 seconds): Prevents connection leak during graceful shutdown; matches typical Kubernetes rolling update timescale
+- Statement timeout (30 seconds): Long queries must complete within 30 seconds; prevents runaway queries holding locks
+
+**Adjustment Path:**
+These are Phase 0 conservative defaults. During Phase 1 capacity planning (when multi-tenant scale is modeled), revisit against observed load and PVC latency. At ≥ 50 tenants, may increase maxConnections and revisit isolation strategy.
+
+**Test Coverage:**
+- Graceful shutdown: in-flight mutations complete/rollback cleanly within 30 seconds
+- Schema idempotence: two API instances start simultaneously; no connection pool race
+- Concurrent mutations: stress-test with pool saturation; verify queue depth doesn't grow unbounded
+
+---
+
+**Decision 3: SQLite Fallback Selection Rule**
+
+**Choice:** DATABASE_URL environment variable gates Postgres vs. SQLite
+
+**Logic:**
+```
+if (process.env.DATABASE_URL) {
+  // DATABASE_URL exists → use Postgres (node-postgres)
+  // Force production-like behavior locally too
+} else {
+  // DATABASE_URL missing → use SQLite fallback (better-sqlite3)
+  // Local development path, file-based, fast iteration
+}
+```
+
+**Rationale:**
+- Standard convention: Heroku and PaaS providers use DATABASE_URL as single source of truth
+- Prevents accidental production SQLite: Explicit env var requirement prevents silent SQLite deployment. If DATABASE_URL is set, Postgres is mandatory
+- Local development simplicity: npm run dev with no env vars → SQLite file created in ./data/dnd-notes.db (no Postgres container needed)
+- CI clarity: CI (k3d) sets DATABASE_URL to managed Postgres; tests validate both backends without duplication
+
+**Implementation:**
+- At startup, log which database backend was selected (Postgres or SQLite) and connection string prefix
+- Emit warning if Postgres selected AND database unreachable (fail fast, don't silent fallback)
+- Schema initialization must work for both backends without code duplication
+
+**Test Coverage:**
+- SQLite fallback: all 26+ API tests pass against local SQLite
+- Postgres primary: all 26+ API tests pass against Postgres in k3d
+- No hidden fallback: CI/CD pipeline does not swap backends mid-test; logs confirm backend in use
+
+---
+
+**Why These Three Decisions Matter**
+
+1. Isolation level determines correctness guarantees: without it, concurrent mutations race and lose writes
+2. Pool config determines ability to survive rolling updates and respond to traffic spikes without connection starvation
+3. Fallback rule determines whether production can accidentally use SQLite (data loss risk) and whether local development is frictionless
+
+All three are load-bearing for Phase 1 multi-tenant operations.
+
+---
+
+**Done Signals (Chunk's QA Gate)**
+
+Data implementation is complete when:
+
+1. ✅ All transactions execute at SERIALIZABLE isolation level with retry logic
+2. ✅ Connection pool configured with four settings (min/max/idle/statement timeout)
+3. ✅ DATABASE_URL env var gates Postgres vs. SQLite; Postgres mandatory if DATABASE_URL set
+4. ✅ All 26+ API tests pass against Postgres in k3d
+5. ✅ All 26+ API tests pass against SQLite locally
+6. ✅ Graceful shutdown drains active queries and closes pool cleanly
+7. ✅ Schema initialization is idempotent on Postgres (two simultaneous app instances don't conflict)
+8. ✅ Concurrency tests validate isolation level, pool saturation, and reference sync atomicity
+
+Chunk re-reviews final implementation against this checklist and chunk-issue-58-qa.md before approving merge.
+
+---
+
+**Implementation Notes for Data**
+
+- Use node-postgres v8.0+ for native connection pooling and await support
+- Wrap all transaction scopes in withTransaction() helper setting isolation + retry
+- Test migration: seed SQLite locally, dump schema, restore to test Postgres instance, verify equivalence
+- Document fallback logic in RUNTIME.md under "Database Backend Selection" section
+
+**Exceptions & Escalation**
+
+If SERIALIZABLE causes unacceptable performance (profiled lock contention > 5% slow query overhead), escalate to Mikey + FFMikha. May move to READ COMMITTED + explicit advisory locks, but requires design review of lock ordering and deadlock handling.
+
+**Expected outcome:** This decision sticks for Phase 0 and Phase 1. Optimization post-Phase-1 if needed.

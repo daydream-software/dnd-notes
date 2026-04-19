@@ -141,3 +141,6 @@ Locked three critical Phase 0–1 clarifications into GitHub issue #42 body and 
 
 
 *Older entries archived. See .squad/decisions.md for locked decisions.*
+
+
+📌 Team update (2026-04-19T22:50:29Z): Three Issue #58 decisions locked and merged to decisions.md. Architecture approved. Worktree + Copilot review flow validated by Brand (no platform changes). Phase 0 Track A (Data) ready to start. — Scribe
