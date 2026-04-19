@@ -15,6 +15,7 @@ on:
 permissions:
   actions: read
   contents: write
+  issues: write
   pull-requests: write
 
 jobs:
@@ -33,9 +34,15 @@ jobs:
             const repo = context.repo.repo;
             const reviewer = 'copilot-pull-request-reviewer[bot]';
             const ciWorkflowId = 'ci.yml';
+            const mergeTracePrefix = '[copilot-gatekeeper] merge-trace';
+            const mergeTraceMarker = 'copilot-gatekeeper-merge-trace';
 
             function normalizeLogin(login) {
               return (login ?? '').toLowerCase().replace(/\[bot\]$/, '');
+            }
+
+            function shortSha(sha) {
+              return (sha ?? '').slice(0, 7);
             }
 
             function matchesReviewer(login) {
@@ -48,6 +55,26 @@ jobs:
 
             function uniquePullNumbers(pullNumbers) {
               return [...new Set(pullNumbers.filter(Boolean))];
+            }
+
+            function getTriggerContext() {
+              const gateRunId = process.env.GITHUB_RUN_ID ?? 'unknown';
+              const gateRunAttempt = process.env.GITHUB_RUN_ATTEMPT ?? '1';
+
+              if (context.eventName === 'workflow_run') {
+                const sourceRun = context.payload.workflow_run;
+                return `workflow_run:${sourceRun?.name ?? 'unknown'}#${sourceRun?.id ?? 'unknown'} attempt ${sourceRun?.run_attempt ?? '1'} (${sourceRun?.conclusion ?? sourceRun?.status ?? 'unknown'}) -> gate #${gateRunId}/${gateRunAttempt}`;
+              }
+
+              if (context.eventName === 'pull_request_review') {
+                return `pull_request_review:${context.payload.review?.state ?? 'unknown'}@${shortSha(context.payload.review?.commit_id)} -> gate #${gateRunId}/${gateRunAttempt}`;
+              }
+
+              if (context.eventName === 'pull_request_target') {
+                return `pull_request_target:${context.payload.action ?? 'unknown'} -> gate #${gateRunId}/${gateRunAttempt}`;
+              }
+
+              return `${context.eventName} -> gate #${gateRunId}/${gateRunAttempt}`;
             }
 
             async function getTargetPullNumbers() {
@@ -114,7 +141,7 @@ jobs:
               );
             }
 
-            async function hasFreshCopilotReview(pullNumber, headSha) {
+            async function getFreshCopilotReview(pullNumber, headSha) {
               const reviews = await github.paginate(github.rest.pulls.listReviews, {
                 owner,
                 repo,
@@ -122,15 +149,23 @@ jobs:
                 per_page: 100,
               });
 
-              return reviews.some(
-                (review) =>
-                  matchesReviewer(review.user?.login) &&
-                  review.commit_id === headSha &&
-                  review.state !== 'DISMISSED',
+              return (
+                reviews
+                  .filter(
+                    (review) =>
+                      matchesReviewer(review.user?.login) &&
+                      review.commit_id === headSha &&
+                      review.state !== 'DISMISSED',
+                  )
+                  .sort(
+                    (left, right) =>
+                      Date.parse(right.submitted_at ?? 0) -
+                      Date.parse(left.submitted_at ?? 0),
+                  )[0] ?? null
               );
             }
 
-            async function hasActiveCopilotThread(pullNumber) {
+            async function getActiveCopilotThreadCount(pullNumber) {
               const reviewThreadQuery = `
                 query($owner: String!, $repo: String!, $pullNumber: Int!) {
                   repository(owner: $owner, name: $repo) {
@@ -162,7 +197,7 @@ jobs:
               const threads =
                 reviewThreadResult.repository.pullRequest.reviewThreads.nodes ?? [];
 
-              return threads.some((thread) => {
+              return threads.filter((thread) => {
                 if (thread.isResolved || thread.isOutdated) {
                   return false;
                 }
@@ -170,7 +205,56 @@ jobs:
                 return thread.comments.nodes.some(
                   (comment) => matchesReviewer(comment.author?.login),
                 );
+              }).length;
+            }
+
+            async function findExistingMergeTraceComment(pullNumber, headSha) {
+              const marker = `<!-- ${mergeTraceMarker}:${headSha} -->`;
+              const comments = await github.paginate(github.rest.issues.listComments, {
+                owner,
+                repo,
+                issue_number: pullNumber,
+                per_page: 100,
               });
+
+              return comments.find((comment) => comment.body?.includes(marker)) ?? null;
+            }
+
+            async function ensureMergeTraceComment(
+              pr,
+              { ciRun, freshReview, activeCopilotThreadCount },
+            ) {
+              const existingComment = await findExistingMergeTraceComment(
+                pr.number,
+                pr.head.sha,
+              );
+
+              if (existingComment) {
+                core.info(
+                  `Merge trace note already exists for PR #${pr.number} at ${shortSha(pr.head.sha)}`,
+                );
+                return;
+              }
+
+              const reviewSubmittedAt = freshReview?.submitted_at ?? 'unknown';
+              const body = [
+                `${mergeTracePrefix} — eligible for squash merge`,
+                `<!-- ${mergeTraceMarker}:${pr.head.sha} -->`,
+                `- head: \`${pr.head.sha}\``,
+                `- ci: ✅ success on this SHA via \`CI\` run #${ciRun.run_number ?? 'n/a'} (id ${ciRun.id})`,
+                `- copilot-review: ✅ fresh \`${freshReview?.state ?? 'UNKNOWN'}\` review on this SHA at ${reviewSubmittedAt}`,
+                `- copilot-threads: ✅ ${activeCopilotThreadCount} active unresolved Copilot threads`,
+                `- trigger/run: \`${getTriggerContext()}\``,
+              ].join('\n');
+
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body,
+              });
+
+              core.info(`Recorded merge trace note for PR #${pr.number}`);
             }
 
             async function mergePullRequest(pr) {
@@ -182,6 +266,7 @@ jobs:
                   repo,
                   pull_number: pr.number,
                   merge_method: 'squash',
+                  sha: pr.head.sha,
                   commit_title: pr.title,
                   commit_message:
                     commitMessage.length > 0
@@ -242,17 +327,26 @@ jobs:
                 continue;
               }
 
-              const hasFreshReview = await hasFreshCopilotReview(pullNumber, pr.head.sha);
+              const freshReview = await getFreshCopilotReview(pullNumber, pr.head.sha);
 
-              if (!hasFreshReview) {
+              if (!freshReview) {
                 core.info(`Skipping PR #${pullNumber} because Copilot has not reviewed the current head SHA`);
                 continue;
               }
 
-              if (await hasActiveCopilotThread(pullNumber)) {
+              const activeCopilotThreadCount = await getActiveCopilotThreadCount(
+                pullNumber,
+              );
+
+              if (activeCopilotThreadCount > 0) {
                 core.info(`Skipping PR #${pullNumber} because Copilot still has active threads`);
                 continue;
               }
 
+              await ensureMergeTraceComment(pr, {
+                ciRun,
+                freshReview,
+                activeCopilotThreadCount,
+              });
               await mergePullRequest(pr);
             }
