@@ -200,6 +200,7 @@ export function createApp({
         !isDocumentRequest ||
         !acceptsHtml ||
         looksLikeFileRequest ||
+        path === '/api' ||
         path.startsWith('/api/') ||
         path === '/health' ||
         path === '/healthz' ||

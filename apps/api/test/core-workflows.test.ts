@@ -86,10 +86,11 @@ test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
   })
   t.after(cleanup)
 
-  const [navigationResponse, assetResponse, jsonResponse] = await Promise.all([
+  const [navigationResponse, assetResponse, jsonResponse, apiRootResponse] = await Promise.all([
     request(app).get('/campaigns/demo').set('Accept', 'text/html'),
     request(app).get('/assets/missing.js').set('Accept', '*/*'),
     request(app).get('/missing-route').set('Accept', 'application/json'),
+    request(app).get('/api').set('Accept', 'text/html'),
   ])
 
   assert.equal(navigationResponse.status, 200)
@@ -100,6 +101,9 @@ test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
 
   assert.equal(jsonResponse.status, 404)
   assert.doesNotMatch(jsonResponse.text, /Fixture dnd-notes app/)
+
+  assert.equal(apiRootResponse.status, 404)
+  assert.doesNotMatch(apiRootResponse.text, /Fixture dnd-notes app/)
 })
 
 test('site admins can download a SQLite backup and non-admins cannot', async (t) => {
