@@ -204,18 +204,19 @@ See issue #43 for full manifest examples after Phase 0 validation.
 **Status:** Not yet implemented. Reserved for control-plane orchestration.
 
 **Design intent (issue #42):**
-- `POST /_control/maintenance` endpoint to enable drain mode
+- `POST /internal/maintenance` endpoint to enable drain mode
 - Readiness probe fails during maintenance
 - Kubernetes removes pod from load balancer
 - Control plane executes maintenance operations (backup, restore, schema migration)
-- `DELETE /_control/maintenance` to resume normal operation
+- `DELETE /internal/maintenance` to resume normal operation
 
 ## Control Plane Contract (Phase 1)
 
 **Cluster-internal endpoints (not yet implemented):**
-- `GET /_control/info` - Runtime state (version, database health, uptime)
-- `POST /_control/maintenance` - Enter drain mode
-- `DELETE /_control/maintenance` - Exit drain mode
+- `GET /internal/status` - Runtime state (version, database health, uptime)
+- `POST /internal/bootstrap` - Initial tenant bootstrap and migrations
+- `POST /internal/maintenance` - Enter drain mode
+- `DELETE /internal/maintenance` - Exit drain mode
 
 These are reserved for Phase 1 control-plane orchestration and are **not** exposed via public ingress.
 
