@@ -228,11 +228,30 @@ function createOwnedPostgresPool(connectionString: string): PostgresPoolLike {
   return new Pool(config)
 }
 
+function resolvePostgresPool(options: {
+  connectionString?: string
+  pool?: PostgresPoolLike
+}) {
+  if (options.pool) {
+    return options.pool
+  }
+
+  const connectionString = options.connectionString?.trim()
+
+  if (!connectionString) {
+    throw new Error(
+      'Postgres pool or connection string is required to create the Postgres note store database.',
+    )
+  }
+
+  return createOwnedPostgresPool(connectionString)
+}
+
 export function createPostgresDatabase(options: {
   connectionString?: string
   pool?: PostgresPoolLike
 }): NoteStoreDatabase {
-  const pool = options.pool ?? createOwnedPostgresPool(options.connectionString ?? '')
+  const pool = resolvePostgresPool(options)
   const transactionExecutor = new AsyncLocalStorage<PostgresQueryable>()
 
   function getExecutor() {

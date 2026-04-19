@@ -207,27 +207,7 @@ export async function buildSessions(
   noteStore: NoteStore,
   campaignId: string,
 ): Promise<SessionSummary[]> {
-  const sessions = (await noteStore.listSessionNames(campaignId)) as Array<
-    string | SessionSummary
-  >
-
-  return Promise.all(sessions.map(async (session) => {
-    if (typeof session !== 'string') {
-      return session
-    }
-
-    const notes = await noteStore.getSessionNotes(campaignId, session)
-    const latestActivity = notes.reduce(
-      (latest, note) => (note.updatedAt > latest ? note.updatedAt : latest),
-      '',
-    )
-
-    return {
-      sessionName: session,
-      noteCount: notes.length,
-      latestActivity,
-    }
-  }))
+  return noteStore.listSessionNames(campaignId)
 }
 
 function noteMatchesActivityMembership(note: Note, membershipId: string) {

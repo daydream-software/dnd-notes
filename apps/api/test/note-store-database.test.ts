@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createSqliteDatabase } from '../src/note-store-database.js'
+import { createPostgresDatabase, createSqliteDatabase } from '../src/note-store-database.js'
 
 function createDeferred() {
   let resolve!: () => void
@@ -60,4 +60,11 @@ test('sqlite transactions keep unrelated statements queued until commit', async 
   } finally {
     await database.close()
   }
+})
+
+test('createPostgresDatabase rejects missing pool and connection string', () => {
+  assert.throws(
+    () => createPostgresDatabase({ connectionString: '   ' }),
+    /Postgres pool or connection string is required to create the Postgres note store database\./,
+  )
 })
