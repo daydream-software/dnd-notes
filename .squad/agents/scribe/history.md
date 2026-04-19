@@ -48,6 +48,15 @@ Scribe initialized as the team's memory and decision merger.
 - **Status:** REQUEST LOGGED. Implementation pending. No success claimed until all steps complete and new PR opens.
 - **Dependencies:** Copilot must handle the recovery workflow; this entry captures the request only.
 
+**📋 2026-04-19 — #52 Follow-up Restart Completed**
+- **Incident recovery:** PR #60 squash-merge corruption required #52 container work restart from corrupted main.
+- **Implementation outcome:**
+  - ✅ Gatekeeper trace-note workflow merged to main (`chore(ci): add merge trace notes for PR gatekeeper (#52)` commit 15d0273).
+  - ✅ #52 follow-up worktree restored: `squad/52-containerize-tenant-app-followup` branch created with fix for PR #60 review follow-up blocker.
+  - ✅ PR #61 opened (`fix(platform): finish PR #60 review follow-up`, state: OPEN, merged from `squad/52-containerize-tenant-app-followup` branch at commit f0e285d).
+  - ✅ All recovery steps completed; #52 follow-up now proceeding independently from #60 squash-merge corruption.
+- **Status:** RECOVERY VERIFIED. PR #61 awaiting review; #52 containerization work isolated and resumable.
+
 ## Learnings
 
 Initial squad setup complete.
