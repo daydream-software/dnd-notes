@@ -9,6 +9,7 @@ const shutdownGracePeriodMs = 30_000
 const siteAdminEmails =
   process.env.SITE_ADMIN_EMAILS?.split(',').map((email) => email.trim()) ?? []
 let noteStore = createNoteStore({ siteAdminEmails })
+let shuttingDown = false
 const app = createApp({
   noteStore,
   publicWebUrl: process.env.PUBLIC_WEB_URL,
@@ -19,7 +20,6 @@ const app = createApp({
   isShuttingDown: () => shuttingDown,
   serveWeb,
 })
-let shuttingDown = false
 
 function isServerNotRunningError(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error && error.code === 'ERR_SERVER_NOT_RUNNING'
