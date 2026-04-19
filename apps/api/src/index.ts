@@ -20,6 +20,10 @@ const app = createApp({
 })
 let shuttingDown = false
 
+function isServerNotRunningError(error: unknown): error is NodeJS.ErrnoException {
+  return error instanceof Error && 'code' in error && error.code === 'ERR_SERVER_NOT_RUNNING'
+}
+
 function finishShutdown(exitCode: number) {
   noteStore.close()
   process.exit(exitCode)
@@ -42,6 +46,11 @@ function shutdown(exitCode: number) {
     clearTimeout(forceShutdownTimer)
 
     if (error) {
+      if (isServerNotRunningError(error)) {
+        finishShutdown(exitCode)
+        return
+      }
+
       console.error('Failed to close HTTP server cleanly.', error)
       finishShutdown(1)
       return
