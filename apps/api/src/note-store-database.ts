@@ -103,6 +103,22 @@ export function createSqliteDatabase(dbPath: string): NoteStoreDatabase {
 
   const database = new Database(dbPath)
   database.pragma('foreign_keys = ON')
+  const transactionExecutor = new AsyncLocalStorage<boolean>()
+  let operationQueue = Promise.resolve()
+
+  function runSerialized<Result>(operation: () => Result | Promise<Result>) {
+    if (transactionExecutor.getStore()) {
+      return Promise.resolve().then(operation)
+    }
+
+    const pendingOperation = operationQueue.then(() => operation())
+    operationQueue = pendingOperation.then(
+      () => undefined,
+      () => undefined,
+    )
+
+    return pendingOperation
+  }
 
   return {
     kind: 'sqlite',
@@ -113,59 +129,76 @@ export function createSqliteDatabase(dbPath: string): NoteStoreDatabase {
         async get(...args: unknown[]) {
           const params = normalizeStatementParameters(args)
 
-          if (params === undefined) {
-            return statement.get() as Row | undefined
-          }
+          return runSerialized(() => {
+            if (params === undefined) {
+              return statement.get() as Row | undefined
+            }
 
-          return statement.get(params as never) as Row | undefined
+            return statement.get(params as never) as Row | undefined
+          })
         },
         async all(...args: unknown[]) {
           const params = normalizeStatementParameters(args)
 
-          if (params === undefined) {
-            return statement.all() as Row[]
-          }
+          return runSerialized(() => {
+            if (params === undefined) {
+              return statement.all() as Row[]
+            }
 
-          return statement.all(params as never) as Row[]
+            return statement.all(params as never) as Row[]
+          })
         },
         async run(...args: unknown[]) {
           const params = normalizeStatementParameters(args)
-          const result =
-            params === undefined
-              ? statement.run()
-              : statement.run(params as never)
 
-          return { changes: result.changes }
+          return runSerialized(() => {
+            const result =
+              params === undefined
+                ? statement.run()
+                : statement.run(params as never)
+
+            return { changes: result.changes }
+          })
         },
       }
     },
     async exec(sql: string) {
-      database.exec(sql)
+      await runSerialized(() => {
+        database.exec(sql)
+      })
     },
     transaction<Args extends unknown[], Result>(
       callback: (...args: Args) => Promise<Result>,
     ) {
       return async (...args: Args) => {
-        database.exec('BEGIN')
-
-        try {
-          const result = await callback(...args)
-          database.exec('COMMIT')
-          return result
-        } catch (error) {
-          if (database.inTransaction) {
-            database.exec('ROLLBACK')
+        return runSerialized(async () => {
+          if (transactionExecutor.getStore()) {
+            return callback(...args)
           }
 
-          throw error
-        }
+          database.exec('BEGIN')
+
+          try {
+            const result = await transactionExecutor.run(true, () => callback(...args))
+            database.exec('COMMIT')
+            return result
+          } catch (error) {
+            if (database.inTransaction) {
+              database.exec('ROLLBACK')
+            }
+
+            throw error
+          }
+        })
       }
     },
     async close() {
-      database.close()
+      await runSerialized(() => {
+        database.close()
+      })
     },
     async backup(destinationPath: string) {
-      await database.backup(destinationPath)
+      await runSerialized(() => database.backup(destinationPath))
     },
   }
 }
