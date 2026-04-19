@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
@@ -13,6 +14,12 @@ import {
   withAuth,
 } from './test-helpers.js'
 
+const testFixtureWebDistPath = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  'fixtures',
+  'web-dist',
+)
+
 test('GET /health returns service metadata', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
@@ -22,6 +29,81 @@ test('GET /health returns service metadata', async (t) => {
   assert.equal(response.status, 200)
   assert.equal(response.body.status, 'ok')
   assert.equal(response.body.service, 'dnd-notes-api')
+})
+
+test('GET /healthz and /readyz return probe metadata while the database is available', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const [livenessResponse, readinessResponse] = await Promise.all([
+    request(app).get('/healthz'),
+    request(app).get('/readyz'),
+  ])
+
+  assert.equal(livenessResponse.status, 200)
+  assert.deepEqual(livenessResponse.body, {
+    status: 'ok',
+    service: 'dnd-notes-api',
+  })
+  assert.equal(readinessResponse.status, 200)
+  assert.deepEqual(readinessResponse.body, {
+    status: 'ok',
+    service: 'dnd-notes-api',
+  })
+})
+
+test('GET /readyz returns 503 when the database is unavailable', async (t) => {
+  const { app, cleanup, closeNoteStore } = await createTestApp()
+  t.after(cleanup)
+
+  closeNoteStore()
+
+  const response = await request(app).get('/readyz')
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(response.body, { error: 'Database unavailable' })
+})
+
+test('GET /readyz returns 503 while the server is shutting down', async (t) => {
+  let shuttingDown = false
+  const { app, cleanup } = await createTestApp({
+    isShuttingDown: () => shuttingDown,
+  })
+  t.after(cleanup)
+
+  shuttingDown = true
+
+  const response = await request(app).get('/readyz')
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(response.body, { error: 'Shutting down' })
+})
+
+test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    serveWeb: true,
+    webDistPath: testFixtureWebDistPath,
+  })
+  t.after(cleanup)
+
+  const [navigationResponse, assetResponse, jsonResponse, apiRootResponse] = await Promise.all([
+    request(app).get('/campaigns/demo').set('Accept', 'text/html'),
+    request(app).get('/assets/missing.js').set('Accept', '*/*'),
+    request(app).get('/missing-route').set('Accept', 'application/json'),
+    request(app).get('/api').set('Accept', 'text/html'),
+  ])
+
+  assert.equal(navigationResponse.status, 200)
+  assert.match(navigationResponse.text, /Fixture dnd-notes app/)
+
+  assert.equal(assetResponse.status, 404)
+  assert.doesNotMatch(assetResponse.text, /Fixture dnd-notes app/)
+
+  assert.equal(jsonResponse.status, 404)
+  assert.doesNotMatch(jsonResponse.text, /Fixture dnd-notes app/)
+
+  assert.equal(apiRootResponse.status, 404)
+  assert.doesNotMatch(apiRootResponse.text, /Fixture dnd-notes app/)
 })
 
 test('site admins can download a SQLite backup and non-admins cannot', async (t) => {

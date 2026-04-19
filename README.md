@@ -1,8 +1,10 @@
 # dnd-notes
 
-A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript + SQLite API.
+A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript + SQLite API. Containerized for Kubernetes deployment with same-origin web + API serving.
 
 ## Getting started
+
+### Local development
 
 ```bash
 nvm use
@@ -16,6 +18,23 @@ Use Node.js `v22.21.1` for local development. The repo pins that version in
 
 - **Web:** `http://localhost:5173`
 - **API:** `http://localhost:3001`
+
+### Container deployment
+
+Build and run the production container:
+
+```bash
+docker build -t dnd-notes:latest .
+docker run -p 3000:3000 \
+  -e SERVE_WEB=true \
+  -e PUBLIC_WEB_URL=http://localhost:3000 \
+  -v $(pwd)/data:/app/data \
+  dnd-notes:latest
+```
+
+The container serves both web and API on the same origin at port 3000.
+
+For detailed runtime configuration, health endpoints, and Kubernetes deployment guidance, see [RUNTIME.md](./RUNTIME.md).
 
 ## Scripts
 

@@ -15,6 +15,9 @@ export interface CreateTestAppOptions {
   publicWebUrl?: string
   allowedOrigins?: string | readonly string[]
   directoryPrefix?: string
+  isShuttingDown?: () => boolean
+  serveWeb?: boolean
+  webDistPath?: string
 }
 
 export async function createTestApp(options: CreateTestAppOptions = {}) {
@@ -35,6 +38,9 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
       typeof options.allowedOrigins === 'string'
         ? options.allowedOrigins
         : options.allowedOrigins?.join(','),
+    isShuttingDown: options.isShuttingDown,
+    serveWeb: options.serveWeb,
+    webDistPath: options.webDistPath,
     restoreNoteStore(sourcePath) {
       noteStore = restoreNoteStoreFromBackup(sourcePath, {
         dbPath,
