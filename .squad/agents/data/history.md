@@ -45,6 +45,7 @@ Data initialized as Backend Dev for the initial project squad.
 - When a locked squad decision supersedes an exploratory history note, point the history entry at `.squad/decisions.md` or mark it explicitly superseded; do not leave PR-visible history pointing at stale inbox artifacts or retired endpoint drafts.
 - Parse `PORT` strictly in control-plane startup; permissive `parseInt()` behavior can silently accept junk suffixes that should fail fast at boot.
 - Control-plane auth middleware should drain unauthorized request bodies before returning 401 so rejected keep-alive requests do not leave unread payloads behind.
+- Control-plane shutdown should bound `server.close()` with a hard timeout; keep-alive sockets can otherwise block SIGINT/SIGTERM exit and leave SQLite handles open.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 

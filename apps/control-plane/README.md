@@ -47,7 +47,7 @@ Each tenant record includes:
 - `currentState`: Actual state (observed from K8s API)
 - `version`: Current app version running
 - `storageReference`: Pointer to persistent volume (e.g., PVC name)
-- `backupMetadata`: JSON metadata for backup locations and schedules
+- `backupMetadata`: Opaque string for backup metadata (often JSON-serialized details such as locations and schedules)
 - `createdAt`: Tenant creation timestamp
 - `updatedAt`: Last modification timestamp
 
