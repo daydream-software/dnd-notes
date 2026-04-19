@@ -64,6 +64,21 @@ test('GET /readyz returns 503 when the database is unavailable', async (t) => {
   assert.deepEqual(response.body, { error: 'Database unavailable' })
 })
 
+test('GET /readyz returns 503 while the server is shutting down', async (t) => {
+  let shuttingDown = false
+  const { app, cleanup } = await createTestApp({
+    isShuttingDown: () => shuttingDown,
+  })
+  t.after(cleanup)
+
+  shuttingDown = true
+
+  const response = await request(app).get('/readyz')
+
+  assert.equal(response.status, 503)
+  assert.deepEqual(response.body, { error: 'Shutting down' })
+})
+
 test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
   const { app, cleanup } = await createTestApp({
     serveWeb: true,

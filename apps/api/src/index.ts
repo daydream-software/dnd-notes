@@ -16,6 +16,7 @@ const app = createApp({
     noteStore = restoreNoteStoreFromBackup(sourcePath, { siteAdminEmails })
     return noteStore
   },
+  isShuttingDown: () => shuttingDown,
   serveWeb,
 })
 let shuttingDown = false

@@ -14,8 +14,9 @@ None. The application will start with defaults.
   HTTP listener port for the combined web + API server.  
   **Note:** Local `apps/api/src/index.ts` defaults to `3001`; the container image sets `PORT=3000`.
 
-- **`NODE_ENV`** (default: `production`)  
-  Node.js environment mode. Set to `production` in container deployments.
+- **`NODE_ENV`** (app default: unset; container image default: `production`)  
+  Node.js environment mode.  
+  **Note:** The application does not set `NODE_ENV`; container deployments set `NODE_ENV=production`.
 
 ### Database Configuration
 
@@ -74,8 +75,9 @@ livenessProbe:
 **Response:**  
 - `200 OK` with `{ "status": "ok", "service": "dnd-notes-api" }` when database is healthy  
 - `503 Service Unavailable` with `{ "error": "Database unavailable" }` when database connection fails
+- `503 Service Unavailable` with `{ "error": "Shutting down" }` during SIGTERM drain / termination
 
-**Failure mode:** Returns 503 if a lightweight database connectivity check fails.
+**Failure mode:** Returns 503 if a lightweight database connectivity check fails or the container is draining for shutdown/maintenance.
 
 **Kubernetes usage:**
 ```yaml
@@ -128,10 +130,11 @@ volumes:
 
 ### Shutdown (SIGTERM)
 1. Stop accepting new HTTP connections
-2. Wait for in-flight requests to complete (default: 30s grace period)
-3. Close idle keep-alive connections so shutdown is not blocked by unused sockets
-4. Close database connection cleanly
-5. Exit with code 0 (or force-exit after the 30s grace period)
+2. Flip readiness to `503` so the pod is removed from Endpoints during drain
+3. Wait for in-flight requests to complete (default: 30s grace period)
+4. Close idle keep-alive connections so shutdown is not blocked by unused sockets
+5. Close database connection cleanly
+6. Exit with code 0 (or force-exit after the 30s grace period)
 
 ### Graceful Termination
 The container handles `SIGTERM` for zero-downtime rolling updates:
@@ -139,7 +142,7 @@ The container handles `SIGTERM` for zero-downtime rolling updates:
 process.on('SIGTERM', () => shutdown(0))
 ```
 
-`shutdown()` now closes the HTTP server first, drains in-flight requests for up to 30 seconds, closes idle keep-alive sockets, and only then closes the database handle.
+`shutdown()` now marks the app unready immediately, closes the HTTP server first, drains in-flight requests for up to 30 seconds, closes idle keep-alive sockets, and only then closes the database handle.
 
 **Kubernetes recommendation:**
 ```yaml
@@ -252,7 +255,7 @@ Phase 0 scope: health endpoints only.
 
 ### Network Policies
 - **Phase 0:** No network policy enforcement
-- **Phase 1:** NetworkPolicy restricts `/_control/*` to control-plane namespace
+- **Phase 1:** NetworkPolicy restricts `/internal/*` to control-plane namespace
 
 ### Database Credentials
 - **SQLite:** No credentials (file-based)

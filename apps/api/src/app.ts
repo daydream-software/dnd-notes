@@ -23,6 +23,7 @@ interface CreateAppOptions {
   publicWebUrl?: string
   allowedOrigins?: string
   restoreNoteStore?: (sourcePath: string) => NoteStore
+  isShuttingDown?: () => boolean
   serveWeb?: boolean
   webDistPath?: string
 }
@@ -36,6 +37,7 @@ export function createApp({
   publicWebUrl: configuredPublicWebUrl,
   allowedOrigins: configuredAllowedOrigins,
   restoreNoteStore,
+  isShuttingDown = () => false,
   serveWeb = false,
   webDistPath,
 }: CreateAppOptions): Express {
@@ -151,6 +153,13 @@ export function createApp({
 
   // Readiness probe - ready to serve traffic
   app.get('/readyz', (_request: Request, response: Response<HealthResponse | ErrorResponse>) => {
+    if (isShuttingDown()) {
+      response.status(503).json({
+        error: 'Shutting down',
+      })
+      return
+    }
+
     try {
       noteStore.checkHealth()
       response.json({ status: 'ok', service: 'dnd-notes-api' })
