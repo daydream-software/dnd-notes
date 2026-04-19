@@ -1,5 +1,7 @@
 import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
+import { fileURLToPath } from 'node:url'
+import { dirname, extname, join } from 'node:path'
 import type { NoteStore } from './note-store.js'
 import { registerAdminRoutes } from './routes/admin-routes.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
@@ -21,6 +23,9 @@ interface CreateAppOptions {
   publicWebUrl?: string
   allowedOrigins?: string
   restoreNoteStore?: (sourcePath: string) => NoteStore
+  isShuttingDown?: () => boolean
+  serveWeb?: boolean
+  webDistPath?: string
 }
 
 function readRateLimitClientId(request: Request) {
@@ -32,6 +37,9 @@ export function createApp({
   publicWebUrl: configuredPublicWebUrl,
   allowedOrigins: configuredAllowedOrigins,
   restoreNoteStore,
+  isShuttingDown = () => false,
+  serveWeb = false,
+  webDistPath,
 }: CreateAppOptions): Express {
   const app = express()
   let noteStore = initialNoteStore
@@ -138,6 +146,31 @@ export function createApp({
 
   app.use(express.json())
 
+  // Liveness probe - process is alive
+  app.get('/healthz', (_request: Request, response: Response<HealthResponse>) => {
+    response.json({ status: 'ok', service: 'dnd-notes-api' })
+  })
+
+  // Readiness probe - ready to serve traffic
+  app.get('/readyz', (_request: Request, response: Response<HealthResponse | ErrorResponse>) => {
+    if (isShuttingDown()) {
+      response.status(503).json({
+        error: 'Shutting down',
+      })
+      return
+    }
+
+    try {
+      noteStore.checkHealth()
+      response.json({ status: 'ok', service: 'dnd-notes-api' })
+    } catch {
+      response.status(503).json({
+        error: 'Database unavailable',
+      })
+    }
+  })
+
+  // Legacy health endpoint for backward compatibility
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json({ status: 'ok', service: 'dnd-notes-api' })
   })
@@ -147,6 +180,38 @@ export function createApp({
   registerOwnerCampaignRoutes(app, routeContext)
   registerOwnerNoteRoutes(app, routeContext)
   registerSharedRoutes(app, routeContext)
+
+  // Serve static web assets when in production container mode
+  if (serveWeb) {
+    const __filename = fileURLToPath(import.meta.url)
+    const __dirname = dirname(__filename)
+    const resolvedWebDistPath = webDistPath ?? join(__dirname, '..', '..', 'web', 'dist')
+
+    app.use(express.static(resolvedWebDistPath))
+
+    // SPA fallback - serve index.html for browser navigation requests only
+    app.use((request: Request, response: Response, next) => {
+      const isDocumentRequest = request.method === 'GET' || request.method === 'HEAD'
+      const path = request.path
+      const acceptsHtml = Boolean(request.accepts('html'))
+      const looksLikeFileRequest = extname(path) !== ''
+
+      if (
+        !isDocumentRequest ||
+        !acceptsHtml ||
+        looksLikeFileRequest ||
+        path === '/api' ||
+        path.startsWith('/api/') ||
+        path === '/health' ||
+        path === '/healthz' ||
+        path === '/readyz'
+      ) {
+        next()
+      } else {
+        response.sendFile('index.html', { root: resolvedWebDistPath })
+      }
+    })
+  }
 
   return app
 }
