@@ -12,6 +12,7 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Team update (2026-04-19T00:25:00Z): PR #59 cleanup pass merged latest `main` into `squad/53-control-plane-skeleton`, cleared stale review drift from tracked squad history, and revalidated the control-plane workspace so the remaining Copilot blockers can collapse to real issue-#53 changes only.
 📌 Team update (2026-04-17T23:22:37Z): ISSUE BACKUP/RUNBOOK REHEARSAL PASS — Branch `copilot/document-backup-restore-operations` was revalidated (lint/build/test baseline green) and README runbook now includes an explicit **Restore rehearsal checklist** that ties operators to restore prep, execution, post-restore validation, and evidence capture cadence for safer recurring drills.
 
 📌 Team update (2026-04-17T01:26:52Z): ISSUE #41 COPILOT FEEDBACK ADDRESSED — Branch `squad/41-backup-restore-runbook` is now rebased on current `main`, so PR `#50` no longer carries the earlier base conflicts. The runbook now uses the actual Site admin panel button labels, states an explicit minimum retention baseline, and clarifies that the post-restore “session” check refers to the notes/campaign session-browsing flow before Copilot review is re-requested.

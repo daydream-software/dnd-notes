@@ -5,12 +5,14 @@
   "description": "D&D note-taking app starter with React, Material UI, and Node.js",
   "workspaces": [
     "apps/web",
-    "apps/api"
+    "apps/api",
+    "apps/control-plane"
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c magenta,cyan \"npm:dev:api\" \"npm:dev:web\"",
     "dev:api": "npm run dev --workspace apps/api",
     "dev:web": "npm run dev --workspace apps/web",
+    "dev:control-plane": "npm run dev --workspace apps/control-plane",
     "copilot:yolo": "bash ./scripts/copilot-yolo.sh",
     "copilot:wait-review": "node --import tsx ./scripts/wait-copilot-review.ts",
     "lint:web": "npm run lint --workspace apps/web",

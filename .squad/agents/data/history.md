@@ -42,6 +42,12 @@ Data initialized as Backend Dev for the initial project squad.
 - Issue #26 stayed schema-light: note bodies remain stored as plain text, while the web app now interprets that text as Markdown so old notes stay readable without migration.
 - Shared note rendering now lives in `apps/web/src/note-formatting.tsx`, which uses `react-markdown` + `remark-gfm` and is reused by both `apps/web/src/App.tsx` and `apps/web/src/SharedCampaignRoute.tsx`.
 - Rich-formatting regression coverage now lives in `apps/web/src/note-formatting.test.tsx`, with app wiring covered in `apps/web/src/App.test.tsx`.
+- When a locked squad decision supersedes an exploratory history note, point the history entry at `.squad/decisions.md` or mark it explicitly superseded; do not leave PR-visible history pointing at stale inbox artifacts or retired endpoint drafts.
+- Parse `PORT` strictly in control-plane startup; permissive `parseInt()` behavior can silently accept junk suffixes that should fail fast at boot.
+- Control-plane auth middleware should drain unauthorized request bodies before returning 401 so rejected keep-alive requests do not leave unread payloads behind.
+- Control-plane shutdown should bound `server.close()` with a hard timeout; keep-alive sockets can otherwise block SIGINT/SIGTERM exit and leave SQLite handles open.
+- Locked issue #53 control-plane management routes live under `/internal/tenants*`; keep service code, tests, and README aligned to that internal-only contract instead of drifting to `/api/*`.
+- Control-plane state audit rows should read `current_state` inside the same write transaction used for the update, and `reason` should be omitted or non-empty so transition history never silently collapses `''` into `null`.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
@@ -206,12 +212,12 @@ This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0
 
 ## 2026-04-18: Issue #42 — Control-Plane ↔ Tenant Contract Recommendation
 
-📌 Wrote `.squad/decisions/inbox/data-42-tenant-contract.md` defining the Phase 1 internal API contract between control plane and tenant app.
+📌 Recorded the locked Phase 1 control-plane ↔ tenant contract in `.squad/decisions.md`.
 
 **Key decisions:**
-- Tenant app exposes exactly three internal endpoints: `GET /_control/health`, `GET /_control/info`, `POST /_control/maintenance`. All cluster-internal only.
+- Tenant app exposes exactly four internal endpoints: `GET /health`, `GET /ready`, `GET /_control/info`, and `POST /_control/maintenance`. All cluster-internal only.
 - Pure push model — control plane drives all interactions. Tenant app never phones home, never heartbeats, never registers itself. Zero outbound dependency on control plane.
-- Provisioning, backup, restore, updates, deprovisioning — all orchestrated by control plane via K8s API + direct Postgres access + the three tenant endpoints.
+- Provisioning, backup, restore, updates, deprovisioning — all orchestrated by control plane via K8s API + direct Postgres access + the locked tenant endpoints documented in `.squad/decisions.md`.
 - Maintenance mode (drain + 503 to users) is the sole point of required tenant cooperation, used only for restore and risky upgrades. Has timeout-and-abort safety.
 - Backup (`pg_dump`) runs directly against tenant DB — no tenant app involvement, no maintenance required (Postgres MVCC snapshot).
 - No event bus, no callbacks, no shared state, no auto-rollback in Phase 1.
@@ -223,6 +229,11 @@ This completes the Phase 1 critical-decision set (backup/restore joins 4 Phase 0
 - Health endpoint must verify DB connectivity (`SELECT 1`), not just app process liveness — a running app with a dead DB connection is not healthy.
 - Restore is the only non-idempotent operation in the contract. Pre-restore safety backup is the mandatory escape hatch.
 
+- In the control-plane skeleton, PATCH handlers should check tenant existence before mutation so missing IDs fail as explicit 404s instead of hidden SQLite no-op writes.
+- Keep `tenantStates` centralized and reuse it for both Zod schemas and SQLite `CHECK` constraints; otherwise the API contract and audit table can silently drift.
+- The control-plane startup path should normalize relative `DATABASE_PATH` values against the app root; otherwise the same env file can create SQLite files in different locations depending on process cwd.
+- Even when HTTP handlers pre-check tenant existence, `TenantRegistry` update helpers should still throw on `changes === 0` so future callers cannot hide no-op writes.
+- Control-plane schema bootstrap should stamp a version/signature (`user_version` + metadata) and fail fast on enum-constraint drift, instead of waiting for a later write to discover stale SQLite CHECK constraints.
 ## 2026-04-19: Issue #42 — Remaining 4 Clarifications Recommendation
 
 📌 Wrote `.squad/decisions/inbox/data-42-remaining-four.md` covering the 4 remaining open clarification items from the #42 epic.
@@ -339,4 +350,3 @@ This skeleton is ready to drive:
 - Issue #40: Backup/restore coordination
 
 **PR:** #59 (awaiting Copilot review)
-

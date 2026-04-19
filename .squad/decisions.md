@@ -4819,7 +4819,7 @@ Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **m
 ### Phase 2+ Deferrals
 
 - Automated restore API (`POST /internal/tenants/{id}/restore?timestamp=...`)
-- Backup verification CronJob (weekly test-restore to scratch DB)
+- Expanded backup verification beyond the required Phase 1 weekly automated test-restore job (for example: higher-frequency runs, broader tenant sampling, and richer reporting)
 - Per-tier backup frequency (premium tenants: hourly, free tier: daily)
 - Cross-region replication / geo-redundant backups
 
@@ -4866,9 +4866,9 @@ Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **m
 
 ### Documentation & Handoff
 
-Full technical details and restore procedures documented in:
-- `.squad/decisions/inbox/data-42-backup-restore.md` — Backend/schema assessment + restore state machine
-- `.squad/decisions/inbox/brand-42-backup-restore.md` — Infrastructure/operations details + runbook
+Full technical details and restore procedures for Phase 1 are captured in this locked decision section, including:
+- Backend/schema assessment and the restore state machine
+- Infrastructure/operations details and the restore runbook
 
 Owners for Phase 1 implementation:
 - **Data:** Backup catalog schema + restore procedure + verification logic
