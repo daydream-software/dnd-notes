@@ -68,6 +68,45 @@ Mikey initialized as Lead for the initial project squad.
 
 **Artifact:** `.squad/decisions/inbox/mikey-issue-42-planning.md` (updated from earlier version)
 
+## 2026-04-19: Issue #58 — Three Architectural Decisions Locked (Postgres Adapter)
+
+**Action Taken:**
+Locked three critical architectural decisions blocking issue #58 from Chunk's QA gate. These decisions were identified by Chunk as prerequisite for safe Postgres adapter implementation. Resolved them from Epic #42 context with correctness and operational safety first.
+
+**Three Decisions Locked:**
+
+1. **Transaction Isolation Level: `SERIALIZABLE`** (2026-04-19)
+   - Postgres default is `READ COMMITTED`; NoteStore code assumes strong isolation (reference sync, consolidation, concurrent edits all expect no partial mutations).
+   - Decision: Use `SERIALIZABLE` isolation to match SQLite `better-sqlite3` contract.
+   - Implementation: Set isolation level at transaction start; retry on serialization conflict (max 3 attempts).
+   - Rationale: Correctness first. Phase 0 is proof-of-concept; Phase 1 capacity planning can profile and optimize if needed.
+   - Owner: Data (implementation); Mikey (escalation if performance unacceptable).
+   - Implication: All transaction scopes must use `withTransaction()` helper with isolation level + retry logic.
+
+2. **Connection Pool Defaults: Conservative for Rolling Updates** (2026-04-19)
+   - `minConnections: 2` (guarantees health checks don't block), `maxConnections: 10` (safe for 3 pods in k3d), `idleTimeout: 30s` (matches rolling update timescale), `statementTimeout: 30s` (prevents query runaway).
+   - Rationale: These are Phase 0 defaults. Phase 1 capacity planning revisits pool config against observed load. At ≥50 tenants, may increase maxConnections and reconsider isolation strategy.
+   - Owner: Data (implementation); Mikey (Phase 1 tuning decision).
+   - Implication: Graceful shutdown must drain connections within 30 seconds; schema initialization must tolerate simultaneous restarts.
+
+3. **SQLite Fallback Rule: `DATABASE_URL` Env Var Gates Backend** (2026-04-19)
+   - If `DATABASE_URL` is set → Postgres (mandatory, production shape). If missing → SQLite fallback (local dev, file-based).
+   - Rationale: Standard convention (Heroku pattern), prevents accidental SQLite in production, keeps local dev frictionless.
+   - Implementation: Startup logging shows which backend selected and connection string prefix. If Postgres selected but unreachable → fail fast, don't silently fall back.
+   - Owner: Data (implementation); Brand (CI env setup).
+   - Implication: CI must set `DATABASE_URL` to point to k3d Postgres; tests validate against both backends.
+
+**Removed from Chunk's Blocker List:**
+- ~~Transaction Isolation Level (SERIALIZABLE decided)~~
+- ~~Connection Pool Configuration (min/max/idle/statement timeout set)~~
+- ~~Fallback Logic (DATABASE_URL gates selection)~~
+
+**Artifact:** `.squad/decisions/inbox/mikey-issue-58-decisions.md` — locked decision document with implementation details, test coverage requirements, and done signals for Chunk's QA gate.
+
+**Next Action:** Data starts implementation on issue #58. Chunk re-reviews final PR against the three decisions + QA brief before approval.
+
+---
+
 ## 2026-04-18: Issue #42 Phase 0–1 Clarifications Locked
 
 **Action Taken:**
