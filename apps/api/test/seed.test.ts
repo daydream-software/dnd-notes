@@ -14,12 +14,12 @@ import {
 async function createTestStore() {
   const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-seed-'))
   const dbPath = join(directory, 'notes.sqlite')
-  const noteStore = createNoteStore({ dbPath })
+  const noteStore = await createNoteStore({ dbPath })
 
   return {
     noteStore,
     async cleanup() {
-      noteStore.close()
+      await noteStore.close()
       await rm(directory, { recursive: true, force: true })
     },
   }
@@ -29,7 +29,7 @@ test('seed workflow populates an empty database with starter notes', async (t) =
   const { noteStore, cleanup } = await createTestStore()
   t.after(cleanup)
 
-  const result = seedStarterNotes(noteStore)
+  const result = await seedStarterNotes(noteStore)
 
   assert.deepEqual(result, {
     action: 'seed',
@@ -37,7 +37,7 @@ test('seed workflow populates an empty database with starter notes', async (t) =
     noteCount: starterNotes.length,
   })
 
-  const notes = noteStore.listNotes()
+  const notes = await noteStore.listNotes()
 
   assert.equal(notes.length, starterNotes.length)
   assert.deepEqual(
@@ -48,15 +48,15 @@ test('seed workflow populates an empty database with starter notes', async (t) =
     notes.map((note) => note.campaignId),
     Array(starterNotes.length).fill(defaultCampaignId),
   )
-  assert.equal(noteStore.listCampaigns()[0]?.id, defaultCampaignId)
+  assert.equal((await noteStore.listCampaigns())[0]?.id, defaultCampaignId)
 })
 
 test('seed workflow skips existing data and reset replaces it with starter notes', async (t) => {
   const { noteStore, cleanup } = await createTestStore()
   t.after(cleanup)
 
-  seedStarterNotes(noteStore)
-  noteStore.createNote({
+  await seedStarterNotes(noteStore)
+  await noteStore.createNote({
     title: 'Temporary test note',
     body: 'This should disappear after a reset.',
     tags: ['temporary'],
@@ -64,7 +64,7 @@ test('seed workflow skips existing data and reset replaces it with starter notes
     sessionName: null,
   })
 
-  const skippedResult = seedStarterNotes(noteStore)
+  const skippedResult = await seedStarterNotes(noteStore)
 
   assert.deepEqual(skippedResult, {
     action: 'seed',
@@ -72,7 +72,7 @@ test('seed workflow skips existing data and reset replaces it with starter notes
     existingCount: starterNotes.length + 1,
   })
 
-  const resetResult = resetStarterNotes(noteStore)
+  const resetResult = await resetStarterNotes(noteStore)
 
   assert.deepEqual(resetResult, {
     action: 'reset',
@@ -80,7 +80,7 @@ test('seed workflow skips existing data and reset replaces it with starter notes
     noteCount: starterNotes.length,
   })
 
-  const titles = noteStore.listNotes().map((note) => note.title)
+  const titles = (await noteStore.listNotes()).map((note) => note.title)
 
   assert.equal(titles.includes('Temporary test note'), false)
   assert.deepEqual(titles, starterNotes.map((note) => note.title))

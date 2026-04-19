@@ -1,4 +1,4 @@
-import type Database from 'better-sqlite3'
+import type { NoteStoreDatabase } from './note-store-database.js'
 import type {
   CampaignMembershipRole,
   Note,
@@ -190,7 +190,7 @@ export function groupReferencesBySource(rows: NoteReferenceRow[]) {
   return referencesBySource
 }
 
-export function prepareNoteStatements(database: Database.Database) {
+export function prepareNoteStatements(database: NoteStoreDatabase) {
   const selectNotesByCampaignId = database.prepare(`
     SELECT
       notes.id,

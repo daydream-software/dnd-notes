@@ -181,20 +181,20 @@ test('site admins can restore a SQLite backup and invalid uploads are rejected',
 
   const sourceDbPath = join(sourceDirectory, 'notes.sqlite')
   const sourceBackupPath = join(sourceDirectory, 'restore.sqlite')
-  const sourceStore = createNoteStore({
+  const sourceStore = await createNoteStore({
     dbPath: sourceDbPath,
     siteAdminEmails: ['site-admin@example.com'],
   })
 
   try {
-    const restoredOwner = sourceStore.createOwnerAccount({
+    const restoredOwner = await sourceStore.createOwnerAccount({
       displayName: 'Restored Admin',
       email: 'site-admin@example.com',
       password: 'restored-password',
     })
     assert.ok(restoredOwner)
 
-    sourceStore.createNote({
+    await sourceStore.createNote({
       title: 'Restored note',
       body: 'Loaded from a restored admin backup.',
       tags: ['restore'],
@@ -206,7 +206,7 @@ test('site admins can restore a SQLite backup and invalid uploads are rejected',
 
     await sourceStore.backupDatabase(sourceBackupPath)
   } finally {
-    sourceStore.close()
+    await sourceStore.close()
   }
 
   const restoreSnapshot = await readFile(sourceBackupPath)
@@ -635,10 +635,10 @@ test('configured site-admin emails are promoted through registration and login',
   assert.equal(sessionResponse.status, 200)
   assert.equal(sessionResponse.body.owner.isSiteAdmin, true)
 
-  closeNoteStore()
+  await closeNoteStore()
 
-  const reopenedStore = createNoteStore({ dbPath, siteAdminEmails: [siteAdminEmail] })
-  t.after(() => reopenedStore.close())
+  const reopenedStore = await createNoteStore({ dbPath, siteAdminEmails: [siteAdminEmail] })
+  t.after(async () => reopenedStore.close())
 
   const reopenedApp = createApp({ noteStore: reopenedStore })
   const loginResponse = await request(reopenedApp).post('/api/auth/login').send({

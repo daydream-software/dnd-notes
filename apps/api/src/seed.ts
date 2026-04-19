@@ -14,13 +14,13 @@ function parseCommand(input: string | undefined): SeedCommand {
 
 const command = parseCommand(process.argv[2])
 const dbPath = resolveNoteDbPath()
-const noteStore = createNoteStore({ dbPath })
+const noteStore = await createNoteStore({ dbPath })
 
 try {
   const result =
     command === 'seed'
-      ? seedStarterNotes(noteStore)
-      : resetStarterNotes(noteStore)
+      ? await seedStarterNotes(noteStore)
+      : await resetStarterNotes(noteStore)
 
   if (result.status === 'skipped') {
     console.log(
@@ -31,5 +31,5 @@ try {
     console.log(`${actionLabel} ${result.noteCount} starter notes in ${dbPath}.`)
   }
 } finally {
-  noteStore.close()
+  await noteStore.close()
 }

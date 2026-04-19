@@ -44,11 +44,11 @@ test('parseInlineNoteReferences supports canonical note syntaxes', () => {
   )
 })
 
-test('note store extracts structured references while preserving linkedNoteIds compatibility', (t) => {
-  const noteStore = createNoteStore({ dbPath: ':memory:' })
-  t.after(() => noteStore.close())
+test('note store extracts structured references while preserving linkedNoteIds compatibility', async (t) => {
+  const noteStore = await createNoteStore({ dbPath: ':memory:' })
+  t.after(async () => noteStore.close())
 
-  const ruins = noteStore.createNote({
+  const ruins = await noteStore.createNote({
     title: 'Ancient Ruins',
     body: 'Collapsed stone and old magic.',
     tags: ['location'],
@@ -56,7 +56,7 @@ test('note store extracts structured references while preserving linkedNoteIds c
     sessionName: null,
     campaignId: defaultCampaignId,
   })
-  const relic = noteStore.createNote({
+  const relic = await noteStore.createNote({
     title: 'Sun Relic',
     body: 'Recovered from the vault.',
     tags: ['item'],
@@ -64,7 +64,7 @@ test('note store extracts structured references while preserving linkedNoteIds c
     sessionName: null,
     campaignId: defaultCampaignId,
   })
-  const patron = noteStore.createNote({
+  const patron = await noteStore.createNote({
     title: 'Whispering Patron',
     body: 'Keeps asking for a favor.',
     tags: ['npc'],
@@ -73,7 +73,7 @@ test('note store extracts structured references while preserving linkedNoteIds c
     campaignId: defaultCampaignId,
   })
 
-  const quest = noteStore.createNote({
+  const quest = await noteStore.createNote({
     title: 'Quest Hook',
     body:
       `Start at ![[${ruins.id}]], recover ![[${relic.id}|Sun Relic]], ` +
@@ -121,7 +121,7 @@ test('note store extracts structured references while preserving linkedNoteIds c
     ],
   )
 
-  const persistedQuest = noteStore.getNote(quest.id)
+  const persistedQuest = await noteStore.getNote(quest.id)
   assert.ok(persistedQuest)
   assert.equal(
     persistedQuest.references.find((reference) => reference.qualifier === 'origin')?.label,
@@ -129,19 +129,19 @@ test('note store extracts structured references while preserving linkedNoteIds c
   )
 
   assert.deepEqual(
-    noteStore.getBacklinks(ruins.id).map((note) => note.id),
+    (await noteStore.getBacklinks(ruins.id)).map((note) => note.id),
     [quest.id],
   )
   assert.deepEqual(
-    noteStore.getBacklinks(relic.id).map((note) => note.id),
+    (await noteStore.getBacklinks(relic.id)).map((note) => note.id),
     [quest.id],
   )
   assert.deepEqual(
-    noteStore.getBacklinks(patron.id).map((note) => note.id),
+    (await noteStore.getBacklinks(patron.id)).map((note) => note.id),
     [quest.id],
   )
 
-  const updatedQuest = noteStore.updateNote(quest.id, {
+  const updatedQuest = await noteStore.updateNote(quest.id, {
     title: quest.title,
     body: `Only follow ![[${ruins.id}|Ancient Ruins|origin]].`,
     tags: quest.tags,
@@ -154,13 +154,13 @@ test('note store extracts structured references while preserving linkedNoteIds c
   assert.deepEqual(updatedQuest.linkedNoteIds, [ruins.id])
   assert.equal(updatedQuest.references.length, 1)
   assert.equal(updatedQuest.references[0].qualifier, 'origin')
-  assert.equal(noteStore.getBacklinks(relic.id).length, 0)
-  assert.equal(noteStore.getBacklinks(patron.id).length, 0)
+  assert.equal((await noteStore.getBacklinks(relic.id)).length, 0)
+  assert.equal((await noteStore.getBacklinks(patron.id)).length, 0)
 })
 
-test('note store rejects malformed, missing, and cross-campaign inline references', () => {
-  const noteStore = createNoteStore({ dbPath: ':memory:' })
-  const owner = noteStore.createOwnerAccount({
+test('note store rejects malformed, missing, and cross-campaign inline references', async () => {
+  const noteStore = await createNoteStore({ dbPath: ':memory:' })
+  const owner = await noteStore.createOwnerAccount({
     displayName: 'Data',
     email: 'data@example.com',
     password: 'moonlit-secret',
@@ -168,7 +168,7 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
 
   assert.ok(owner)
 
-  const foreignCampaign = noteStore.createCampaign(
+  const foreignCampaign = await noteStore.createCampaign(
     {
       name: 'Foreign Campaign',
       tagline: 'Different trouble',
@@ -179,7 +179,7 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
     owner,
   )
 
-  const foreignNote = noteStore.createNote({
+  const foreignNote = await noteStore.createNote({
     title: 'Elsewhere',
     body: 'Not part of the default campaign.',
     tags: [],
@@ -188,7 +188,7 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
     campaignId: foreignCampaign.id,
   })
 
-  assert.throws(
+  await assert.rejects(
     () =>
       noteStore.createNote({
         title: 'Malformed',
@@ -201,7 +201,7 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
     /Use !\[\[noteId\]\], !\[\[noteId\|label\]\], or !\[\[noteId\|label\|qualifier\]\]\./,
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       noteStore.createNote({
         title: 'Missing target',
@@ -214,7 +214,7 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
     /Referenced note "does-not-exist" was not found\./,
   )
 
-  assert.throws(
+  await assert.rejects(
     () =>
       noteStore.createNote({
         title: 'Wrong campaign',
@@ -227,19 +227,19 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
     /must be in the same campaign\./,
   )
 
-  noteStore.close()
+  await noteStore.close()
 })
 
 test('persistent stores backfill references from note bodies and linkedNoteIds on startup', async (t) => {
   const dbPath = await createPersistentDbPath()
-  let noteStore = createNoteStore({ dbPath })
+  let noteStore = await createNoteStore({ dbPath })
 
   t.after(async () => {
-    noteStore.close()
+    await noteStore.close()
     await rm(dbPath, { force: true })
   })
 
-  const target = noteStore.createNote({
+  const target = await noteStore.createNote({
     title: 'Target',
     body: 'Anchor note.',
     tags: [],
@@ -247,7 +247,7 @@ test('persistent stores backfill references from note bodies and linkedNoteIds o
     sessionName: null,
     campaignId: defaultCampaignId,
   })
-  const legacyLinked = noteStore.createNote({
+  const legacyLinked = await noteStore.createNote({
     title: 'Legacy Linked',
     body: 'Uses legacy linkedNoteIds only.',
     tags: [],
@@ -256,7 +256,7 @@ test('persistent stores backfill references from note bodies and linkedNoteIds o
     campaignId: defaultCampaignId,
     linkedNoteIds: [target.id],
   })
-  const inlineLinked = noteStore.createNote({
+  const inlineLinked = await noteStore.createNote({
     title: 'Inline Linked',
     body: `Uses ![[${target.id}|Target|clue]] in the body.`,
     tags: [],
@@ -265,16 +265,16 @@ test('persistent stores backfill references from note bodies and linkedNoteIds o
     campaignId: defaultCampaignId,
   })
 
-  noteStore.close()
+  await noteStore.close()
 
   const database = new Database(dbPath)
   database.exec('DROP TABLE note_references')
   database.close()
 
-  noteStore = createNoteStore({ dbPath })
+  noteStore = await createNoteStore({ dbPath })
 
-  const reloadedLegacy = noteStore.getNote(legacyLinked.id)
-  const reloadedInline = noteStore.getNote(inlineLinked.id)
+  const reloadedLegacy = await noteStore.getNote(legacyLinked.id)
+  const reloadedInline = await noteStore.getNote(inlineLinked.id)
 
   assert.ok(reloadedLegacy)
   assert.ok(reloadedInline)
@@ -282,8 +282,8 @@ test('persistent stores backfill references from note bodies and linkedNoteIds o
   assert.deepEqual(reloadedInline.linkedNoteIds, [target.id])
   assert.equal(reloadedInline.references[0].qualifier, 'clue')
 
-  const backlinkIds = noteStore
-    .getBacklinks(target.id)
+  const backlinkIds = (await noteStore
+    .getBacklinks(target.id))
     .map((note) => note.id)
     .sort()
   assert.deepEqual(backlinkIds, [inlineLinked.id, legacyLinked.id].sort())

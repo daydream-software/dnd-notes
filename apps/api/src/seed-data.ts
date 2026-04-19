@@ -45,8 +45,8 @@ export type SeedWorkflowResult =
       noteCount: number
     }
 
-export function seedStarterNotes(noteStore: NoteStore): SeedWorkflowResult {
-  const existingCount = noteStore.getStats().totalNotes
+export async function seedStarterNotes(noteStore: NoteStore): Promise<SeedWorkflowResult> {
+  const existingCount = (await noteStore.getStats()).totalNotes
 
   if (existingCount > 0) {
     return {
@@ -56,7 +56,7 @@ export function seedStarterNotes(noteStore: NoteStore): SeedWorkflowResult {
     }
   }
 
-  const notes = noteStore.resetNotes(starterNotes)
+  const notes = await noteStore.resetNotes(starterNotes)
 
   return {
     action: 'seed',
@@ -65,8 +65,8 @@ export function seedStarterNotes(noteStore: NoteStore): SeedWorkflowResult {
   }
 }
 
-export function resetStarterNotes(noteStore: NoteStore): SeedWorkflowResult {
-  const notes = noteStore.resetNotes(starterNotes)
+export async function resetStarterNotes(noteStore: NoteStore): Promise<SeedWorkflowResult> {
+  const notes = await noteStore.resetNotes(starterNotes)
 
   return {
     action: 'reset',

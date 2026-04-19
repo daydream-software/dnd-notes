@@ -8,13 +8,13 @@ const serveWeb = process.env.SERVE_WEB === 'true'
 const shutdownGracePeriodMs = 30_000
 const siteAdminEmails =
   process.env.SITE_ADMIN_EMAILS?.split(',').map((email) => email.trim()) ?? []
-let noteStore = createNoteStore({ siteAdminEmails })
+let noteStore = await createNoteStore({ siteAdminEmails })
 let shuttingDown = false
 const app = createApp({
   noteStore,
   publicWebUrl: process.env.PUBLIC_WEB_URL,
-  restoreNoteStore(sourcePath) {
-    noteStore = restoreNoteStoreFromBackup(sourcePath, { siteAdminEmails })
+  async restoreNoteStore(sourcePath) {
+    noteStore = await restoreNoteStoreFromBackup(sourcePath, { siteAdminEmails })
     return noteStore
   },
   isShuttingDown: () => shuttingDown,
@@ -25,8 +25,8 @@ function isServerNotRunningError(error: unknown): error is NodeJS.ErrnoException
   return error instanceof Error && 'code' in error && error.code === 'ERR_SERVER_NOT_RUNNING'
 }
 
-function finishShutdown(exitCode: number) {
-  noteStore.close()
+async function finishShutdown(exitCode: number) {
+  await noteStore.close()
   process.exit(exitCode)
 }
 
@@ -39,7 +39,7 @@ function shutdown(exitCode: number) {
 
   const forceShutdownTimer = setTimeout(() => {
     server?.closeAllConnections?.()
-    finishShutdown(exitCode)
+    void finishShutdown(exitCode)
   }, shutdownGracePeriodMs)
   forceShutdownTimer.unref()
 
@@ -48,16 +48,16 @@ function shutdown(exitCode: number) {
 
     if (error) {
       if (isServerNotRunningError(error)) {
-        finishShutdown(exitCode)
+        void finishShutdown(exitCode)
         return
       }
 
       console.error('Failed to close HTTP server cleanly.', error)
-      finishShutdown(1)
+      void finishShutdown(1)
       return
     }
 
-    finishShutdown(exitCode)
+    void finishShutdown(exitCode)
   })
   server.closeIdleConnections?.()
 }

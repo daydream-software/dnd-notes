@@ -1,10 +1,10 @@
-import type Database from 'better-sqlite3'
+import type { NoteStoreDatabase } from './note-store-database.js'
 
 const pragmaTableNames = ['notes', 'owner_accounts', 'campaign_share_links'] as const
 type PragmaTableName = (typeof pragmaTableNames)[number]
 const pragmaTableNameSet = new Set<string>(pragmaTableNames)
 
-function tableExists(database: Database.Database, tableName: string) {
+async function tableExists(database: NoteStoreDatabase, tableName: string) {
   return database
     .prepare(`
       SELECT 1
@@ -14,93 +14,103 @@ function tableExists(database: Database.Database, tableName: string) {
     .get(tableName)
 }
 
-function listTableColumns(database: Database.Database, tableName: PragmaTableName) {
+async function listTableColumns(database: NoteStoreDatabase, tableName: PragmaTableName) {
   if (!pragmaTableNameSet.has(tableName)) {
     throw new Error(`Unsupported PRAGMA table lookup for "${tableName}".`)
   }
 
   return new Set(
-    (
-      database.prepare(`
+    ((await database.prepare(`
         PRAGMA table_info("${tableName}")
-      `).all() as Array<{ name: string }>
-    ).map((column) => column.name),
+      `).all()) as Array<{ name: string }>).map((column) => column.name),
   )
 }
 
-function ensureNotesAttributionColumns(database: Database.Database) {
-  const transaction = database.transaction(() => {
-    if (!tableExists(database, 'notes')) {
+async function ensureNotesAttributionColumns(database: NoteStoreDatabase) {
+  if (database.kind !== 'sqlite') {
+    return
+  }
+
+  const transaction = database.transaction(async () => {
+    if (!(await tableExists(database, 'notes'))) {
       return
     }
 
-    const noteColumns = listTableColumns(database, 'notes')
+    const noteColumns = await listTableColumns(database, 'notes')
 
     if (!noteColumns.has('created_by_membership_id')) {
-      database.exec(`
+      await database.exec(`
         ALTER TABLE notes
         ADD COLUMN created_by_membership_id TEXT REFERENCES campaign_memberships(id)
       `)
     }
 
     if (!noteColumns.has('last_edited_by_membership_id')) {
-      database.exec(`
+      await database.exec(`
         ALTER TABLE notes
         ADD COLUMN last_edited_by_membership_id TEXT REFERENCES campaign_memberships(id)
       `)
     }
 
     if (!noteColumns.has('linked_notes_json')) {
-      database.exec(`
+      await database.exec(`
         ALTER TABLE notes
         ADD COLUMN linked_notes_json TEXT NOT NULL DEFAULT '[]'
       `)
     }
   })
 
-  transaction()
+  await transaction()
 }
 
-function ensureOwnerSiteAdminColumn(database: Database.Database) {
-  const transaction = database.transaction(() => {
-    if (!tableExists(database, 'owner_accounts')) {
+async function ensureOwnerSiteAdminColumn(database: NoteStoreDatabase) {
+  if (database.kind !== 'sqlite') {
+    return
+  }
+
+  const transaction = database.transaction(async () => {
+    if (!(await tableExists(database, 'owner_accounts'))) {
       return
     }
 
-    const ownerColumns = listTableColumns(database, 'owner_accounts')
+    const ownerColumns = await listTableColumns(database, 'owner_accounts')
 
     if (!ownerColumns.has('is_site_admin')) {
-      database.exec(`
+      await database.exec(`
         ALTER TABLE owner_accounts
         ADD COLUMN is_site_admin INTEGER NOT NULL DEFAULT 0
       `)
     }
   })
 
-  transaction()
+  await transaction()
 }
 
-function ensureShareLinkRevealTokens(database: Database.Database) {
-  const transaction = database.transaction(() => {
-    if (!tableExists(database, 'campaign_share_links')) {
+async function ensureShareLinkRevealTokens(database: NoteStoreDatabase) {
+  if (database.kind !== 'sqlite') {
+    return
+  }
+
+  const transaction = database.transaction(async () => {
+    if (!(await tableExists(database, 'campaign_share_links'))) {
       return
     }
 
-    const shareLinkColumns = listTableColumns(database, 'campaign_share_links')
+    const shareLinkColumns = await listTableColumns(database, 'campaign_share_links')
 
     if (!shareLinkColumns.has('token_plaintext')) {
-      database.exec(`
+      await database.exec(`
         ALTER TABLE campaign_share_links
         ADD COLUMN token_plaintext TEXT
       `)
     }
   })
 
-  transaction()
+  await transaction()
 }
 
-function elevateConfiguredSiteAdminAccounts(
-  database: Database.Database,
+async function elevateConfiguredSiteAdminAccounts(
+  database: NoteStoreDatabase,
   configuredSiteAdminEmails: ReadonlySet<string>,
 ) {
   if (configuredSiteAdminEmails.size === 0) {
@@ -113,7 +123,7 @@ function elevateConfiguredSiteAdminAccounts(
   ).join(', ')
   const timestamp = new Date().toISOString()
 
-  database
+  await database
     .prepare(`
       UPDATE owner_accounts
       SET is_site_admin = 1,
@@ -124,11 +134,11 @@ function elevateConfiguredSiteAdminAccounts(
     .run(timestamp, ...configuredSiteAdminEmails)
 }
 
-export function initializeNoteStoreDatabase(
-  database: Database.Database,
+export async function initializeNoteStoreDatabase(
+  database: NoteStoreDatabase,
   configuredSiteAdminEmails: ReadonlySet<string>,
 ) {
-  database.exec(`
+  await database.exec(`
     CREATE TABLE IF NOT EXISTS owner_accounts (
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL UNIQUE,
@@ -237,9 +247,8 @@ export function initializeNoteStoreDatabase(
     CREATE INDEX IF NOT EXISTS idx_note_references_source
     ON note_references(source_note_id, campaign_id);
   `)
-
-  ensureOwnerSiteAdminColumn(database)
-  ensureNotesAttributionColumns(database)
-  ensureShareLinkRevealTokens(database)
-  elevateConfiguredSiteAdminAccounts(database, configuredSiteAdminEmails)
+  await ensureOwnerSiteAdminColumn(database)
+  await ensureNotesAttributionColumns(database)
+  await ensureShareLinkRevealTokens(database)
+  await elevateConfiguredSiteAdminAccounts(database, configuredSiteAdminEmails)
 }

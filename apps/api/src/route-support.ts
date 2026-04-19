@@ -49,7 +49,7 @@ export interface AppRouteContext {
   getNoteStore: () => NoteStore
   setNoteStore: (noteStore: NoteStore) => void
   publicWebUrl: string | null
-  restoreNoteStore?: (sourcePath: string) => NoteStore
+  restoreNoteStore?: (sourcePath: string) => Promise<NoteStore>
   isRateLimited: (
     request: Request,
     response: Response<ErrorResponse>,
@@ -184,12 +184,12 @@ export function readRequestedActivityLimit(
   return Math.min(parsed, maxActivityLimit)
 }
 
-export function buildOverview(
+export async function buildOverview(
   noteStore: NoteStore,
   campaignId: string,
   membership: CampaignMembership | null,
-): NotesOverview {
-  const campaign = noteStore.getCampaign(campaignId)
+): Promise<NotesOverview> {
+  const campaign = await noteStore.getCampaign(campaignId)
 
   if (!campaign || campaign.archivedAt !== null) {
     throw new Error(`Campaign "${campaignId}" was not found.`)
@@ -198,20 +198,25 @@ export function buildOverview(
   return {
     campaign,
     membership,
-    stats: noteStore.getStats(campaign.id),
-    recentNotes: noteStore.listRecentNotes(3, campaign.id),
+    stats: await noteStore.getStats(campaign.id),
+    recentNotes: await noteStore.listRecentNotes(3, campaign.id),
   }
 }
 
-export function buildSessions(noteStore: NoteStore, campaignId: string): SessionSummary[] {
-  const sessions = noteStore.listSessionNames(campaignId) as Array<string | SessionSummary>
+export async function buildSessions(
+  noteStore: NoteStore,
+  campaignId: string,
+): Promise<SessionSummary[]> {
+  const sessions = (await noteStore.listSessionNames(campaignId)) as Array<
+    string | SessionSummary
+  >
 
-  return sessions.map((session) => {
+  return Promise.all(sessions.map(async (session) => {
     if (typeof session !== 'string') {
       return session
     }
 
-    const notes = noteStore.getSessionNotes(campaignId, session)
+    const notes = await noteStore.getSessionNotes(campaignId, session)
     const latestActivity = notes.reduce(
       (latest, note) => (note.updatedAt > latest ? note.updatedAt : latest),
       '',
@@ -222,7 +227,7 @@ export function buildSessions(noteStore: NoteStore, campaignId: string): Session
       noteCount: notes.length,
       latestActivity,
     }
-  })
+  }))
 }
 
 function noteMatchesActivityMembership(note: Note, membershipId: string) {
@@ -274,19 +279,19 @@ function buildNoteActivityEntry(note: Note): NoteActivityEntry {
   }
 }
 
-export function buildNoteActivityResponse(
+export async function buildNoteActivityResponse(
   noteStore: NoteStore,
   campaignId: string,
   membershipId: string | null,
   limit: number,
-): NoteActivityResponse {
-  const campaign = noteStore.getCampaign(campaignId)
+): Promise<NoteActivityResponse> {
+  const campaign = await noteStore.getCampaign(campaignId)
 
   if (!campaign || campaign.archivedAt !== null) {
     throw new Error(`Campaign "${campaignId}" was not found.`)
   }
 
-  const notes = [...noteStore.listNotes(campaignId)].sort((left, right) =>
+  const notes = [...(await noteStore.listNotes(campaignId))].sort((left, right) =>
     right.updatedAt.localeCompare(left.updatedAt),
   )
 
@@ -301,7 +306,7 @@ export function buildNoteActivityResponse(
   }
 }
 
-export function requireAuthenticatedAccount(
+export async function requireAuthenticatedAccount(
   noteStore: NoteStore,
   request: Request,
   response: Response<ErrorResponse>,
@@ -313,7 +318,7 @@ export function requireAuthenticatedAccount(
     return null
   }
 
-  const owner = noteStore.getOwnerBySessionToken(token)
+  const owner = await noteStore.getOwnerBySessionToken(token)
 
   if (!owner) {
     response.status(401).json({ error: 'Owner session is invalid or expired.' })
@@ -323,12 +328,12 @@ export function requireAuthenticatedAccount(
   return owner
 }
 
-export function requireSiteAdmin(
+export async function requireSiteAdmin(
   noteStore: NoteStore,
   request: Request,
   response: Response<ErrorResponse>,
 ) {
-  const owner = requireAuthenticatedAccount(noteStore, request, response)
+  const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
   if (!owner) {
     return null
@@ -342,7 +347,7 @@ export function requireSiteAdmin(
   return owner
 }
 
-export function resolveOwnedCampaign(
+export async function resolveOwnedCampaign(
   noteStore: NoteStore,
   owner: OwnerAccount,
   campaignId: string | null | undefined,
@@ -350,21 +355,21 @@ export function resolveOwnedCampaign(
 ) {
   if (!campaignId) {
     try {
-      return noteStore.getPrimaryCampaign(owner.id)
+      return await noteStore.getPrimaryCampaign(owner.id)
     } catch {
       response.status(404).json({ error: 'No owned campaigns are available.' })
       return null
     }
   }
 
-  const campaign = noteStore.getCampaign(campaignId)
+  const campaign = await noteStore.getCampaign(campaignId)
 
   if (!campaign || campaign.archivedAt !== null) {
     response.status(404).json({ error: `Campaign "${campaignId}" was not found.` })
     return null
   }
 
-  if (!noteStore.userOwnsCampaign(owner.id, campaignId)) {
+  if (!(await noteStore.userOwnsCampaign(owner.id, campaignId))) {
     response.status(403).json({ error: 'You do not have access to this campaign.' })
     return null
   }
@@ -372,7 +377,7 @@ export function resolveOwnedCampaign(
   return campaign
 }
 
-export function resolveAccessibleCampaign(
+export async function resolveAccessibleCampaign(
   noteStore: NoteStore,
   owner: OwnerAccount,
   campaignId: string | null | undefined,
@@ -380,21 +385,21 @@ export function resolveAccessibleCampaign(
 ) {
   if (!campaignId) {
     try {
-      return noteStore.getPrimaryCampaignForUser(owner.id)
+      return await noteStore.getPrimaryCampaignForUser(owner.id)
     } catch {
       response.status(404).json({ error: 'No campaigns are available.' })
       return null
     }
   }
 
-  const campaign = noteStore.getCampaign(campaignId)
+  const campaign = await noteStore.getCampaign(campaignId)
 
   if (!campaign || campaign.archivedAt !== null) {
     response.status(404).json({ error: `Campaign "${campaignId}" was not found.` })
     return null
   }
 
-  if (!noteStore.userHasCampaignAccess(owner.id, campaignId)) {
+  if (!(await noteStore.userHasCampaignAccess(owner.id, campaignId))) {
     response.status(403).json({ error: 'You do not have access to this campaign.' })
     return null
   }
@@ -402,19 +407,19 @@ export function resolveAccessibleCampaign(
   return campaign
 }
 
-export function resolveSharedLink(
+export async function resolveSharedLink(
   noteStore: NoteStore,
   shareToken: string,
   response: Response<ErrorResponse>,
 ) {
-  const shareLink = noteStore.getCampaignShareLinkByToken(shareToken)
+  const shareLink = await noteStore.getCampaignShareLinkByToken(shareToken)
 
   if (!shareLink) {
     response.status(404).json({ error: 'Shared link was not found or has been revoked.' })
     return null
   }
 
-  const campaign = noteStore.getCampaign(shareLink.campaignId)
+  const campaign = await noteStore.getCampaign(shareLink.campaignId)
 
   if (!campaign || campaign.archivedAt !== null) {
     response.status(404).json({ error: 'Campaign was not found for this shared link.' })
@@ -435,7 +440,7 @@ export function applySharedLinkPolicy(
   response.removeHeader('X-Frame-Options')
 }
 
-export function readSharedMembership(
+export async function readSharedMembership(
   noteStore: NoteStore,
   request: Request,
   campaignId: string,
@@ -446,7 +451,7 @@ export function readSharedMembership(
     return null
   }
 
-  const membership = noteStore.getGuestMembershipByToken(guestToken)
+  const membership = await noteStore.getGuestMembershipByToken(guestToken)
 
   if (!membership || membership.campaignId !== campaignId) {
     return null
@@ -455,13 +460,13 @@ export function readSharedMembership(
   return membership
 }
 
-export function requireSharedMembership(
+export async function requireSharedMembership(
   noteStore: NoteStore,
   request: Request,
   campaignId: string,
   response: Response<ErrorResponse>,
 ) {
-  const membership = readSharedMembership(noteStore, request, campaignId)
+  const membership = await readSharedMembership(noteStore, request, campaignId)
 
   if (!membership) {
     response.status(401).json({ error: 'Guest authentication is required for this shared campaign.' })
