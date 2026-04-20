@@ -8,6 +8,7 @@ import {
   type V1Deployment,
   type V1Namespace,
   type V1PersistentVolumeClaim,
+  type V1PersistentVolumeClaimSpec,
   type V1Secret,
   type V1Service,
   type V1ServicePort,
@@ -766,36 +767,52 @@ function prepareKubernetesObjectForReplace<T extends KubernetesObject>(
   spec: T,
   existing: T,
 ): T {
-  if (spec.kind !== 'Service' || existing.kind !== 'Service') {
+  if (spec.kind === 'Service' && existing.kind === 'Service') {
+    const desiredService = spec as T & V1Service
+    const existingService = existing as T & V1Service
+
     return {
-      ...spec,
+      ...desiredService,
       metadata: {
-        ...spec.metadata,
+        ...desiredService.metadata,
+      },
+      spec: {
+        ...desiredService.spec,
+        clusterIP: desiredService.spec?.clusterIP ?? existingService.spec?.clusterIP,
+        clusterIPs: desiredService.spec?.clusterIPs ?? existingService.spec?.clusterIPs,
+        healthCheckNodePort:
+          desiredService.spec?.healthCheckNodePort ??
+          existingService.spec?.healthCheckNodePort,
+        ipFamilies:
+          desiredService.spec?.ipFamilies ?? existingService.spec?.ipFamilies,
+        ipFamilyPolicy:
+          desiredService.spec?.ipFamilyPolicy ??
+          existingService.spec?.ipFamilyPolicy,
+        ports: mergeServicePorts(desiredService.spec?.ports, existingService.spec?.ports),
       },
     }
   }
 
-  const desiredService = spec as T & V1Service
-  const existingService = existing as T & V1Service
+  if (
+    spec.kind === 'PersistentVolumeClaim' &&
+    existing.kind === 'PersistentVolumeClaim'
+  ) {
+    const desiredPvc = spec as T & V1PersistentVolumeClaim
+    const existingPvc = existing as T & V1PersistentVolumeClaim
+
+    return {
+      ...desiredPvc,
+      metadata: {
+        ...desiredPvc.metadata,
+      },
+      spec: mergePersistentVolumeClaimSpec(desiredPvc, existingPvc),
+    }
+  }
 
   return {
-    ...desiredService,
+    ...spec,
     metadata: {
-      ...desiredService.metadata,
-    },
-    spec: {
-      ...desiredService.spec,
-      clusterIP: desiredService.spec?.clusterIP ?? existingService.spec?.clusterIP,
-      clusterIPs: desiredService.spec?.clusterIPs ?? existingService.spec?.clusterIPs,
-      healthCheckNodePort:
-        desiredService.spec?.healthCheckNodePort ??
-        existingService.spec?.healthCheckNodePort,
-      ipFamilies:
-        desiredService.spec?.ipFamilies ?? existingService.spec?.ipFamilies,
-      ipFamilyPolicy:
-        desiredService.spec?.ipFamilyPolicy ??
-        existingService.spec?.ipFamilyPolicy,
-      ports: mergeServicePorts(desiredService.spec?.ports, existingService.spec?.ports),
+      ...spec.metadata,
     },
   }
 }
@@ -829,6 +846,19 @@ function mergeServicePorts(
       nodePort: desiredPort.nodePort ?? matchingExistingPort.nodePort,
     }
   })
+}
+
+function mergePersistentVolumeClaimSpec(
+  desiredPvc: V1PersistentVolumeClaim,
+  existingPvc: V1PersistentVolumeClaim,
+): V1PersistentVolumeClaimSpec | undefined {
+  return {
+    ...desiredPvc.spec,
+    storageClassName:
+      desiredPvc.spec?.storageClassName ?? existingPvc.spec?.storageClassName,
+    volumeMode: desiredPvc.spec?.volumeMode ?? existingPvc.spec?.volumeMode,
+    volumeName: desiredPvc.spec?.volumeName ?? existingPvc.spec?.volumeName,
+  }
 }
 
 function isApiException(error: unknown, statusCode: number): error is ApiException<unknown> {

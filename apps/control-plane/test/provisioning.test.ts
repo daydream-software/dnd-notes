@@ -505,6 +505,84 @@ describe('KubernetesTenantInfrastructureManager', () => {
     }
   })
 
+  it('preserves pvc-assigned fields when replacing an existing PersistentVolumeClaim', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const tenant = tenantRegistry.createTenant({
+      id: 'tenant-demo',
+      slug: 'demo',
+      ownerId: 'owner-1',
+      version: '1.0.0',
+    })
+    const bundle = buildTenantInfrastructureBundle({
+      tenant,
+      subdomain: 't-opaque123456',
+      database: {
+        databaseName: 'tenant_demo_t_opaque123456',
+        connectionString:
+          'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+      },
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      publicScheme: 'https',
+      tenantPort: 3000,
+    })
+    const client = new FakeKubernetesClient()
+
+    try {
+      for (const object of [
+        bundle.namespace,
+        bundle.configMap,
+        bundle.secret,
+        bundle.service,
+        bundle.deployment,
+      ]) {
+        client.seed({
+          ...object,
+          metadata: {
+            ...object.metadata!,
+            resourceVersion: '1',
+          },
+        })
+      }
+
+      client.seed({
+        ...bundle.persistentVolumeClaim,
+        metadata: {
+          ...bundle.persistentVolumeClaim.metadata!,
+          resourceVersion: '1',
+        },
+        spec: {
+          ...bundle.persistentVolumeClaim.spec,
+          storageClassName: 'local-path',
+          volumeMode: 'Filesystem',
+          volumeName: 'pvc-12345',
+        },
+      })
+
+      const manager = new KubernetesTenantInfrastructureManager({ client })
+      await manager.applyTenantResources(bundle)
+
+      const replacedPvc = client.replaceCalls.find(
+        (object) => object.kind === 'PersistentVolumeClaim',
+      ) as
+        | (KubernetesObject & {
+            spec?: {
+              storageClassName?: string
+              volumeMode?: string
+              volumeName?: string
+            }
+          })
+        | undefined
+
+      assert.ok(replacedPvc)
+      assert.equal(replacedPvc.spec?.storageClassName, 'local-path')
+      assert.equal(replacedPvc.spec?.volumeMode, 'Filesystem')
+      assert.equal(replacedPvc.spec?.volumeName, 'pvc-12345')
+    } finally {
+      tenantRegistry.close()
+    }
+  })
+
   it('waits for namespace termination before finishing tenant deletion', async () => {
     const client = new FakeKubernetesClient()
     client.namespaceReadCountdown = 2

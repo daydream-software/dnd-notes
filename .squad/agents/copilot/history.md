@@ -61,3 +61,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Scope: handle the next Copilot pass, including one visible shutdown blocker and one low-confidence suppressed note about registry index recovery.
 - Fixed as blocking: control-plane shutdown now uses the same timed shutdown-controller pattern as the API workspace so stalled `tenantProvisioningService.close()` cannot block process exit indefinitely, and tenant-registry startup now always reasserts the `idx_tenants_subdomain` unique index for existing schema-v2 databases.
 - Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 third review follow-up
+- Scope: respond to the latest two Copilot comments on tenant-registry null handling and Kubernetes PVC reconciliation.
+- Fixed as blocking: tenant-registry now treats `subdomain` presence with null checks instead of truthiness so malformed empty-string rows no longer fall into the reservation retry loop, and Kubernetes replace preparation now preserves PVC-assigned fields such as `storageClassName`, `volumeMode`, and `volumeName` just like the earlier Service hardening preserved `clusterIP`.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.

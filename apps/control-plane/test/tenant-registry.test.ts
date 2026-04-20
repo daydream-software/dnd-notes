@@ -159,4 +159,44 @@ describe('TenantRegistry', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('preserves empty-string subdomains instead of collapsing them to null', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const tenantRegistry = new TenantRegistry(databasePath)
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.close()
+
+      const rawDb = new Database(databasePath)
+      rawDb
+        .prepare(
+          `UPDATE tenants
+           SET subdomain = ''
+           WHERE id = ?`,
+        )
+        .run('tenant-1')
+      rawDb.close()
+
+      const reopenedRegistry = new TenantRegistry(databasePath)
+
+      try {
+        assert.equal(reopenedRegistry.getTenant('tenant-1')?.subdomain, '')
+        assert.equal(
+          reopenedRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
+          '',
+        )
+      } finally {
+        reopenedRegistry.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })

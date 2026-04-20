@@ -186,7 +186,7 @@ export class TenantRegistry {
         throw new Error(`Tenant ${tenantId} not found`)
       }
 
-      if (existingTenant.subdomain) {
+      if (existingTenant.subdomain != null) {
         return existingTenant.subdomain
       }
 
@@ -208,7 +208,7 @@ export class TenantRegistry {
           }
 
           const updatedTenant = this.getTenant(tenantId)
-          if (updatedTenant?.subdomain) {
+          if (updatedTenant?.subdomain != null) {
             return updatedTenant.subdomain
           }
         } catch (error) {
@@ -434,13 +434,13 @@ export class TenantRegistry {
     return {
       id: r.id,
       slug: r.slug,
-      subdomain: r.subdomain || null,
+      subdomain: r.subdomain ?? null,
       ownerId: r.owner_id,
       desiredState: r.desired_state as TenantState,
       currentState: r.current_state as TenantState,
       version: r.version,
-      storageReference: r.storage_reference || null,
-      backupMetadata: r.backup_metadata || null,
+      storageReference: r.storage_reference ?? null,
+      backupMetadata: r.backup_metadata ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     }
