@@ -33,7 +33,7 @@
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test:web && npm run test:api && npm run test:control-plane",
-    "prepare": "husky"
+    "prepare": "node ./scripts/prepare.mjs"
   },
   "repository": {
     "type": "git",

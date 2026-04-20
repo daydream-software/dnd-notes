@@ -104,3 +104,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Status: broker policy is no longer the main blocker. Live revalidation now creates the k3d cluster successfully in this environment.
 - Repo fix landed during validation: `scripts/k3d/bootstrap.sh` now rewrites k3d kubeconfig endpoints from `0.0.0.0` to `127.0.0.1` when needed and waits explicitly for the Kubernetes API before applying manifests.
 - Current blocker: the host environment still cannot reach Docker-published ports (including the k3d API port and ingress ports) or container bridge IPs, even though the k3d load balancer can reach the in-cluster API server. That prevents host `kubectl` from reaching the cluster and blocks the smoke lane beyond cluster creation.
+
+## 2026-04-20 Issue #63 live validation follow-up (tenant image build)
+- Status: the smoke lane progressed into the tenant image build path and exposed a real Dockerfile issue on production installs: root `prepare` still ran under `npm ci --omit=dev`, but Husky was not installed in the image.
+- Delivered: root `prepare` now routes through `scripts/prepare.mjs`, which exits cleanly when `.git` or the Husky package is absent; the tenant Dockerfile now copies that script before `npm ci`; and `.dockerignore` now includes only that script from `scripts/` so the Docker build context stays tight.
+- Validation: `npm run prepare`, repo-wide `npm run lint && npm run test:ci && npm run build`, raw `docker build`, and `DOCKER_BUILDKIT=0 npm run k3d:build-image` all passed after the fix.
