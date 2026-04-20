@@ -25,7 +25,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     join(tmpdir(), options.directoryPrefix ?? 'dnd-notes-api-'),
   )
   const dbPath = join(directory, 'notes.sqlite')
-  let noteStore = createNoteStore({
+  let noteStore = await createNoteStore({
     dbPath,
     siteAdminEmails: options.siteAdminEmails,
   })
@@ -41,8 +41,8 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     isShuttingDown: options.isShuttingDown,
     serveWeb: options.serveWeb,
     webDistPath: options.webDistPath,
-    restoreNoteStore(sourcePath) {
-      noteStore = restoreNoteStoreFromBackup(sourcePath, {
+    async restoreNoteStore(sourcePath) {
+      noteStore = await restoreNoteStoreFromBackup(sourcePath, {
         dbPath,
         siteAdminEmails: options.siteAdminEmails,
       })
@@ -51,12 +51,12 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     },
   })
 
-  const closeNoteStore = () => {
+  const closeNoteStore = async () => {
     if (noteStoreClosed) {
       return
     }
 
-    noteStore.close()
+    await noteStore.close()
     noteStoreClosed = true
   }
 
@@ -68,7 +68,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     },
     closeNoteStore,
     async cleanup() {
-      closeNoteStore()
+      await closeNoteStore()
       await rm(directory, { recursive: true, force: true })
     },
   }

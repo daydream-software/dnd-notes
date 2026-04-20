@@ -183,7 +183,7 @@ test('notes and owner sessions persist across app recreation when using the same
     await rm(directory, { recursive: true, force: true })
   })
 
-  const firstStore = createNoteStore({ dbPath })
+  const firstStore = await createNoteStore({ dbPath })
   const firstApp = createApp({ noteStore: firstStore })
 
   const { token } = await registerOwner(request(firstApp))
@@ -199,11 +199,11 @@ test('notes and owner sessions persist across app recreation when using the same
   })
 
   assert.equal(createResponse.status, 201)
-  firstStore.close()
+  await firstStore.close()
 
-  const secondStore = createNoteStore({ dbPath })
-  t.after(() => {
-    secondStore.close()
+  const secondStore = await createNoteStore({ dbPath })
+  t.after(async () => {
+    await secondStore.close()
   })
 
   const secondApp = createApp({ noteStore: secondStore })
@@ -280,16 +280,16 @@ test('legacy note databases are upgraded in place for membership attribution col
     })
   legacyDatabase.close()
 
-  const noteStore = createNoteStore({ dbPath })
+  const noteStore = await createNoteStore({ dbPath })
 
   try {
-    const notes = noteStore.listNotes(defaultCampaignId)
+    const notes = await noteStore.listNotes(defaultCampaignId)
     assert.equal(notes.length, 1)
     assert.equal(notes[0].title, 'Legacy harbor log')
     assert.equal(notes[0].createdBy, null)
     assert.equal(notes[0].lastEditedBy, null)
   } finally {
-    noteStore.close()
+    await noteStore.close()
   }
 
   const migratedDatabase = new Database(dbPath, { readonly: true })
@@ -327,9 +327,9 @@ test('legacy share links without stored plaintext tokens return an explicit rege
   `)
   legacyDatabase.close()
 
-  const noteStore = createNoteStore({ dbPath })
-  t.after(() => {
-    noteStore.close()
+  const noteStore = await createNoteStore({ dbPath })
+  t.after(async () => {
+    await noteStore.close()
   })
 
   const app = createApp({ noteStore })
@@ -813,7 +813,7 @@ test('legacy databases without linked_notes_json column are upgraded safely', as
   const dbPath = join(directory, 'notes.sqlite')
 
   try {
-    const noteStore1 = createNoteStore({ dbPath })
+    const noteStore1 = await createNoteStore({ dbPath })
     const app1 = createApp({ noteStore: noteStore1 })
     const { token } = await registerOwner(request(app1))
     const authed = withAuth(request(app1), token)
@@ -828,7 +828,7 @@ test('legacy databases without linked_notes_json column are upgraded safely', as
     assert.equal(noteResponse.status, 201)
     const noteId = noteResponse.body.note.id as string
 
-    noteStore1.close()
+    await noteStore1.close()
 
     const db = new Database(dbPath)
     db.exec('DROP TABLE IF EXISTS note_references')
@@ -862,7 +862,7 @@ test('legacy databases without linked_notes_json column are upgraded safely', as
     }
     db.close()
 
-    const noteStore2 = createNoteStore({ dbPath })
+    const noteStore2 = await createNoteStore({ dbPath })
     const app2 = createApp({ noteStore: noteStore2 })
 
     const getResponse = await withAuth(request(app2), token).get(`/api/notes/${noteId}`)
@@ -881,7 +881,7 @@ test('legacy databases without linked_notes_json column are upgraded safely', as
     assert.equal(linkedNoteResponse.status, 201)
     assert.deepEqual(linkedNoteResponse.body.note.linkedNoteIds, [noteId])
 
-    noteStore2.close()
+    await noteStore2.close()
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

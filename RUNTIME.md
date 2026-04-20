@@ -22,12 +22,27 @@ None. The application will start with defaults.
 
 - **`NOTES_DB_PATH`** (default: `/app/data/dnd-notes.sqlite`)  
   Path to the SQLite database file (Phase 0 local dev fallback).  
-  **Production:** Will use Postgres connection string via `DATABASE_URL` after Phase 0.
+  **Behavior:** Used automatically whenever `DATABASE_URL` is unset.
 
-- **`DATABASE_URL`** (not yet implemented)  
+- **`DATABASE_URL`**  
   Postgres connection string for production tenant databases.  
   Format: `postgresql://user:pass@host:5432/dbname`  
-  **Status:** Reserved for Phase 0 Postgres adapter work (issue #58).
+  **Behavior:** When set, the API uses `node-postgres` with connection pooling.
+
+- **`NOTES_DB_POOL_MIN`** (default: `0`)  
+  Minimum pooled Postgres connections.
+
+- **`NOTES_DB_POOL_MAX`** (default: `20`)  
+  Maximum pooled Postgres connections.
+
+- **`NOTES_DB_IDLE_TIMEOUT_MS`** (default: `30000`)  
+  Postgres pool idle timeout.
+
+- **`NOTES_DB_CONNECTION_TIMEOUT_MS`** (default: `10000`)  
+  Postgres connection acquisition timeout.
+
+- **`NOTES_DB_STATEMENT_TIMEOUT_MS`** (default: `30000`)  
+  Postgres statement timeout.
 
 ### Security & Access Control
 
@@ -123,7 +138,7 @@ volumes:
 
 ### Startup
 1. Resolve environment variables
-2. Initialize database connection (`NOTES_DB_PATH` or `DATABASE_URL`)
+2. Initialize database connection (`DATABASE_URL` when set, otherwise `NOTES_DB_PATH`)
 3. Run schema migrations (if needed)
 4. Start HTTP server on `PORT`
 5. Readiness probe begins succeeding
@@ -186,9 +201,9 @@ See issue #43 for full manifest examples after Phase 0 validation.
 ## Phase 0 ↔ Phase 1 Migration Notes
 
 **Current (Phase 0):**
-- SQLite database at `/app/data/dnd-notes.sqlite`
-- Single-writer constraint enforced by file lock
-- Backup via admin API (`GET /api/admin/backup`)
+- Hosted path: Postgres via `DATABASE_URL`
+- Local fallback: SQLite at `/app/data/dnd-notes.sqlite`
+- Backup via admin API (`GET /api/admin/backup`) using SQLite-compatible snapshots
 
 **Future (Phase 1):**
 - Postgres via `DATABASE_URL`
@@ -197,10 +212,10 @@ See issue #43 for full manifest examples after Phase 0 validation.
 - Backup via control-plane `pg_dump` CronJob
 
 **Migration:**
-1. Phase 0 proves container + health contract + Kubernetes lifecycle
-2. Issue #58 ports the NoteStore adapter to Postgres (`node-postgres`)
-3. Phase 1 manifests (#43) reference `DATABASE_URL` instead of PVC
-4. SQLite support retained as local dev fallback via env detection
+1. Download a fresh SQLite-compatible admin backup from the old SQLite-backed tenant.
+2. Start the target tenant with `DATABASE_URL` pointed at Postgres.
+3. Restore the backup through the admin restore flow; the API imports the snapshot into Postgres.
+4. Keep SQLite support for local development when `DATABASE_URL` is unset.
 
 ## Maintenance Mode (Phase 1)
 
@@ -228,8 +243,8 @@ These are reserved for Phase 1 control-plane orchestration and are **not** expos
 When `DATABASE_URL` is set, the application will:
 1. Use `node-postgres` for async database access (issue #58)
 2. Respect Postgres connection pooling and timeout settings
-3. Gracefully handle connection loss (retry with exponential backoff)
-4. Support schema migrations via control-plane orchestration
+3. Drain the pool on shutdown before process exit
+4. Keep exporting/importing SQLite-compatible admin snapshots for backup + migration workflows
 
 **Connection pool defaults (to be tuned in Phase 1):**
 - Max connections: 20

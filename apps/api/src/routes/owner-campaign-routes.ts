@@ -29,29 +29,29 @@ import {
 export function registerOwnerCampaignRoutes(app: Express, context: AppRouteContext) {
   app.get(
     '/api/campaigns',
-    (
+    async (
       request: Request,
       response: Response<CampaignsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      response.json({ campaigns: noteStore.listUserCampaigns(owner.id) })
+      response.json({ campaigns: await noteStore.listUserCampaigns(owner.id) })
     },
   )
 
   app.post(
     '/api/campaigns',
-    (
+    async (
       request: Request,
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -67,25 +67,25 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      const campaign = noteStore.createCampaign(validation.data, owner)
+      const campaign = await noteStore.createCampaign(validation.data, owner)
       response.status(201).json({ campaign })
     },
   )
 
   app.get(
     '/api/campaigns/:campaignId',
-    (
+    async (
       request: Request<CampaignParams>,
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -102,18 +102,18 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/sessions',
-    (
+    async (
       request: Request<CampaignParams>,
       response: Response<SessionsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -124,24 +124,24 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      response.json({ sessions: buildSessions(noteStore, campaign.id) })
+      response.json({ sessions: await buildSessions(noteStore, campaign.id) })
     },
   )
 
   app.put(
     '/api/campaigns/:campaignId',
-    (
+    async (
       request: Request<CampaignParams>,
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = await resolveOwnedCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -162,7 +162,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      const updatedCampaign = noteStore.updateCampaign(
+      const updatedCampaign = await noteStore.updateCampaign(
         campaign.id,
         validation.data,
         owner.id,
@@ -179,18 +179,18 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/memberships',
-    (
+    async (
       request: Request<CampaignParams>,
       response: Response<CampaignMembershipsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = await resolveOwnedCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -202,25 +202,25 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       }
 
       response.json({
-        memberships: noteStore.listCampaignMemberships(campaign.id),
+        memberships: await noteStore.listCampaignMemberships(campaign.id),
       })
     },
   )
 
   app.post(
     '/api/campaigns/:campaignId/memberships/consolidations',
-    (
+    async (
       request: Request<CampaignParams>,
       response: Response<MembershipConsolidationResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = await resolveOwnedCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -241,7 +241,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      const preview = noteStore.previewMembershipConsolidation(
+      const preview = await noteStore.previewMembershipConsolidation(
         campaign.id,
         validation.data.sourceMembershipId,
         validation.data.targetMembershipId,
@@ -294,7 +294,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      const consolidation = noteStore.consolidateMemberships(
+      const consolidation = await noteStore.consolidateMemberships(
         campaign.id,
         validation.data.sourceMembershipId,
         validation.data.targetMembershipId,
@@ -330,18 +330,18 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/share-links',
-    (
+    async (
       request: Request<CampaignParams>,
       response: Response<CampaignShareLinksResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = await resolveOwnedCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -353,25 +353,25 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       }
 
       response.json({
-        shareLinks: noteStore.listCampaignShareLinks(campaign.id),
+        shareLinks: await noteStore.listCampaignShareLinks(campaign.id),
       })
     },
   )
 
   app.post(
     '/api/campaigns/:campaignId/share-links',
-    (
+    async (
       request: Request<CampaignParams>,
       response: Response<CampaignShareLinkCreateResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = await resolveOwnedCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -392,7 +392,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      const created = noteStore.createCampaignShareLink(
+      const created = await noteStore.createCampaignShareLink(
         campaign.id,
         validation.data,
         owner.id,
@@ -413,18 +413,18 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/share-links/:shareLinkId',
-    (
+    async (
       request: Request<ShareLinkParams>,
       response: Response<CampaignShareLinkRevealResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = await resolveOwnedCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -435,7 +435,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      const reveal = noteStore.getCampaignShareLinkReveal(
+      const reveal = await noteStore.getCampaignShareLinkReveal(
         campaign.id,
         request.params.shareLinkId,
         owner.id,
@@ -465,18 +465,18 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.delete(
     '/api/campaigns/:campaignId/share-links/:shareLinkId',
-    (
+    async (
       request: Request<ShareLinkParams>,
       response: Response<undefined | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveOwnedCampaign(
+      const campaign = await resolveOwnedCampaign(
         noteStore,
         owner,
         request.params.campaignId,
@@ -487,7 +487,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
         return
       }
 
-      const revoked = noteStore.revokeCampaignShareLink(
+      const revoked = await noteStore.revokeCampaignShareLink(
         campaign.id,
         request.params.shareLinkId,
         owner.id,

@@ -19,7 +19,7 @@ import {
 export function registerAuthRoutes(app: Express, context: AppRouteContext) {
   app.post(
     '/api/auth/register',
-    (
+    async (
       request: Request,
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
@@ -38,7 +38,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
       }
 
       const noteStore = context.getNoteStore()
-      const owner = noteStore.createOwnerAccount(validation.data)
+      const owner = await noteStore.createOwnerAccount(validation.data)
 
       if (!owner) {
         response.status(409).json({
@@ -47,14 +47,14 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      const token = noteStore.createOwnerSession(owner.id)
+      const token = await noteStore.createOwnerSession(owner.id)
       response.status(201).json({ token, owner })
     },
   )
 
   app.post(
     '/api/auth/login',
-    (
+    async (
       request: Request,
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
@@ -73,7 +73,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
       }
 
       const noteStore = context.getNoteStore()
-      const owner = noteStore.authenticateOwner(
+      const owner = await noteStore.authenticateOwner(
         validation.data.email,
         validation.data.password,
       )
@@ -83,18 +83,22 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      const token = noteStore.createOwnerSession(owner.id)
+      const token = await noteStore.createOwnerSession(owner.id)
       response.json({ token, owner })
     },
   )
 
   app.get(
     '/api/auth/session',
-    (
+    async (
       request: Request,
       response: Response<CurrentOwnerResponse | ErrorResponse>,
     ) => {
-      const owner = requireAuthenticatedAccount(context.getNoteStore(), request, response)
+      const owner = await requireAuthenticatedAccount(
+        context.getNoteStore(),
+        request,
+        response,
+      )
 
       if (!owner) {
         return
@@ -106,7 +110,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/auth/logout',
-    (
+    async (
       request: Request,
       response: Response<undefined | ErrorResponse>,
     ) => {
@@ -117,7 +121,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      context.getNoteStore().deleteOwnerSession(token)
+      await context.getNoteStore().deleteOwnerSession(token)
       response.status(204).send()
     },
   )

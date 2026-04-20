@@ -25,18 +25,18 @@ import { validateNoteCreateInput, validateNoteInput } from '../validation.js'
 export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) {
   app.get(
     '/api/overview',
-    (
+    async (
       request: Request,
       response: Response<NotesOverview | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         readRequestedCampaignId(request),
@@ -48,10 +48,10 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       }
 
       response.json(
-        buildOverview(
+        await buildOverview(
           noteStore,
           campaign.id,
-          noteStore.getUserMembershipForCampaign(owner.id, campaign.id),
+          await noteStore.getUserMembershipForCampaign(owner.id, campaign.id),
         ),
       )
     },
@@ -59,18 +59,18 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes',
-    (
+    async (
       request: Request,
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         readRequestedCampaignId(request),
@@ -81,24 +81,24 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      response.json({ notes: noteStore.listNotes(campaign.id) })
+      response.json({ notes: await noteStore.listNotes(campaign.id) })
     },
   )
 
   app.get(
     '/api/notes/activity',
-    (
+    async (
       request: Request,
       response: Response<NoteActivityResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         readRequestedCampaignId(request),
@@ -118,8 +118,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       const membershipId = readRequestedMembershipId(request)
 
       if (membershipId) {
-        const membership = noteStore
-          .listCampaignMemberships(campaign.id)
+        const membership = (await noteStore.listCampaignMemberships(campaign.id))
           .find((candidate) => candidate.id === membershipId)
 
         if (!membership) {
@@ -131,22 +130,22 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       }
 
       response.json(
-        buildNoteActivityResponse(noteStore, campaign.id, membershipId, limit),
+        await buildNoteActivityResponse(noteStore, campaign.id, membershipId, limit),
       )
     },
   )
 
   app.get(
     '/api/notes/sessions',
-    (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
+    async (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         readRequestedCampaignId(request),
@@ -157,18 +156,18 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      response.json({ sessions: buildSessions(noteStore, campaign.id) })
+      response.json({ sessions: await buildSessions(noteStore, campaign.id) })
     },
   )
 
   app.post(
     '/api/notes',
-    (
+    async (
       request: Request,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
@@ -184,7 +183,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         validation.data.campaignId,
@@ -195,7 +194,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      const membership = noteStore.getUserMembershipForCampaign(owner.id, campaign.id)
+      const membership = await noteStore.getUserMembershipForCampaign(owner.id, campaign.id)
 
       if (!membership) {
         response.status(403).json({ error: 'You do not have access to this campaign.' })
@@ -203,7 +202,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       }
 
       try {
-        const note = noteStore.createNote(
+        const note = await noteStore.createNote(
           {
             ...validation.data,
             campaignId: campaign.id,
@@ -222,18 +221,18 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/sessions/:sessionId',
-    (
+    async (
       request: Request<SessionParams>,
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const campaign = resolveAccessibleCampaign(
+      const campaign = await resolveAccessibleCampaign(
         noteStore,
         owner,
         readRequestedCampaignId(request),
@@ -244,7 +243,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      const notes = noteStore.getSessionNotes(campaign.id, request.params.sessionId)
+      const notes = await noteStore.getSessionNotes(campaign.id, request.params.sessionId)
 
       response.json({ notes })
     },
@@ -252,18 +251,18 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/:noteId',
-    (
+    async (
       request: Request<NoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const note = noteStore.getNote(request.params.noteId)
+      const note = await noteStore.getNote(request.params.noteId)
 
       if (!note) {
         response
@@ -272,7 +271,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
+      if (!(await noteStore.userHasCampaignAccess(owner.id, note.campaignId))) {
         response.status(403).json({ error: 'You do not have access to this note.' })
         return
       }
@@ -283,18 +282,18 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/:noteId/backlinks',
-    (
+    async (
       request: Request<NoteParams>,
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const note = noteStore.getNote(request.params.noteId)
+      const note = await noteStore.getNote(request.params.noteId)
 
       if (!note) {
         response
@@ -303,30 +302,30 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
+      if (!(await noteStore.userHasCampaignAccess(owner.id, note.campaignId))) {
         response.status(403).json({ error: 'You do not have access to this note.' })
         return
       }
 
-      const backlinks = noteStore.getBacklinks(request.params.noteId)
+      const backlinks = await noteStore.getBacklinks(request.params.noteId)
       response.json({ notes: backlinks })
     },
   )
 
   app.put(
     '/api/notes/:noteId',
-    (
+    async (
       request: Request<NoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const existingNote = noteStore.getNote(request.params.noteId)
+      const existingNote = await noteStore.getNote(request.params.noteId)
 
       if (!existingNote) {
         response
@@ -335,7 +334,10 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      const membership = noteStore.getUserMembershipForCampaign(owner.id, existingNote.campaignId)
+      const membership = await noteStore.getUserMembershipForCampaign(
+        owner.id,
+        existingNote.campaignId,
+      )
 
       if (!membership) {
         response.status(403).json({ error: 'You do not have access to this note.' })
@@ -353,7 +355,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       }
 
       try {
-        const note = noteStore.updateNote(
+        const note = await noteStore.updateNote(
           request.params.noteId,
           {
             ...validation.data,
@@ -380,18 +382,18 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.delete(
     '/api/notes/:noteId',
-    (
+    async (
       request: Request<NoteParams>,
       response: Response<undefined | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const note = noteStore.getNote(request.params.noteId)
+      const note = await noteStore.getNote(request.params.noteId)
 
       if (!note) {
         response
@@ -400,12 +402,12 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
         return
       }
 
-      if (!noteStore.userHasCampaignAccess(owner.id, note.campaignId)) {
+      if (!(await noteStore.userHasCampaignAccess(owner.id, note.campaignId))) {
         response.status(403).json({ error: 'You do not have access to this note.' })
         return
       }
 
-      noteStore.deleteNote(request.params.noteId)
+      await noteStore.deleteNote(request.params.noteId)
       response.status(204).send()
     },
   )
