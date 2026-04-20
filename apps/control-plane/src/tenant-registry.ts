@@ -1,4 +1,8 @@
 import Database, { type Database as DatabaseType } from 'better-sqlite3'
+import {
+  assertGeneratedTenantSubdomain,
+  assertPersistedTenantSubdomain,
+} from './tenant-subdomain.js'
 import { tenantStates, type Tenant, type TenantState, type StateTransition } from './types.js'
 
 const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
@@ -187,11 +191,15 @@ export class TenantRegistry {
       }
 
       if (existingTenant.subdomain != null) {
-        return existingTenant.subdomain
+        return assertPersistedTenantSubdomain(
+          tenantId,
+          existingTenant.subdomain,
+          'provisioning or deprovisioning tenant resources',
+        )
       }
 
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-        const candidate = createCandidate()
+        const candidate = assertGeneratedTenantSubdomain(createCandidate())
 
         try {
           const result = this.db
@@ -209,7 +217,11 @@ export class TenantRegistry {
 
           const updatedTenant = this.getTenant(tenantId)
           if (updatedTenant?.subdomain != null) {
-            return updatedTenant.subdomain
+            return assertPersistedTenantSubdomain(
+              tenantId,
+              updatedTenant.subdomain,
+              'provisioning or deprovisioning tenant resources',
+            )
           }
         } catch (error) {
           if (isSqliteUniqueConstraintError(error)) {

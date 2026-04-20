@@ -160,7 +160,7 @@ describe('TenantRegistry', () => {
     }
   })
 
-  it('preserves empty-string subdomains instead of collapsing them to null', async () => {
+  it('preserves empty-string subdomains for inspection but rejects them for reservation', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
     const databasePath = join(directory, 'registry.sqlite')
     const tenantRegistry = new TenantRegistry(databasePath)
@@ -188,9 +188,9 @@ describe('TenantRegistry', () => {
 
       try {
         assert.equal(reopenedRegistry.getTenant('tenant-1')?.subdomain, '')
-        assert.equal(
-          reopenedRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
-          '',
+        assert.throws(
+          () => reopenedRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
+          /invalid persisted subdomain ""/,
         )
       } finally {
         reopenedRegistry.close()

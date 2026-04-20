@@ -202,6 +202,47 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('marks tenant failed when a persisted subdomain is invalid', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', '')
+
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+        }),
+        /invalid persisted subdomain ""/,
+      )
+
+      const tenant = tenantRegistry.getTenant('tenant-demo')
+      assert.equal(tenant?.currentState, 'failed')
+      assert.equal(tenant?.desiredState, 'ready')
+      assert.deepEqual(databaseManager.createdDatabaseNames, [])
+      assert.equal(infrastructureManager.bundles.length, 0)
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
   it('deprovisions tenant resources and clears the storage reference', async () => {
     const tenantRegistry = new TenantRegistry(':memory:')
     const databaseManager = new FakeDatabaseManager()
@@ -257,6 +298,57 @@ describe('TenantProvisioningService', () => {
         infrastructureManager.deletedResources[0].namespace,
         'tenant-t-existing123456',
       )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
+  it('fails deprovisioning when a persisted subdomain is invalid', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', '')
+      tenantRegistry.updateTenantStorageReference('tenant-demo', 'broken-storage-handle')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'ready',
+        'control-plane',
+        'Provisioned already',
+      )
+      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+
+      await assert.rejects(
+        provisioningService.deprovisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+        }),
+        /invalid persisted subdomain ""/,
+      )
+
+      assert.equal(infrastructureManager.deletedResources.length, 0)
+      assert.deepEqual(databaseManager.deletedDatabaseNames, [])
+      assert.equal(
+        tenantRegistry.getTenant('tenant-demo')?.storageReference,
+        'broken-storage-handle',
+      )
+      assert.equal(tenantRegistry.getTenant('tenant-demo')?.currentState, 'ready')
     } finally {
       await provisioningService.close()
       tenantRegistry.close()

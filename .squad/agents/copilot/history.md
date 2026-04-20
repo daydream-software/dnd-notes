@@ -71,3 +71,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Scope: add a lint guard so future `||` defaults on nullable values get reviewed as explicit nullish handling instead of silently collapsing valid falsy data.
 - Delivered: enabled `@typescript-eslint/prefer-nullish-coalescing` in all three workspace ESLint configs with typed linting, added local `test/tsconfig.json` files for the API and control-plane test suites so typed lint covers tests cleanly, and rewrote current empty-string fallback sites to explicit helpers/ternaries where empty strings are intentionally normalized.
 - Validation: repo-wide `npm run lint && npm run test:ci && npm run build` passed after the lint-rule rollout.
+
+## 2026-04-20 PR #64 fourth review follow-up
+- Scope: address the latest Copilot review threads about invalid persisted tenant subdomains reaching provisioning and deprovisioning flows.
+- Delivered: extracted shared tenant-subdomain validation helpers, taught `TenantRegistry.reserveTenantSubdomain()` to reject invalid persisted values (while still preserving them for inspection), moved provisioning subdomain validation into the failure-handled path so invalid rows mark the tenant failed instead of generating broken resource names, and changed deprovisioning to use explicit null checks plus the same validation so empty-string rows no longer silently skip cleanup.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.

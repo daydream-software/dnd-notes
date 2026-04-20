@@ -15,6 +15,7 @@ import {
 } from '@kubernetes/client-node'
 import { randomBytes } from 'node:crypto'
 import { Pool } from 'pg'
+import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
 import type {
   Tenant,
   TenantDeprovisionResponse,
@@ -144,14 +145,17 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     }
 
     const refreshedTenant = this.getExistingTenant(tenant.id)
-    const subdomain = this.tenantRegistry.reserveTenantSubdomain(
-      refreshedTenant.id,
-      () => this.createOpaqueSubdomainCandidate(),
-    )
-
-    this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
 
     try {
+      this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
+      const subdomain = assertPersistedTenantSubdomain(
+        refreshedTenant.id,
+        this.tenantRegistry.reserveTenantSubdomain(
+          refreshedTenant.id,
+          () => this.createOpaqueSubdomainCandidate(),
+        ),
+        'provisioning tenant resources',
+      )
       const database = await this.databaseManager.ensureTenantDatabase(
         refreshedTenant,
         subdomain,
@@ -220,10 +224,15 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       }
     }
 
-    if (tenant.subdomain) {
+    if (tenant.subdomain != null) {
+      const subdomain = assertPersistedTenantSubdomain(
+        tenant.id,
+        tenant.subdomain,
+        'deprovisioning tenant resources',
+      )
       const resources = buildTenantResourceNames({
         tenant,
-        subdomain: tenant.subdomain,
+        subdomain,
         baseDomain: this.baseDomain,
         imageRepository: this.imageRepository,
       })
