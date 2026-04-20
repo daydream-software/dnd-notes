@@ -32,6 +32,10 @@ Keycloak is exposed at:
 http://keycloak.127.0.0.1.nip.io:8080
 ```
 
+Keycloak now gets that full external URL injected during bootstrap so its own
+redirects keep the mapped host port instead of collapsing back to plain
+`http://keycloak.127.0.0.1.nip.io/`.
+
 Seeded credentials:
 
 | Account | Username | Password |

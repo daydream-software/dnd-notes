@@ -81,6 +81,8 @@ spec:
               value: admin
             - name: KC_BOOTSTRAP_ADMIN_PASSWORD
               value: admin
+            - name: KC_HOSTNAME
+              value: http://keycloak.127.0.0.1.nip.io:8080
             - name: KEYCLOAK_ADMIN
               value: admin
             - name: KEYCLOAK_ADMIN_PASSWORD

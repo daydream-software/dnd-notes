@@ -66,6 +66,17 @@ wait_for_kube_api() {
   return 1
 }
 
+apply_keycloak_manifest() {
+  local keycloak_external_url="http://keycloak.127.0.0.1.nip.io:${HTTP_PORT}"
+
+  kubectl apply -f "${ROOT}/platform/k3d/keycloak.yaml"
+  kubectl set env \
+    -n "${PLATFORM_NAMESPACE}" \
+    deployment/platform-keycloak \
+    KC_HOSTNAME="${keycloak_external_url}" \
+    >/dev/null
+}
+
 if [[ "${1:-}" == "--help" ]]; then
   usage
   exit 0
@@ -97,7 +108,7 @@ kubectl apply -f "${INGRESS_NGINX_MANIFEST_URL}"
 wait_for_rollout ingress-nginx ingress-nginx-controller 240s
 
 kubectl apply -f "${ROOT}/platform/k3d/postgres.yaml"
-kubectl apply -f "${ROOT}/platform/k3d/keycloak.yaml"
+apply_keycloak_manifest
 
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-postgres 180s
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
