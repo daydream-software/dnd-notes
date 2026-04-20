@@ -11,6 +11,7 @@ import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
 import {
   createNoteStore,
+  initializeDatabaseOrClose,
   resolveNoteStoreBackend,
   restoreNoteStoreFromBackup,
 } from '../src/note-store.js'
@@ -138,6 +139,58 @@ test('postgres-backed backups export a SQLite-compatible snapshot', async (t) =>
   }
 })
 
+test('postgres-backed backups copy snapshot tables in bounded batches', async (t) => {
+  const db = newDb({
+    autoCreateForeignKeyIndices: true,
+  })
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
+  const noteStore = await createNoteStore({
+    backend: 'postgres',
+    postgresPool: pool,
+  })
+  t.after(async () => {
+    await noteStore.close()
+    await pool.end()
+  })
+
+  const notes = Array.from({ length: 105 }, (_value, index) => ({
+    campaignId: defaultCampaignId,
+    title: `Snapshot note ${index + 1}`,
+    body: `Export note ${index + 1}`,
+    tags: ['snapshot'],
+    status: 'active' as const,
+    sessionName: null,
+  }))
+  await noteStore.resetNotes(notes, defaultCampaignId)
+
+  await mkdir(runtimeDirectory, { recursive: true })
+  const backupPath = join(runtimeDirectory, `postgres-export-batched-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await rm(backupPath, { force: true })
+  })
+
+  const queryLog: string[] = []
+  const originalQuery = pool.query.bind(pool)
+  pool.query = async (text, values) => {
+    const sql = typeof text === 'string' ? text : text.text
+    queryLog.push(sql)
+    return originalQuery(text as never, values)
+  }
+
+  await noteStore.backupDatabase(backupPath)
+
+  const noteSelectQueries = queryLog.filter((sql) => sql.includes('FROM notes'))
+  assert.ok(
+    noteSelectQueries.length >= 2,
+    `expected batched notes export queries, saw ${noteSelectQueries.length}`,
+  )
+  for (const sql of noteSelectQueries) {
+    assert.match(sql, /ORDER BY id ASC/i)
+    assert.match(sql, /LIMIT \$\d+/i)
+  }
+})
+
 test('postgres-backed backups roll back partial snapshot writes when export fails', async (t) => {
   const db = newDb({
     autoCreateForeignKeyIndices: true,
@@ -243,6 +296,26 @@ test('postgres restore fails fast when no pool or DATABASE_URL is configured', a
       }),
     /DATABASE_URL is required when the Postgres note store is selected\./,
   )
+})
+
+test('initializeDatabaseOrClose closes the database before rethrowing init failures', async () => {
+  const calls: string[] = []
+  const database = {
+    async close() {
+      calls.push('close')
+    },
+  }
+  const initializationError = new Error('init failed')
+
+  await assert.rejects(
+    () =>
+      initializeDatabaseOrClose(database, async () => {
+        calls.push('initialize')
+        throw initializationError
+      }),
+    initializationError,
+  )
+  assert.deepEqual(calls, ['initialize', 'close'])
 })
 
 test('explicit sqlite dbPath beats an ambient DATABASE_URL', () => {

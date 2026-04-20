@@ -46,6 +46,10 @@ export interface PostgresClientLike extends PostgresQueryable {
   release(): void
 }
 
+interface SqliteTransactionContext {
+  readonly holdsExclusiveAccess: true
+}
+
 function isNamedParameterObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
@@ -118,23 +122,30 @@ export function createSqliteDatabase(
   if (!options.readonly) {
     database.pragma('foreign_keys = ON')
   }
-  const transactionExecutor = new AsyncLocalStorage<boolean>()
+  const transactionExecutor = new AsyncLocalStorage<SqliteTransactionContext>()
   let operationQueue = Promise.resolve()
 
-  function runSerialized<Result>(operation: () => Result | Promise<Result>) {
-    // SQLite shares one connection here, so async transaction callbacks must keep all
-    // unrelated work queued until COMMIT/ROLLBACK to preserve atomicity across awaits.
-    if (transactionExecutor.getStore()) {
-      return Promise.resolve().then(operation)
+  async function runSerialized<Result>(operation: () => Result | Promise<Result>) {
+    const activeTransaction = transactionExecutor.getStore()
+    if (activeTransaction?.holdsExclusiveAccess) {
+      return operation()
     }
 
-    const pendingOperation = operationQueue.then(() => operation())
-    operationQueue = pendingOperation.then(
-      () => undefined,
-      () => undefined,
-    )
+    let releaseQueue = () => {}
+    const previousOperation = operationQueue
+    operationQueue = new Promise<void>((resolve) => {
+      releaseQueue = resolve
+    })
 
-    return pendingOperation
+    await previousOperation
+
+    try {
+      // SQLite shares one connection here. Keep the queue lease until the full async
+      // operation settles so other requests cannot observe half-finished transaction work.
+      return await operation()
+    } finally {
+      releaseQueue()
+    }
   }
 
   return {
@@ -193,10 +204,13 @@ export function createSqliteDatabase(
             return callback(...args)
           }
 
-          database.exec('BEGIN')
+          database.exec('BEGIN IMMEDIATE')
 
           try {
-            const result = await transactionExecutor.run(true, () => callback(...args))
+            const result = await transactionExecutor.run(
+              { holdsExclusiveAccess: true },
+              () => callback(...args),
+            )
             database.exec('COMMIT')
             return result
           } catch (error) {
@@ -252,7 +266,7 @@ function resolvePostgresPool(options: {
   if (options.pool) {
     return {
       pool: options.pool,
-      ownsPool: false,
+      ownedPool: undefined,
     }
   }
 
@@ -264,9 +278,11 @@ function resolvePostgresPool(options: {
     )
   }
 
+  const ownedPool = createOwnedPostgresPool(connectionString)
+
   return {
-    pool: createOwnedPostgresPool(connectionString),
-    ownsPool: true,
+    pool: ownedPool,
+    ownedPool,
   }
 }
 
@@ -274,7 +290,7 @@ export function createPostgresDatabase(options: {
   connectionString?: string
   pool?: PostgresPoolLike
 }): NoteStoreDatabase {
-  const { pool, ownsPool } = resolvePostgresPool(options)
+  const { pool, ownedPool } = resolvePostgresPool(options)
   const transactionExecutor = new AsyncLocalStorage<PostgresQueryable>()
 
   function getExecutor() {
@@ -343,9 +359,7 @@ export function createPostgresDatabase(options: {
       }
     },
     async close() {
-      if (ownsPool) {
-        await pool.end()
-      }
+      await ownedPool?.end()
     },
   }
 }

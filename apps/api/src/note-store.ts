@@ -276,8 +276,20 @@ const snapshotDeletionOrder = [...snapshotTableDefinitions]
   .reverse()
   .map((definition) => definition.name)
 
+const snapshotCopyBatchSize = 100
+
+interface SnapshotRow extends Record<string, unknown> {
+  id: string
+}
+
 function buildSnapshotSelectSql(definition: (typeof snapshotTableDefinitions)[number]) {
-  return `SELECT ${definition.columns.join(', ')} FROM ${definition.name}`
+  return `
+    SELECT ${definition.columns.join(', ')}
+    FROM ${definition.name}
+    WHERE (@afterId IS NULL OR id > @afterId)
+    ORDER BY id ASC
+    LIMIT @batchSize
+  `
 }
 
 function buildSnapshotInsertSql(definition: (typeof snapshotTableDefinitions)[number]) {
@@ -298,14 +310,25 @@ async function copySnapshotTables(
   destinationDatabase: NoteStoreDatabase,
 ) {
   for (const definition of snapshotTableDefinitions) {
-    const rows = (await sourceDatabase
-      .prepare<Record<string, unknown>>(buildSnapshotSelectSql(definition))
-      .all()) as Array<Record<string, unknown>>
-
+    const selectStatement = sourceDatabase.prepare<SnapshotRow>(buildSnapshotSelectSql(definition))
     const insertStatement = destinationDatabase.prepare(buildSnapshotInsertSql(definition))
+    let afterId: string | null = null
 
-    for (const row of rows) {
-      await insertStatement.run(row)
+    while (true) {
+      const rows = (await selectStatement.all({
+        afterId,
+        batchSize: snapshotCopyBatchSize,
+      })) as SnapshotRow[]
+
+      for (const row of rows) {
+        await insertStatement.run(row)
+      }
+
+      if (rows.length < snapshotCopyBatchSize) {
+        break
+      }
+
+      afterId = rows.at(-1)?.id ?? null
     }
   }
 }
@@ -463,6 +486,27 @@ export function resolveNoteStoreBackend(
   return resolveDatabaseUrl(options, environment) ? 'postgres' : 'sqlite'
 }
 
+export async function initializeDatabaseOrClose(
+  database: Pick<NoteStoreDatabase, 'close'>,
+  initialize: () => Promise<void>,
+) {
+  try {
+    await initialize()
+  } catch (error) {
+    try {
+      await database.close()
+    } catch (closeError) {
+      throw new AggregateError(
+        [error, closeError],
+        'Failed to initialize the note store database and close it cleanly.',
+        { cause: closeError },
+      )
+    }
+
+    throw error
+  }
+}
+
 function createPasswordHash(password: string) {
   const salt = randomBytes(16).toString('hex')
   const derivedKey = scryptSync(password, salt, 64).toString('hex')
@@ -603,7 +647,9 @@ export async function createNoteStore(
         })
       : createSqliteDatabase(dbPath)
 
-  await initializeNoteStoreDatabase(database, configuredSiteAdminEmails)
+  await initializeDatabaseOrClose(database, () =>
+    initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
+  )
 
   const selectCampaignById = database.prepare(`
     SELECT

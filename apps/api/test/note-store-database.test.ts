@@ -82,6 +82,56 @@ test('sqlite async transactions keep unrelated reads and writes queued until com
   }
 })
 
+test('sqlite async transactions roll back before queued readers resume', async () => {
+  const database = createSqliteDatabase(':memory:')
+
+  try {
+    await database.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL
+      )
+    `)
+
+    const insertNote = database.prepare('INSERT INTO notes (title) VALUES (?)')
+    const listNotes = database.prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC')
+    const releaseTransaction = createDeferred()
+    const transactionEntered = createDeferred()
+    const rollbackError = new Error('rollback requested')
+
+    const createNotesInTransaction = database.transaction(async () => {
+      await insertNote.run('before-rollback')
+      transactionEntered.resolve()
+      await releaseTransaction.promise
+      throw rollbackError
+    })
+
+    const transactionPromise = createNotesInTransaction()
+    await transactionEntered.promise
+
+    let queuedReadResolved = false
+    let queuedReadTitles: string[] = []
+    const queuedReadPromise = listNotes.all().then((rows) => {
+      queuedReadResolved = true
+      queuedReadTitles = rows.map((row) => row.title)
+    })
+
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.equal(queuedReadResolved, false)
+
+    releaseTransaction.resolve()
+    await assert.rejects(() => transactionPromise, rollbackError)
+    await queuedReadPromise
+
+    assert.deepEqual(queuedReadTitles, [])
+    const notes = await listNotes.all()
+    assert.deepEqual(notes, [])
+  } finally {
+    await database.close()
+  }
+})
+
 test('createPostgresDatabase rejects missing pool and connection string', () => {
   assert.throws(
     () => createPostgresDatabase({ connectionString: '   ' }),
