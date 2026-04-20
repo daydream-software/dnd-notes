@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, it } from 'node:test'
+import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 
 describe('TenantRegistry', () => {
@@ -191,6 +192,47 @@ describe('TenantRegistry', () => {
         assert.throws(
           () => reopenedRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
           /invalid persisted subdomain ""/,
+        )
+      } finally {
+        reopenedRegistry.close()
+      }
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects overly long persisted subdomains during reservation', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const tenantRegistry = new TenantRegistry(databasePath)
+    const invalidSubdomain = `t-${'a'.repeat(maxTenantSubdomainLength - 1)}`
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.close()
+
+      const rawDb = new Database(databasePath)
+      rawDb
+        .prepare(
+          `UPDATE tenants
+           SET subdomain = ?
+           WHERE id = ?`,
+        )
+        .run(invalidSubdomain, 'tenant-1')
+      rawDb.close()
+
+      const reopenedRegistry = new TenantRegistry(databasePath)
+
+      try {
+        assert.equal(reopenedRegistry.getTenant('tenant-1')?.subdomain, invalidSubdomain)
+        assert.throws(
+          () => reopenedRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
+          /invalid persisted subdomain/,
         )
       } finally {
         reopenedRegistry.close()

@@ -13,7 +13,7 @@ import {
   type V1Service,
   type V1ServicePort,
 } from '@kubernetes/client-node'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { Pool } from 'pg'
 import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
 import type {
@@ -31,6 +31,7 @@ const defaultReadyPollIntervalMs = 2_000
 const defaultDeleteTimeoutMs = 120_000
 const defaultTenantStorageRequest = '1Gi'
 const defaultTenantStorageMountPath = '/app/data'
+const maxKubernetesLabelValueLength = 63
 
 type KubernetesObjectClient = Pick<
   KubernetesObjectApi,
@@ -702,7 +703,7 @@ function buildTenantSelectorLabels(tenant: Tenant): Record<string, string> {
   return {
     'app.kubernetes.io/name': 'dnd-notes',
     'app.kubernetes.io/component': 'tenant-app',
-    'dnd-notes.dev/tenant-id': tenant.id,
+    'dnd-notes.dev/tenant-id': normalizeKubernetesLabelValue(tenant.id),
   }
 }
 
@@ -729,6 +730,29 @@ function buildTenantDatabaseName(tenantId: string, subdomain: string): string {
   const name = `tenant_${normalizedTenantId}_${normalizedSubdomain}`.slice(0, 63)
 
   return name.replace(/_+$/g, '')
+}
+
+function normalizeKubernetesLabelValue(value: string): string {
+  const normalized = value
+    .toLowerCase()
+    .replace(/[^a-z0-9.-]+/g, '-')
+    .replace(/^[^a-z0-9]+|[^a-z0-9]+$/g, '')
+
+  if (normalized === '') {
+    return `tenant-${createHash('sha256').update(value).digest('hex').slice(0, 12)}`
+  }
+
+  if (normalized.length <= maxKubernetesLabelValueLength) {
+    return normalized
+  }
+
+  const digest = createHash('sha256').update(value).digest('hex').slice(0, 8)
+  const maxPrefixLength = maxKubernetesLabelValueLength - digest.length - 1
+  const trimmedPrefix = normalized
+    .slice(0, maxPrefixLength)
+    .replace(/[^a-z0-9]+$/g, '')
+
+  return `${trimmedPrefix}-${digest}`
 }
 
 function quoteIdentifier(identifier: string): string {

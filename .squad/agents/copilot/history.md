@@ -76,3 +76,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Scope: address the latest Copilot review threads about invalid persisted tenant subdomains reaching provisioning and deprovisioning flows.
 - Delivered: extracted shared tenant-subdomain validation helpers, taught `TenantRegistry.reserveTenantSubdomain()` to reject invalid persisted values (while still preserving them for inspection), moved provisioning subdomain validation into the failure-handled path so invalid rows mark the tenant failed instead of generating broken resource names, and changed deprovisioning to use explicit null checks plus the same validation so empty-string rows no longer silently skip cleanup.
 - Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 fifth review follow-up
+- Scope: handle the next Copilot comments on Kubernetes label safety for tenant IDs and length bounds for tenant subdomains.
+- Delivered: bounded tenant subdomains to the strictest derived Kubernetes name budget (the PVC name), added regression coverage for overly long persisted subdomains, and normalized tenant IDs before projecting them into Kubernetes labels/selectors so arbitrary control-plane IDs no longer break Kubernetes apply.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.

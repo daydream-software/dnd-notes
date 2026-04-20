@@ -8,6 +8,7 @@ import {
   buildTenantResourceNames,
   type TenantProvisioningPort,
 } from '../src/provisioning.js'
+import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 import type { TenantProvisioningResources } from '../src/types.js'
 
@@ -438,6 +439,82 @@ describe('TenantProvisioningService', () => {
             mountPath: '/app/data',
           },
         ],
+      )
+    } finally {
+      tenantRegistry.close()
+    }
+  })
+
+  it('keeps derived resource names within kubernetes limits for max-length subdomains', () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const maxLengthSubdomain = `t-${'a'.repeat(maxTenantSubdomainLength - 2)}`
+
+    try {
+      const tenant = tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      const bundle = buildTenantInfrastructureBundle({
+        tenant,
+        subdomain: maxLengthSubdomain,
+        database: {
+          databaseName: 'tenant_demo',
+          connectionString: 'postgresql://postgres:postgres@postgres.default:5432/tenant_demo',
+        },
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+        publicScheme: 'https',
+        tenantPort: 3000,
+      })
+
+      assert.equal(maxLengthSubdomain.length, maxTenantSubdomainLength)
+      assert.ok(bundle.resources.namespace.length <= 63)
+      assert.ok(bundle.resources.pvcName.length <= 63)
+      assert.equal(bundle.resources.hostname, `${maxLengthSubdomain}.dnd-notes.test`)
+    } finally {
+      tenantRegistry.close()
+    }
+  })
+
+  it('normalizes tenant IDs before using them in kubernetes labels', () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+
+    try {
+      const tenant = tenantRegistry.createTenant({
+        id: 'Tenant ID With Spaces / UPPERCASE / punctuation / '.repeat(3),
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      const bundle = buildTenantInfrastructureBundle({
+        tenant,
+        subdomain: 't-opaque123456',
+        database: {
+          databaseName: 'tenant_demo_t_opaque123456',
+          connectionString:
+            'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+        },
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+        publicScheme: 'https',
+        tenantPort: 3000,
+      })
+
+      const labelValue = bundle.namespace.metadata?.labels?.['dnd-notes.dev/tenant-id']
+
+      assert.ok(labelValue)
+      assert.match(labelValue, /^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/)
+      assert.ok(labelValue.length <= 63)
+      assert.equal(bundle.service.spec?.selector?.['dnd-notes.dev/tenant-id'], labelValue)
+      assert.equal(
+        bundle.deployment.spec?.selector?.matchLabels?.['dnd-notes.dev/tenant-id'],
+        labelValue,
+      )
+      assert.equal(
+        bundle.deployment.spec?.template?.metadata?.labels?.['dnd-notes.dev/tenant-id'],
+        labelValue,
       )
     } finally {
       tenantRegistry.close()

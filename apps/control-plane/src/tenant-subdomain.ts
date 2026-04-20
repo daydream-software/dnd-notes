@@ -1,7 +1,15 @@
+const maxKubernetesObjectNameLength = 63
+const tenantPvcNamePrefix = 'dnd-notes-data-'
+export const maxTenantSubdomainLength =
+  maxKubernetesObjectNameLength - tenantPvcNamePrefix.length
+
 const tenantSubdomainPattern = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 
 export function isValidTenantSubdomain(subdomain: string): boolean {
-  return tenantSubdomainPattern.test(subdomain)
+  return (
+    subdomain.length <= maxTenantSubdomainLength &&
+    tenantSubdomainPattern.test(subdomain)
+  )
 }
 
 export function assertPersistedTenantSubdomain(
