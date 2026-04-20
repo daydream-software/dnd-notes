@@ -6951,3 +6951,39 @@ This keeps the operator-facing contract boring during the adapter port. We get P
 
 **By:** Data
 
+
+### 2026-04-20: Root npm test exit-code contract
+
+**By:** Brand (Platform Dev)  
+**Requested by:** FFMikha  
+**Status:** IMPLEMENTED
+
+## Problem
+
+The repo root used npm's workspace test aggregation (`npm run test --workspaces --if-present`) for `npm test`, but the user reported that a failing workspace did not always surface as a non-zero exit from the root command. Even when local reproduction did not show the bad exit code on demand, the top-level failure contract was too important to leave to aggregator behavior.
+
+## Decision
+
+Make the root test path explicit in `package.json`:
+
+- keep per-workspace wrappers with explicit `apps/*` selectors
+- add missing root wrappers for `apps/api` and `apps/control-plane`
+- define root `npm test` as:
+
+```json
+"test": "npm run test:web && npm run test:api && npm run test:control-plane"
+```
+
+## Rationale
+
+- Guarantees a deterministic non-zero exit as soon as any workspace test command fails
+- Stays aligned with the repo's existing explicit workspace-path pattern (`apps/web`)
+- Keeps CI and local developer experience on the same root entrypoint without depending on npm's aggregation semantics across mixed test runners
+
+## Validation
+
+- `npm run lint` ✅
+- `npm run build` ✅
+- healthy `npm test` exits `0` ✅
+- induced temporary failing test in `apps/control-plane/test/zz-temp-exit-code.test.ts` makes root `npm test` exit `1` ✅
+- temporary repro file removed before finish ✅
