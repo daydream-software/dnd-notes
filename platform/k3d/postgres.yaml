@@ -3,6 +3,8 @@ kind: Secret
 metadata:
   name: platform-postgres-env
   namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/warning: Development-only Postgres credentials. Never reuse outside local k3d.
 type: Opaque
 stringData:
   POSTGRES_USER: postgres

@@ -49,6 +49,9 @@ Seeded credentials:
 | Test realm user | `owner@example.com` | `password` |
 | Test realm site admin | `site-admin@example.com` | `password` |
 
+These checked-in credentials are **development-only** for the local k3d lane.
+Never reuse them outside this local environment.
+
 The imported realm is `dnd-notes-dev`. This keeps the local auth provider present in the standard k3d loop even though tenant/control-plane OIDC wiring itself still belongs to `#56`.
 
 ## What `k3d:smoke` proves

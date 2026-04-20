@@ -139,3 +139,7 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Investigation result: the failed `k3d Smoke` run the user flagged (`24691692504`) was tied to older head SHA `2f0aa32`, while the newer run on `3b75dcf` already completed successfully.
 - Delivered: committed `d6032f4` (`fix(ci): force direct k3d image import for #63`), which changes `scripts/k3d/build-tenant-image.sh` to call `k3d image import --mode direct ...` and documents the new `K3D_IMAGE_IMPORT_MODE` override. This avoids the tarball-based `tools-node` path that logged `/k3d/images/...tar: no such file or directory` in the older failing CI run.
 - Status: branch `squad/63-formalize-k3d-development-test-environment` was pushed with `d6032f4`, and a fresh `k3d Smoke` run started on that SHA. If more CI investigation is needed later, start from the current run rather than the obsolete failure.
+
+## 2026-04-20 PR #65 second review follow-up
+- Delivered: hardened `scripts/prepare.mjs` so signaled Husky exits no longer report success (`status ?? 1`), taught both k3d scripts to restore the user's prior `kubectl` context on exit, and moved local Keycloak bootstrap admin credentials into a dev-only Secret while annotating the committed Keycloak/Postgres seed credentials as local-only in both manifests and docs.
+- Validation: `bash -n scripts/k3d/*.sh` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the follow-up.

@@ -8,6 +8,7 @@ HTTP_PORT="${K3D_HTTP_PORT:-8080}"
 HTTPS_PORT="${K3D_HTTPS_PORT:-8443}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 INGRESS_NGINX_MANIFEST_URL="${INGRESS_NGINX_MANIFEST_URL:-https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/cloud/deploy.yaml}"
+previous_kube_context=""
 
 usage() {
   cat <<'EOF'
@@ -67,6 +68,17 @@ wait_for_kube_api() {
   return 1
 }
 
+restore_previous_context() {
+  local exit_code=$?
+  set +e
+
+  if [[ -n "${previous_kube_context}" ]]; then
+    kubectl config use-context "${previous_kube_context}" >/dev/null 2>&1
+  fi
+
+  exit "${exit_code}"
+}
+
 apply_keycloak_manifest() {
   local keycloak_external_url="http://keycloak.127.0.0.1.nip.io:${HTTP_PORT}"
 
@@ -86,6 +98,9 @@ fi
 for tool in docker k3d kubectl; do
   require_tool "$tool"
 done
+
+previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
+trap restore_previous_context EXIT
 
 if ! cluster_exists; then
   echo "Creating k3d cluster ${CLUSTER_NAME}..."

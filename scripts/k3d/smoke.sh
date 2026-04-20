@@ -16,6 +16,7 @@ TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-http}"
 TENANT_DATABASE_RUNTIME_URL="${TENANT_DATABASE_RUNTIME_URL:-postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres}"
 KEEP_TENANT="${KEEP_K3D_SMOKE_TENANT:-false}"
 WORK_DIR="$(mktemp -d)"
+previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
 
 control_plane_pid=""
 postgres_forward_pid=""
@@ -132,6 +133,10 @@ cleanup() {
     echo >&2
     echo "Control-plane log (tail):" >&2
     tail -n 200 "${WORK_DIR}/control-plane.log" >&2
+  fi
+
+  if [[ -n "${previous_kube_context}" ]]; then
+    kubectl config use-context "${previous_kube_context}" >/dev/null 2>&1
   fi
 
   rm -rf "${WORK_DIR}"
