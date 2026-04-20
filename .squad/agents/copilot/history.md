@@ -130,3 +130,7 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 
 ## 2026-04-20 Issue #63 cloud-agent unblock config
 - User-approved repo-local agent config updates are ready to commit with the issue work: `.copilot_here/docker/Dockerfile` now installs `k3d` and `kubectl`, and `.copilot_here/docker-broker.json` allows the k3d helper images plus the host bind/namespace behavior needed to exercise the local smoke lane inside the agent environment.
+
+## 2026-04-20 Issue #63 k3s version standardization
+- Delivered: the k3d bootstrap lane now pins the cluster image explicitly instead of inheriting the `k3d` binary default. The current pinned image is `rancher/k3s:v1.35.3-k3s1`, and the CI smoke workflow now aligns its `kubectl` tooling with Kubernetes 1.35 as well.
+- Rationale: local workstations were still creating 1.31 clusters because `k3d` 5.8.3 defaults to an older bundled k3s release. The lane now keeps local and CI smoke runs on an explicit supported Kubernetes minor until we intentionally bump it again.

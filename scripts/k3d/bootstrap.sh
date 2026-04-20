@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
+K3S_IMAGE="${K3D_K3S_IMAGE:-rancher/k3s:v1.35.3-k3s1}"
 HTTP_PORT="${K3D_HTTP_PORT:-8080}"
 HTTPS_PORT="${K3D_HTTPS_PORT:-8443}"
 PLATFORM_NAMESPACE="${PLATFORM_NAMESPACE:-dnd-notes-platform}"
@@ -14,6 +15,7 @@ Bootstrap the local k3d platform environment for dnd-notes.
 
 Environment overrides:
   K3D_CLUSTER_NAME          Cluster name (default: dnd-notes)
+  K3D_K3S_IMAGE             k3s image used for the cluster (default: rancher/k3s:v1.35.3-k3s1)
   K3D_HTTP_PORT             Host port mapped to ingress HTTP (default: 8080)
   K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 8443)
   PLATFORM_NAMESPACE        Namespace for platform services (default: dnd-notes-platform)
@@ -92,6 +94,7 @@ if ! cluster_exists; then
     --servers 1 \
     --agents 1 \
     --wait \
+    --image "${K3S_IMAGE}" \
     --k3s-arg "--disable=traefik@server:0" \
     --port "${HTTP_PORT}:80@loadbalancer" \
     --port "${HTTPS_PORT}:443@loadbalancer"
@@ -116,6 +119,7 @@ wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
 echo
 echo "k3d platform bootstrap complete."
 echo "- Cluster context: k3d-${CLUSTER_NAME}"
+echo "- k3s image: ${K3S_IMAGE}"
 echo "- Platform namespace: ${PLATFORM_NAMESPACE}"
 echo "- Keycloak ingress: http://keycloak.127.0.0.1.nip.io:${HTTP_PORT}"
 echo "- Postgres service: platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432"

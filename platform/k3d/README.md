@@ -26,7 +26,7 @@ cluster down at the end of the job.
 
 ## What `k3d:bootstrap` provisions
 
-- a k3d cluster with Traefik disabled and host ports `8080`/`8443` mapped to the load balancer
+- a k3d cluster pinned to `rancher/k3s:v1.35.3-k3s1` with Traefik disabled and host ports `8080`/`8443` mapped to the load balancer
 - `ingress-nginx`
 - a platform Postgres instance in `dnd-notes-platform`
 - a seeded Keycloak instance in `dnd-notes-platform`
@@ -84,6 +84,7 @@ Both scripts honor a few env overrides when you need a different local shape:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `K3D_CLUSTER_NAME` | `dnd-notes` | k3d cluster name |
+| `K3D_K3S_IMAGE` | `rancher/k3s:v1.35.3-k3s1` | pinned k3s image used by the local cluster |
 | `K3D_HTTP_PORT` | `8080` | host HTTP port for ingress |
 | `K3D_HTTPS_PORT` | `8443` | host HTTPS port for ingress |
 | `TENANT_IMAGE_REPOSITORY` | `ghcr.io/daydream-software/dnd-notes` | tenant image repository |
@@ -112,3 +113,12 @@ The later k3s / managed-cluster rehearsals still own:
 - node restarts, PVC survival, and other stateful failure-mode testing
 - full in-cluster control-plane packaging/deployment shape
 - OIDC request flows and token validation once `#56` starts
+
+## Kubernetes version policy for this lane
+
+The k3d lane is now **explicitly pinned** instead of inheriting whatever default
+Kubernetes version happens to ship with the installed `k3d` binary. The current
+default is `rancher/k3s:v1.35.3-k3s1`, which keeps local workstations and the CI
+smoke workflow on the same supported Kubernetes minor. When we advance the lane
+again, update both `K3D_K3S_IMAGE` in `scripts/k3d/bootstrap.sh` and the
+matching CI env in `.github/workflows/k3d-smoke.yml`.
