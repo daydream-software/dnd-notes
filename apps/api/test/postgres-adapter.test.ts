@@ -9,7 +9,11 @@ import request from 'supertest'
 import { fileURLToPath } from 'node:url'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
-import { createNoteStore, restoreNoteStoreFromBackup } from '../src/note-store.js'
+import {
+  createNoteStore,
+  resolveNoteStoreBackend,
+  restoreNoteStoreFromBackup,
+} from '../src/note-store.js'
 import { registerOwner, withAuth } from './test-helpers.js'
 
 const runtimeDirectory = join(dirname(fileURLToPath(import.meta.url)), '.runtime')
@@ -30,6 +34,7 @@ async function createPostgresTestStore() {
     noteStore,
     async cleanup() {
       await noteStore.close()
+      await pool.end()
     },
   }
 }
@@ -145,6 +150,7 @@ test('postgres-backed backups roll back partial snapshot writes when export fail
   })
   t.after(async () => {
     await noteStore.close()
+    await pool.end()
   })
 
   await noteStore.createOwnerAccount({
@@ -236,5 +242,15 @@ test('postgres restore fails fast when no pool or DATABASE_URL is configured', a
         backend: 'postgres',
       }),
     /DATABASE_URL is required when the Postgres note store is selected\./,
+  )
+})
+
+test('explicit sqlite dbPath beats an ambient DATABASE_URL', () => {
+  assert.equal(
+    resolveNoteStoreBackend(
+      { dbPath: ':memory:' },
+      { DATABASE_URL: 'postgresql://ambient.example/dnd-notes' } as NodeJS.ProcessEnv,
+    ),
+    'sqlite',
   )
 })

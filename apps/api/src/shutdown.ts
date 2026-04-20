@@ -33,7 +33,6 @@ export function createShutdownController(options: ShutdownControllerOptions) {
       timeout = setTimeout(() => {
         resolve({ status: 'timed-out', error: timeoutError })
       }, options.shutdownGracePeriodMs)
-      timeout.unref()
     })
     const result = await Promise.race([closeResourcesResult, timeoutResult])
 
@@ -94,7 +93,6 @@ export function createShutdownController(options: ShutdownControllerOptions) {
       server.closeAllConnections?.()
       safelyFinishShutdown(exitCode)
     }, options.shutdownGracePeriodMs)
-    forceShutdownTimer.unref()
 
     server.close((error) => {
       clearTimeout(forceShutdownTimer)

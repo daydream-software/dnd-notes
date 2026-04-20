@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createPostgresDatabase, createSqliteDatabase } from '../src/note-store-database.js'
+import { chmod, mkdir, rm } from 'node:fs/promises'
+import { randomUUID } from 'node:crypto'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import {
+  createPostgresDatabase,
+  createSqliteDatabase,
+  type PostgresPoolLike,
+} from '../src/note-store-database.js'
 
 function createDeferred() {
   let resolve!: () => void
@@ -11,7 +19,9 @@ function createDeferred() {
   return { promise, resolve }
 }
 
-test('sqlite async transactions keep unrelated statements queued until commit', async () => {
+const runtimeDirectory = join(dirname(fileURLToPath(import.meta.url)), '.runtime')
+
+test('sqlite async transactions keep unrelated reads and writes queued until commit', async () => {
   const database = createSqliteDatabase(':memory:')
 
   try {
@@ -39,6 +49,13 @@ test('sqlite async transactions keep unrelated statements queued until commit', 
     const transactionPromise = createNotesInTransaction()
     await transactionEntered.promise
 
+    let queuedReadResolved = false
+    let queuedReadTitles: string[] = []
+    const queuedReadPromise = listNotes.all().then((rows) => {
+      queuedReadResolved = true
+      queuedReadTitles = rows.map((row) => row.title)
+    })
+
     let queuedInsertResolved = false
     const queuedInsertPromise = insertNote.get('outside').then(() => {
       queuedInsertResolved = true
@@ -46,12 +63,15 @@ test('sqlite async transactions keep unrelated statements queued until commit', 
 
     await Promise.resolve()
     await Promise.resolve()
+    assert.equal(queuedReadResolved, false)
     assert.equal(queuedInsertResolved, false)
 
     releaseTransaction.resolve()
     await transactionPromise
+    await queuedReadPromise
     await queuedInsertPromise
 
+    assert.deepEqual(queuedReadTitles, ['before-await', 'after-await'])
     const notes = await listNotes.all()
     assert.deepEqual(
       notes.map((note) => note.title),
@@ -67,4 +87,64 @@ test('createPostgresDatabase rejects missing pool and connection string', () => 
     () => createPostgresDatabase({ connectionString: '   ' }),
     /Postgres pool or connection string is required to create the Postgres note store database\./,
   )
+})
+
+test('createPostgresDatabase close preserves a provided external pool', async () => {
+  let endCallCount = 0
+  const pool: PostgresPoolLike = {
+    async query() {
+      throw new Error('query should not be called during close()')
+    },
+    async connect() {
+      throw new Error('connect should not be called during close()')
+    },
+    async end() {
+      endCallCount += 1
+    },
+  }
+
+  const database = createPostgresDatabase({ pool })
+  await database.close()
+
+  assert.equal(endCallCount, 0)
+})
+
+test('createSqliteDatabase can open a read-only snapshot without write access', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const dbPath = join(runtimeDirectory, `readonly-snapshot-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await chmod(dbPath, 0o666).catch(() => undefined)
+    await rm(dbPath, { force: true })
+  })
+
+  const writableDatabase = createSqliteDatabase(dbPath)
+
+  try {
+    await writableDatabase.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL
+      )
+    `)
+    await writableDatabase.prepare('INSERT INTO notes (title) VALUES (?)').run('Snapshot note')
+  } finally {
+    await writableDatabase.close()
+  }
+
+  await chmod(dbPath, 0o444)
+
+  const readonlyDatabase = createSqliteDatabase(dbPath, { readonly: true })
+
+  try {
+    const notes = await readonlyDatabase
+      .prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC')
+      .all()
+    assert.deepEqual(notes.map((note) => note.title), ['Snapshot note'])
+    await assert.rejects(
+      () => readonlyDatabase.prepare('INSERT INTO notes (title) VALUES (?)').run('Nope'),
+      /readonly/i,
+    )
+  } finally {
+    await readonlyDatabase.close()
+  }
 })

@@ -26,6 +26,10 @@ export interface NoteStoreDatabase {
   backup?(destinationPath: string): Promise<void>
 }
 
+export interface CreateSqliteDatabaseOptions {
+  readonly?: boolean
+}
+
 export interface PostgresQueryable {
   query<Row extends QueryResultRow = QueryResultRow>(
     text: string,
@@ -96,13 +100,24 @@ function compilePostgresQuery(sql: string, params?: unknown[] | Record<string, u
   return compileNamedParameters(sql, params)
 }
 
-export function createSqliteDatabase(dbPath: string): NoteStoreDatabase {
-  if (dbPath !== ':memory:') {
+export function createSqliteDatabase(
+  dbPath: string,
+  options: CreateSqliteDatabaseOptions = {},
+): NoteStoreDatabase {
+  if (!options.readonly && dbPath !== ':memory:') {
     mkdirSync(dirname(dbPath), { recursive: true })
   }
 
-  const database = new Database(dbPath)
-  database.pragma('foreign_keys = ON')
+  const database = options.readonly
+    ? new Database(dbPath, {
+        readonly: true,
+        fileMustExist: true,
+      })
+    : new Database(dbPath)
+
+  if (!options.readonly) {
+    database.pragma('foreign_keys = ON')
+  }
   const transactionExecutor = new AsyncLocalStorage<boolean>()
   let operationQueue = Promise.resolve()
 
@@ -235,7 +250,10 @@ function resolvePostgresPool(options: {
   pool?: PostgresPoolLike
 }) {
   if (options.pool) {
-    return options.pool
+    return {
+      pool: options.pool,
+      ownsPool: false,
+    }
   }
 
   const connectionString = options.connectionString?.trim()
@@ -246,14 +264,17 @@ function resolvePostgresPool(options: {
     )
   }
 
-  return createOwnedPostgresPool(connectionString)
+  return {
+    pool: createOwnedPostgresPool(connectionString),
+    ownsPool: true,
+  }
 }
 
 export function createPostgresDatabase(options: {
   connectionString?: string
   pool?: PostgresPoolLike
 }): NoteStoreDatabase {
-  const pool = resolvePostgresPool(options)
+  const { pool, ownsPool } = resolvePostgresPool(options)
   const transactionExecutor = new AsyncLocalStorage<PostgresQueryable>()
 
   function getExecutor() {
@@ -322,7 +343,9 @@ export function createPostgresDatabase(options: {
       }
     },
     async close() {
-      await pool.end()
+      if (ownsPool) {
+        await pool.end()
+      }
     },
   }
 }

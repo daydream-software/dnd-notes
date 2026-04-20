@@ -6,7 +6,7 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto'
-import { copyFileSync, mkdirSync } from 'node:fs'
+import { chmodSync, copyFileSync, mkdirSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -417,12 +417,23 @@ const defaultDbPath = fileURLToPath(
 
 export function resolveNoteDbPath(
   options: CreateNoteStoreOptions = {},
+  environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  return options.dbPath ?? process.env.NOTES_DB_PATH ?? defaultDbPath
+  return options.dbPath ?? environment.NOTES_DB_PATH ?? defaultDbPath
 }
 
-function resolveDatabaseUrl(options: CreateNoteStoreOptions) {
-  return options.databaseUrl ?? process.env.DATABASE_URL ?? null
+function resolveDatabaseUrl(
+  options: CreateNoteStoreOptions,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  return options.databaseUrl ?? environment.DATABASE_URL ?? null
+}
+
+function hasExplicitOption<Key extends keyof CreateNoteStoreOptions>(
+  options: CreateNoteStoreOptions,
+  key: Key,
+) {
+  return Object.prototype.hasOwnProperty.call(options, key)
 }
 
 function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl = resolveDatabaseUrl(options)) {
@@ -433,12 +444,23 @@ function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl
   return databaseUrl
 }
 
-function resolveNoteStoreBackend(options: CreateNoteStoreOptions): 'sqlite' | 'postgres' {
+export function resolveNoteStoreBackend(
+  options: CreateNoteStoreOptions,
+  environment: NodeJS.ProcessEnv = process.env,
+): 'sqlite' | 'postgres' {
   if (options.backend) {
     return options.backend
   }
 
-  return resolveDatabaseUrl(options) ? 'postgres' : 'sqlite'
+  if (options.postgresPool || hasExplicitOption(options, 'databaseUrl')) {
+    return 'postgres'
+  }
+
+  if (hasExplicitOption(options, 'dbPath')) {
+    return 'sqlite'
+  }
+
+  return resolveDatabaseUrl(options, environment) ? 'postgres' : 'sqlite'
 }
 
 function createPasswordHash(password: string) {
@@ -2338,6 +2360,7 @@ export async function restoreNoteStoreFromBackup(
 ): Promise<NoteStore> {
   const backend = resolveNoteStoreBackend(options)
   const dbPath = resolveNoteDbPath(options)
+  const workingCopyPath = `${dbPath}.restore-working-${randomUUID()}.sqlite`
 
   if (dbPath === ':memory:') {
     throw new Error('Admin restore is not supported for in-memory note stores.')
@@ -2377,53 +2400,59 @@ export async function restoreNoteStoreFromBackup(
     validationDatabase.close()
   }
 
-  const validationStore = await createNoteStore({
-    ...options,
-    dbPath: sourcePath,
-    backend: 'sqlite',
-  })
+  mkdirSync(dirname(workingCopyPath), { recursive: true })
+  copyFileSync(sourcePath, workingCopyPath)
+  chmodSync(workingCopyPath, 0o600)
+
+  let validationStore: NoteStore | undefined
 
   try {
+    validationStore = await createNoteStore({
+      ...options,
+      dbPath: workingCopyPath,
+      backend: 'sqlite',
+    })
     await validationStore.checkHealth()
   } catch {
     throw new InvalidBackupDatabaseError(
       'The uploaded database could not be opened as a dnd-notes backup.',
     )
   } finally {
-    await validationStore.close()
+    await validationStore?.close()
   }
-
-  if (backend === 'sqlite') {
-    mkdirSync(dirname(dbPath), { recursive: true })
-    copyFileSync(sourcePath, dbPath)
-
-    return createNoteStore({ ...options, dbPath, backend: 'sqlite' })
-  }
-
-  const databaseUrl = requirePostgresDatabaseUrl(options)
-  const destinationDatabase = createPostgresDatabase({
-    connectionString: databaseUrl ?? undefined,
-    pool: options.postgresPool,
-  })
-  const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
-  const sourceDatabase = createSqliteDatabase(sourcePath)
-  const shouldCloseDestinationDatabase = !options.postgresPool
 
   try {
-    await initializeNoteStoreDatabase(destinationDatabase, configuredSiteAdminEmails)
+    if (backend === 'sqlite') {
+      mkdirSync(dirname(dbPath), { recursive: true })
+      copyFileSync(workingCopyPath, dbPath)
 
-    const restoreTransaction = destinationDatabase.transaction(async () => {
-      await clearSnapshotTables(destinationDatabase)
-      await copySnapshotTables(sourceDatabase, destinationDatabase)
+      return createNoteStore({ ...options, dbPath, backend: 'sqlite' })
+    }
+
+    const databaseUrl = requirePostgresDatabaseUrl(options)
+    const destinationDatabase = createPostgresDatabase({
+      connectionString: databaseUrl ?? undefined,
+      pool: options.postgresPool,
     })
+    const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
+    const sourceDatabase = createSqliteDatabase(workingCopyPath, { readonly: true })
 
-    await restoreTransaction()
-  } finally {
-    await sourceDatabase.close()
-    if (shouldCloseDestinationDatabase) {
+    try {
+      await initializeNoteStoreDatabase(destinationDatabase, configuredSiteAdminEmails)
+
+      const restoreTransaction = destinationDatabase.transaction(async () => {
+        await clearSnapshotTables(destinationDatabase)
+        await copySnapshotTables(sourceDatabase, destinationDatabase)
+      })
+
+      await restoreTransaction()
+    } finally {
+      await sourceDatabase.close()
       await destinationDatabase.close()
     }
-  }
 
-  return createNoteStore({ ...options, backend: 'postgres' })
+    return createNoteStore({ ...options, backend: 'postgres' })
+  } finally {
+    rmSync(workingCopyPath, { force: true })
+  }
 }
