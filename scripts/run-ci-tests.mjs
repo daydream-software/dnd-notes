@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import { mergeCiCoverage } from './merge-ci-coverage.mjs'
+import { normalizeJUnitReports } from './normalize-junit-results.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const rootDir = path.resolve(__dirname, '..')
@@ -51,6 +52,12 @@ function runSuite({ name, script }) {
 await rm(reportsDir, { recursive: true, force: true })
 await mkdir(path.join(reportsDir, 'test-results'), { recursive: true })
 await mkdir(path.join(reportsDir, 'coverage'), { recursive: true })
+await Promise.all(
+  suites.flatMap(({ name }) => [
+    mkdir(path.join(reportsDir, 'coverage', name), { recursive: true }),
+    mkdir(path.join(reportsDir, 'coverage', name, '.tmp'), { recursive: true }),
+  ]),
+)
 
 const results = []
 
@@ -59,6 +66,7 @@ for (const suite of suites) {
   results.push(await runSuite(suite))
 }
 
+await normalizeJUnitReports()
 await mergeCiCoverage()
 
 console.log('\nCI test summary:')
