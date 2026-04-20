@@ -41,6 +41,31 @@ wait_for_rollout() {
   kubectl rollout status -n "$namespace" "deployment/${deployment}" --timeout="$timeout"
 }
 
+normalize_kubeconfig_server() {
+  local context="k3d-${CLUSTER_NAME}"
+  local server
+
+  server="$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')"
+  if [[ "$server" =~ ^https://0\.0\.0\.0:([0-9]+)$ ]]; then
+    kubectl config set-cluster "$context" --server="https://127.0.0.1:${BASH_REMATCH[1]}" >/dev/null
+  fi
+}
+
+wait_for_kube_api() {
+  local timeout="${1:-60}"
+  local deadline=$((SECONDS + timeout))
+
+  while (( SECONDS < deadline )); do
+    if kubectl --request-timeout=5s get --raw=/readyz >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Timed out waiting for the Kubernetes API to become reachable" >&2
+  return 1
+}
+
 if [[ "${1:-}" == "--help" ]]; then
   usage
   exit 0
@@ -64,6 +89,8 @@ else
 fi
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
+normalize_kubeconfig_server
+wait_for_kube_api 60
 
 kubectl apply -f "${ROOT}/platform/k3d/namespace.yaml"
 kubectl apply -f "${INGRESS_NGINX_MANIFEST_URL}"

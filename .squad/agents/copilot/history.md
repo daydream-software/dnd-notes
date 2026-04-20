@@ -91,3 +91,16 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Delivered: added `scripts/k3d/bootstrap.sh`, `scripts/k3d/build-tenant-image.sh`, and `scripts/k3d/smoke.sh`; added committed k3d manifests for the platform namespace, Postgres, and seeded Keycloak; wired root `package.json` entrypoints; and documented the lane in `platform/k3d/README.md` plus the root README.
 - Validation: `bash -n scripts/k3d/*.sh`, `npm run k3d:bootstrap -- --help`, `npm run k3d:build-image -- --help`, `npm run k3d:smoke -- --help`, and repo-wide `npm run lint && npm run test:ci && npm run build` passed.
 - Constraint in this environment: `docker` is available, but `k3d` and `kubectl` are not installed here, so the live cluster smoke path itself could not be executed during this session. The repo now contains the automated lane needed to run that rehearsal on a workstation with the standard tools installed.
+
+## 2026-04-20 Issue #63 live validation follow-up
+- Status: live smoke revalidation now reaches k3d helper startup under the local Docker broker, so the previous `ghcr.io/k3d-io/k3d-proxy:5.8.3` block is cleared.
+- Current blocker: the broker still rejects `ghcr.io/k3d-io/k3d-tools:5.8.3` while `k3d` creates its tools node, so the cluster rolls back before bootstrap can continue.
+
+## 2026-04-20 Issue #63 live validation follow-up (broker bind policy)
+- Status: live smoke revalidation now gets past the currently required k3d images, including `ghcr.io/k3d-io/k3d-tools:5.8.3`.
+- Current blocker: the broker rejects the tools-node bind mount `/var/run/docker.sock:/var/run/docker.sock` as a forbidden host path, so cluster creation still rolls back before bootstrap can continue.
+
+## 2026-04-20 Issue #63 live validation follow-up (host connectivity)
+- Status: broker policy is no longer the main blocker. Live revalidation now creates the k3d cluster successfully in this environment.
+- Repo fix landed during validation: `scripts/k3d/bootstrap.sh` now rewrites k3d kubeconfig endpoints from `0.0.0.0` to `127.0.0.1` when needed and waits explicitly for the Kubernetes API before applying manifests.
+- Current blocker: the host environment still cannot reach Docker-published ports (including the k3d API port and ingress ports) or container bridge IPs, even though the k3d load balancer can reach the in-cluster API server. That prevents host `kubectl` from reaching the cluster and blocks the smoke lane beyond cluster creation.
