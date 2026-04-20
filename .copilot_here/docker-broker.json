@@ -1,0 +1,23 @@
+{
+  "enabled": true,
+  "enable_logging": false,
+  "inherit_default_rules": true,
+  "mode": "enforce",
+  "allowed_endpoints": [],
+  "body_inspection": {
+    "reject_privileged": false,
+    "reject_host_namespaces": false,
+    "reject_forbidden_binds": false,
+    "reject_dangerous_capabilities": true,
+    "allowed_images": [
+      "ghcr.io/daydream-software/dnd-notes:*",
+      "docker.io/postgres:*",
+      "quay.io/keycloak/keycloak:*",
+      "docker.io/rancher/k3s:*",
+      "ghcr.io/k3d-io/k3d-proxy:*",
+      "ghcr.io/k3d-io/k3d-tools:*",
+      "registry.k8s.io/ingress-nginx/controller:*",
+      "registry.k8s.io/ingress-nginx/kube-webhook-certgen:*"
+    ]
+  }
+}

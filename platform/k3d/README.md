@@ -19,6 +19,11 @@ npm run k3d:bootstrap
 npm run k3d:smoke
 ```
 
+The same smoke lane now runs in GitHub Actions via
+`.github/workflows/k3d-smoke.yml`. That workflow installs `k3d` and `kubectl`,
+executes `npm run k3d:smoke`, uploads cluster diagnostics, and tears the test
+cluster down at the end of the job.
+
 ## What `k3d:bootstrap` provisions
 
 - a k3d cluster with Traefik disabled and host ports `8080`/`8443` mapped to the load balancer

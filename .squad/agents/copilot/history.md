@@ -119,3 +119,14 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Status: the next user-side validation showed Keycloak redirects dropping the mapped host port, causing the browser to jump from `http://keycloak.127.0.0.1.nip.io:8080` to the same host without `:8080`.
 - Delivered: the committed Keycloak manifest now sets `KC_HOSTNAME` to the correct default local URL, and `scripts/k3d/bootstrap.sh` now reapplies `KC_HOSTNAME` on the deployment using the active `K3D_HTTP_PORT` so non-default local port mappings also generate correct redirects. The k3d README now documents that bootstrap injects the full external URL for this reason.
 - Validation: `bash -n scripts/k3d/bootstrap.sh` passed and the final wiring was checked to confirm the manifest default plus bootstrap override both include the full Keycloak URL with port.
+
+## 2026-04-20 Issue #63 live validation success
+- Status: the user reran `npm run k3d:smoke` on their workstation and the full lane completed successfully: bootstrap reused the existing cluster, the tenant image built/imported, the tenant deployment rolled out, and the smoke readiness check passed.
+- Operational note: this is expected to leave the k3d cluster running. The smoke lane is designed to reuse the shared local cluster and only clean up the smoke tenant by default; cluster teardown remains a separate explicit action (`k3d cluster delete dnd-notes` when desired).
+
+## 2026-04-20 Issue #63 CI smoke workflow
+- Delivered: added `.github/workflows/k3d-smoke.yml`, a dedicated GitHub Actions workflow that installs `k3d` and `kubectl`, runs `npm run k3d:smoke`, captures cluster diagnostics as an artifact, and always deletes the CI cluster afterward. The k3d README now documents that the same smoke lane runs in CI.
+- Trigger shape: runs on PRs and pushes touching the k3d/platform lane, on nightly schedule, and on manual dispatch.
+
+## 2026-04-20 Issue #63 cloud-agent unblock config
+- User-approved repo-local agent config updates are ready to commit with the issue work: `.copilot_here/docker/Dockerfile` now installs `k3d` and `kubectl`, and `.copilot_here/docker-broker.json` allows the k3d helper images plus the host bind/namespace behavior needed to exercise the local smoke lane inside the agent environment.
