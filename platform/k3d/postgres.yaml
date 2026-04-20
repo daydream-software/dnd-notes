@@ -1,0 +1,96 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: platform-postgres-env
+  namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/warning: Development-only Postgres credentials. Never reuse outside local k3d.
+type: Opaque
+stringData:
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_DB: postgres
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: platform-postgres-data
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-postgres
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-postgres
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-postgres
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-postgres
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:17.9-bookworm
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: platform-postgres-env
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: platform-postgres-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-postgres
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-postgres
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: platform-postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres

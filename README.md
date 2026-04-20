@@ -48,9 +48,11 @@ For detailed runtime configuration, health endpoints, and Kubernetes deployment 
 
 ## Git hooks
 
-`npm install` now provisions Husky git hooks automatically via the root `prepare`
-script. Commits are checked with commitlint, so commit messages must follow the
-Conventional Commits format (for example `feat(api): harden CORS policy` or
+`npm install` now provisions Husky git hooks automatically via the root
+`prepare` script when the repo checkout is present and the Husky package is
+installed. Production installs and container builds skip that hook bootstrap
+cleanly. Commits are checked with commitlint, so commit messages must follow
+the Conventional Commits format (for example `feat(api): harden CORS policy` or
 `chore: update hook tooling`).
 
 ## Workspace layout
@@ -72,6 +74,7 @@ only when you have a live kube context plus an admin Postgres connection string:
 - `TENANT_BASE_DOMAIN` — opaque tenant subdomains are created under this suffix
 - `TENANT_IMAGE_REPOSITORY` — image repository used for tenant deployments
 - `TENANT_DATABASE_ADMIN_URL` — admin Postgres URL used to create/drop per-tenant databases
+- `TENANT_DATABASE_RUNTIME_URL` — optional runtime Postgres URL injected into tenant pods; defaults to the admin URL when unset
 - `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret name for private images
 
 When provisioning is enabled, the control plane reconciles a tenant namespace,
@@ -79,6 +82,25 @@ runtime ConfigMap/Secret, PVC, Service, Deployment, and a per-tenant Postgres
 database. The tenant workload uses `/ready` for readiness and `/healthz` for
 liveness, and the PVC stays mounted at `/app/data` for explicit tenant storage
 lifecycle plus SQLite-compatible fallback files.
+
+## k3d platform loop
+
+Issue `#63` formalizes the daily local Kubernetes lane for platform work.
+
+```bash
+npm run k3d:bootstrap
+npm run k3d:smoke
+```
+
+- `k3d:bootstrap` creates the local cluster shape and deploys ingress-nginx,
+  platform Postgres, and seeded Keycloak.
+- `k3d:smoke` builds/imports the tenant image, runs the control plane locally
+  against the live k3d kube context, provisions a tenant, and verifies tenant
+  readiness.
+
+See [`platform/k3d/README.md`](platform/k3d/README.md) for the full workflow and
+the documented boundary between the fast k3d lane and the later k3s/stateful
+rehearsal lane.
 
 ## Local persistence
 

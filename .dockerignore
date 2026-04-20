@@ -19,7 +19,8 @@ apps/web/.vite
 .copilot_here
 .worktrees
 docker/
-scripts/
+scripts/*
+!scripts/prepare.mjs
 .github/
 *.test.ts
 *.test.tsx

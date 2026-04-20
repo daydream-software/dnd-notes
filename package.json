@@ -13,6 +13,9 @@
     "dev:api": "npm run dev --workspace apps/api",
     "dev:web": "npm run dev --workspace apps/web",
     "dev:control-plane": "npm run dev --workspace apps/control-plane",
+    "k3d:bootstrap": "bash ./scripts/k3d/bootstrap.sh",
+    "k3d:build-image": "bash ./scripts/k3d/build-tenant-image.sh",
+    "k3d:smoke": "bash ./scripts/k3d/smoke.sh",
     "copilot:yolo": "bash ./scripts/copilot-yolo.sh",
     "copilot:wait-review": "node --import tsx ./scripts/wait-copilot-review.ts",
     "lint:web": "npm run lint --workspace apps/web",
@@ -30,7 +33,7 @@
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test:web && npm run test:api && npm run test:control-plane",
-    "prepare": "husky"
+    "prepare": "node ./scripts/prepare.mjs"
   },
   "repository": {
     "type": "git",
