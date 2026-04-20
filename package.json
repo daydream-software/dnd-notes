@@ -18,11 +18,13 @@
     "lint:web": "npm run lint --workspace apps/web",
     "build:web": "npm run build --workspace apps/web",
     "test:web": "npm run test --workspace apps/web --",
+    "test:api": "npm run test --workspace apps/api --",
+    "test:control-plane": "npm run test --workspace apps/control-plane --",
     "seed:data": "npm run seed:data --workspace apps/api",
     "reset:data": "npm run reset:data --workspace apps/api",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "test": "npm run test:web && npm run test:api && npm run test:control-plane",
     "prepare": "husky"
   },
   "repository": {
