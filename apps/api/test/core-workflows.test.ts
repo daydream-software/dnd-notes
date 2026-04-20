@@ -56,7 +56,7 @@ test('GET /readyz returns 503 when the database is unavailable', async (t) => {
   const { app, cleanup, closeNoteStore } = await createTestApp()
   t.after(cleanup)
 
-  closeNoteStore()
+  await closeNoteStore()
 
   const response = await request(app).get('/readyz')
 
@@ -563,6 +563,31 @@ test('owner login is rate limited after repeated attempts', async (t) => {
     'Too many login attempts. Please wait before trying again.',
   )
   assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
+})
+
+test('owner auth normalizes email casing for registration, duplicate checks, and login', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const registration = await registerOwner(request(app), {
+    displayName: 'Aela',
+    email: 'Aela@Example.com',
+  })
+  assert.equal(registration.owner.email, 'aela@example.com')
+
+  const duplicateResponse = await request(app).post('/api/auth/register').send({
+    displayName: 'Duplicate Aela',
+    email: 'AELA@example.com',
+    password: 'moonlit-secret',
+  })
+  assert.equal(duplicateResponse.status, 409)
+
+  const loginResponse = await request(app).post('/api/auth/login').send({
+    email: 'AELA@example.com',
+    password: 'moonlit-secret',
+  })
+  assert.equal(loginResponse.status, 200)
+  assert.equal(loginResponse.body.owner.email, 'aela@example.com')
 })
 
 test('authenticated owners can run the note CRUD workflow in a selected campaign', async (t) => {

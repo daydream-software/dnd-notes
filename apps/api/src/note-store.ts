@@ -839,6 +839,31 @@ export async function createNoteStore(
     )
   `)
 
+  const insertDefaultCampaignIfMissing = database.prepare(`
+    INSERT INTO campaigns (
+      id,
+      name,
+      tagline,
+      system,
+      setting,
+      next_session,
+      archived_at,
+      created_at,
+      updated_at
+    ) VALUES (
+      @id,
+      @name,
+      @tagline,
+      @system,
+      @setting,
+      @next_session,
+      @archived_at,
+      @created_at,
+      @updated_at
+    )
+    ON CONFLICT (id) DO NOTHING
+  `)
+
   const updateCampaignStatement = database.prepare(`
     UPDATE campaigns
     SET
@@ -1032,7 +1057,7 @@ export async function createNoteStore(
       created_at,
       updated_at
     FROM owner_accounts
-    WHERE email = ?
+    WHERE LOWER(email) = LOWER(?)
   `)
 
   const selectAdminAccounts = database.prepare(`
@@ -1274,22 +1299,18 @@ export async function createNoteStore(
   `)
 
   const ensureDefaultCampaignTransaction = database.transaction(async () => {
-    const existing = (await selectCampaignById.get(defaultCampaign.id)) as CampaignRow | undefined
-
-    if (!existing) {
-      const timestamp = new Date().toISOString()
-      await insertCampaign.run({
-        id: defaultCampaign.id,
-        name: defaultCampaign.name,
-        tagline: defaultCampaign.tagline,
-        system: defaultCampaign.system,
-        setting: defaultCampaign.setting,
-        next_session: defaultCampaign.nextSession,
-        archived_at: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      })
-    }
+    const campaignTimestamp = new Date().toISOString()
+    await insertDefaultCampaignIfMissing.run({
+      id: defaultCampaign.id,
+      name: defaultCampaign.name,
+      tagline: defaultCampaign.tagline,
+      system: defaultCampaign.system,
+      setting: defaultCampaign.setting,
+      next_session: defaultCampaign.nextSession,
+      archived_at: null,
+      created_at: campaignTimestamp,
+      updated_at: campaignTimestamp,
+    })
 
     const ownerMembershipCount = (await countOwnerMemberships.get(defaultCampaign.id)) as {
       count: number
@@ -1313,7 +1334,7 @@ export async function createNoteStore(
   const createOwnerAccountTransaction = database.transaction(
     async (input: OwnerRegistrationInput) => {
       const normalizedEmail = normalizeEmailAddress(input.email)
-      const existing = (await selectOwnerAccountByEmail.get(input.email)) as
+      const existing = (await selectOwnerAccountByEmail.get(normalizedEmail)) as
         | OwnerAccountRow
         | undefined
 
@@ -1324,7 +1345,7 @@ export async function createNoteStore(
       const timestamp = new Date().toISOString()
       const owner: OwnerAccount = {
         id: randomUUID(),
-        email: input.email,
+        email: normalizedEmail,
         displayName: input.displayName,
         isSiteAdmin: configuredSiteAdminEmails.has(normalizedEmail),
         createdAt: timestamp,
@@ -2110,7 +2131,8 @@ export async function createNoteStore(
       return createOwnerAccountTransaction(input)
     },
     async authenticateOwner(email, password) {
-      const row = (await selectOwnerAccountByEmail.get(email)) as
+      const normalizedEmail = normalizeEmailAddress(email)
+      const row = (await selectOwnerAccountByEmail.get(normalizedEmail)) as
         | OwnerAccountRow
         | undefined
 
@@ -2408,7 +2430,9 @@ export async function createNoteStore(
     },
     backupDatabase(destinationPath) {
       if (database.backup) {
-        return database.backup(destinationPath).then(() => undefined)
+        return database.backup(destinationPath).then(() => {
+          tightenSqliteFilePermissions(destinationPath)
+        })
       }
 
       return (async () => {
@@ -2416,6 +2440,7 @@ export async function createNoteStore(
 
         try {
           await initializeNoteStoreDatabase(snapshotDatabase, new Set())
+          tightenSqliteFilePermissions(destinationPath)
 
           const writeSnapshot = snapshotDatabase.transaction(async () => {
             await clearSnapshotTables(snapshotDatabase)
@@ -2426,6 +2451,7 @@ export async function createNoteStore(
           })
 
           await exportSnapshot()
+          tightenSqliteFilePermissions(destinationPath)
         } finally {
           await snapshotDatabase.close()
         }

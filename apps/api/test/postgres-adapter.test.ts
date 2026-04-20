@@ -141,6 +141,26 @@ test('postgres-backed backups export a SQLite-compatible snapshot', async (t) =>
   }
 })
 
+test('postgres-backed backups tighten restrictive permissions on snapshot files', async (t) => {
+  const { noteStore, cleanup } = await createPostgresTestStore()
+  t.after(cleanup)
+
+  await mkdir(runtimeDirectory, { recursive: true })
+  const backupPath = join(runtimeDirectory, `postgres-export-permissions-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await rm(backupPath, { force: true })
+  })
+
+  const placeholderDatabase = new Database(backupPath)
+  placeholderDatabase.close()
+  await chmod(backupPath, 0o666)
+
+  await noteStore.backupDatabase(backupPath)
+
+  const backupStats = await stat(backupPath)
+  assert.equal(backupStats.mode & 0o777, 0o600)
+})
+
 test('postgres-backed backups copy snapshot tables in bounded batches', async (t) => {
   const db = newDb({
     autoCreateForeignKeyIndices: true,
