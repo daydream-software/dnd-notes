@@ -245,6 +245,15 @@ function createDraftFromStarterNote(starterNote: StarterNoteSeed): NoteDraft {
   }
 }
 
+function trimToNull(value: string): string | null {
+  const trimmedValue = value.trim()
+  return trimmedValue === '' ? null : trimmedValue
+}
+
+function formatFallbackText(value: string | null, fallback: string) {
+  return trimToNull(value ?? '') ?? fallback
+}
+
 function createNotePayload(
   draft: NoteDraft,
   campaignId: string | null,
@@ -254,7 +263,7 @@ function createNotePayload(
     body: draft.body,
     status: draft.status,
     tags: normalizeTags([draft.tagsText]),
-    sessionName: draft.sessionName.trim() || null,
+    sessionName: trimToNull(draft.sessionName),
     linkedNoteIds: draft.linkedNoteIds,
     campaignId,
   }
@@ -286,7 +295,7 @@ function createCampaignPayload(draft: CampaignDraft): CampaignInput {
     tagline: draft.tagline,
     system: draft.system,
     setting: draft.setting,
-    nextSession: draft.nextSession.trim() || null,
+    nextSession: trimToNull(draft.nextSession),
   }
 }
 
@@ -300,9 +309,9 @@ function createShareLinkDraft(): ShareLinkDraft {
 
 function createShareLinkPayload(draft: ShareLinkDraft): CampaignShareLinkInput {
   return {
-    label: draft.label.trim() || null,
+    label: trimToNull(draft.label),
     accessLevel: draft.accessLevel,
-    frameAncestors: draft.frameAncestors.trim() || null,
+    frameAncestors: trimToNull(draft.frameAncestors),
   }
 }
 
@@ -601,7 +610,7 @@ function createActivityCollaboratorsFromEntries(
 }
 
 function formatSessionLine(sessionName: string | null) {
-  return sessionName?.trim() || 'No session'
+  return formatFallbackText(sessionName, 'No session')
 }
 
 function App() {
@@ -3605,14 +3614,16 @@ function App() {
                             const shareLinkError = shareLinkActionErrors[shareLink.id]
                             const isRevealingShareLink =
                               revealingShareLinkId === shareLink.id
+                            const shareLinkLabel = formatFallbackText(
+                              shareLink.label,
+                              'Untitled shared link',
+                            )
 
                             return (
                               <Box
                                 component="section"
                                 key={shareLink.id}
-                                aria-label={`${
-                                  shareLink.label || 'Untitled shared link'
-                                } shared link`}
+                                aria-label={`${shareLinkLabel} shared link`}
                                 sx={{
                                   border: '1px solid',
                                   borderColor: 'divider',
@@ -3628,9 +3639,7 @@ function App() {
                                 >
                                   <Stack spacing={1.25} sx={{ flexGrow: 1 }}>
                                     <Box>
-                                      <Typography variant="subtitle1">
-                                        {shareLink.label || 'Untitled shared link'}
-                                      </Typography>
+                                      <Typography variant="subtitle1">{shareLinkLabel}</Typography>
                                       <Typography color="text.secondary" variant="body2">
                                         {shareLink.accessLevel === 'editor'
                                           ? 'Editors can view and update notes.'

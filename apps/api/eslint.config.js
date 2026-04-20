@@ -1,7 +1,12 @@
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import js from '@eslint/js'
 import globals from 'globals'
 import tseslint from 'typescript-eslint'
 import { defineConfig, globalIgnores } from 'eslint/config'
+
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
 export default defineConfig([
   globalIgnores(['coverage', 'dist']),
@@ -12,8 +17,13 @@ export default defineConfig([
       ecmaVersion: 'latest',
       sourceType: 'module',
       globals: globals.node,
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: __dirname,
+      },
     },
     rules: {
+      '@typescript-eslint/prefer-nullish-coalescing': 'error',
       'no-restricted-syntax': [
         'error',
         {

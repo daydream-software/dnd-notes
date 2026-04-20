@@ -32,17 +32,23 @@ test('GET /health returns service metadata', async (t) => {
   assert.equal(response.body.service, 'dnd-notes-api')
 })
 
-test('GET /healthz and /readyz return probe metadata while the database is available', async (t) => {
+test('GET /healthz, /ready, and /readyz return probe metadata while the database is available', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
 
-  const [livenessResponse, readinessResponse] = await Promise.all([
+  const [livenessResponse, readyResponse, readinessResponse] = await Promise.all([
     request(app).get('/healthz'),
+    request(app).get('/ready'),
     request(app).get('/readyz'),
   ])
 
   assert.equal(livenessResponse.status, 200)
   assert.deepEqual(livenessResponse.body, {
+    status: 'ok',
+    service: 'dnd-notes-api',
+  })
+  assert.equal(readyResponse.status, 200)
+  assert.deepEqual(readyResponse.body, {
     status: 'ok',
     service: 'dnd-notes-api',
   })
