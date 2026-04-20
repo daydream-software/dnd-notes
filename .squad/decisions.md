@@ -6987,3 +6987,43 @@ Make the root test path explicit in `package.json`:
 - healthy `npm test` exits `0` ✅
 - induced temporary failing test in `apps/control-plane/test/zz-temp-exit-code.test.ts` makes root `npm test` exit `1` ✅
 - temporary repro file removed before finish ✅
+# 2026-04-20: Mixed-runner CI test reporting and coverage path
+
+**By:** Brand (Platform Dev)  
+**Requested by:** FFMikha  
+**Status:** PROPOSED
+
+## Context
+
+The monorepo now has three real test lanes with mixed runners:
+
+- `apps/web` uses Vitest
+- `apps/api` uses Node's built-in test runner
+- `apps/control-plane` uses Node's built-in test runner
+
+GitHub CI only surfaced the Vitest results cleanly, and there was no durable repo-level path for coverage output across all workspaces.
+
+## Decision
+
+Adopt a dedicated CI test orchestration path alongside the existing local fail-fast path:
+
+1. Keep root `npm test` fail-fast for local developer feedback.
+2. Add root `npm run test:ci` to always execute all workspace suites, even if one fails.
+3. Have each workspace write JUnit XML into `reports/test-results/`.
+4. Publish those XML files through a single GitHub Actions check using `EnricoMi/publish-unit-test-result-action`.
+5. Collect coverage per workspace into `reports/coverage/{workspace}/`, then merge the summaries into one root markdown/json summary and combined `lcov.info`.
+6. Surface coverage in CI through the GitHub job summary plus an uploaded coverage artifact, with **no thresholds enforced yet**.
+
+## Rationale
+
+- Mixed runners need a shared interchange format; JUnit XML is the durable common path.
+- CI should report the whole repo state, not stop at the first failing suite.
+- Coverage is useful immediately for visibility even before the team is ready to gate on percentages.
+- Root scripts keep workflow YAML readable and keep CI/local entrypoints aligned.
+
+## Implementation notes
+
+- Root orchestrator: `scripts/run-ci-tests.mjs`
+- Coverage merger: `scripts/merge-ci-coverage.mjs`
+- Workflow entrypoint: `.github/workflows/ci.yml`
+- Workspace CI scripts live in each `apps/*/package.json`
