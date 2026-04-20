@@ -3637,3 +3637,29 @@ Adopt a dedicated CI test orchestration path alongside the existing local fail-f
 - Workspace CI scripts live in each `apps/*/package.json`
 
 
+# Decision: Upgrade GitHub Actions to Node24-Compatible Releases
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-20
+
+## Decision
+
+When a GitHub-hosted action in this repo hits a runtime deprecation warning, upgrade it to the latest suitable release that declares support for the target Node runtime in `action.yml`, while preserving immutable SHA pinning and the matching inline release comment.
+
+## Why
+
+- GitHub Actions deprecated Node20; platform now enforces Node24.
+- Old pinned actions (e.g., `actions/upload-artifact@v4.6.2`) still run on Node20 and will fail in future.
+- Upgrading to compatible releases (`v6.0.0` onward) prevents CI breakage and keeps the toolchain current.
+- SHA pinning + release comment provides supply-chain immutability without sacrificing runtime compatibility.
+
+## Applied Here
+
+- Updated `.github/workflows/ci.yml`
+- `actions/upload-artifact`: `ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2` → `b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v6.0.0`
+- Committed: `c92f06c`
+
+## Validation
+
+- Workflow YAML parses correctly.
+- All external `uses:` entries in `.github/workflows/ci.yml` now declare `runs.using: node24`.
