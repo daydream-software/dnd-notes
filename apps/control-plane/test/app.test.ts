@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
+import type { TenantProvisioningPort } from '../src/provisioning.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 
 const require = createRequire(import.meta.url)
@@ -14,6 +15,7 @@ describe('Control Plane API', () => {
   const tenantPath = (tenantId: string) => `${tenantsPath}/${tenantId}`
   let tenantRegistry: TenantRegistry
   let app: ReturnType<typeof createApp>
+  let tenantProvisioningService: TenantProvisioningPort | undefined
 
   const authedGet = (path: string) =>
     request(app).get(path).set('Authorization', `Bearer ${adminToken}`)
@@ -26,7 +28,8 @@ describe('Control Plane API', () => {
 
   beforeEach(() => {
     tenantRegistry = new TenantRegistry(':memory:')
-    app = createApp({ tenantRegistry, adminToken })
+    tenantProvisioningService = undefined
+    app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
   })
 
   afterEach(() => {
@@ -88,6 +91,7 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.tenant.id, 'tenant-123')
       assert.strictEqual(response.body.tenant.slug, 'test-tenant')
       assert.strictEqual(response.body.tenant.ownerId, 'owner-456')
+      assert.strictEqual(response.body.tenant.subdomain, null)
       assert.strictEqual(response.body.tenant.version, '1.0.0')
       assert.strictEqual(response.body.tenant.currentState, 'provisioning')
       assert.strictEqual(response.body.tenant.desiredState, 'provisioning')
@@ -352,6 +356,133 @@ describe('Control Plane API', () => {
         .expect(404)
 
       assert.strictEqual(response.body.error, 'Tenant not found')
+    })
+  })
+
+  describe('POST /internal/tenants/:tenantId/provision', () => {
+    it('returns 501 when provisioning is not configured', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+        })
+        .expect(501)
+
+      assert.strictEqual(response.body.error, 'Tenant provisioning is not configured')
+    })
+
+    it('returns provisioned tenant metadata from the provisioning service', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
+          tenantRegistry.updateTenantStorageReference('tenant-123', 'tenant_db')
+          tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
+          tenantRegistry.updateTenantState(
+            'tenant-123',
+            'ready',
+            'test-suite',
+            'Provisioned in test',
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant('tenant-123')!,
+            resources: {
+              namespace: 'tenant-t-opaque123456',
+              deploymentName: 'dnd-notes',
+              serviceName: 'dnd-notes',
+              configMapName: 'dnd-notes-runtime',
+              secretName: 'dnd-notes-runtime-secret',
+              hostname: 't-opaque123456.dnd-notes.test',
+              databaseName: 'tenant_db',
+              image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+            },
+          }
+        },
+        async deprovisionTenant() {
+          throw new Error('not used')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+        })
+        .expect(200)
+
+      assert.strictEqual(response.body.tenant.currentState, 'ready')
+      assert.strictEqual(response.body.tenant.subdomain, 't-opaque123456')
+      assert.strictEqual(response.body.tenant.storageReference, 'tenant_db')
+      assert.strictEqual(response.body.resources.namespace, 'tenant-t-opaque123456')
+    })
+  })
+
+  describe('POST /internal/tenants/:tenantId/deprovision', () => {
+    it('returns deprovisioned tenant metadata from the provisioning service', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
+      tenantRegistry.updateTenantStorageReference('tenant-123', 'tenant_db')
+      tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-123',
+        'ready',
+        'test-suite',
+        'Provisioned in test',
+      )
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new Error('not used')
+        },
+        async deprovisionTenant() {
+          tenantRegistry.updateTenantStorageReference('tenant-123', null)
+          tenantRegistry.updateTenantDesiredState('tenant-123', 'deprovisioned')
+          tenantRegistry.updateTenantState(
+            'tenant-123',
+            'deprovisioned',
+            'test-suite',
+            'Removed in test',
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant('tenant-123')!,
+            deprovisioned: true,
+          }
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/deprovision`)
+        .send({
+          triggeredBy: 'test-suite',
+        })
+        .expect(200)
+
+      assert.strictEqual(response.body.deprovisioned, true)
+      assert.strictEqual(response.body.tenant.currentState, 'deprovisioned')
+      assert.strictEqual(response.body.tenant.storageReference, null)
     })
   })
 

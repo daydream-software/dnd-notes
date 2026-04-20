@@ -39,3 +39,9 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Scope: external Postgres pool ownership, init cleanup on failure, SQLite async transaction serialization evidence, bounded-memory Postgres snapshot export.
 - Status: inspected existing dirty patch; validating whether only small follow-up edits remain before running API validation/commit/push.
 Status: verified branch HEAD already contains the #58 PR #62 backend review fixes; apps/api lint/test/build passed in the dedicated worktree; no extra code edits were required after inspection.
+
+## 2026-04-20 Issue #54 kickoff
+- Branch: `squad/54-provision-tenant-workloads`
+- Scope: first provisioning slice for control-plane Kubernetes orchestration, opaque tenant subdomain persistence, explicit workload/storage lifecycle handling, and tightly coupled tenant-app contract gaps only if they block provisioning.
+- Constraints: locked squad decisions make k3d the standard dev environment and require the thin control-plane contract (`/ready`, `/_control/info`, `/_control/maintenance`). Repo baseline (`npm run lint && npm run test:ci && npm run build`) was green before edits.
+- Status: planning complete and implementation investigation underway; next step is to wire the control-plane provisioning surface and decide exactly which tenant-app endpoints must land in the same slice.

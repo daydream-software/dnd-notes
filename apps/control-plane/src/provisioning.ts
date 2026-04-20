@@ -1,0 +1,676 @@
+import {
+  ApiException,
+  KubeConfig,
+  KubernetesObjectApi,
+  type KubernetesObject,
+  type V1ConfigMap,
+  type V1DeleteOptions,
+  type V1Deployment,
+  type V1Namespace,
+  type V1Secret,
+  type V1Service,
+} from '@kubernetes/client-node'
+import { randomBytes } from 'node:crypto'
+import { Pool } from 'pg'
+import type {
+  Tenant,
+  TenantDeprovisionResponse,
+  TenantProvisioningResources,
+  TenantProvisioningResponse,
+} from './types.js'
+import type { TenantRegistry } from './tenant-registry.js'
+
+const opaqueSubdomainPrefix = 't'
+const defaultTenantPort = 3000
+const defaultReadyTimeoutMs = 120_000
+const defaultReadyPollIntervalMs = 2_000
+
+interface TenantDatabase {
+  databaseName: string
+  connectionString: string
+}
+
+interface TenantDatabaseManager {
+  ensureTenantDatabase(tenant: Tenant, subdomain: string): Promise<TenantDatabase>
+  deleteTenantDatabase(databaseName: string): Promise<void>
+  close(): Promise<void>
+}
+
+interface TenantInfrastructureBundle {
+  namespace: V1Namespace
+  configMap: V1ConfigMap
+  secret: V1Secret
+  service: V1Service
+  deployment: V1Deployment
+  resources: TenantProvisioningResources
+}
+
+interface TenantInfrastructureManager {
+  applyTenantResources(bundle: TenantInfrastructureBundle): Promise<void>
+  waitForTenantReady(
+    resources: TenantProvisioningResources,
+    timeoutMs?: number,
+  ): Promise<void>
+  deleteTenantResources(resources: TenantProvisioningResources): Promise<void>
+}
+
+export interface TenantProvisioningPort {
+  provisionTenant(params: {
+    tenantId: string
+    triggeredBy: string
+    reason?: string
+    version?: string
+  }): Promise<TenantProvisioningResponse>
+  deprovisionTenant(params: {
+    tenantId: string
+    triggeredBy: string
+    reason?: string
+  }): Promise<TenantDeprovisionResponse>
+  close(): Promise<void>
+}
+
+interface TenantProvisioningServiceOptions {
+  tenantRegistry: TenantRegistry
+  infrastructureManager: TenantInfrastructureManager
+  databaseManager: TenantDatabaseManager
+  baseDomain: string
+  imageRepository: string
+  imagePullSecretName?: string
+  publicScheme?: 'http' | 'https'
+  tenantPort?: number
+  readyTimeoutMs?: number
+}
+
+interface BuildTenantInfrastructureBundleOptions {
+  tenant: Tenant
+  subdomain: string
+  database: TenantDatabase
+  baseDomain: string
+  imageRepository: string
+  imagePullSecretName?: string
+  publicScheme: 'http' | 'https'
+  tenantPort: number
+}
+
+export class TenantProvisioningService implements TenantProvisioningPort {
+  private readonly tenantRegistry: TenantRegistry
+  private readonly infrastructureManager: TenantInfrastructureManager
+  private readonly databaseManager: TenantDatabaseManager
+  private readonly baseDomain: string
+  private readonly imageRepository: string
+  private readonly imagePullSecretName?: string
+  private readonly publicScheme: 'http' | 'https'
+  private readonly tenantPort: number
+  private readonly readyTimeoutMs: number
+
+  constructor(options: TenantProvisioningServiceOptions) {
+    this.tenantRegistry = options.tenantRegistry
+    this.infrastructureManager = options.infrastructureManager
+    this.databaseManager = options.databaseManager
+    this.baseDomain = options.baseDomain
+    this.imageRepository = options.imageRepository
+    this.imagePullSecretName = options.imagePullSecretName
+    this.publicScheme = options.publicScheme ?? 'https'
+    this.tenantPort = options.tenantPort ?? defaultTenantPort
+    this.readyTimeoutMs = options.readyTimeoutMs ?? defaultReadyTimeoutMs
+  }
+
+  async provisionTenant(params: {
+    tenantId: string
+    triggeredBy: string
+    reason?: string
+    version?: string
+  }): Promise<TenantProvisioningResponse> {
+    const tenant = this.getExistingTenant(params.tenantId)
+
+    if (tenant.currentState === 'deprovisioned') {
+      throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
+    }
+
+    if (params.version && params.version !== tenant.version) {
+      this.tenantRegistry.updateTenantVersion(tenant.id, params.version)
+    }
+
+    const refreshedTenant = this.getExistingTenant(tenant.id)
+    const subdomain = this.tenantRegistry.reserveTenantSubdomain(
+      refreshedTenant.id,
+      () => this.createOpaqueSubdomainCandidate(),
+    )
+
+    this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
+
+    try {
+      const database = await this.databaseManager.ensureTenantDatabase(
+        refreshedTenant,
+        subdomain,
+      )
+      this.tenantRegistry.updateTenantStorageReference(
+        refreshedTenant.id,
+        database.databaseName,
+      )
+
+      const bundle = buildTenantInfrastructureBundle({
+        tenant: this.getExistingTenant(refreshedTenant.id),
+        subdomain,
+        database,
+        baseDomain: this.baseDomain,
+        imageRepository: this.imageRepository,
+        imagePullSecretName: this.imagePullSecretName,
+        publicScheme: this.publicScheme,
+        tenantPort: this.tenantPort,
+      })
+
+      await this.infrastructureManager.applyTenantResources(bundle)
+      await this.infrastructureManager.waitForTenantReady(
+        bundle.resources,
+        this.readyTimeoutMs,
+      )
+
+      const currentTenant = this.getExistingTenant(refreshedTenant.id)
+      if (currentTenant.currentState !== 'ready') {
+        this.tenantRegistry.updateTenantState(
+          refreshedTenant.id,
+          'ready',
+          params.triggeredBy,
+          params.reason ?? 'Tenant resources provisioned',
+        )
+      }
+
+      return {
+        tenant: this.getExistingTenant(refreshedTenant.id),
+        resources: bundle.resources,
+      }
+    } catch (error) {
+      const failedTenant = this.getExistingTenant(refreshedTenant.id)
+      if (failedTenant.currentState !== 'failed') {
+        this.tenantRegistry.updateTenantState(
+          refreshedTenant.id,
+          'failed',
+          params.triggeredBy,
+          params.reason ?? 'Tenant provisioning failed',
+        )
+      }
+      throw error
+    }
+  }
+
+  async deprovisionTenant(params: {
+    tenantId: string
+    triggeredBy: string
+    reason?: string
+  }): Promise<TenantDeprovisionResponse> {
+    const tenant = this.getExistingTenant(params.tenantId)
+
+    if (tenant.currentState === 'deprovisioned') {
+      return {
+        tenant,
+        deprovisioned: true,
+      }
+    }
+
+    if (tenant.subdomain) {
+      const resources = buildTenantResourceNames({
+        tenant,
+        subdomain: tenant.subdomain,
+        baseDomain: this.baseDomain,
+        imageRepository: this.imageRepository,
+      })
+
+      await this.infrastructureManager.deleteTenantResources(resources)
+    }
+
+    if (tenant.storageReference) {
+      await this.databaseManager.deleteTenantDatabase(tenant.storageReference)
+      this.tenantRegistry.updateTenantStorageReference(tenant.id, null)
+    }
+
+    this.tenantRegistry.updateTenantDesiredState(tenant.id, 'deprovisioned')
+    this.tenantRegistry.updateTenantState(
+      tenant.id,
+      'deprovisioned',
+      params.triggeredBy,
+      params.reason ?? 'Tenant resources deleted',
+    )
+
+    return {
+      tenant: this.getExistingTenant(tenant.id),
+      deprovisioned: true,
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.databaseManager.close()
+  }
+
+  private createOpaqueSubdomainCandidate(): string {
+    return `${opaqueSubdomainPrefix}-${randomBytes(6).toString('hex')}`
+  }
+
+  private getExistingTenant(tenantId: string): Tenant {
+    const tenant = this.tenantRegistry.getTenant(tenantId)
+    if (!tenant) {
+      throw new Error(`Tenant ${tenantId} not found`)
+    }
+
+    return tenant
+  }
+}
+
+export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
+  private readonly pool: Pool
+  private readonly adminDatabaseUrl: string
+
+  constructor(adminDatabaseUrl: string) {
+    this.adminDatabaseUrl = adminDatabaseUrl
+    this.pool = new Pool({
+      connectionString: adminDatabaseUrl,
+      max: 1,
+    })
+  }
+
+  async ensureTenantDatabase(tenant: Tenant, subdomain: string): Promise<TenantDatabase> {
+    const databaseName = buildTenantDatabaseName(tenant.id, subdomain)
+    const client = await this.pool.connect()
+
+    try {
+      const existing = await client.query<{ exists: boolean }>(
+        'SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1) AS exists',
+        [databaseName],
+      )
+
+      if (!existing.rows[0]?.exists) {
+        await client.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
+      }
+    } finally {
+      client.release()
+    }
+
+    const connectionString = new URL(this.adminDatabaseUrl)
+    connectionString.pathname = `/${databaseName}`
+
+    return {
+      databaseName,
+      connectionString: connectionString.toString(),
+    }
+  }
+
+  async deleteTenantDatabase(databaseName: string): Promise<void> {
+    const client = await this.pool.connect()
+
+    try {
+      const existing = await client.query<{ exists: boolean }>(
+        'SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1) AS exists',
+        [databaseName],
+      )
+
+      if (!existing.rows[0]?.exists) {
+        return
+      }
+
+      await client.query(
+        `SELECT pg_terminate_backend(pid)
+           FROM pg_stat_activity
+          WHERE datname = $1
+            AND pid <> pg_backend_pid()`,
+        [databaseName],
+      )
+      await client.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`)
+    } finally {
+      client.release()
+    }
+  }
+
+  async close(): Promise<void> {
+    await this.pool.end()
+  }
+}
+
+export class KubernetesTenantInfrastructureManager
+  implements TenantInfrastructureManager
+{
+  private readonly client: KubernetesObjectApi
+  private readonly readyPollIntervalMs: number
+
+  constructor(options?: { kubeConfig?: KubeConfig; readyPollIntervalMs?: number }) {
+    const kubeConfig = options?.kubeConfig ?? new KubeConfig()
+    kubeConfig.loadFromDefault()
+    this.client = KubernetesObjectApi.makeApiClient(kubeConfig)
+    this.readyPollIntervalMs =
+      options?.readyPollIntervalMs ?? defaultReadyPollIntervalMs
+  }
+
+  async applyTenantResources(bundle: TenantInfrastructureBundle): Promise<void> {
+    await upsertKubernetesObject(this.client, bundle.namespace)
+    await upsertKubernetesObject(this.client, bundle.configMap)
+    await upsertKubernetesObject(this.client, bundle.secret)
+    await upsertKubernetesObject(this.client, bundle.service)
+    await upsertKubernetesObject(this.client, bundle.deployment)
+  }
+
+  async waitForTenantReady(
+    resources: TenantProvisioningResources,
+    timeoutMs = defaultReadyTimeoutMs,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs
+
+    while (Date.now() < deadline) {
+      const deployment = await this.client.read<V1Deployment>({
+        apiVersion: 'apps/v1',
+        kind: 'Deployment',
+        metadata: {
+          name: resources.deploymentName,
+          namespace: resources.namespace,
+        },
+      })
+
+      const isAvailable =
+        (deployment.status?.availableReplicas ?? 0) >= 1 &&
+        deployment.status?.conditions?.some(
+          (condition) =>
+            condition.type === 'Available' && condition.status === 'True',
+        ) === true
+
+      if (isAvailable) {
+        return
+      }
+
+      await sleep(this.readyPollIntervalMs)
+    }
+
+    throw new Error(
+      `Tenant workload ${resources.deploymentName} did not become ready within ${timeoutMs}ms`,
+    )
+  }
+
+  async deleteTenantResources(resources: TenantProvisioningResources): Promise<void> {
+    try {
+      await this.client.delete(
+        {
+          apiVersion: 'v1',
+          kind: 'Namespace',
+          metadata: {
+            name: resources.namespace,
+          },
+        },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        'Foreground',
+        {
+          apiVersion: 'v1',
+          kind: 'DeleteOptions',
+        } as V1DeleteOptions,
+      )
+    } catch (error) {
+      if (isApiException(error, 404)) {
+        return
+      }
+      throw error
+    }
+  }
+}
+
+export function createLiveTenantProvisioningService(params: {
+  tenantRegistry: TenantRegistry
+  baseDomain: string
+  imageRepository: string
+  databaseAdminUrl: string
+  imagePullSecretName?: string
+  publicScheme?: 'http' | 'https'
+  tenantPort?: number
+  readyTimeoutMs?: number
+}): TenantProvisioningService {
+  return new TenantProvisioningService({
+    tenantRegistry: params.tenantRegistry,
+    infrastructureManager: new KubernetesTenantInfrastructureManager(),
+    databaseManager: new PostgresTenantDatabaseManager(params.databaseAdminUrl),
+    baseDomain: params.baseDomain,
+    imageRepository: params.imageRepository,
+    imagePullSecretName: params.imagePullSecretName,
+    publicScheme: params.publicScheme,
+    tenantPort: params.tenantPort,
+    readyTimeoutMs: params.readyTimeoutMs,
+  })
+}
+
+export function buildTenantInfrastructureBundle(
+  options: BuildTenantInfrastructureBundleOptions,
+): TenantInfrastructureBundle {
+  const resources = buildTenantResourceNames({
+    tenant: options.tenant,
+    subdomain: options.subdomain,
+    baseDomain: options.baseDomain,
+    imageRepository: options.imageRepository,
+  })
+  const runtimeUrl = `${options.publicScheme}://${resources.hostname}`
+  const namespaceLabels = buildTenantLabels(options.tenant, options.subdomain)
+
+  return {
+    resources,
+    namespace: {
+      apiVersion: 'v1',
+      kind: 'Namespace',
+      metadata: {
+        name: resources.namespace,
+        labels: namespaceLabels,
+      },
+    },
+    configMap: {
+      apiVersion: 'v1',
+      kind: 'ConfigMap',
+      metadata: {
+        name: resources.configMapName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      data: {
+        PORT: String(options.tenantPort),
+        SERVE_WEB: 'true',
+        PUBLIC_WEB_URL: runtimeUrl,
+        ALLOWED_ORIGINS: runtimeUrl,
+      },
+    },
+    secret: {
+      apiVersion: 'v1',
+      kind: 'Secret',
+      metadata: {
+        name: resources.secretName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      type: 'Opaque',
+      data: {
+        DATABASE_URL: encodeSecretValue(options.database.connectionString),
+      },
+    },
+    service: {
+      apiVersion: 'v1',
+      kind: 'Service',
+      metadata: {
+        name: resources.serviceName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      spec: {
+        selector: buildTenantSelectorLabels(options.tenant),
+        ports: [
+          {
+            name: 'http',
+            port: options.tenantPort,
+            targetPort: options.tenantPort,
+          },
+        ],
+      },
+    },
+    deployment: {
+      apiVersion: 'apps/v1',
+      kind: 'Deployment',
+      metadata: {
+        name: resources.deploymentName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      spec: {
+        replicas: 1,
+        selector: {
+          matchLabels: buildTenantSelectorLabels(options.tenant),
+        },
+        template: {
+          metadata: {
+            labels: namespaceLabels,
+          },
+          spec: {
+            terminationGracePeriodSeconds: 30,
+            imagePullSecrets: options.imagePullSecretName
+              ? [{ name: options.imagePullSecretName }]
+              : undefined,
+            containers: [
+              {
+                name: 'tenant-app',
+                image: resources.image,
+                imagePullPolicy: 'IfNotPresent',
+                ports: [
+                  {
+                    containerPort: options.tenantPort,
+                    name: 'http',
+                  },
+                ],
+                envFrom: [
+                  {
+                    configMapRef: { name: resources.configMapName },
+                  },
+                  {
+                    secretRef: { name: resources.secretName },
+                  },
+                ],
+                livenessProbe: {
+                  httpGet: {
+                    path: '/healthz',
+                    port: options.tenantPort,
+                  },
+                  initialDelaySeconds: 10,
+                  periodSeconds: 10,
+                  timeoutSeconds: 3,
+                  failureThreshold: 3,
+                },
+                readinessProbe: {
+                  httpGet: {
+                    path: '/ready',
+                    port: options.tenantPort,
+                  },
+                  initialDelaySeconds: 5,
+                  periodSeconds: 5,
+                  timeoutSeconds: 2,
+                  failureThreshold: 2,
+                },
+              },
+            ],
+          },
+        },
+      },
+    },
+  }
+}
+
+export function buildTenantResourceNames(params: {
+  tenant: Tenant
+  subdomain: string
+  baseDomain: string
+  imageRepository: string
+}): TenantProvisioningResources {
+  const namespace = `tenant-${params.subdomain}`
+  return {
+    namespace,
+    deploymentName: 'dnd-notes',
+    serviceName: 'dnd-notes',
+    configMapName: 'dnd-notes-runtime',
+    secretName: 'dnd-notes-runtime-secret',
+    hostname: `${params.subdomain}.${params.baseDomain}`,
+    databaseName: buildTenantDatabaseName(params.tenant.id, params.subdomain),
+    image: `${params.imageRepository}:${params.tenant.version}`,
+  }
+}
+
+function buildTenantSelectorLabels(tenant: Tenant): Record<string, string> {
+  return {
+    'app.kubernetes.io/name': 'dnd-notes',
+    'app.kubernetes.io/component': 'tenant-app',
+    'dnd-notes.dev/tenant-id': tenant.id,
+  }
+}
+
+function buildTenantLabels(
+  tenant: Tenant,
+  subdomain: string,
+): Record<string, string> {
+  return {
+    ...buildTenantSelectorLabels(tenant),
+    'app.kubernetes.io/managed-by': 'dnd-notes-control-plane',
+    'dnd-notes.dev/tenant-slug': tenant.slug,
+    'dnd-notes.dev/subdomain': subdomain,
+  }
+}
+
+function buildTenantDatabaseName(tenantId: string, subdomain: string): string {
+  const normalizedTenantId = tenantId
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 20)
+  const normalizedSubdomain = subdomain.replace(/-/g, '_')
+
+  const name = `tenant_${normalizedTenantId}_${normalizedSubdomain}`.slice(0, 63)
+
+  return name.replace(/_+$/g, '')
+}
+
+function quoteIdentifier(identifier: string): string {
+  if (!/^[a-z0-9_]+$/.test(identifier)) {
+    throw new Error(`Unsafe database identifier: ${identifier}`)
+  }
+
+  return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function encodeSecretValue(value: string): string {
+  return Buffer.from(value, 'utf8').toString('base64')
+}
+
+async function upsertKubernetesObject<T extends KubernetesObject>(
+  client: KubernetesObjectApi,
+  spec: T,
+): Promise<void> {
+  try {
+    const existing = await client.read<T>({
+      apiVersion: spec.apiVersion,
+      kind: spec.kind,
+      metadata: {
+        name: spec.metadata!.name!,
+        namespace: spec.metadata?.namespace,
+      },
+    })
+    spec.metadata = {
+      ...spec.metadata,
+      resourceVersion: existing.metadata?.resourceVersion,
+    }
+    await client.replace(spec)
+  } catch (error) {
+    if (isApiException(error, 404)) {
+      await client.create(spec)
+      return
+    }
+
+    throw error
+  }
+}
+
+function isApiException(error: unknown, statusCode: number): error is ApiException<unknown> {
+  return error instanceof ApiException && error.code === statusCode
+}
+
+function sleep(durationMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, durationMs)
+  })
+}

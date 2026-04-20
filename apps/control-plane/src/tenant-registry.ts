@@ -2,7 +2,7 @@ import Database, { type Database as DatabaseType } from 'better-sqlite3'
 import { tenantStates, type Tenant, type TenantState, type StateTransition } from './types.js'
 
 const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
-const CURRENT_SCHEMA_VERSION = 1
+const CURRENT_SCHEMA_VERSION = 2
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 
 export class TenantRegistry {
@@ -22,6 +22,7 @@ export class TenantRegistry {
     this.bootstrap()
 
     if (currentSchemaVersion === 0) {
+      this.ensureSubdomainIndex()
       this.setSchemaMetadata(
         'tenant_state_signature',
         CURRENT_TENANT_STATE_SIGNATURE,
@@ -30,7 +31,9 @@ export class TenantRegistry {
       return
     }
 
-    if (currentSchemaVersion !== CURRENT_SCHEMA_VERSION) {
+    if (currentSchemaVersion === 1) {
+      this.migrateFromV1ToV2()
+    } else if (currentSchemaVersion !== CURRENT_SCHEMA_VERSION) {
       throw new Error(
         `Unsupported control-plane schema version ${currentSchemaVersion}`,
       )
@@ -62,6 +65,7 @@ export class TenantRegistry {
       CREATE TABLE IF NOT EXISTS tenants (
         id TEXT PRIMARY KEY,
         slug TEXT UNIQUE NOT NULL,
+        subdomain TEXT,
         owner_id TEXT NOT NULL,
         desired_state TEXT NOT NULL CHECK (desired_state IN (${tenantStateSqlList})),
         current_state TEXT NOT NULL CHECK (current_state IN (${tenantStateSqlList})),
@@ -87,10 +91,33 @@ export class TenantRegistry {
     `)
   }
 
+  private migrateFromV1ToV2(): void {
+    const columnNames = this.db
+      .prepare(`PRAGMA table_info(tenants)`)
+      .all() as Array<{ name: string }>
+
+    const hasSubdomainColumn = columnNames.some((column) => column.name === 'subdomain')
+
+    if (!hasSubdomainColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN subdomain TEXT`)
+    }
+
+    this.ensureSubdomainIndex()
+    this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+  }
+
+  private ensureSubdomainIndex(): void {
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_subdomain
+      ON tenants(subdomain)
+      WHERE subdomain IS NOT NULL;
+    `)
+  }
+
   listTenants(): Tenant[] {
     const rows = this.db
       .prepare(
-        `SELECT id, slug, owner_id, desired_state, current_state, version,
+        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
                 storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          ORDER BY created_at DESC`,
@@ -103,7 +130,7 @@ export class TenantRegistry {
   getTenant(tenantId: string): Tenant | null {
     const row = this.db
       .prepare(
-        `SELECT id, slug, owner_id, desired_state, current_state, version,
+        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
                 storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE id = ?`,
@@ -116,7 +143,7 @@ export class TenantRegistry {
   getTenantBySlug(slug: string): Tenant | null {
     const row = this.db
       .prepare(
-        `SELECT id, slug, owner_id, desired_state, current_state, version,
+        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
                 storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE slug = ?`,
@@ -124,6 +151,77 @@ export class TenantRegistry {
       .get(slug)
 
     return row ? this.mapRowToTenant(row) : null
+  }
+
+  getTenantBySubdomain(subdomain: string): Tenant | null {
+    const row = this.db
+      .prepare(
+        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
+                storage_reference, backup_metadata, created_at, updated_at
+         FROM tenants
+         WHERE subdomain = ?`,
+      )
+      .get(subdomain)
+
+    return row ? this.mapRowToTenant(row) : null
+  }
+
+  reserveTenantSubdomain(
+    tenantId: string,
+    createCandidate: () => string,
+    maxAttempts = 10,
+  ): string {
+    const reserveTransaction = this.db.transaction(() => {
+      const existingTenant = this.db
+        .prepare(
+          `SELECT subdomain
+           FROM tenants
+           WHERE id = ?`,
+        )
+        .get(tenantId) as { subdomain: string | null } | undefined
+
+      if (!existingTenant) {
+        throw new Error(`Tenant ${tenantId} not found`)
+      }
+
+      if (existingTenant.subdomain) {
+        return existingTenant.subdomain
+      }
+
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const candidate = createCandidate()
+
+        try {
+          const result = this.db
+            .prepare(
+              `UPDATE tenants
+               SET subdomain = ?, updated_at = datetime('now')
+               WHERE id = ?
+                 AND subdomain IS NULL`,
+            )
+            .run(candidate, tenantId)
+
+          if (result.changes === 1) {
+            return candidate
+          }
+
+          const updatedTenant = this.getTenant(tenantId)
+          if (updatedTenant?.subdomain) {
+            return updatedTenant.subdomain
+          }
+        } catch (error) {
+          if (isSqliteUniqueConstraintError(error)) {
+            continue
+          }
+
+          throw error
+        }
+      }
+
+      throw new Error('Could not allocate an opaque tenant subdomain')
+    })
+
+    return reserveTransaction.immediate()
   }
 
   createTenant(params: {
@@ -219,7 +317,7 @@ export class TenantRegistry {
 
   updateTenantStorageReference(
     tenantId: string,
-    storageReference: string,
+    storageReference: string | null,
   ): void {
     const result = this.db
       .prepare(
@@ -228,6 +326,30 @@ export class TenantRegistry {
          WHERE id = ?`,
       )
       .run(storageReference, tenantId)
+
+    this.assertTenantUpdated(result, tenantId)
+  }
+
+  updateTenantSubdomain(tenantId: string, subdomain: string): void {
+    const result = this.db
+      .prepare(
+        `UPDATE tenants
+         SET subdomain = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(subdomain, tenantId)
+
+    this.assertTenantUpdated(result, tenantId)
+  }
+
+  updateTenantVersion(tenantId: string, version: string): void {
+    const result = this.db
+      .prepare(
+        `UPDATE tenants
+         SET version = ?, updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(version, tenantId)
 
     this.assertTenantUpdated(result, tenantId)
   }
@@ -310,6 +432,7 @@ export class TenantRegistry {
     return {
       id: r.id,
       slug: r.slug,
+      subdomain: r.subdomain || null,
       ownerId: r.owner_id,
       desiredState: r.desired_state as TenantState,
       currentState: r.current_state as TenantState,
@@ -337,4 +460,19 @@ export class TenantRegistry {
   close(): void {
     this.db.close()
   }
+}
+
+function isSqliteUniqueConstraintError(error: unknown): error is Error & { code?: string } {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const sqliteCode = (error as Error & { code?: string }).code
+
+  return (
+    sqliteCode === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    sqliteCode === 'SQLITE_CONSTRAINT_PRIMARYKEY' ||
+    (sqliteCode === 'SQLITE_CONSTRAINT' &&
+      error.message.includes('UNIQUE constraint failed'))
+  )
 }

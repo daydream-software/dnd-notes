@@ -66,7 +66,7 @@ None. The application will start with defaults.
 
 ## Health Endpoints
 
-The application exposes three health check endpoints:
+The application exposes four health and probe endpoints:
 
 ### `GET /healthz` (Liveness Probe)
 **Purpose:** Process liveness check for Kubernetes.  
@@ -85,7 +85,12 @@ livenessProbe:
   failureThreshold: 3
 ```
 
-### `GET /readyz` (Readiness Probe)
+### `GET /ready` (Control-plane Readiness Contract)
+**Purpose:** Cluster-internal readiness path used by the control plane and tenant
+Deployment manifests.  
+**Response:** Same behavior as `/readyz`.
+
+### `GET /readyz` (Legacy Readiness Probe)
 **Purpose:** Ready-to-serve-traffic check for Kubernetes.  
 **Response:**  
 - `200 OK` with `{ "status": "ok", "service": "dnd-notes-api" }` when database is healthy  
@@ -98,7 +103,7 @@ livenessProbe:
 ```yaml
 readinessProbe:
   httpGet:
-    path: /readyz
+    path: /ready
     port: 3000
   initialDelaySeconds: 5
   periodSeconds: 5
@@ -109,7 +114,7 @@ readinessProbe:
 ### `GET /health` (Legacy)
 **Purpose:** Backward compatibility for existing monitoring.  
 **Response:** Same as `/healthz`  
-**Status:** Maintained for continuity; prefer `/healthz` and `/readyz` for new deployments.
+**Status:** Maintained for continuity; prefer `/healthz` and `/ready` for new deployments.
 
 ## Persistent Storage
 

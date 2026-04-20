@@ -151,8 +151,10 @@ export function createApp({
     response.json({ status: 'ok', service: 'dnd-notes-api' })
   })
 
-  // Readiness probe - ready to serve traffic
-  app.get('/readyz', async (_request: Request, response: Response<HealthResponse | ErrorResponse>) => {
+  const handleReadiness = async (
+    _request: Request,
+    response: Response<HealthResponse | ErrorResponse>,
+  ) => {
     if (isShuttingDown()) {
       response.status(503).json({
         error: 'Shutting down',
@@ -168,7 +170,11 @@ export function createApp({
         error: 'Database unavailable',
       })
     }
-  })
+  }
+
+  // Readiness probes - /ready is the control-plane contract, /readyz stays for legacy probe compatibility.
+  app.get('/ready', handleReadiness)
+  app.get('/readyz', handleReadiness)
 
   // Legacy health endpoint for backward compatibility
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
@@ -204,6 +210,7 @@ export function createApp({
         path.startsWith('/api/') ||
         path === '/health' ||
         path === '/healthz' ||
+        path === '/ready' ||
         path === '/readyz'
       ) {
         next()
