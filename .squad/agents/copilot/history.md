@@ -81,3 +81,68 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Scope: handle the next Copilot comments on Kubernetes label safety for tenant IDs and length bounds for tenant subdomains.
 - Delivered: bounded tenant subdomains to the strictest derived Kubernetes name budget (the PVC name), added regression coverage for overly long persisted subdomains, and normalized tenant IDs before projecting them into Kubernetes labels/selectors so arbitrary control-plane IDs no longer break Kubernetes apply.
 - Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 Issue #63 kickoff
+- Branch: `squad/63-formalize-k3d-development-test-environment`
+- Scope: turn the locked k3d local-platform decision into real bootstrap and smoke artifacts without widening into later control-plane deployment packaging or OIDC implementation.
+- Planned shape: add a k3d bootstrap lane for ingress-nginx + platform Postgres + seeded Keycloak, add a live smoke path that provisions a tenant against k3d using the existing local control-plane process and imported tenant image, and document the k3d/k3s boundary explicitly.
+
+## 2026-04-20 Issue #63 implementation complete
+- Delivered: added `scripts/k3d/bootstrap.sh`, `scripts/k3d/build-tenant-image.sh`, and `scripts/k3d/smoke.sh`; added committed k3d manifests for the platform namespace, Postgres, and seeded Keycloak; wired root `package.json` entrypoints; and documented the lane in `platform/k3d/README.md` plus the root README.
+- Validation: `bash -n scripts/k3d/*.sh`, `npm run k3d:bootstrap -- --help`, `npm run k3d:build-image -- --help`, `npm run k3d:smoke -- --help`, and repo-wide `npm run lint && npm run test:ci && npm run build` passed.
+- Constraint in this environment: `docker` is available, but `k3d` and `kubectl` are not installed here, so the live cluster smoke path itself could not be executed during this session. The repo now contains the automated lane needed to run that rehearsal on a workstation with the standard tools installed.
+
+## 2026-04-20 Issue #63 live validation follow-up
+- Status: live smoke revalidation now reaches k3d helper startup under the local Docker broker, so the previous `ghcr.io/k3d-io/k3d-proxy:5.8.3` block is cleared.
+- Current blocker: the broker still rejects `ghcr.io/k3d-io/k3d-tools:5.8.3` while `k3d` creates its tools node, so the cluster rolls back before bootstrap can continue.
+
+## 2026-04-20 Issue #63 live validation follow-up (broker bind policy)
+- Status: live smoke revalidation now gets past the currently required k3d images, including `ghcr.io/k3d-io/k3d-tools:5.8.3`.
+- Current blocker: the broker rejects the tools-node bind mount `/var/run/docker.sock:/var/run/docker.sock` as a forbidden host path, so cluster creation still rolls back before bootstrap can continue.
+
+## 2026-04-20 Issue #63 live validation follow-up (host connectivity)
+- Status: broker policy is no longer the main blocker. Live revalidation now creates the k3d cluster successfully in this environment.
+- Repo fix landed during validation: `scripts/k3d/bootstrap.sh` now rewrites k3d kubeconfig endpoints from `0.0.0.0` to `127.0.0.1` when needed and waits explicitly for the Kubernetes API before applying manifests.
+- Current blocker: the host environment still cannot reach Docker-published ports (including the k3d API port and ingress ports) or container bridge IPs, even though the k3d load balancer can reach the in-cluster API server. That prevents host `kubectl` from reaching the cluster and blocks the smoke lane beyond cluster creation.
+
+## 2026-04-20 Issue #63 live validation follow-up (tenant image build)
+- Status: the smoke lane progressed into the tenant image build path and exposed a real Dockerfile issue on production installs: root `prepare` still ran under `npm ci --omit=dev`, but Husky was not installed in the image.
+- Delivered: root `prepare` now routes through `scripts/prepare.mjs`, which exits cleanly when `.git` or the Husky package is absent; the tenant Dockerfile now copies that script before `npm ci`; and `.dockerignore` now includes only that script from `scripts/` so the Docker build context stays tight.
+- Validation: `npm run prepare`, repo-wide `npm run lint && npm run test:ci && npm run build`, raw `docker build`, and `DOCKER_BUILDKIT=0 npm run k3d:build-image` all passed after the fix.
+
+## 2026-04-20 Issue #63 live validation follow-up (tenant Postgres runtime URL)
+- Status: the next live smoke failure showed the in-cluster tenant pod trying to connect to `127.0.0.1:55432`. That URL only works for the local control-plane process and must not be injected into the tenant workload.
+- Delivered: the control plane now accepts an optional `TENANT_DATABASE_RUNTIME_URL` override and uses it when building tenant `DATABASE_URL` secrets, while still using `TENANT_DATABASE_ADMIN_URL` for create/drop operations. The k3d smoke lane now defaults that runtime URL to `platform-postgres.dnd-notes-platform.svc.cluster.local:5432`, and control-plane docs/examples were updated accordingly.
+- Validation: control-plane `lint`, `test`, and `build` passed, `bash -n scripts/k3d/*.sh` passed, and repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fix.
+
+## 2026-04-20 Issue #63 live validation follow-up (Keycloak external URL)
+- Status: the next user-side validation showed Keycloak redirects dropping the mapped host port, causing the browser to jump from `http://keycloak.127.0.0.1.nip.io:8080` to the same host without `:8080`.
+- Delivered: the committed Keycloak manifest now sets `KC_HOSTNAME` to the correct default local URL, and `scripts/k3d/bootstrap.sh` now reapplies `KC_HOSTNAME` on the deployment using the active `K3D_HTTP_PORT` so non-default local port mappings also generate correct redirects. The k3d README now documents that bootstrap injects the full external URL for this reason.
+- Validation: `bash -n scripts/k3d/bootstrap.sh` passed and the final wiring was checked to confirm the manifest default plus bootstrap override both include the full Keycloak URL with port.
+
+## 2026-04-20 Issue #63 live validation success
+- Status: the user reran `npm run k3d:smoke` on their workstation and the full lane completed successfully: bootstrap reused the existing cluster, the tenant image built/imported, the tenant deployment rolled out, and the smoke readiness check passed.
+- Operational note: this is expected to leave the k3d cluster running. The smoke lane is designed to reuse the shared local cluster and only clean up the smoke tenant by default; cluster teardown remains a separate explicit action (`k3d cluster delete dnd-notes` when desired).
+
+## 2026-04-20 Issue #63 CI smoke workflow
+- Delivered: added `.github/workflows/k3d-smoke.yml`, a dedicated GitHub Actions workflow that installs `k3d` and `kubectl`, runs `npm run k3d:smoke`, captures cluster diagnostics as an artifact, and always deletes the CI cluster afterward. The k3d README now documents that the same smoke lane runs in CI.
+- Trigger shape: runs on PRs and pushes touching the k3d/platform lane, on nightly schedule, and on manual dispatch.
+
+## 2026-04-20 Issue #63 cloud-agent unblock config
+- User-approved repo-local agent config updates are ready to commit with the issue work: `.copilot_here/docker/Dockerfile` now installs `k3d` and `kubectl`, and `.copilot_here/docker-broker.json` allows the k3d helper images plus the host bind/namespace behavior needed to exercise the local smoke lane inside the agent environment.
+
+## 2026-04-20 Issue #63 k3s version standardization
+- Delivered: the k3d bootstrap lane now pins the cluster image explicitly instead of inheriting the `k3d` binary default. The current pinned image is `rancher/k3s:v1.35.3-k3s1`, and the CI smoke workflow now aligns its `kubectl` tooling with Kubernetes 1.35 as well.
+- Rationale: local workstations were still creating 1.31 clusters because `k3d` 5.8.3 defaults to an older bundled k3s release. The lane now keeps local and CI smoke runs on an explicit supported Kubernetes minor until we intentionally bump it again.
+
+## 2026-04-20 PR #65 CI follow-up
+- Investigation result: the failed `k3d Smoke` run the user flagged (`24691692504`) was tied to older head SHA `2f0aa32`, while the newer run on `3b75dcf` already completed successfully.
+- Delivered: committed `d6032f4` (`fix(ci): force direct k3d image import for #63`), which changes `scripts/k3d/build-tenant-image.sh` to call `k3d image import --mode direct ...` and documents the new `K3D_IMAGE_IMPORT_MODE` override. This avoids the tarball-based `tools-node` path that logged `/k3d/images/...tar: no such file or directory` in the older failing CI run.
+- Status: branch `squad/63-formalize-k3d-development-test-environment` was pushed with `d6032f4`, and a fresh `k3d Smoke` run started on that SHA. If more CI investigation is needed later, start from the current run rather than the obsolete failure.
+
+## 2026-04-20 PR #65 second review follow-up
+- Delivered: hardened `scripts/prepare.mjs` so signaled Husky exits no longer report success (`status ?? 1`), taught both k3d scripts to restore the user's prior `kubectl` context on exit, and moved local Keycloak bootstrap admin credentials into a dev-only Secret while annotating the committed Keycloak/Postgres seed credentials as local-only in both manifests and docs.
+- Validation: `bash -n scripts/k3d/*.sh` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the follow-up.
+
+## 2026-04-20 PR #65 third review follow-up
+- Delivered: vendored the ingress-nginx controller manifest into `platform/k3d/ingress-nginx-controller-v1.12.1.yaml` so bootstrap no longer depends on a runtime network fetch, switched `scripts/k3d/bootstrap.sh` to consume that local file via `INGRESS_NGINX_MANIFEST_PATH`, pinned the platform Postgres image to `postgres:17.9-bookworm`, and cleaned up the lingering README grammar nit around the Husky `prepare` hook.

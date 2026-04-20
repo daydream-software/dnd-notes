@@ -1,0 +1,123 @@
+name: k3d Smoke
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/k3d-smoke.yml'
+      - '.dockerignore'
+      - 'Dockerfile'
+      - 'README.md'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'apps/api/**'
+      - 'apps/control-plane/**'
+      - 'apps/web/**'
+      - 'platform/k3d/**'
+      - 'scripts/prepare.mjs'
+      - 'scripts/k3d/**'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/k3d-smoke.yml'
+      - '.dockerignore'
+      - 'Dockerfile'
+      - 'README.md'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'apps/api/**'
+      - 'apps/control-plane/**'
+      - 'apps/web/**'
+      - 'platform/k3d/**'
+      - 'scripts/prepare.mjs'
+      - 'scripts/k3d/**'
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: k3d-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOCKER_BUILDKIT: '0'
+      K3D_CLUSTER_NAME: dnd-notes
+      K3D_VERSION: v5.8.3
+      K3D_K3S_IMAGE: rancher/k3s:v1.35.3-k3s1
+      KUBECTL_VERSION: v1.35.4
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: '22.21.1'
+          cache: 'npm'
+
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+
+      - name: Install k3d
+        run: |
+          curl -fsSLo k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-amd64"
+          chmod +x k3d
+          sudo mv k3d /usr/local/bin/k3d
+
+      - name: Show tool versions
+        run: |
+          docker version
+          kubectl version --client
+          k3d version
+          echo "k3s image: ${K3D_K3S_IMAGE}"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run k3d smoke lane
+        run: npm run k3d:smoke
+
+      - name: Collect k3d diagnostics
+        if: ${{ always() }}
+        run: |
+          mkdir -p reports/k3d-smoke
+
+          docker ps -a > reports/k3d-smoke/docker-ps.txt || true
+          docker images > reports/k3d-smoke/docker-images.txt || true
+          k3d cluster list > reports/k3d-smoke/k3d-cluster-list.txt || true
+          kubectl config get-contexts > reports/k3d-smoke/kube-contexts.txt || true
+          kubectl get nodes -o wide > reports/k3d-smoke/nodes.txt || true
+          kubectl get all -A -o wide > reports/k3d-smoke/all-resources.txt || true
+          kubectl get ingress -A > reports/k3d-smoke/ingresses.txt || true
+          kubectl get pvc -A > reports/k3d-smoke/pvcs.txt || true
+          kubectl get events -A --sort-by=.metadata.creationTimestamp > reports/k3d-smoke/events.txt || true
+
+          while IFS= read -r container; do
+            docker logs "${container}" > "reports/k3d-smoke/${container}.log" 2>&1 || true
+          done < <(docker ps -a --format '{{.Names}}' | grep "^k3d-${K3D_CLUSTER_NAME}" || true)
+
+      - name: Upload k3d diagnostics
+        if: ${{ always() && hashFiles('reports/k3d-smoke/**/*') != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: k3d-smoke-diagnostics
+          path: reports/k3d-smoke
+
+      - name: Delete k3d cluster
+        if: ${{ always() }}
+        run: k3d cluster delete "${K3D_CLUSTER_NAME}" || true
