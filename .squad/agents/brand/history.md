@@ -22,6 +22,26 @@ Brand initialized as Platform Dev for the initial project squad.
 📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
 📌 Team update (2026-04-11T19:27:38Z): GitHub Actions in all workflows pinned to commit SHAs; decision merged to team decisions log — Brand
 📌 Team update (2026-04-17T23:10:03Z): copilot_yolo GitHub CLI integration complete (install `gh`, auth fallback, auth enforcement). Three decisions consolidated to team decisions.md — Brand
+📌 Team update (2026-04-20T21:45:00Z): CI test orchestrator and coverage merger committed (65e8057); monorepo test reporting infrastructure complete — Brand
+
+## 2026-04-20T21:45:00Z: CI Infrastructure Commit Complete
+
+**Action:** Committed monorepo CI test orchestrator and coverage merger infrastructure (65e8057).
+
+**What was built:**
+- `scripts/run-ci-tests.mjs`: Orchestrator that spawns web, api, and control-plane test suites sequentially and collects exit codes; always runs all three and reports summary
+- `scripts/merge-ci-coverage.mjs`: Merger that consolidates per-workspace coverage summaries (from c8) into root `reports/coverage/summary.md` (Markdown) and `summary.json` (structured); concatenates lcov.info files
+- `.github/workflows/ci.yml` updated: replaced `npm test` with `npm run test:ci`; added `continue-on-error: true` so coverage is always published even if tests fail; published consolidated results via `publish-unit-test-result-action`; coverage artifact uploaded for visibility
+- Root `package.json`: added `test:ci` (calls orchestrator), `test:ci:web/api/control-plane` (per-workspace hooks), and `c8` dev dependency for coverage instrumentation
+- Per-workspace `package.json`: `test:ci` scripts that run `npm test` with coverage instrumentation
+
+**Testing:**
+- `npm run test:ci` run: all 54 tests pass (32 web vitest + 22 control-plane/api node tests) in ~92s; coverage summary generated; all metrics correct (web 50.22%, api 90.60%, control-plane 74.06%, total 81.84%)
+
+**Design decisions frozen:**
+- Local development stays with `npm test` (fail-fast per-workspace)
+- CI uses separate `npm run test:ci` (always-all, reports on GitHub)
+- Coverage thresholds deferred (Phase 2+)
 
 ## Learnings
 
