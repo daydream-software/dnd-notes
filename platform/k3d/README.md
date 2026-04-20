@@ -27,8 +27,8 @@ cluster down at the end of the job.
 ## What `k3d:bootstrap` provisions
 
 - a k3d cluster pinned to `rancher/k3s:v1.35.3-k3s1` with Traefik disabled and host ports `8080`/`8443` mapped to the load balancer
-- `ingress-nginx`
-- a platform Postgres instance in `dnd-notes-platform`
+- a vendored `ingress-nginx` controller manifest pinned to controller `v1.12.1`
+- a platform Postgres instance in `dnd-notes-platform` pinned to `postgres:17.9-bookworm`
 - a seeded Keycloak instance in `dnd-notes-platform`
 
 Keycloak is exposed at:
@@ -88,6 +88,7 @@ Both scripts honor a few env overrides when you need a different local shape:
 | --- | --- | --- |
 | `K3D_CLUSTER_NAME` | `dnd-notes` | k3d cluster name |
 | `K3D_K3S_IMAGE` | `rancher/k3s:v1.35.3-k3s1` | pinned k3s image used by the local cluster |
+| `INGRESS_NGINX_MANIFEST_PATH` | `platform/k3d/ingress-nginx-controller-v1.12.1.yaml` | local ingress-nginx manifest consumed by bootstrap |
 | `K3D_IMAGE_IMPORT_MODE` | `direct` | k3d image import mode for the tenant image; `direct` avoids the flaky tarball-based tools-node path seen in CI |
 | `K3D_HTTP_PORT` | `8080` | host HTTP port for ingress |
 | `K3D_HTTPS_PORT` | `8443` | host HTTPS port for ingress |
@@ -126,3 +127,6 @@ default is `rancher/k3s:v1.35.3-k3s1`, which keeps local workstations and the CI
 smoke workflow on the same supported Kubernetes minor. When we advance the lane
 again, update both `K3D_K3S_IMAGE` in `scripts/k3d/bootstrap.sh` and the
 matching CI env in `.github/workflows/k3d-smoke.yml`.
+
+The lane also vendors the ingress-nginx manifest in-repo and pins Postgres to a
+specific patch tag so local and CI smoke runs do not drift on external defaults.

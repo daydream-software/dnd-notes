@@ -48,11 +48,12 @@ For detailed runtime configuration, health endpoints, and Kubernetes deployment 
 
 ## Git hooks
 
-`npm install` now provisions Husky git hooks automatically via the root `prepare`
-script when the repo checkout and Husky package are present. Production installs
-and container builds skip that hook bootstrap cleanly. Commits are checked with
-commitlint, so commit messages must follow the Conventional Commits format (for
-example `feat(api): harden CORS policy` or `chore: update hook tooling`).
+`npm install` now provisions Husky git hooks automatically via the root
+`prepare` script when the repo checkout is present and the Husky package is
+installed. Production installs and container builds skip that hook bootstrap
+cleanly. Commits are checked with commitlint, so commit messages must follow
+the Conventional Commits format (for example `feat(api): harden CORS policy` or
+`chore: update hook tooling`).
 
 ## Workspace layout
 

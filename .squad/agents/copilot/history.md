@@ -143,3 +143,6 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 ## 2026-04-20 PR #65 second review follow-up
 - Delivered: hardened `scripts/prepare.mjs` so signaled Husky exits no longer report success (`status ?? 1`), taught both k3d scripts to restore the user's prior `kubectl` context on exit, and moved local Keycloak bootstrap admin credentials into a dev-only Secret while annotating the committed Keycloak/Postgres seed credentials as local-only in both manifests and docs.
 - Validation: `bash -n scripts/k3d/*.sh` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the follow-up.
+
+## 2026-04-20 PR #65 third review follow-up
+- Delivered: vendored the ingress-nginx controller manifest into `platform/k3d/ingress-nginx-controller-v1.12.1.yaml` so bootstrap no longer depends on a runtime network fetch, switched `scripts/k3d/bootstrap.sh` to consume that local file via `INGRESS_NGINX_MANIFEST_PATH`, pinned the platform Postgres image to `postgres:17.9-bookworm`, and cleaned up the lingering README grammar nit around the Husky `prepare` hook.

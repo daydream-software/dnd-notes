@@ -47,7 +47,7 @@ spec:
     spec:
       containers:
         - name: postgres
-          image: postgres:17-bookworm
+          image: postgres:17.9-bookworm
           imagePullPolicy: IfNotPresent
           ports:
             - name: postgres

@@ -7,7 +7,7 @@ K3S_IMAGE="${K3D_K3S_IMAGE:-rancher/k3s:v1.35.3-k3s1}"
 HTTP_PORT="${K3D_HTTP_PORT:-8080}"
 HTTPS_PORT="${K3D_HTTPS_PORT:-8443}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
-INGRESS_NGINX_MANIFEST_URL="${INGRESS_NGINX_MANIFEST_URL:-https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/cloud/deploy.yaml}"
+INGRESS_NGINX_MANIFEST_PATH="${INGRESS_NGINX_MANIFEST_PATH:-${ROOT}/platform/k3d/ingress-nginx-controller-v1.12.1.yaml}"
 previous_kube_context=""
 
 usage() {
@@ -19,8 +19,8 @@ Environment overrides:
   K3D_K3S_IMAGE             k3s image used for the cluster (default: rancher/k3s:v1.35.3-k3s1)
   K3D_HTTP_PORT             Host port mapped to ingress HTTP (default: 8080)
   K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 8443)
-  INGRESS_NGINX_MANIFEST_URL
-                             Pinned ingress-nginx manifest URL
+  INGRESS_NGINX_MANIFEST_PATH
+                             Local ingress-nginx manifest path
 EOF
 }
 
@@ -121,7 +121,7 @@ normalize_kubeconfig_server
 wait_for_kube_api 60
 
 kubectl apply -f "${ROOT}/platform/k3d/namespace.yaml"
-kubectl apply -f "${INGRESS_NGINX_MANIFEST_URL}"
+kubectl apply -f "${INGRESS_NGINX_MANIFEST_PATH}"
 wait_for_rollout ingress-nginx ingress-nginx-controller 240s
 
 kubectl apply -f "${ROOT}/platform/k3d/postgres.yaml"
