@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import Database from 'better-sqlite3'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -588,6 +589,30 @@ test('owner auth normalizes email casing for registration, duplicate checks, and
   })
   assert.equal(loginResponse.status, 200)
   assert.equal(loginResponse.body.owner.email, 'aela@example.com')
+})
+
+test('owner email lookups are backed by a unique lower(email) index', async (t) => {
+  const { dbPath, closeNoteStore, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  await closeNoteStore()
+
+  const database = new Database(dbPath, { readonly: true, fileMustExist: true })
+  t.after(() => {
+    database.close()
+  })
+
+  const indexRow = database
+    .prepare(`
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'index' AND name = 'idx_owner_accounts_email_lower'
+    `)
+    .get() as { sql: string } | undefined
+
+  assert.ok(indexRow)
+  assert.match(indexRow.sql, /CREATE UNIQUE INDEX/i)
+  assert.match(indexRow.sql, /LOWER\(email\)/i)
 })
 
 test('authenticated owners can run the note CRUD workflow in a selected campaign', async (t) => {

@@ -134,6 +134,42 @@ async function elevateConfiguredSiteAdminAccounts(
     .run(timestamp, ...configuredSiteAdminEmails)
 }
 
+async function ensureOwnerEmailUniqueness(database: NoteStoreDatabase) {
+  const existingEmails = (await database
+    .prepare<{ email: string }>(`
+      SELECT email
+      FROM owner_accounts
+    `)
+    .all()) as Array<{ email: string }>
+  const normalizedEmails = new Set<string>()
+  let duplicate: string | undefined
+
+  for (const row of existingEmails) {
+    const normalizedEmail = row.email.toLowerCase()
+
+    if (normalizedEmails.has(normalizedEmail)) {
+      duplicate = normalizedEmail
+      break
+    }
+
+    normalizedEmails.add(normalizedEmail)
+  }
+
+  if (duplicate) {
+    throw new Error(
+      `Owner accounts contain duplicate email addresses for "${duplicate}" when compared case-insensitively.`,
+    )
+  }
+
+  await database.prepare(`UPDATE owner_accounts SET email = LOWER(email) WHERE email != LOWER(email)`).run()
+  await database.exec(`
+    DROP INDEX IF EXISTS idx_owner_accounts_email_lower;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_email_lower
+    ON owner_accounts(LOWER(email));
+  `)
+}
+
 export async function initializeNoteStoreDatabase(
   database: NoteStoreDatabase,
   configuredSiteAdminEmails: ReadonlySet<string>,
@@ -148,9 +184,6 @@ export async function initializeNoteStoreDatabase(
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
-
-    CREATE INDEX IF NOT EXISTS idx_owner_accounts_email_lower
-    ON owner_accounts(LOWER(email));
 
     CREATE TABLE IF NOT EXISTS owner_sessions (
       id TEXT PRIMARY KEY,
@@ -253,5 +286,6 @@ export async function initializeNoteStoreDatabase(
   await ensureOwnerSiteAdminColumn(database)
   await ensureNotesAttributionColumns(database)
   await ensureShareLinkRevealTokens(database)
+  await ensureOwnerEmailUniqueness(database)
   await elevateConfiguredSiteAdminAccounts(database, configuredSiteAdminEmails)
 }

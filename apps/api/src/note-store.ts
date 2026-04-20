@@ -395,6 +395,31 @@ function normalizeEmailAddress(email: string) {
   return email.trim().toLowerCase()
 }
 
+function isOwnerEmailUniqueConstraintError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const code =
+    'code' in error && typeof error.code === 'string'
+      ? error.code
+      : undefined
+  const constraint =
+    'constraint' in error && typeof error.constraint === 'string'
+      ? error.constraint
+      : undefined
+  const details = [code, constraint, error.message].filter(Boolean).join(' ')
+
+  return (
+    code === '23505' ||
+    code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    code === 'SQLITE_CONSTRAINT' ||
+    /owner_accounts\.email/i.test(details) ||
+    /idx_owner_accounts_email_lower/i.test(details) ||
+    /duplicate key value/i.test(details)
+  )
+}
+
 function resolveConfiguredSiteAdminEmails(options: CreateNoteStoreOptions) {
   const configuredEmails =
     options.siteAdminEmails ??
@@ -1369,15 +1394,23 @@ export async function createNoteStore(
         updatedAt: timestamp,
       }
 
-      await insertOwnerAccount.run({
-        id: owner.id,
-        email: owner.email,
-        display_name: owner.displayName,
-        password_hash: createPasswordHash(input.password),
-        is_site_admin: owner.isSiteAdmin ? 1 : 0,
-        created_at: owner.createdAt,
-        updated_at: owner.updatedAt,
-      })
+      try {
+        await insertOwnerAccount.run({
+          id: owner.id,
+          email: owner.email,
+          display_name: owner.displayName,
+          password_hash: createPasswordHash(input.password),
+          is_site_admin: owner.isSiteAdmin ? 1 : 0,
+          created_at: owner.createdAt,
+          updated_at: owner.updatedAt,
+        })
+      } catch (error) {
+        if (isOwnerEmailUniqueConstraintError(error)) {
+          return null
+        }
+
+        throw error
+      }
 
       await updateUnclaimedDefaultMembership.run({
         user_id: owner.id,
