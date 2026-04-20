@@ -320,6 +320,52 @@ test('postgres restore fails fast when no pool or DATABASE_URL is configured', a
   )
 })
 
+test('postgres restore does not require write access to the configured sqlite directory', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const sourceDbPath = join(runtimeDirectory, `restore-source-${randomUUID()}.sqlite`)
+  const backupPath = join(runtimeDirectory, `restore-backup-${randomUUID()}.sqlite`)
+  const readonlyDirectory = join(runtimeDirectory, `restore-readonly-${randomUUID()}`)
+  const unusedDbPath = join(readonlyDirectory, 'notes.sqlite')
+  t.after(async () => {
+    await chmod(readonlyDirectory, 0o755).catch(() => undefined)
+    await rm(readonlyDirectory, { recursive: true, force: true })
+    await rm(sourceDbPath, { force: true })
+    await rm(backupPath, { force: true })
+  })
+
+  const sourceStore = await createNoteStore({
+    backend: 'sqlite',
+    dbPath: sourceDbPath,
+  })
+
+  try {
+    await sourceStore.createNote({
+      campaignId: defaultCampaignId,
+      title: 'Restored without sqlite writes',
+      body: 'Postgres restore should only need a temp working copy.',
+      tags: ['restore'],
+      status: 'active',
+      sessionName: null,
+    })
+    await sourceStore.backupDatabase(backupPath)
+  } finally {
+    await sourceStore.close()
+  }
+
+  await mkdir(readonlyDirectory, { recursive: true })
+  await chmod(readonlyDirectory, 0o555)
+
+  await assert.rejects(
+    () =>
+      restoreNoteStoreFromBackup(backupPath, {
+        backend: 'postgres',
+        dbPath: unusedDbPath,
+      }),
+    /DATABASE_URL is required when the Postgres note store is selected\./,
+  )
+  assert.deepEqual(await readdir(readonlyDirectory), [])
+})
+
 test('snapshot copy batches note inserts instead of issuing one INSERT per row', async (t) => {
   await mkdir(runtimeDirectory, { recursive: true })
   const sourceDbPath = join(runtimeDirectory, `restore-source-${randomUUID()}.sqlite`)

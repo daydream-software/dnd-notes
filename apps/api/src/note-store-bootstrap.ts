@@ -149,6 +149,9 @@ export async function initializeNoteStoreDatabase(
       updated_at TEXT NOT NULL
     );
 
+    CREATE INDEX IF NOT EXISTS idx_owner_accounts_email_lower
+    ON owner_accounts(LOWER(email));
+
     CREATE TABLE IF NOT EXISTS owner_sessions (
       id TEXT PRIMARY KEY,
       owner_user_id TEXT NOT NULL REFERENCES owner_accounts(id),

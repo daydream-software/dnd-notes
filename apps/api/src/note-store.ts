@@ -6,8 +6,9 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto'
-import { chmodSync, copyFileSync, mkdirSync, rmSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
   defaultCampaign,
@@ -325,6 +326,22 @@ function flattenSnapshotRows(
 
 function tightenSqliteFilePermissions(dbPath: string) {
   chmodSync(dbPath, 0o600)
+}
+
+function createRestoreWorkingCopy(backend: 'sqlite' | 'postgres', dbPath: string) {
+  if (backend === 'postgres') {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-notes-restore-'))
+
+    return {
+      directory,
+      path: join(directory, `restore-working-${randomUUID()}.sqlite`),
+    }
+  }
+
+  return {
+    directory: null,
+    path: `${dbPath}.restore-working-${randomUUID()}.sqlite`,
+  }
 }
 
 async function clearSnapshotTables(database: NoteStoreDatabase) {
@@ -2471,11 +2488,15 @@ export async function restoreNoteStoreFromBackup(
 ): Promise<NoteStore> {
   const backend = resolveNoteStoreBackend(options)
   const dbPath = resolveNoteDbPath(options)
-  const workingCopyPath = `${dbPath}.restore-working-${randomUUID()}.sqlite`
 
   if (dbPath === ':memory:') {
     throw new Error('Admin restore is not supported for in-memory note stores.')
   }
+
+  const { directory: workingCopyDirectory, path: workingCopyPath } = createRestoreWorkingCopy(
+    backend,
+    dbPath,
+  )
 
   const validationDatabase = new Database(sourcePath, {
     readonly: true,
@@ -2566,5 +2587,9 @@ export async function restoreNoteStoreFromBackup(
     return createNoteStore({ ...options, backend: 'postgres' })
   } finally {
     rmSync(workingCopyPath, { force: true })
+
+    if (workingCopyDirectory) {
+      rmSync(workingCopyDirectory, { recursive: true, force: true })
+    }
   }
 }
