@@ -277,6 +277,7 @@ const snapshotDeletionOrder = [...snapshotTableDefinitions]
   .map((definition) => definition.name)
 
 const snapshotCopyBatchSize = 100
+const snapshotInsertParameterLimit = 900
 
 interface SnapshotRow extends Record<string, unknown> {
   id: string
@@ -292,11 +293,38 @@ function buildSnapshotSelectSql(definition: (typeof snapshotTableDefinitions)[nu
   `
 }
 
-function buildSnapshotInsertSql(definition: (typeof snapshotTableDefinitions)[number]) {
+function buildSnapshotInsertSql(
+  definition: (typeof snapshotTableDefinitions)[number],
+  rowCount = 1,
+) {
   return `
     INSERT INTO ${definition.name} (${definition.columns.join(', ')})
-    VALUES (${definition.columns.map((column) => `@${column}`).join(', ')})
+    VALUES ${Array.from(
+      { length: rowCount },
+      () => `(${definition.columns.map(() => '?').join(', ')})`,
+    ).join(', ')}
   `
+}
+
+function resolveSnapshotInsertBatchSize(definition: (typeof snapshotTableDefinitions)[number]) {
+  return Math.max(
+    1,
+    Math.min(
+      snapshotCopyBatchSize,
+      Math.floor(snapshotInsertParameterLimit / definition.columns.length),
+    ),
+  )
+}
+
+function flattenSnapshotRows(
+  definition: (typeof snapshotTableDefinitions)[number],
+  rows: SnapshotRow[],
+) {
+  return rows.flatMap((row) => definition.columns.map((columnName) => row[columnName]))
+}
+
+function tightenSqliteFilePermissions(dbPath: string) {
+  chmodSync(dbPath, 0o600)
 }
 
 async function clearSnapshotTables(database: NoteStoreDatabase) {
@@ -305,13 +333,14 @@ async function clearSnapshotTables(database: NoteStoreDatabase) {
   }
 }
 
-async function copySnapshotTables(
+export async function copySnapshotTables(
   sourceDatabase: NoteStoreDatabase,
   destinationDatabase: NoteStoreDatabase,
 ) {
   for (const definition of snapshotTableDefinitions) {
     const selectStatement = sourceDatabase.prepare<SnapshotRow>(buildSnapshotSelectSql(definition))
-    const insertStatement = destinationDatabase.prepare(buildSnapshotInsertSql(definition))
+    const insertBatchSize = resolveSnapshotInsertBatchSize(definition)
+    const insertStatements = new Map<number, ReturnType<typeof destinationDatabase.prepare>>()
     let afterId: string | null = null
 
     while (true) {
@@ -320,8 +349,18 @@ async function copySnapshotTables(
         batchSize: snapshotCopyBatchSize,
       })) as SnapshotRow[]
 
-      for (const row of rows) {
-        await insertStatement.run(row)
+      for (let index = 0; index < rows.length; index += insertBatchSize) {
+        const rowBatch = rows.slice(index, index + insertBatchSize)
+        let insertStatement = insertStatements.get(rowBatch.length)
+
+        if (!insertStatement) {
+          insertStatement = destinationDatabase.prepare(
+            buildSnapshotInsertSql(definition, rowBatch.length),
+          )
+          insertStatements.set(rowBatch.length, insertStatement)
+        }
+
+        await insertStatement.run(flattenSnapshotRows(definition, rowBatch))
       }
 
       if (rows.length < snapshotCopyBatchSize) {
@@ -2451,7 +2490,7 @@ export async function restoreNoteStoreFromBackup(
   try {
     mkdirSync(dirname(workingCopyPath), { recursive: true })
     copyFileSync(sourcePath, workingCopyPath)
-    chmodSync(workingCopyPath, 0o600)
+    tightenSqliteFilePermissions(workingCopyPath)
 
     try {
       validationStore = await createNoteStore({
@@ -2471,7 +2510,7 @@ export async function restoreNoteStoreFromBackup(
     if (backend === 'sqlite') {
       mkdirSync(dirname(dbPath), { recursive: true })
       copyFileSync(workingCopyPath, dbPath)
-      chmodSync(dbPath, 0o600)
+      tightenSqliteFilePermissions(dbPath)
 
       return createNoteStore({ ...options, dbPath, backend: 'sqlite' })
     }

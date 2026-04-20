@@ -10,11 +10,13 @@ import { fileURLToPath } from 'node:url'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
 import {
+  copySnapshotTables,
   createNoteStore,
   initializeDatabaseOrClose,
   resolveNoteStoreBackend,
   restoreNoteStoreFromBackup,
 } from '../src/note-store.js'
+import { createSqliteDatabase } from '../src/note-store-database.js'
 import { registerOwner, withAuth } from './test-helpers.js'
 
 const runtimeDirectory = join(dirname(fileURLToPath(import.meta.url)), '.runtime')
@@ -296,6 +298,79 @@ test('postgres restore fails fast when no pool or DATABASE_URL is configured', a
       }),
     /DATABASE_URL is required when the Postgres note store is selected\./,
   )
+})
+
+test('snapshot copy batches note inserts instead of issuing one INSERT per row', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const sourceDbPath = join(runtimeDirectory, `restore-source-${randomUUID()}.sqlite`)
+  const backupPath = join(runtimeDirectory, `restore-backup-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await rm(sourceDbPath, { force: true })
+    await rm(backupPath, { force: true })
+  })
+
+  const sourceStore = await createNoteStore({
+    backend: 'sqlite',
+    dbPath: sourceDbPath,
+  })
+
+  try {
+    await sourceStore.resetNotes(
+      Array.from({ length: 105 }, (_value, index) => ({
+        campaignId: defaultCampaignId,
+        title: `Snapshot note ${index + 1}`,
+        body: `Snapshot note ${index + 1}`,
+        tags: ['snapshot'],
+        status: 'active' as const,
+        sessionName: null,
+      })),
+      defaultCampaignId,
+    )
+    await sourceStore.backupDatabase(backupPath)
+  } finally {
+    await sourceStore.close()
+  }
+
+  const sourceDatabase = createSqliteDatabase(backupPath, { readonly: true })
+  t.after(async () => {
+    await sourceDatabase.close()
+  })
+  const noteInsertBatchSizes: number[] = []
+
+  await copySnapshotTables(sourceDatabase, {
+    kind: 'postgres',
+    prepare(sql) {
+      return {
+        async get() {
+          return undefined
+        },
+        async all() {
+          return []
+        },
+        async run(...args) {
+          if (/INSERT INTO notes/i.test(sql)) {
+            const valuesClause = sql.split(/VALUES/i)[1] ?? ''
+            const rowCount = (valuesClause.match(/\(/g) ?? []).length
+            noteInsertBatchSizes.push(rowCount)
+            assert.match(valuesClause, /\)\s*,\s*\(/)
+            assert.equal((args[0] as unknown[]).length % rowCount, 0)
+          }
+
+          return { changes: 0 }
+        },
+      }
+    },
+    async exec() {},
+    transaction(callback) {
+      return callback
+    },
+    async close() {},
+  })
+
+  assert.equal(noteInsertBatchSizes.reduce((total, batchSize) => total + batchSize, 0), 105)
+  assert.equal(noteInsertBatchSizes.every((batchSize) => batchSize > 1), true)
+  assert.equal(noteInsertBatchSizes.every((batchSize) => batchSize <= 75), true)
+  assert.ok(noteInsertBatchSizes.length < 10, `expected a handful of batched INSERTs, saw ${noteInsertBatchSizes.length}`)
 })
 
 test('sqlite restore cleanup removes working copies when restore validation fails', async (t) => {

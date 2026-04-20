@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { defaultCampaignId } from '../src/campaign.js'
 import { createNoteStore } from '../src/note-store.js'
+import { resolveSeedTarget } from '../src/seed-target.js'
 import {
   resetStarterNotes,
   seedStarterNotes,
@@ -84,4 +85,33 @@ test('seed workflow skips existing data and reset replaces it with starter notes
 
   assert.equal(titles.includes('Temporary test note'), false)
   assert.deepEqual(titles, starterNotes.map((note) => note.title))
+})
+
+test('seed target uses postgres when DATABASE_URL is configured', () => {
+  assert.deepEqual(
+    resolveSeedTarget({
+      DATABASE_URL: 'postgresql://db.example/dnd-notes',
+      NOTES_DB_PATH: '/unused/notes.sqlite',
+    } as NodeJS.ProcessEnv),
+    {
+      backend: 'postgres',
+      noteStoreOptions: {},
+      label: 'postgres',
+    },
+  )
+})
+
+test('seed target preserves sqlite dbPath when postgres is not configured', () => {
+  assert.deepEqual(
+    resolveSeedTarget({
+      NOTES_DB_PATH: '/worktree/apps/api/data/custom.sqlite',
+    } as NodeJS.ProcessEnv),
+    {
+      backend: 'sqlite',
+      noteStoreOptions: {
+        dbPath: '/worktree/apps/api/data/custom.sqlite',
+      },
+      label: '/worktree/apps/api/data/custom.sqlite',
+    },
+  )
 })
