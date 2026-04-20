@@ -2446,28 +2446,28 @@ export async function restoreNoteStoreFromBackup(
     validationDatabase.close()
   }
 
-  mkdirSync(dirname(workingCopyPath), { recursive: true })
-  copyFileSync(sourcePath, workingCopyPath)
-  chmodSync(workingCopyPath, 0o600)
-
   let validationStore: NoteStore | undefined
 
   try {
-    validationStore = await createNoteStore({
-      ...options,
-      dbPath: workingCopyPath,
-      backend: 'sqlite',
-    })
-    await validationStore.checkHealth()
-  } catch {
-    throw new InvalidBackupDatabaseError(
-      'The uploaded database could not be opened as a dnd-notes backup.',
-    )
-  } finally {
-    await validationStore?.close()
-  }
+    mkdirSync(dirname(workingCopyPath), { recursive: true })
+    copyFileSync(sourcePath, workingCopyPath)
+    chmodSync(workingCopyPath, 0o600)
 
-  try {
+    try {
+      validationStore = await createNoteStore({
+        ...options,
+        dbPath: workingCopyPath,
+        backend: 'sqlite',
+      })
+      await validationStore.checkHealth()
+    } catch {
+      throw new InvalidBackupDatabaseError(
+        'The uploaded database could not be opened as a dnd-notes backup.',
+      )
+    } finally {
+      await validationStore?.close()
+    }
+
     if (backend === 'sqlite') {
       mkdirSync(dirname(dbPath), { recursive: true })
       copyFileSync(workingCopyPath, dbPath)

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, rm } from 'node:fs/promises'
+import { mkdir, readdir, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
-import { dirname, join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
 import { newDb } from 'pg-mem'
 import request from 'supertest'
@@ -296,6 +296,53 @@ test('postgres restore fails fast when no pool or DATABASE_URL is configured', a
       }),
     /DATABASE_URL is required when the Postgres note store is selected\./,
   )
+})
+
+test('sqlite restore cleanup removes working copies when restore validation fails', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const sourcePath = join(runtimeDirectory, `restore-invalid-${randomUUID()}.sqlite`)
+  const destinationPath = join(runtimeDirectory, `restore-destination-${randomUUID()}.sqlite`)
+  const workingCopyPrefix = `${basename(destinationPath)}.restore-working-`
+  t.after(async () => {
+    await rm(sourcePath, { force: true })
+    await rm(destinationPath, { force: true })
+    const runtimeFiles = await readdir(runtimeDirectory)
+    await Promise.all(
+      runtimeFiles
+        .filter((fileName) => fileName.startsWith(workingCopyPrefix))
+        .map((fileName) => rm(join(runtimeDirectory, fileName), { force: true })),
+    )
+  })
+
+  const sourceDatabase = new Database(sourcePath)
+  try {
+    sourceDatabase.exec(`
+      CREATE TABLE owner_accounts (id TEXT PRIMARY KEY);
+      CREATE TABLE owner_sessions (id TEXT PRIMARY KEY);
+      CREATE TABLE campaigns (id TEXT PRIMARY KEY);
+      CREATE TABLE campaign_memberships (id TEXT PRIMARY KEY);
+      CREATE TABLE campaign_share_links (id TEXT PRIMARY KEY);
+      CREATE TABLE notes (id TEXT PRIMARY KEY);
+    `)
+  } finally {
+    sourceDatabase.close()
+  }
+
+  await assert.rejects(
+    () =>
+      restoreNoteStoreFromBackup(sourcePath, {
+        backend: 'sqlite',
+        dbPath: destinationPath,
+      }),
+    /could not be opened as a dnd-notes backup/,
+  )
+
+  const runtimeFiles = await readdir(runtimeDirectory)
+  const leakedWorkingCopies = runtimeFiles.filter((fileName) =>
+    fileName.startsWith(workingCopyPrefix),
+  )
+
+  assert.deepEqual(leakedWorkingCopies, [])
 })
 
 test('initializeDatabaseOrClose closes the database before rethrowing init failures', async () => {
