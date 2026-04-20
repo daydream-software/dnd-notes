@@ -6,9 +6,20 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto'
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  createReadStream,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  writeSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import {
   defaultCampaign,
@@ -277,16 +288,18 @@ const snapshotDeletionOrder = [...snapshotTableDefinitions]
   .reverse()
   .map((definition) => definition.name)
 
+// Keep page reads small enough to cap peak memory during backup and restore work.
 const snapshotCopyBatchSize = 100
+// Stay under SQLite's 999-parameter ceiling and avoid giant multi-row INSERTs.
 const snapshotInsertParameterLimit = 900
 
 interface SnapshotRow extends Record<string, unknown> {
   id: string
 }
 
-interface SnapshotTablePages {
+interface SnapshotSpoolFile {
   definition: (typeof snapshotTableDefinitions)[number]
-  pages: SnapshotRow[][]
+  path: string
 }
 
 function buildSnapshotSelectSql(definition: (typeof snapshotTableDefinitions)[number]) {
@@ -355,57 +368,95 @@ async function clearSnapshotTables(database: NoteStoreDatabase) {
   }
 }
 
-async function collectSnapshotTablePages(sourceDatabase: NoteStoreDatabase) {
-  const snapshotTablePages: SnapshotTablePages[] = []
+function createSnapshotSpoolDirectory() {
+  return mkdtempSync(join(tmpdir(), 'dnd-notes-snapshot-'))
+}
+
+async function spoolSnapshotTables(sourceDatabase: NoteStoreDatabase, spoolDirectory: string) {
+  const snapshotSpoolFiles: SnapshotSpoolFile[] = []
 
   for (const definition of snapshotTableDefinitions) {
     const selectStatement = sourceDatabase.prepare<SnapshotRow>(buildSnapshotSelectSql(definition))
-    const pages: SnapshotRow[][] = []
+    const spoolPath = join(spoolDirectory, `${definition.name}-${randomUUID()}.jsonl`)
+    const spoolHandle = openSync(spoolPath, 'w')
     let afterId: string | null = null
 
-    while (true) {
-      const rows = (await selectStatement.all({
-        afterId,
-        batchSize: snapshotCopyBatchSize,
-      })) as SnapshotRow[]
+    try {
+      while (true) {
+        const rows = (await selectStatement.all({
+          afterId,
+          batchSize: snapshotCopyBatchSize,
+        })) as SnapshotRow[]
 
-      pages.push(rows)
-
-      if (rows.length < snapshotCopyBatchSize) {
-        break
-      }
-
-      afterId = rows.at(-1)?.id ?? null
-    }
-
-    snapshotTablePages.push({ definition, pages })
-  }
-
-  return snapshotTablePages
-}
-
-async function writeSnapshotTablePages(
-  snapshotTablePages: SnapshotTablePages[],
-  destinationDatabase: NoteStoreDatabase,
-) {
-  for (const { definition, pages } of snapshotTablePages) {
-    const insertBatchSize = resolveSnapshotInsertBatchSize(definition)
-    const insertStatements = new Map<number, ReturnType<typeof destinationDatabase.prepare>>()
-
-    for (const rows of pages) {
-      for (let index = 0; index < rows.length; index += insertBatchSize) {
-        const rowBatch = rows.slice(index, index + insertBatchSize)
-        let insertStatement = insertStatements.get(rowBatch.length)
-
-        if (!insertStatement) {
-          insertStatement = destinationDatabase.prepare(
-            buildSnapshotInsertSql(definition, rowBatch.length),
-          )
-          insertStatements.set(rowBatch.length, insertStatement)
+        if (rows.length > 0) {
+          writeSync(spoolHandle, `${JSON.stringify(rows)}\n`)
         }
 
-        await insertStatement.run(flattenSnapshotRows(definition, rowBatch))
+        if (rows.length < snapshotCopyBatchSize) {
+          break
+        }
+
+        afterId = rows.at(-1)?.id ?? null
       }
+    } finally {
+      closeSync(spoolHandle)
+    }
+
+    snapshotSpoolFiles.push({ definition, path: spoolPath })
+  }
+
+  return snapshotSpoolFiles
+}
+
+async function insertSnapshotRows(
+  definition: (typeof snapshotTableDefinitions)[number],
+  rows: SnapshotRow[],
+  destinationDatabase: NoteStoreDatabase,
+) {
+  const insertBatchSize = resolveSnapshotInsertBatchSize(definition)
+  const insertStatements = new Map<number, ReturnType<typeof destinationDatabase.prepare>>()
+
+  for (let index = 0; index < rows.length; index += insertBatchSize) {
+    const rowBatch = rows.slice(index, index + insertBatchSize)
+    let insertStatement = insertStatements.get(rowBatch.length)
+
+    if (!insertStatement) {
+      insertStatement = destinationDatabase.prepare(
+        buildSnapshotInsertSql(definition, rowBatch.length),
+      )
+      insertStatements.set(rowBatch.length, insertStatement)
+    }
+
+    await insertStatement.run(flattenSnapshotRows(definition, rowBatch))
+  }
+}
+
+async function writeSnapshotSpoolFiles(
+  snapshotSpoolFiles: SnapshotSpoolFile[],
+  destinationDatabase: NoteStoreDatabase,
+) {
+  for (const { definition, path } of snapshotSpoolFiles) {
+    const stream = createReadStream(path, { encoding: 'utf8' })
+    const lineReader = createInterface({
+      input: stream,
+      crlfDelay: Infinity,
+    })
+
+    try {
+      for await (const line of lineReader) {
+        if (!line) {
+          continue
+        }
+
+        await insertSnapshotRows(
+          definition,
+          JSON.parse(line) as SnapshotRow[],
+          destinationDatabase,
+        )
+      }
+    } finally {
+      lineReader.close()
+      stream.destroy()
     }
   }
 }
@@ -414,8 +465,14 @@ export async function copySnapshotTables(
   sourceDatabase: NoteStoreDatabase,
   destinationDatabase: NoteStoreDatabase,
 ) {
-  const snapshotTablePages = await collectSnapshotTablePages(sourceDatabase)
-  await writeSnapshotTablePages(snapshotTablePages, destinationDatabase)
+  const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
+
+  try {
+    const snapshotSpoolFiles = await spoolSnapshotTables(sourceDatabase, snapshotSpoolDirectory)
+    await writeSnapshotSpoolFiles(snapshotSpoolFiles, destinationDatabase)
+  } finally {
+    rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
+  }
 }
 
 const sessionTtlMs = 1000 * 60 * 60 * 24 * 30
@@ -2521,17 +2578,23 @@ export async function createNoteStore(
           await initializeNoteStoreDatabase(snapshotDatabase, new Set())
           tightenSqliteFilePermissions(destinationPath)
 
-          const exportSnapshot = database.transaction(async () =>
-            collectSnapshotTablePages(database),
-          )
-          const snapshotTablePages = await exportSnapshot()
-          const writeSnapshot = snapshotDatabase.transaction(async () => {
-            await clearSnapshotTables(snapshotDatabase)
-            await writeSnapshotTablePages(snapshotTablePages, snapshotDatabase)
-          })
+          const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
 
-          await writeSnapshot()
-          tightenSqliteFilePermissions(destinationPath)
+          try {
+            const exportSnapshot = database.transaction(async () =>
+              spoolSnapshotTables(database, snapshotSpoolDirectory),
+            )
+            const snapshotSpoolFiles = await exportSnapshot()
+            const writeSnapshot = snapshotDatabase.transaction(async () => {
+              await clearSnapshotTables(snapshotDatabase)
+              await writeSnapshotSpoolFiles(snapshotSpoolFiles, snapshotDatabase)
+            })
+
+            await writeSnapshot()
+            tightenSqliteFilePermissions(destinationPath)
+          } finally {
+            rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
+          }
         } finally {
           await snapshotDatabase.close()
         }
@@ -2636,12 +2699,19 @@ export async function restoreNoteStoreFromBackup(
     try {
       await initializeNoteStoreDatabase(destinationDatabase, configuredSiteAdminEmails)
 
-      const restoreTransaction = destinationDatabase.transaction(async () => {
-        await clearSnapshotTables(destinationDatabase)
-        await copySnapshotTables(sourceDatabase, destinationDatabase)
-      })
+      const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
 
-      await restoreTransaction()
+      try {
+        const snapshotSpoolFiles = await spoolSnapshotTables(sourceDatabase, snapshotSpoolDirectory)
+        const restoreTransaction = destinationDatabase.transaction(async () => {
+          await clearSnapshotTables(destinationDatabase)
+          await writeSnapshotSpoolFiles(snapshotSpoolFiles, destinationDatabase)
+        })
+
+        await restoreTransaction()
+      } finally {
+        rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
+      }
     } finally {
       await sourceDatabase.close()
       await destinationDatabase.close()
