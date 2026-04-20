@@ -107,6 +107,8 @@ export function createSqliteDatabase(dbPath: string): NoteStoreDatabase {
   let operationQueue = Promise.resolve()
 
   function runSerialized<Result>(operation: () => Result | Promise<Result>) {
+    // SQLite shares one connection here, so async transaction callbacks must keep all
+    // unrelated work queued until COMMIT/ROLLBACK to preserve atomicity across awaits.
     if (transactionExecutor.getStore()) {
       return Promise.resolve().then(operation)
     }

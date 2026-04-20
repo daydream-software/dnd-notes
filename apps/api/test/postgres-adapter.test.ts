@@ -104,7 +104,7 @@ test('postgres-backed backups export a SQLite-compatible snapshot', async (t) =>
   t.after(cleanup)
 
   await mkdir(runtimeDirectory, { recursive: true })
-  const backupPath = join(runtimeDirectory, 'postgres-export.sqlite')
+  const backupPath = join(runtimeDirectory, `postgres-export-${randomUUID()}.sqlite`)
   t.after(async () => {
     await rm(backupPath, { force: true })
   })

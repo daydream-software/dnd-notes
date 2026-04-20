@@ -11,7 +11,7 @@ function createDeferred() {
   return { promise, resolve }
 }
 
-test('sqlite transactions keep unrelated statements queued until commit', async () => {
+test('sqlite async transactions keep unrelated statements queued until commit', async () => {
   const database = createSqliteDatabase(':memory:')
 
   try {

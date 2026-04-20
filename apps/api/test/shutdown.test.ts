@@ -66,3 +66,26 @@ test('finishShutdown swallows resource-close rejections and exits once', async (
     },
   ])
 })
+
+test('finishShutdown times out stalled resource shutdowns and exits once', async () => {
+  const errors: Array<{ message: string; error: unknown }> = []
+  const exitCodes: number[] = []
+  const controller = createShutdownController({
+    getServer: () => undefined,
+    closeResources: async () => new Promise<void>(() => {}),
+    exit: (code) => {
+      exitCodes.push(code)
+    },
+    shutdownGracePeriodMs: 5,
+    logError: (message, error) => {
+      errors.push({ message, error })
+    },
+  })
+
+  await controller.finishShutdown(0)
+
+  assert.deepEqual(exitCodes, [1])
+  assert.equal(errors.length, 1)
+  assert.equal(errors[0]?.message, 'Timed out while closing note store cleanly.')
+  assert.match((errors[0]?.error as Error).message, /closeResources\(\) exceeded 5ms/)
+})
