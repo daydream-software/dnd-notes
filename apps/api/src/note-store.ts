@@ -284,6 +284,11 @@ interface SnapshotRow extends Record<string, unknown> {
   id: string
 }
 
+interface SnapshotTablePages {
+  definition: (typeof snapshotTableDefinitions)[number]
+  pages: SnapshotRow[][]
+}
+
 function buildSnapshotSelectSql(definition: (typeof snapshotTableDefinitions)[number]) {
   return `
     SELECT ${definition.columns.join(', ')}
@@ -350,14 +355,12 @@ async function clearSnapshotTables(database: NoteStoreDatabase) {
   }
 }
 
-export async function copySnapshotTables(
-  sourceDatabase: NoteStoreDatabase,
-  destinationDatabase: NoteStoreDatabase,
-) {
+async function collectSnapshotTablePages(sourceDatabase: NoteStoreDatabase) {
+  const snapshotTablePages: SnapshotTablePages[] = []
+
   for (const definition of snapshotTableDefinitions) {
     const selectStatement = sourceDatabase.prepare<SnapshotRow>(buildSnapshotSelectSql(definition))
-    const insertBatchSize = resolveSnapshotInsertBatchSize(definition)
-    const insertStatements = new Map<number, ReturnType<typeof destinationDatabase.prepare>>()
+    const pages: SnapshotRow[][] = []
     let afterId: string | null = null
 
     while (true) {
@@ -366,6 +369,30 @@ export async function copySnapshotTables(
         batchSize: snapshotCopyBatchSize,
       })) as SnapshotRow[]
 
+      pages.push(rows)
+
+      if (rows.length < snapshotCopyBatchSize) {
+        break
+      }
+
+      afterId = rows.at(-1)?.id ?? null
+    }
+
+    snapshotTablePages.push({ definition, pages })
+  }
+
+  return snapshotTablePages
+}
+
+async function writeSnapshotTablePages(
+  snapshotTablePages: SnapshotTablePages[],
+  destinationDatabase: NoteStoreDatabase,
+) {
+  for (const { definition, pages } of snapshotTablePages) {
+    const insertBatchSize = resolveSnapshotInsertBatchSize(definition)
+    const insertStatements = new Map<number, ReturnType<typeof destinationDatabase.prepare>>()
+
+    for (const rows of pages) {
       for (let index = 0; index < rows.length; index += insertBatchSize) {
         const rowBatch = rows.slice(index, index + insertBatchSize)
         let insertStatement = insertStatements.get(rowBatch.length)
@@ -379,14 +406,16 @@ export async function copySnapshotTables(
 
         await insertStatement.run(flattenSnapshotRows(definition, rowBatch))
       }
-
-      if (rows.length < snapshotCopyBatchSize) {
-        break
-      }
-
-      afterId = rows.at(-1)?.id ?? null
     }
   }
+}
+
+export async function copySnapshotTables(
+  sourceDatabase: NoteStoreDatabase,
+  destinationDatabase: NoteStoreDatabase,
+) {
+  const snapshotTablePages = await collectSnapshotTablePages(sourceDatabase)
+  await writeSnapshotTablePages(snapshotTablePages, destinationDatabase)
 }
 
 const sessionTtlMs = 1000 * 60 * 60 * 24 * 30
@@ -2492,15 +2521,16 @@ export async function createNoteStore(
           await initializeNoteStoreDatabase(snapshotDatabase, new Set())
           tightenSqliteFilePermissions(destinationPath)
 
+          const exportSnapshot = database.transaction(async () =>
+            collectSnapshotTablePages(database),
+          )
+          const snapshotTablePages = await exportSnapshot()
           const writeSnapshot = snapshotDatabase.transaction(async () => {
             await clearSnapshotTables(snapshotDatabase)
-            await copySnapshotTables(database, snapshotDatabase)
-          })
-          const exportSnapshot = database.transaction(async () => {
-            await writeSnapshot()
+            await writeSnapshotTablePages(snapshotTablePages, snapshotDatabase)
           })
 
-          await exportSnapshot()
+          await writeSnapshot()
           tightenSqliteFilePermissions(destinationPath)
         } finally {
           await snapshotDatabase.close()

@@ -93,6 +93,7 @@ export function createShutdownController(options: ShutdownControllerOptions) {
       server.closeAllConnections?.()
       safelyFinishShutdown(exitCode)
     }, options.shutdownGracePeriodMs)
+    forceShutdownTimer.unref?.()
 
     server.close((error) => {
       clearTimeout(forceShutdownTimer)
