@@ -56,3 +56,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Scope: address Copilot review feedback on the issue #54 branch without widening into the separate k3d/e2e follow-up tracked in #63.
 - Fixed as blocking: tenant provisioning now creates and reports an explicit PVC, `storageReference` points at that PVC, provisioning-only env validation no longer crashes the control plane when provisioning is disabled, namespace deletion waits for termination before reporting deprovisioned, and Service reconciliation preserves server-assigned fields such as `clusterIP` on replace.
 - Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 second review follow-up
+- Scope: handle the next Copilot pass, including one visible shutdown blocker and one low-confidence suppressed note about registry index recovery.
+- Fixed as blocking: control-plane shutdown now uses the same timed shutdown-controller pattern as the API workspace so stalled `tenantProvisioningService.close()` cannot block process exit indefinitely, and tenant-registry startup now always reasserts the `idx_tenants_subdomain` unique index for existing schema-v2 databases.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.

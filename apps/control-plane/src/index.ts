@@ -1,4 +1,5 @@
 import dotenv from 'dotenv'
+import type { Server } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp } from './app.js'
@@ -6,6 +7,7 @@ import {
   createLiveTenantProvisioningService,
   type TenantProvisioningPort,
 } from './provisioning.js'
+import { createShutdownController } from './shutdown.js'
 import { TenantRegistry } from './tenant-registry.js'
 
 dotenv.config()
@@ -139,61 +141,38 @@ const app = createApp({
   tenantProvisioningService,
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000
+const serverRef: { current?: Server } = {}
+const shutdownController = createShutdownController({
+  getServer: () => serverRef.current,
+  closeResources: async () => {
+    if (tenantProvisioningService) {
+      await tenantProvisioningService.close()
+    }
 
-const server = app.listen(PORT, () => {
+    tenantRegistry.close()
+  },
+  exit: (exitCode) => {
+    console.log('Control plane stopped')
+    process.exit(exitCode)
+  },
+  shutdownGracePeriodMs: SHUTDOWN_TIMEOUT_MS,
+  logError: (message, error) => {
+    console.error(message, error)
+  },
+})
+
+serverRef.current = app.listen(PORT, () => {
   console.log(`Control plane listening on port ${PORT}`)
   console.log(`Database: ${DATABASE_PATH}`)
 })
 
-let shuttingDown = false
-let shutdownCompleted = false
-let shutdownTimeout: NodeJS.Timeout | undefined
-
-const finishShutdown = async (exitCode: number) => {
-  if (shutdownCompleted) {
-    return
-  }
-
-  shutdownCompleted = true
-  if (shutdownTimeout) {
-    clearTimeout(shutdownTimeout)
-  }
-
-  try {
-    if (tenantProvisioningService) {
-      await tenantProvisioningService.close()
-    }
-  } finally {
-    tenantRegistry.close()
-    console.log('Control plane stopped')
-    process.exit(exitCode)
-  }
-}
-
 const shutdown = () => {
-  if (shuttingDown) {
+  if (shutdownController.isShuttingDown()) {
     return
   }
 
-  shuttingDown = true
   console.log('\nShutting down control plane...')
-
-  shutdownTimeout = setTimeout(() => {
-    console.error(
-      `Forcing control plane shutdown after ${SHUTDOWN_TIMEOUT_MS}ms timeout`,
-    )
-    void finishShutdown(1)
-  }, SHUTDOWN_TIMEOUT_MS)
-
-  server.close((error) => {
-    if (error) {
-      console.error('Control plane shutdown error:', error)
-      void finishShutdown(1)
-      return
-    }
-
-    void finishShutdown(0)
-  })
+  shutdownController.shutdown(0)
 }
 
 process.on('SIGINT', shutdown)

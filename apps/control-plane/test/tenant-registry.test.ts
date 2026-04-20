@@ -102,4 +102,61 @@ describe('TenantRegistry', () => {
       tenantRegistry.close()
     }
   })
+
+  it('recreates the subdomain index when an existing v2 registry is missing it', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const rawDb = new Database(databasePath)
+
+    rawDb.exec(`
+      CREATE TABLE schema_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE tenants (
+        id TEXT PRIMARY KEY,
+        slug TEXT UNIQUE NOT NULL,
+        subdomain TEXT,
+        owner_id TEXT NOT NULL,
+        desired_state TEXT NOT NULL,
+        current_state TEXT NOT NULL,
+        version TEXT NOT NULL,
+        storage_reference TEXT,
+        backup_metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE state_transitions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        from_state TEXT NOT NULL,
+        to_state TEXT NOT NULL,
+        triggered_by TEXT NOT NULL,
+        reason TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO schema_metadata (key, value)
+      VALUES ('tenant_state_signature', 'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned');
+
+      PRAGMA user_version = 2;
+    `)
+    rawDb.close()
+
+    try {
+      const tenantRegistry = new TenantRegistry(databasePath)
+      const migratedDb = new Database(databasePath, { readonly: true })
+      const indexes = migratedDb
+        .prepare(`PRAGMA index_list(tenants)`)
+        .all() as Array<{ name: string }>
+      migratedDb.close()
+      tenantRegistry.close()
+
+      assert.ok(indexes.some((index) => index.name === 'idx_tenants_subdomain'))
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })

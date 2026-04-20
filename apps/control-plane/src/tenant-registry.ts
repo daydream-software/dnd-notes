@@ -39,6 +39,8 @@ export class TenantRegistry {
       )
     }
 
+    this.ensureSubdomainIndex()
+
     const storedStateSignature = this.getSchemaMetadata('tenant_state_signature')
     if (!storedStateSignature) {
       this.setSchemaMetadata(
