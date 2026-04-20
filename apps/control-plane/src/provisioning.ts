@@ -7,8 +7,10 @@ import {
   type V1DeleteOptions,
   type V1Deployment,
   type V1Namespace,
+  type V1PersistentVolumeClaim,
   type V1Secret,
   type V1Service,
+  type V1ServicePort,
 } from '@kubernetes/client-node'
 import { randomBytes } from 'node:crypto'
 import { Pool } from 'pg'
@@ -24,6 +26,14 @@ const opaqueSubdomainPrefix = 't'
 const defaultTenantPort = 3000
 const defaultReadyTimeoutMs = 120_000
 const defaultReadyPollIntervalMs = 2_000
+const defaultDeleteTimeoutMs = 120_000
+const defaultTenantStorageRequest = '1Gi'
+const defaultTenantStorageMountPath = '/app/data'
+
+type KubernetesObjectClient = Pick<
+  KubernetesObjectApi,
+  'create' | 'delete' | 'read' | 'replace'
+>
 
 interface TenantDatabase {
   databaseName: string
@@ -40,6 +50,7 @@ interface TenantInfrastructureBundle {
   namespace: V1Namespace
   configMap: V1ConfigMap
   secret: V1Secret
+  persistentVolumeClaim: V1PersistentVolumeClaim
   service: V1Service
   deployment: V1Deployment
   resources: TenantProvisioningResources
@@ -144,10 +155,6 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         refreshedTenant,
         subdomain,
       )
-      this.tenantRegistry.updateTenantStorageReference(
-        refreshedTenant.id,
-        database.databaseName,
-      )
 
       const bundle = buildTenantInfrastructureBundle({
         tenant: this.getExistingTenant(refreshedTenant.id),
@@ -159,6 +166,10 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         publicScheme: this.publicScheme,
         tenantPort: this.tenantPort,
       })
+      this.tenantRegistry.updateTenantStorageReference(
+        refreshedTenant.id,
+        bundle.resources.pvcName,
+      )
 
       await this.infrastructureManager.applyTenantResources(bundle)
       await this.infrastructureManager.waitForTenantReady(
@@ -217,10 +228,10 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       })
 
       await this.infrastructureManager.deleteTenantResources(resources)
+      await this.databaseManager.deleteTenantDatabase(resources.databaseName)
     }
 
     if (tenant.storageReference) {
-      await this.databaseManager.deleteTenantDatabase(tenant.storageReference)
       this.tenantRegistry.updateTenantStorageReference(tenant.id, null)
     }
 
@@ -328,21 +339,33 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
 export class KubernetesTenantInfrastructureManager
   implements TenantInfrastructureManager
 {
-  private readonly client: KubernetesObjectApi
+  private readonly client: KubernetesObjectClient
   private readonly readyPollIntervalMs: number
+  private readonly deleteTimeoutMs: number
 
-  constructor(options?: { kubeConfig?: KubeConfig; readyPollIntervalMs?: number }) {
-    const kubeConfig = options?.kubeConfig ?? new KubeConfig()
-    kubeConfig.loadFromDefault()
-    this.client = KubernetesObjectApi.makeApiClient(kubeConfig)
+  constructor(options?: {
+    client?: KubernetesObjectClient
+    kubeConfig?: KubeConfig
+    readyPollIntervalMs?: number
+    deleteTimeoutMs?: number
+  }) {
+    if (options?.client) {
+      this.client = options.client
+    } else {
+      const kubeConfig = options?.kubeConfig ?? new KubeConfig()
+      kubeConfig.loadFromDefault()
+      this.client = KubernetesObjectApi.makeApiClient(kubeConfig)
+    }
     this.readyPollIntervalMs =
       options?.readyPollIntervalMs ?? defaultReadyPollIntervalMs
+    this.deleteTimeoutMs = options?.deleteTimeoutMs ?? defaultDeleteTimeoutMs
   }
 
   async applyTenantResources(bundle: TenantInfrastructureBundle): Promise<void> {
     await upsertKubernetesObject(this.client, bundle.namespace)
     await upsertKubernetesObject(this.client, bundle.configMap)
     await upsertKubernetesObject(this.client, bundle.secret)
+    await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
     await upsertKubernetesObject(this.client, bundle.service)
     await upsertKubernetesObject(this.client, bundle.deployment)
   }
@@ -384,6 +407,21 @@ export class KubernetesTenantInfrastructureManager
 
   async deleteTenantResources(resources: TenantProvisioningResources): Promise<void> {
     try {
+      await this.client.delete({
+        apiVersion: 'v1',
+        kind: 'PersistentVolumeClaim',
+        metadata: {
+          name: resources.pvcName,
+          namespace: resources.namespace,
+        },
+      })
+    } catch (error) {
+      if (!isApiException(error, 404)) {
+        throw error
+      }
+    }
+
+    try {
       await this.client.delete(
         {
           apiVersion: 'v1',
@@ -408,6 +446,31 @@ export class KubernetesTenantInfrastructureManager
       }
       throw error
     }
+
+    const deadline = Date.now() + this.deleteTimeoutMs
+
+    while (Date.now() < deadline) {
+      try {
+        await this.client.read<V1Namespace>({
+          apiVersion: 'v1',
+          kind: 'Namespace',
+          metadata: {
+            name: resources.namespace,
+          },
+        })
+      } catch (error) {
+        if (isApiException(error, 404)) {
+          return
+        }
+        throw error
+      }
+
+      await sleep(this.readyPollIntervalMs)
+    }
+
+    throw new Error(
+      `Tenant namespace ${resources.namespace} did not terminate within ${this.deleteTimeoutMs}ms`,
+    )
   }
 }
 
@@ -469,6 +532,7 @@ export function buildTenantInfrastructureBundle(
         SERVE_WEB: 'true',
         PUBLIC_WEB_URL: runtimeUrl,
         ALLOWED_ORIGINS: runtimeUrl,
+        NOTES_DB_PATH: `${defaultTenantStorageMountPath}/dnd-notes.sqlite`,
       },
     },
     secret: {
@@ -482,6 +546,23 @@ export function buildTenantInfrastructureBundle(
       type: 'Opaque',
       data: {
         DATABASE_URL: encodeSecretValue(options.database.connectionString),
+      },
+    },
+    persistentVolumeClaim: {
+      apiVersion: 'v1',
+      kind: 'PersistentVolumeClaim',
+      metadata: {
+        name: resources.pvcName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      spec: {
+        accessModes: ['ReadWriteOnce'],
+        resources: {
+          requests: {
+            storage: defaultTenantStorageRequest,
+          },
+        },
       },
     },
     service: {
@@ -544,6 +625,12 @@ export function buildTenantInfrastructureBundle(
                     secretRef: { name: resources.secretName },
                   },
                 ],
+                volumeMounts: [
+                  {
+                    name: 'tenant-data',
+                    mountPath: defaultTenantStorageMountPath,
+                  },
+                ],
                 livenessProbe: {
                   httpGet: {
                     path: '/healthz',
@@ -566,6 +653,14 @@ export function buildTenantInfrastructureBundle(
                 },
               },
             ],
+            volumes: [
+              {
+                name: 'tenant-data',
+                persistentVolumeClaim: {
+                  claimName: resources.pvcName,
+                },
+              },
+            ],
           },
         },
       },
@@ -584,6 +679,7 @@ export function buildTenantResourceNames(params: {
     namespace,
     deploymentName: 'dnd-notes',
     serviceName: 'dnd-notes',
+    pvcName: `dnd-notes-data-${params.subdomain}`,
     configMapName: 'dnd-notes-runtime',
     secretName: 'dnd-notes-runtime-secret',
     hostname: `${params.subdomain}.${params.baseDomain}`,
@@ -638,7 +734,7 @@ function encodeSecretValue(value: string): string {
 }
 
 async function upsertKubernetesObject<T extends KubernetesObject>(
-  client: KubernetesObjectApi,
+  client: KubernetesObjectClient,
   spec: T,
 ): Promise<void> {
   try {
@@ -650,11 +746,12 @@ async function upsertKubernetesObject<T extends KubernetesObject>(
         namespace: spec.metadata?.namespace,
       },
     })
-    spec.metadata = {
-      ...spec.metadata,
+    const specForReplace = prepareKubernetesObjectForReplace(spec, existing)
+    specForReplace.metadata = {
+      ...specForReplace.metadata,
       resourceVersion: existing.metadata?.resourceVersion,
     }
-    await client.replace(spec)
+    await client.replace(specForReplace)
   } catch (error) {
     if (isApiException(error, 404)) {
       await client.create(spec)
@@ -663,6 +760,75 @@ async function upsertKubernetesObject<T extends KubernetesObject>(
 
     throw error
   }
+}
+
+function prepareKubernetesObjectForReplace<T extends KubernetesObject>(
+  spec: T,
+  existing: T,
+): T {
+  if (spec.kind !== 'Service' || existing.kind !== 'Service') {
+    return {
+      ...spec,
+      metadata: {
+        ...spec.metadata,
+      },
+    }
+  }
+
+  const desiredService = spec as T & V1Service
+  const existingService = existing as T & V1Service
+
+  return {
+    ...desiredService,
+    metadata: {
+      ...desiredService.metadata,
+    },
+    spec: {
+      ...desiredService.spec,
+      clusterIP: desiredService.spec?.clusterIP ?? existingService.spec?.clusterIP,
+      clusterIPs: desiredService.spec?.clusterIPs ?? existingService.spec?.clusterIPs,
+      healthCheckNodePort:
+        desiredService.spec?.healthCheckNodePort ??
+        existingService.spec?.healthCheckNodePort,
+      ipFamilies:
+        desiredService.spec?.ipFamilies ?? existingService.spec?.ipFamilies,
+      ipFamilyPolicy:
+        desiredService.spec?.ipFamilyPolicy ??
+        existingService.spec?.ipFamilyPolicy,
+      ports: mergeServicePorts(desiredService.spec?.ports, existingService.spec?.ports),
+    },
+  }
+}
+
+function mergeServicePorts(
+  desiredPorts: V1ServicePort[] | undefined,
+  existingPorts: V1ServicePort[] | undefined,
+): V1ServicePort[] | undefined {
+  if (!desiredPorts) {
+    return desiredPorts
+  }
+
+  return desiredPorts.map((desiredPort) => {
+    const matchingExistingPort = existingPorts?.find((existingPort) => {
+      if (desiredPort.name && existingPort.name) {
+        return desiredPort.name === existingPort.name
+      }
+
+      return (
+        desiredPort.port === existingPort.port &&
+        (desiredPort.protocol ?? 'TCP') === (existingPort.protocol ?? 'TCP')
+      )
+    })
+
+    if (!matchingExistingPort?.nodePort) {
+      return desiredPort
+    }
+
+    return {
+      ...desiredPort,
+      nodePort: desiredPort.nodePort ?? matchingExistingPort.nodePort,
+    }
+  })
 }
 
 function isApiException(error: unknown, statusCode: number): error is ApiException<unknown> {

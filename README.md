@@ -75,8 +75,10 @@ only when you have a live kube context plus an admin Postgres connection string:
 - `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret name for private images
 
 When provisioning is enabled, the control plane reconciles a tenant namespace,
-runtime ConfigMap/Secret, Service, Deployment, and a per-tenant Postgres database.
-The tenant workload uses `/ready` for readiness and `/healthz` for liveness.
+runtime ConfigMap/Secret, PVC, Service, Deployment, and a per-tenant Postgres
+database. The tenant workload uses `/ready` for readiness and `/healthz` for
+liveness, and the PVC stays mounted at `/app/data` for explicit tenant storage
+lifecycle plus SQLite-compatible fallback files.
 
 ## Local persistence
 

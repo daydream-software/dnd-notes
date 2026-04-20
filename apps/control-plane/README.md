@@ -51,6 +51,10 @@ Each tenant record includes:
 - `createdAt`: Tenant creation timestamp
 - `updatedAt`: Last modification timestamp
 
+The live provisioning slice also creates a per-tenant Postgres database, but the
+registry keeps `storageReference` focused on the Kubernetes storage handle so the
+PVC lifecycle stays explicit in tenant metadata.
+
 ### State Transitions
 
 Every state change is logged with:

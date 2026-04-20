@@ -123,6 +123,11 @@ readinessProbe:
 - **File:** `/app/data/dnd-notes.sqlite`  
 - **Volume type:** Kubernetes `PersistentVolumeClaim` or local bind mount
 
+The control-plane provisioning slice for issue #54 now keeps this mount present
+even when the tenant runs primarily against `DATABASE_URL`, so the container
+retains a writable runtime volume for SQLite-compatible fallback files and
+operator-managed storage lifecycle.
+
 **Kubernetes example:**
 ```yaml
 volumeMounts:
@@ -136,7 +141,8 @@ volumes:
 
 ### Postgres (Phase 1 target)
 - **Connection:** Via `DATABASE_URL` environment variable  
-- **Persistence:** Managed by Postgres (no container volume needed)  
+- **Persistence:** Managed by Postgres for note data; the control plane may also
+  mount `/app/data` on a PVC for runtime scratch/fallback storage.  
 - **Backup:** Control-plane orchestrated `pg_dump` to object storage
 
 ## Container Lifecycle

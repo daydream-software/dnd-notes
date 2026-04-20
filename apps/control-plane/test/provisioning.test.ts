@@ -1,7 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { ApiException, type KubernetesObject, type V1Status } from '@kubernetes/client-node'
 import {
+  KubernetesTenantInfrastructureManager,
   TenantProvisioningService,
+  buildTenantInfrastructureBundle,
+  buildTenantResourceNames,
   type TenantProvisioningPort,
 } from '../src/provisioning.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
@@ -104,7 +108,7 @@ describe('TenantProvisioningService', () => {
       assert.match(result.tenant.subdomain ?? '', /^t-[0-9a-f]{12}$/)
       assert.equal(
         result.tenant.storageReference,
-        `tenant_demo_${result.tenant.subdomain?.replace(/-/g, '_')}`,
+        result.resources.pvcName,
       )
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
@@ -221,7 +225,7 @@ describe('TenantProvisioningService', () => {
       tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
       tenantRegistry.updateTenantStorageReference(
         'tenant-demo',
-        'tenant_demo_t_existing123456',
+        'dnd-notes-data-t-existing123456',
       )
       tenantRegistry.updateTenantState(
         'tenant-demo',
@@ -241,7 +245,12 @@ describe('TenantProvisioningService', () => {
       assert.equal(result.tenant.desiredState, 'deprovisioned')
       assert.equal(result.tenant.storageReference, null)
       assert.deepEqual(databaseManager.deletedDatabaseNames, [
-        'tenant_demo_t_existing123456',
+        buildTenantResourceNames({
+          tenant: tenantRegistry.getTenant('tenant-demo')!,
+          subdomain: 't-existing123456',
+          baseDomain: 'dnd-notes.test',
+          imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+        }).databaseName,
       ])
       assert.equal(infrastructureManager.deletedResources.length, 1)
       assert.equal(
@@ -288,5 +297,247 @@ describe('TenantProvisioningService', () => {
       await provisioningService.close()
       tenantRegistry.close()
     }
+  })
+
+  it('builds a tenant PVC and mounts it into the workload', () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+
+    try {
+      const tenant = tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      const bundle = buildTenantInfrastructureBundle({
+        tenant,
+        subdomain: 't-opaque123456',
+        database: {
+          databaseName: 'tenant_demo_t_opaque123456',
+          connectionString:
+            'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+        },
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+        publicScheme: 'https',
+        tenantPort: 3000,
+      })
+
+      assert.equal(bundle.resources.pvcName, 'dnd-notes-data-t-opaque123456')
+      assert.equal(bundle.persistentVolumeClaim.metadata?.name, bundle.resources.pvcName)
+      assert.equal(
+        bundle.configMap.data?.NOTES_DB_PATH,
+        '/app/data/dnd-notes.sqlite',
+      )
+      assert.deepEqual(bundle.persistentVolumeClaim.spec?.accessModes, ['ReadWriteOnce'])
+      assert.deepEqual(bundle.deployment.spec?.template?.spec?.volumes, [
+        {
+          name: 'tenant-data',
+          persistentVolumeClaim: {
+            claimName: bundle.resources.pvcName,
+          },
+        },
+      ])
+      assert.deepEqual(
+        bundle.deployment.spec?.template?.spec?.containers?.[0]?.volumeMounts,
+        [
+          {
+            name: 'tenant-data',
+            mountPath: '/app/data',
+          },
+        ],
+      )
+    } finally {
+      tenantRegistry.close()
+    }
+  })
+})
+
+class FakeKubernetesClient {
+  readonly createCalls: KubernetesObject[] = []
+  readonly replaceCalls: KubernetesObject[] = []
+  readonly deleteCalls: KubernetesObject[] = []
+  namespaceReadCountdown = 0
+  private readonly objects = new Map<string, KubernetesObject>()
+
+  seed(object: KubernetesObject & { metadata: { name: string; namespace?: string } }) {
+    this.objects.set(this.keyFor(object), structuredClone(object))
+  }
+
+  async create<T extends KubernetesObject>(spec: T): Promise<T> {
+    this.createCalls.push(structuredClone(spec))
+    this.objects.set(this.keyFor(spec), structuredClone(spec))
+    return structuredClone(spec)
+  }
+
+  async read<T extends KubernetesObject>(spec: {
+    apiVersion: string
+    kind: string
+    metadata: { name: string; namespace?: string }
+  }): Promise<T> {
+    if (spec.kind === 'Namespace' && this.namespaceReadCountdown > 0) {
+      this.namespaceReadCountdown -= 1
+      return {
+        apiVersion: 'v1',
+        kind: 'Namespace',
+        metadata: { name: spec.metadata.name },
+      } as T
+    }
+
+    const existing = this.objects.get(this.keyFor(spec))
+    if (!existing) {
+      throw new ApiException(404, 'Not Found', { reason: 'NotFound' }, {})
+    }
+
+    return structuredClone(existing) as T
+  }
+
+  async replace<T extends KubernetesObject>(spec: T): Promise<T> {
+    this.replaceCalls.push(structuredClone(spec))
+    this.objects.set(this.keyFor(spec), structuredClone(spec))
+    return structuredClone(spec)
+  }
+
+  async delete(spec: KubernetesObject): Promise<V1Status> {
+    this.deleteCalls.push(structuredClone(spec))
+    const deleted = this.objects.delete(this.keyFor(spec))
+
+    if (!deleted && spec.kind === 'Namespace' && this.namespaceReadCountdown === 0) {
+      throw new ApiException(404, 'Not Found', { reason: 'NotFound' }, {})
+    }
+
+    return {
+      apiVersion: 'v1',
+      kind: 'Status',
+      status: 'Success',
+    }
+  }
+
+  private keyFor(spec: {
+    apiVersion: string
+    kind: string
+    metadata: { name: string; namespace?: string }
+  }): string {
+    return [
+      spec.apiVersion,
+      spec.kind,
+      spec.metadata.namespace ?? '',
+      spec.metadata.name,
+    ].join('::')
+  }
+}
+
+describe('KubernetesTenantInfrastructureManager', () => {
+  it('preserves service-assigned fields when replacing an existing Service', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const tenant = tenantRegistry.createTenant({
+      id: 'tenant-demo',
+      slug: 'demo',
+      ownerId: 'owner-1',
+      version: '1.0.0',
+    })
+    const bundle = buildTenantInfrastructureBundle({
+      tenant,
+      subdomain: 't-opaque123456',
+      database: {
+        databaseName: 'tenant_demo_t_opaque123456',
+        connectionString:
+          'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+      },
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      publicScheme: 'https',
+      tenantPort: 3000,
+    })
+    const client = new FakeKubernetesClient()
+
+    try {
+      for (const object of [
+        bundle.namespace,
+        bundle.configMap,
+        bundle.secret,
+        bundle.persistentVolumeClaim,
+        bundle.deployment,
+      ]) {
+        client.seed({
+          ...object,
+          metadata: {
+            ...object.metadata!,
+            resourceVersion: '1',
+          },
+        })
+      }
+
+      client.seed({
+        ...bundle.service,
+        metadata: {
+          ...bundle.service.metadata!,
+          resourceVersion: '1',
+        },
+        spec: {
+          ...bundle.service.spec,
+          clusterIP: '10.43.0.10',
+          clusterIPs: ['10.43.0.10'],
+          ipFamilies: ['IPv4'],
+          ipFamilyPolicy: 'SingleStack',
+        },
+      })
+
+      const manager = new KubernetesTenantInfrastructureManager({ client })
+      await manager.applyTenantResources(bundle)
+
+      const replacedService = client.replaceCalls.find(
+        (object) => object.kind === 'Service',
+      ) as
+        | (KubernetesObject & {
+            spec?: {
+              clusterIP?: string
+              clusterIPs?: string[]
+            }
+          })
+        | undefined
+
+      assert.ok(replacedService)
+      assert.equal(replacedService.spec?.clusterIP, '10.43.0.10')
+      assert.deepEqual(replacedService.spec?.clusterIPs, ['10.43.0.10'])
+    } finally {
+      tenantRegistry.close()
+    }
+  })
+
+  it('waits for namespace termination before finishing tenant deletion', async () => {
+    const client = new FakeKubernetesClient()
+    client.namespaceReadCountdown = 2
+    client.seed({
+      apiVersion: 'v1',
+      kind: 'Namespace',
+      metadata: {
+        name: 'tenant-t-opaque123456',
+      },
+    })
+
+    const manager = new KubernetesTenantInfrastructureManager({
+      client,
+      readyPollIntervalMs: 1,
+      deleteTimeoutMs: 50,
+    })
+
+    await manager.deleteTenantResources({
+      namespace: 'tenant-t-opaque123456',
+      deploymentName: 'dnd-notes',
+      serviceName: 'dnd-notes',
+      pvcName: 'dnd-notes-data-t-opaque123456',
+      configMapName: 'dnd-notes-runtime',
+      secretName: 'dnd-notes-runtime-secret',
+      hostname: 't-opaque123456.dnd-notes.test',
+      databaseName: 'tenant_demo_t_opaque123456',
+      image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+    })
+
+    assert.deepEqual(
+      client.deleteCalls.map((call) => call.kind),
+      ['PersistentVolumeClaim', 'Namespace'],
+    )
+    assert.equal(client.namespaceReadCountdown, 0)
   })
 })

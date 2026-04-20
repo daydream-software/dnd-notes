@@ -388,7 +388,10 @@ describe('Control Plane API', () => {
       tenantProvisioningService = {
         async provisionTenant() {
           tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
-          tenantRegistry.updateTenantStorageReference('tenant-123', 'tenant_db')
+          tenantRegistry.updateTenantStorageReference(
+            'tenant-123',
+            'dnd-notes-data-t-opaque123456',
+          )
           tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
           tenantRegistry.updateTenantState(
             'tenant-123',
@@ -403,6 +406,7 @@ describe('Control Plane API', () => {
               namespace: 'tenant-t-opaque123456',
               deploymentName: 'dnd-notes',
               serviceName: 'dnd-notes',
+              pvcName: 'dnd-notes-data-t-opaque123456',
               configMapName: 'dnd-notes-runtime',
               secretName: 'dnd-notes-runtime-secret',
               hostname: 't-opaque123456.dnd-notes.test',
@@ -427,8 +431,15 @@ describe('Control Plane API', () => {
 
       assert.strictEqual(response.body.tenant.currentState, 'ready')
       assert.strictEqual(response.body.tenant.subdomain, 't-opaque123456')
-      assert.strictEqual(response.body.tenant.storageReference, 'tenant_db')
+      assert.strictEqual(
+        response.body.tenant.storageReference,
+        'dnd-notes-data-t-opaque123456',
+      )
       assert.strictEqual(response.body.resources.namespace, 'tenant-t-opaque123456')
+      assert.strictEqual(
+        response.body.resources.pvcName,
+        'dnd-notes-data-t-opaque123456',
+      )
     })
   })
 

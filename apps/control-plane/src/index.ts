@@ -41,34 +41,47 @@ const TENANT_DATABASE_ADMIN_URL = process.env.TENANT_DATABASE_ADMIN_URL
 const TENANT_IMAGE_PULL_SECRET = process.env.TENANT_IMAGE_PULL_SECRET
 const TENANT_PUBLIC_SCHEME =
   process.env.TENANT_PUBLIC_SCHEME === 'http' ? 'http' : 'https'
-const rawTenantPort = process.env.TENANT_APP_PORT
-const TENANT_APP_PORT =
-  rawTenantPort === undefined
-    ? 3000
-    : /^\d+$/.test(rawTenantPort)
-      ? Number(rawTenantPort)
-      : Number.NaN
-const rawReadyTimeoutMs = process.env.TENANT_READY_TIMEOUT_MS
-const TENANT_READY_TIMEOUT_MS =
-  rawReadyTimeoutMs === undefined
-    ? 120_000
-    : /^\d+$/.test(rawReadyTimeoutMs)
-      ? Number(rawReadyTimeoutMs)
-      : Number.NaN
 
 if (!ADMIN_TOKEN) {
   throw new Error('CONTROL_PLANE_ADMIN_TOKEN is required')
 }
 
-if (!Number.isInteger(TENANT_APP_PORT) || TENANT_APP_PORT < 1 || TENANT_APP_PORT > 65535) {
-  throw new Error(`Invalid TENANT_APP_PORT value: ${rawTenantPort}`)
+function parsePortSetting(
+  name: string,
+  rawValue: string | undefined,
+  defaultValue: number,
+): number {
+  const parsedValue =
+    rawValue === undefined
+      ? defaultValue
+      : /^\d+$/.test(rawValue)
+        ? Number(rawValue)
+        : Number.NaN
+
+  if (!Number.isInteger(parsedValue) || parsedValue < 1 || parsedValue > 65535) {
+    throw new Error(`Invalid ${name} value: ${rawValue}`)
+  }
+
+  return parsedValue
 }
 
-if (
-  !Number.isInteger(TENANT_READY_TIMEOUT_MS) ||
-  TENANT_READY_TIMEOUT_MS < 1
-) {
-  throw new Error(`Invalid TENANT_READY_TIMEOUT_MS value: ${rawReadyTimeoutMs}`)
+function parsePositiveIntegerSetting(
+  name: string,
+  rawValue: string | undefined,
+  defaultValue: number,
+): number {
+  const parsedValue =
+    rawValue === undefined
+      ? defaultValue
+      : /^\d+$/.test(rawValue)
+        ? Number(rawValue)
+        : Number.NaN
+
+  if (!Number.isInteger(parsedValue) || parsedValue < 1) {
+    throw new Error(`Invalid ${name} value: ${rawValue}`)
+  }
+
+  return parsedValue
 }
 
 const databaseDir = path.dirname(DATABASE_PATH)
@@ -97,6 +110,17 @@ if (ENABLE_TENANT_PROVISIONING) {
     )
   }
 
+  const tenantAppPort = parsePortSetting(
+    'TENANT_APP_PORT',
+    process.env.TENANT_APP_PORT,
+    3000,
+  )
+  const tenantReadyTimeoutMs = parsePositiveIntegerSetting(
+    'TENANT_READY_TIMEOUT_MS',
+    process.env.TENANT_READY_TIMEOUT_MS,
+    120_000,
+  )
+
   tenantProvisioningService = createLiveTenantProvisioningService({
     tenantRegistry,
     baseDomain: TENANT_BASE_DOMAIN,
@@ -104,8 +128,8 @@ if (ENABLE_TENANT_PROVISIONING) {
     databaseAdminUrl: TENANT_DATABASE_ADMIN_URL,
     imagePullSecretName: TENANT_IMAGE_PULL_SECRET,
     publicScheme: TENANT_PUBLIC_SCHEME,
-    tenantPort: TENANT_APP_PORT,
-    readyTimeoutMs: TENANT_READY_TIMEOUT_MS,
+    tenantPort: tenantAppPort,
+    readyTimeoutMs: tenantReadyTimeoutMs,
   })
 }
 

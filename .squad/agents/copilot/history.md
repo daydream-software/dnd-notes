@@ -51,3 +51,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Delivered: control-plane provisioning/deprovisioning endpoints, live Kubernetes/Postgres provisioning service wiring, opaque tenant subdomain persistence, `/ready` tenant compatibility, control-plane env/docs updates, and focused provisioning + migration regression tests.
 - Review notes: internal review caught two real fixes before finish — the subdomain reservation is now atomic at the registry layer, and v1 control-plane registries now migrate safely to the new `subdomain` column/index without bootstrap-time index failures.
 - Status: working tree clean on `squad/54-provision-tenant-workloads`; ready for the usual Copilot PR/review flow, with squad-member review still recommended because this slice crosses control-plane orchestration and infrastructure integration.
+
+## 2026-04-20 PR #64 review follow-up
+- Scope: address Copilot review feedback on the issue #54 branch without widening into the separate k3d/e2e follow-up tracked in #63.
+- Fixed as blocking: tenant provisioning now creates and reports an explicit PVC, `storageReference` points at that PVC, provisioning-only env validation no longer crashes the control plane when provisioning is disabled, namespace deletion waits for termination before reporting deprovisioned, and Service reconciliation preserves server-assigned fields such as `clusterIP` on replace.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
