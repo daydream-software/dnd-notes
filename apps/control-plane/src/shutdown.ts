@@ -42,13 +42,13 @@ export function createShutdownController(options: ShutdownControllerOptions) {
 
     if (result.status === 'failed') {
       finalExitCode = 1
-      logError('Failed to close note store cleanly.', result.error)
+      logError('Failed to close control-plane resources cleanly.', result.error)
       return
     }
 
     if (result.status === 'timed-out') {
       finalExitCode = 1
-      logError('Timed out while closing note store cleanly.', result.error)
+      logError('Timed out while closing control-plane resources cleanly.', result.error)
     }
   }
 

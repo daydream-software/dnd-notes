@@ -66,7 +66,7 @@ None. The application will start with defaults.
 
 ## Health Endpoints
 
-The application exposes three health check endpoints:
+The application exposes four health and probe endpoints:
 
 ### `GET /healthz` (Liveness Probe)
 **Purpose:** Process liveness check for Kubernetes.  
@@ -85,7 +85,12 @@ livenessProbe:
   failureThreshold: 3
 ```
 
-### `GET /readyz` (Readiness Probe)
+### `GET /ready` (Control-plane Readiness Contract)
+**Purpose:** Cluster-internal readiness path used by the control plane and tenant
+Deployment manifests.  
+**Response:** Same behavior as `/readyz`.
+
+### `GET /readyz` (Legacy Readiness Probe)
 **Purpose:** Ready-to-serve-traffic check for Kubernetes.  
 **Response:**  
 - `200 OK` with `{ "status": "ok", "service": "dnd-notes-api" }` when database is healthy  
@@ -98,7 +103,7 @@ livenessProbe:
 ```yaml
 readinessProbe:
   httpGet:
-    path: /readyz
+    path: /ready
     port: 3000
   initialDelaySeconds: 5
   periodSeconds: 5
@@ -109,7 +114,7 @@ readinessProbe:
 ### `GET /health` (Legacy)
 **Purpose:** Backward compatibility for existing monitoring.  
 **Response:** Same as `/healthz`  
-**Status:** Maintained for continuity; prefer `/healthz` and `/readyz` for new deployments.
+**Status:** Maintained for continuity; prefer `/healthz` and `/ready` for new deployments.
 
 ## Persistent Storage
 
@@ -117,6 +122,11 @@ readinessProbe:
 - **Mount point:** `/app/data`  
 - **File:** `/app/data/dnd-notes.sqlite`  
 - **Volume type:** Kubernetes `PersistentVolumeClaim` or local bind mount
+
+The control-plane provisioning slice for issue #54 now keeps this mount present
+even when the tenant runs primarily against `DATABASE_URL`, so the container
+retains a writable runtime volume for SQLite-compatible fallback files and
+operator-managed storage lifecycle.
 
 **Kubernetes example:**
 ```yaml
@@ -131,7 +141,8 @@ volumes:
 
 ### Postgres (Phase 1 target)
 - **Connection:** Via `DATABASE_URL` environment variable  
-- **Persistence:** Managed by Postgres (no container volume needed)  
+- **Persistence:** Managed by Postgres for note data; the control plane may also
+  mount `/app/data` on a PVC for runtime scratch/fallback storage.  
 - **Backup:** Control-plane orchestrated `pg_dump` to object storage
 
 ## Container Lifecycle

@@ -39,3 +39,45 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Scope: external Postgres pool ownership, init cleanup on failure, SQLite async transaction serialization evidence, bounded-memory Postgres snapshot export.
 - Status: inspected existing dirty patch; validating whether only small follow-up edits remain before running API validation/commit/push.
 Status: verified branch HEAD already contains the #58 PR #62 backend review fixes; apps/api lint/test/build passed in the dedicated worktree; no extra code edits were required after inspection.
+
+## 2026-04-20 Issue #54 kickoff
+- Branch: `squad/54-provision-tenant-workloads`
+- Scope: first provisioning slice for control-plane Kubernetes orchestration, opaque tenant subdomain persistence, explicit workload/storage lifecycle handling, and tightly coupled tenant-app contract gaps only if they block provisioning.
+- Constraints: locked squad decisions make k3d the standard dev environment and require the thin control-plane contract (`/ready`, `/_control/info`, `/_control/maintenance`). Repo baseline (`npm run lint && npm run test:ci && npm run build`) was green before edits.
+- Status: planning complete and implementation investigation underway; next step is to wire the control-plane provisioning surface and decide exactly which tenant-app endpoints must land in the same slice.
+
+## 2026-04-20 Issue #54 implementation complete
+- Commit: `775ef4c` (`feat(control-plane): add tenant provisioning slice for #54`)
+- Delivered: control-plane provisioning/deprovisioning endpoints, live Kubernetes/Postgres provisioning service wiring, opaque tenant subdomain persistence, `/ready` tenant compatibility, control-plane env/docs updates, and focused provisioning + migration regression tests.
+- Review notes: internal review caught two real fixes before finish — the subdomain reservation is now atomic at the registry layer, and v1 control-plane registries now migrate safely to the new `subdomain` column/index without bootstrap-time index failures.
+- Status: working tree clean on `squad/54-provision-tenant-workloads`; ready for the usual Copilot PR/review flow, with squad-member review still recommended because this slice crosses control-plane orchestration and infrastructure integration.
+
+## 2026-04-20 PR #64 review follow-up
+- Scope: address Copilot review feedback on the issue #54 branch without widening into the separate k3d/e2e follow-up tracked in #63.
+- Fixed as blocking: tenant provisioning now creates and reports an explicit PVC, `storageReference` points at that PVC, provisioning-only env validation no longer crashes the control plane when provisioning is disabled, namespace deletion waits for termination before reporting deprovisioned, and Service reconciliation preserves server-assigned fields such as `clusterIP` on replace.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 second review follow-up
+- Scope: handle the next Copilot pass, including one visible shutdown blocker and one low-confidence suppressed note about registry index recovery.
+- Fixed as blocking: control-plane shutdown now uses the same timed shutdown-controller pattern as the API workspace so stalled `tenantProvisioningService.close()` cannot block process exit indefinitely, and tenant-registry startup now always reasserts the `idx_tenants_subdomain` unique index for existing schema-v2 databases.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 third review follow-up
+- Scope: respond to the latest two Copilot comments on tenant-registry null handling and Kubernetes PVC reconciliation.
+- Fixed as blocking: tenant-registry now treats `subdomain` presence with null checks instead of truthiness so malformed empty-string rows no longer fall into the reservation retry loop, and Kubernetes replace preparation now preserves PVC-assigned fields such as `storageClassName`, `volumeMode`, and `volumeName` just like the earlier Service hardening preserved `clusterIP`.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 lint hardening follow-up
+- Scope: add a lint guard so future `||` defaults on nullable values get reviewed as explicit nullish handling instead of silently collapsing valid falsy data.
+- Delivered: enabled `@typescript-eslint/prefer-nullish-coalescing` in all three workspace ESLint configs with typed linting, added local `test/tsconfig.json` files for the API and control-plane test suites so typed lint covers tests cleanly, and rewrote current empty-string fallback sites to explicit helpers/ternaries where empty strings are intentionally normalized.
+- Validation: repo-wide `npm run lint && npm run test:ci && npm run build` passed after the lint-rule rollout.
+
+## 2026-04-20 PR #64 fourth review follow-up
+- Scope: address the latest Copilot review threads about invalid persisted tenant subdomains reaching provisioning and deprovisioning flows.
+- Delivered: extracted shared tenant-subdomain validation helpers, taught `TenantRegistry.reserveTenantSubdomain()` to reject invalid persisted values (while still preserving them for inspection), moved provisioning subdomain validation into the failure-handled path so invalid rows mark the tenant failed instead of generating broken resource names, and changed deprovisioning to use explicit null checks plus the same validation so empty-string rows no longer silently skip cleanup.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 fifth review follow-up
+- Scope: handle the next Copilot comments on Kubernetes label safety for tenant IDs and length bounds for tenant subdomains.
+- Delivered: bounded tenant subdomains to the strictest derived Kubernetes name budget (the PVC name), added regression coverage for overly long persisted subdomains, and normalized tenant IDs before projecting them into Kubernetes labels/selectors so arbitrary control-plane IDs no longer break Kubernetes apply.
+- Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.

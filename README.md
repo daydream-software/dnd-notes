@@ -57,6 +57,28 @@ Conventional Commits format (for example `feat(api): harden CORS policy` or
 
 - `apps/web` — React + Vite + Material UI notes workspace
 - `apps/api` — Express + TypeScript API with SQLite persistence
+- `apps/control-plane` — Express + TypeScript control plane for tenant registry and provisioning orchestration
+
+## Control-plane provisioning
+
+Copy `apps/control-plane/.env.example` to `apps/control-plane/.env` when you want
+to run the control plane locally.
+
+For issue `#54` and related platform work, **k3d is the standard dev
+environment**. The control plane keeps provisioning disabled by default; enable it
+only when you have a live kube context plus an admin Postgres connection string:
+
+- `CONTROL_PLANE_ENABLE_PROVISIONING=true`
+- `TENANT_BASE_DOMAIN` — opaque tenant subdomains are created under this suffix
+- `TENANT_IMAGE_REPOSITORY` — image repository used for tenant deployments
+- `TENANT_DATABASE_ADMIN_URL` — admin Postgres URL used to create/drop per-tenant databases
+- `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret name for private images
+
+When provisioning is enabled, the control plane reconciles a tenant namespace,
+runtime ConfigMap/Secret, PVC, Service, Deployment, and a per-tenant Postgres
+database. The tenant workload uses `/ready` for readiness and `/healthz` for
+liveness, and the PVC stays mounted at `/app/data` for explicit tenant storage
+lifecycle plus SQLite-compatible fallback files.
 
 ## Local persistence
 

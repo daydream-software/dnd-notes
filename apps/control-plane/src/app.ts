@@ -1,19 +1,23 @@
 import { createRequire } from 'node:module'
 import express, { type Express, type Request, type Response } from 'express'
 import { z } from 'zod'
+import type { TenantProvisioningPort } from './provisioning.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import { tenantStates } from './types.js'
 import type {
+  TenantDeprovisionResponse,
   ErrorResponse,
   HealthResponse,
   StateTransitionHistoryResponse,
   TenantDetailResponse,
   TenantListResponse,
+  TenantProvisioningResponse,
 } from './types.js'
 
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
   adminToken: string
+  tenantProvisioningService?: TenantProvisioningPort
 }
 
 const require = createRequire(import.meta.url)
@@ -46,6 +50,17 @@ const updateStorageSchema = z.object({
 
 const updateBackupSchema = z.object({
   backupMetadata: z.string().min(1),
+})
+
+const provisionTenantSchema = z.object({
+  triggeredBy: z.string().min(1),
+  reason: z.string().min(1).optional(),
+  version: z.string().min(1).optional(),
+})
+
+const deprovisionTenantSchema = z.object({
+  triggeredBy: z.string().min(1),
+  reason: z.string().min(1).optional(),
 })
 
 function isSqliteConstraintError(
@@ -99,6 +114,7 @@ function createAdminAuthMiddleware(adminToken: string): express.RequestHandler {
 export function createApp({
   tenantRegistry,
   adminToken,
+  tenantProvisioningService,
 }: CreateAppOptions): Express {
   const app = express()
 
@@ -408,6 +424,104 @@ export function createApp({
 
       const transitions = tenantRegistry.getStateTransitions(tenantId)
       response.json({ transitions })
+    },
+  )
+
+  app.post(
+    `${tenantRoutePrefix}/:tenantId/provision`,
+    async (
+      request: Request<{ tenantId: string }>,
+      response: Response<TenantProvisioningResponse | ErrorResponse>,
+    ) => {
+      if (!tenantProvisioningService) {
+        response.status(501).json({
+          error: 'Tenant provisioning is not configured',
+        })
+        return
+      }
+
+      const { tenantId } = request.params
+      const parseResult = provisionTenantSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      const existingTenant = tenantRegistry.getTenant(tenantId)
+      if (!existingTenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+
+      try {
+        const provisioningResult = await tenantProvisioningService.provisionTenant({
+          tenantId,
+          triggeredBy: parseResult.data.triggeredBy,
+          reason: parseResult.data.reason,
+          version: parseResult.data.version,
+        })
+        response.json(provisioningResult)
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error'
+        response.status(500).json({
+          error: 'Failed to provision tenant resources',
+          details: errorMessage,
+        })
+      }
+    },
+  )
+
+  app.post(
+    `${tenantRoutePrefix}/:tenantId/deprovision`,
+    async (
+      request: Request<{ tenantId: string }>,
+      response: Response<TenantDeprovisionResponse | ErrorResponse>,
+    ) => {
+      if (!tenantProvisioningService) {
+        response.status(501).json({
+          error: 'Tenant provisioning is not configured',
+        })
+        return
+      }
+
+      const { tenantId } = request.params
+      const parseResult = deprovisionTenantSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      const existingTenant = tenantRegistry.getTenant(tenantId)
+      if (!existingTenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+
+      try {
+        const deprovisionResult =
+          await tenantProvisioningService.deprovisionTenant({
+            tenantId,
+            triggeredBy: parseResult.data.triggeredBy,
+            reason: parseResult.data.reason,
+          })
+        response.json(deprovisionResult)
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error'
+        response.status(500).json({
+          error: 'Failed to deprovision tenant resources',
+          details: errorMessage,
+        })
+      }
     },
   )
 

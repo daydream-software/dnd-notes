@@ -413,9 +413,15 @@ export function applySharedLinkPolicy(
   response: Response,
   frameAncestors: string | null,
 ) {
+  const trimmedFrameAncestors = frameAncestors?.trim()
+  const frameAncestorsDirective =
+    trimmedFrameAncestors == null || trimmedFrameAncestors === ''
+      ? "'none'"
+      : trimmedFrameAncestors
+
   response.set(
     'Content-Security-Policy',
-    `frame-ancestors ${frameAncestors?.trim() || "'none'"}`,
+    `frame-ancestors ${frameAncestorsDirective}`,
   )
   response.removeHeader('X-Frame-Options')
 }

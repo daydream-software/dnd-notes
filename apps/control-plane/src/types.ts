@@ -13,6 +13,7 @@ export type TenantState = (typeof tenantStates)[number]
 export interface Tenant {
   id: string
   slug: string
+  subdomain: string | null
   ownerId: string
   desiredState: TenantState
   currentState: TenantState
@@ -39,6 +40,28 @@ export interface TenantListResponse {
 
 export interface TenantDetailResponse {
   tenant: Tenant
+}
+
+export interface TenantProvisioningResources {
+  namespace: string
+  deploymentName: string
+  serviceName: string
+  pvcName: string
+  configMapName: string
+  secretName: string
+  hostname: string
+  databaseName: string
+  image: string
+}
+
+export interface TenantProvisioningResponse {
+  tenant: Tenant
+  resources: TenantProvisioningResources
+}
+
+export interface TenantDeprovisionResponse {
+  tenant: Tenant
+  deprovisioned: true
 }
 
 export interface StateTransitionHistoryResponse {

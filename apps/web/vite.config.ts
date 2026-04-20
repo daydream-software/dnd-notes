@@ -38,7 +38,12 @@ function createFrameAncestorsPlugin(apiBaseUrl: string): Plugin {
 
         if (sessionResponse.ok) {
           const payload = (await sessionResponse.json()) as SharedSessionPayload
-          policy = `frame-ancestors ${payload.shareLink?.frameAncestors?.trim() || "'none'"}`
+          const trimmedFrameAncestors = payload.shareLink?.frameAncestors?.trim()
+          const frameAncestorsDirective =
+            trimmedFrameAncestors == null || trimmedFrameAncestors === ''
+              ? "'none'"
+              : trimmedFrameAncestors
+          policy = `frame-ancestors ${frameAncestorsDirective}`
         }
       } catch {
         policy = "frame-ancestors 'none'"
