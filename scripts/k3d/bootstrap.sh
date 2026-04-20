@@ -6,7 +6,7 @@ CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 K3S_IMAGE="${K3D_K3S_IMAGE:-rancher/k3s:v1.35.3-k3s1}"
 HTTP_PORT="${K3D_HTTP_PORT:-8080}"
 HTTPS_PORT="${K3D_HTTPS_PORT:-8443}"
-PLATFORM_NAMESPACE="${PLATFORM_NAMESPACE:-dnd-notes-platform}"
+PLATFORM_NAMESPACE="dnd-notes-platform"
 INGRESS_NGINX_MANIFEST_URL="${INGRESS_NGINX_MANIFEST_URL:-https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/cloud/deploy.yaml}"
 
 usage() {
@@ -18,9 +18,8 @@ Environment overrides:
   K3D_K3S_IMAGE             k3s image used for the cluster (default: rancher/k3s:v1.35.3-k3s1)
   K3D_HTTP_PORT             Host port mapped to ingress HTTP (default: 8080)
   K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 8443)
-  PLATFORM_NAMESPACE        Namespace for platform services (default: dnd-notes-platform)
   INGRESS_NGINX_MANIFEST_URL
-                            Pinned ingress-nginx manifest URL
+                             Pinned ingress-nginx manifest URL
 EOF
 }
 

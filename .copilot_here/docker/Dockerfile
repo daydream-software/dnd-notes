@@ -8,6 +8,8 @@ ARG NODE_VERSION
 # Use a slim Node.js base image, which gives us `npm`.
 FROM node:${NODE_VERSION}-slim
 
+ARG K3D_VERSION=v5.8.3
+
 # --- snippet: system-packages ---
 # Set non-interactive frontend to avoid prompts during package installation.
 ENV DEBIAN_FRONTEND=noninteractive
@@ -26,7 +28,15 @@ RUN apt-get update && apt-get install -y \
   xdg-utils \
   zsh \
   && rm -rf /var/lib/apt/lists/* \
-  && curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+  && ARCH=$(dpkg --print-architecture) \
+  && case "$ARCH" in \
+    amd64) K3D_ARCH=amd64 ;; \
+    arm64) K3D_ARCH=arm64 ;; \
+    *) echo "Unsupported architecture for k3d: $ARCH" >&2; exit 1 ;; \
+  esac \
+  && curl -fsSLo /tmp/k3d "https://github.com/k3d-io/k3d/releases/download/${K3D_VERSION}/k3d-linux-${K3D_ARCH}" \
+  && install -m 0755 /tmp/k3d /usr/local/bin/k3d \
+  && rm -f /tmp/k3d
 
 # --- snippet: docker-cli ---
 # Install Docker CLI to support brokered Docker socket scenarios.
@@ -42,7 +52,8 @@ RUN mkdir -p /etc/apt/keyrings \
 RUN curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.35/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg \
     && echo 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.35/deb/ /' > /etc/apt/sources.list.d/kubernetes.list \
     && apt-get update \
-    && apt-get install -y kubectl
+    && apt-get install -y kubectl \
+    && rm -rf /var/lib/apt/lists/*
 
 # --- snippet: powershell ---
 # Install PowerShell - architecture-specific approach

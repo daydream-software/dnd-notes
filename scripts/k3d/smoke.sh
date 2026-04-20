@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
-PLATFORM_NAMESPACE="${PLATFORM_NAMESPACE:-dnd-notes-platform}"
+PLATFORM_NAMESPACE="dnd-notes-platform"
 K3D_HTTP_PORT="${K3D_HTTP_PORT:-8080}"
 CONTROL_PLANE_PORT="${CONTROL_PLANE_PORT:-3101}"
 POSTGRES_LOCAL_PORT="${POSTGRES_LOCAL_PORT:-55432}"
