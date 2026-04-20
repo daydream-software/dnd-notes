@@ -80,6 +80,25 @@ database. The tenant workload uses `/ready` for readiness and `/healthz` for
 liveness, and the PVC stays mounted at `/app/data` for explicit tenant storage
 lifecycle plus SQLite-compatible fallback files.
 
+## k3d platform loop
+
+Issue `#63` formalizes the daily local Kubernetes lane for platform work.
+
+```bash
+npm run k3d:bootstrap
+npm run k3d:smoke
+```
+
+- `k3d:bootstrap` creates the local cluster shape and deploys ingress-nginx,
+  platform Postgres, and seeded Keycloak.
+- `k3d:smoke` builds/imports the tenant image, runs the control plane locally
+  against the live k3d kube context, provisions a tenant, and verifies tenant
+  readiness.
+
+See [`platform/k3d/README.md`](platform/k3d/README.md) for the full workflow and
+the documented boundary between the fast k3d lane and the later k3s/stateful
+rehearsal lane.
+
 ## Local persistence
 
 Copy `apps/api/.env.example` to `apps/api/.env` when you want a checked-in

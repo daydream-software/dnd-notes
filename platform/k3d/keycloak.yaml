@@ -1,0 +1,150 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: platform-keycloak-realm
+  namespace: dnd-notes-platform
+data:
+  dnd-notes-dev-realm.json: |
+    {
+      "realm": "dnd-notes-dev",
+      "enabled": true,
+      "displayName": "dnd-notes Dev",
+      "registrationAllowed": false,
+      "rememberMe": true,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "users": [
+        {
+          "username": "owner@example.com",
+          "email": "owner@example.com",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Owner",
+          "lastName": "User",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "password",
+              "temporary": false
+            }
+          ]
+        },
+        {
+          "username": "site-admin@example.com",
+          "email": "site-admin@example.com",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Site",
+          "lastName": "Admin",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "password",
+              "temporary": false
+            }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-keycloak
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-keycloak
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-keycloak
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.2.4
+          imagePullPolicy: IfNotPresent
+          args:
+            - start-dev
+            - --import-realm
+            - --http-port=8080
+            - --proxy-headers=xforwarded
+          env:
+            - name: KC_BOOTSTRAP_ADMIN_USERNAME
+              value: admin
+            - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+              value: admin
+            - name: KEYCLOAK_ADMIN
+              value: admin
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              value: admin
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 5
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: realm-import
+              mountPath: /opt/keycloak/data/import
+      volumes:
+        - name: realm-import
+          configMap:
+            name: platform-keycloak-realm
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: platform-keycloak
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-keycloak
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: platform-keycloak
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platform-keycloak
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-keycloak
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: keycloak.127.0.0.1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-keycloak
+                port:
+                  name: http

@@ -81,3 +81,13 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Scope: handle the next Copilot comments on Kubernetes label safety for tenant IDs and length bounds for tenant subdomains.
 - Delivered: bounded tenant subdomains to the strictest derived Kubernetes name budget (the PVC name), added regression coverage for overly long persisted subdomains, and normalized tenant IDs before projecting them into Kubernetes labels/selectors so arbitrary control-plane IDs no longer break Kubernetes apply.
 - Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 Issue #63 kickoff
+- Branch: `squad/63-formalize-k3d-development-test-environment`
+- Scope: turn the locked k3d local-platform decision into real bootstrap and smoke artifacts without widening into later control-plane deployment packaging or OIDC implementation.
+- Planned shape: add a k3d bootstrap lane for ingress-nginx + platform Postgres + seeded Keycloak, add a live smoke path that provisions a tenant against k3d using the existing local control-plane process and imported tenant image, and document the k3d/k3s boundary explicitly.
+
+## 2026-04-20 Issue #63 implementation complete
+- Delivered: added `scripts/k3d/bootstrap.sh`, `scripts/k3d/build-tenant-image.sh`, and `scripts/k3d/smoke.sh`; added committed k3d manifests for the platform namespace, Postgres, and seeded Keycloak; wired root `package.json` entrypoints; and documented the lane in `platform/k3d/README.md` plus the root README.
+- Validation: `bash -n scripts/k3d/*.sh`, `npm run k3d:bootstrap -- --help`, `npm run k3d:build-image -- --help`, `npm run k3d:smoke -- --help`, and repo-wide `npm run lint && npm run test:ci && npm run build` passed.
+- Constraint in this environment: `docker` is available, but `k3d` and `kubectl` are not installed here, so the live cluster smoke path itself could not be executed during this session. The repo now contains the automated lane needed to run that rehearsal on a workstation with the standard tools installed.
