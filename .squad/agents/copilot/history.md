@@ -32,3 +32,9 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 📌 Team update (2026-04-18T02:25:33Z): Epic #42 clarification backlog added to GitHub issue #42. Platform gaps tracked for next discussion: local k3d/k3s dev loop, ingress/DNS/TLS, SQLite backup, single-writer choreography, control-plane/tenant contract, lifecycle state machine, auth migration to OIDC, version-skew policy, CI coverage. — Scribe
 📌 Team update (2026-04-18T14:57:36Z): EPIC SYNC DIRECTIVE CODIFIED — User directive: when the team makes decisions on an epic, update the GitHub epic so the visible GitHub source stays synchronized with squad decisions. Standing practice established. Mikey synchronized GitHub issue #42 (body + syncing comment) to reflect locked platform direction (Postgres, ghcr.io, ingress-nginx, cert-manager wildcard DNS-01, K8s Secrets, dropped OKE/ARM). Directive merged to `.squad/decisions.md` and captured in orchestration/session logs. — Scribe
 
+## 2026-04-20 Issue #58 PR #62 backend review pass
+- Worktree: `.worktrees/58-postgres-adapter` on `squad/58-postgres-adapter`.
+- Scope: external Postgres pool ownership, init cleanup on failure, SQLite async transaction serialization evidence, bounded-memory Postgres snapshot export.
+- Status: inspected existing dirty patch; validating whether only small follow-up edits remain before running API validation/commit/push.
+Status: verified branch HEAD already contains the #58 PR #62 backend review fixes; apps/api lint/test/build passed in the dedicated worktree; no extra code edits were required after inspection.
+
