@@ -57,12 +57,9 @@ export function createShutdownController(options: ShutdownControllerOptions) {
       finalExitCode = exitCode
     }
 
-    if (!finishShutdownPromise) {
-      finishShutdownPromise = closeResourcesWithinTimeout()
-        .then(() => {
-          options.exit(finalExitCode)
-        })
-    }
+    finishShutdownPromise ??= closeResourcesWithinTimeout().then(() => {
+      options.exit(finalExitCode)
+    })
 
     return finishShutdownPromise
   }

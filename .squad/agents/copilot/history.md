@@ -66,3 +66,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Scope: respond to the latest two Copilot comments on tenant-registry null handling and Kubernetes PVC reconciliation.
 - Fixed as blocking: tenant-registry now treats `subdomain` presence with null checks instead of truthiness so malformed empty-string rows no longer fall into the reservation retry loop, and Kubernetes replace preparation now preserves PVC-assigned fields such as `storageClassName`, `volumeMode`, and `volumeName` just like the earlier Service hardening preserved `clusterIP`.
 - Validation: `npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane` plus repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fixes.
+
+## 2026-04-20 PR #64 lint hardening follow-up
+- Scope: add a lint guard so future `||` defaults on nullable values get reviewed as explicit nullish handling instead of silently collapsing valid falsy data.
+- Delivered: enabled `@typescript-eslint/prefer-nullish-coalescing` in all three workspace ESLint configs with typed linting, added local `test/tsconfig.json` files for the API and control-plane test suites so typed lint covers tests cleanly, and rewrote current empty-string fallback sites to explicit helpers/ternaries where empty strings are intentionally normalized.
+- Validation: repo-wide `npm run lint && npm run test:ci && npm run build` passed after the lint-rule rollout.

@@ -29,7 +29,7 @@ interface CreateAppOptions {
 }
 
 function readRateLimitClientId(request: Request) {
-  return request.ip || request.socket.remoteAddress || 'unknown'
+  return request.ip ?? request.socket.remoteAddress ?? 'unknown'
 }
 
 export function createApp({
