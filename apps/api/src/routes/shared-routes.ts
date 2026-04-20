@@ -29,12 +29,12 @@ import { validateGuestJoinInput, validateNoteCreateInput, validateNoteInput } fr
 export function registerSharedRoutes(app: Express, context: AppRouteContext) {
   app.get(
     '/api/shared/:shareToken/session',
-    (
+    async (
       request: Request<ShareParams>,
       response: Response<SharedSessionResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -45,14 +45,14 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
       response.json({
         campaign: shared.campaign,
         shareLink: shared.shareLink,
-        membership: readSharedMembership(noteStore, request, shared.campaign.id),
+        membership: await readSharedMembership(noteStore, request, shared.campaign.id),
       })
     },
   )
 
   app.post(
     '/api/shared/:shareToken/join',
-    (
+    async (
       request: Request<ShareParams>,
       response: Response<SharedJoinResponse | ErrorResponse>,
     ) => {
@@ -69,7 +69,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
       }
 
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -87,7 +87,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      const guestSession = noteStore.createGuestMembership(
+      const guestSession = await noteStore.createGuestMembership(
         shared.campaign.id,
         validation.data.displayName,
       )
@@ -103,7 +103,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/shared/:shareToken/membership/claim',
-    (
+    async (
       request: Request<ShareParams>,
       response: Response<SharedMembershipClaimResponse | ErrorResponse>,
     ) => {
@@ -120,7 +120,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
       }
 
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -128,13 +128,13 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const owner = requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response)
 
       if (!owner) {
         return
       }
 
-      const membership = requireSharedMembership(
+      const membership = await requireSharedMembership(
         noteStore,
         request,
         shared.campaign.id,
@@ -145,7 +145,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      const claimedMembership = noteStore.claimGuestMembership(membership.id, owner.id)
+      const claimedMembership = await noteStore.claimGuestMembership(membership.id, owner.id)
 
       if (claimedMembership.status === 'not-found') {
         response.status(404).json({ error: 'Guest membership was not found.' })
@@ -184,12 +184,12 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.get(
     '/api/shared/:shareToken/overview',
-    (
+    async (
       request: Request<ShareParams>,
       response: Response<NotesOverview | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -197,7 +197,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const membership = requireSharedMembership(
+      const membership = await requireSharedMembership(
         noteStore,
         request,
         shared.campaign.id,
@@ -208,18 +208,18 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      response.json(buildOverview(noteStore, shared.campaign.id, membership))
+      response.json(await buildOverview(noteStore, shared.campaign.id, membership))
     },
   )
 
   app.get(
     '/api/shared/:shareToken/notes',
-    (
+    async (
       request: Request<ShareParams>,
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -227,7 +227,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const membership = requireSharedMembership(
+      const membership = await requireSharedMembership(
         noteStore,
         request,
         shared.campaign.id,
@@ -238,18 +238,18 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      response.json({ notes: noteStore.listNotes(shared.campaign.id) })
+      response.json({ notes: await noteStore.listNotes(shared.campaign.id) })
     },
   )
 
   app.get(
     '/api/shared/:shareToken/sessions',
-    (
+    async (
       request: Request<ShareParams>,
       response: Response<SessionsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -257,7 +257,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const membership = requireSharedMembership(
+      const membership = await requireSharedMembership(
         noteStore,
         request,
         shared.campaign.id,
@@ -268,18 +268,18 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      response.json({ sessions: buildSessions(noteStore, shared.campaign.id) })
+      response.json({ sessions: await buildSessions(noteStore, shared.campaign.id) })
     },
   )
 
   app.post(
     '/api/shared/:shareToken/notes',
-    (
+    async (
       request: Request<ShareParams>,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -287,7 +287,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const membership = requireSharedMembership(
+      const membership = await requireSharedMembership(
         noteStore,
         request,
         shared.campaign.id,
@@ -309,7 +309,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
       }
 
       try {
-        const note = noteStore.createNote(
+        const note = await noteStore.createNote(
           {
             ...validation.data,
             campaignId: shared.campaign.id,
@@ -328,12 +328,12 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.put(
     '/api/shared/:shareToken/notes/:noteId',
-    (
+    async (
       request: Request<SharedNoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -341,7 +341,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const membership = requireSharedMembership(
+      const membership = await requireSharedMembership(
         noteStore,
         request,
         shared.campaign.id,
@@ -352,7 +352,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      const existingNote = noteStore.getNote(request.params.noteId)
+      const existingNote = await noteStore.getNote(request.params.noteId)
 
       if (!existingNote || existingNote.campaignId !== shared.campaign.id) {
         response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
@@ -370,7 +370,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
       }
 
       try {
-        const note = noteStore.updateNote(
+        const note = await noteStore.updateNote(
           request.params.noteId,
           {
             ...validation.data,
@@ -395,12 +395,12 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.delete(
     '/api/shared/:shareToken/notes/:noteId',
-    (
+    async (
       request: Request<SharedNoteParams>,
       response: Response<undefined | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const shared = resolveSharedLink(noteStore, request.params.shareToken, response)
+      const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
       if (!shared) {
         return
@@ -408,7 +408,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const membership = requireSharedMembership(
+      const membership = await requireSharedMembership(
         noteStore,
         request,
         shared.campaign.id,
@@ -419,14 +419,14 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      const note = noteStore.getNote(request.params.noteId)
+      const note = await noteStore.getNote(request.params.noteId)
 
       if (!note || note.campaignId !== shared.campaign.id) {
         response.status(404).json({ error: `Note "${request.params.noteId}" was not found.` })
         return
       }
 
-      noteStore.deleteNote(request.params.noteId)
+      await noteStore.deleteNote(request.params.noteId)
       response.status(204).send()
     },
   )

@@ -19,35 +19,35 @@ import {
 export function registerAdminRoutes(app: Express, context: AppRouteContext) {
   app.get(
     '/api/admin/accounts',
-    (
+    async (
       request: Request,
       response: Response<AdminAccountsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
 
       if (!siteAdmin) {
         return
       }
 
-      response.json({ accounts: noteStore.listOwnerAccounts() })
+      response.json({ accounts: await noteStore.listOwnerAccounts() })
     },
   )
 
   app.get(
     '/api/admin/overview',
-    (
+    async (
       request: Request,
       response: Response<AdminOverviewResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
 
       if (!siteAdmin) {
         return
       }
 
-      response.json({ overview: noteStore.getAdminOverview() })
+      response.json({ overview: await noteStore.getAdminOverview() })
     },
   )
 
@@ -58,7 +58,7 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
       response: Response<ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
 
       if (!siteAdmin) {
         return
@@ -127,7 +127,7 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
       response: Response<AdminRestoreResponse | ErrorResponse>,
     ) => {
       let noteStore = context.getNoteStore()
-      const siteAdmin = requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
 
       if (!siteAdmin) {
         return
@@ -168,14 +168,14 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
         return
       }
 
-      noteStore.close()
+      await noteStore.close()
 
       try {
-        noteStore = context.restoreNoteStore(uploadPath)
+        noteStore = await context.restoreNoteStore(uploadPath)
         context.setNoteStore(noteStore)
       } catch (restoreError) {
         try {
-          noteStore = context.restoreNoteStore(rollbackPath)
+          noteStore = await context.restoreNoteStore(rollbackPath)
           context.setNoteStore(noteStore)
         } catch {
           await rm(restoreDirectory, { recursive: true, force: true })
@@ -204,7 +204,7 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
       response.json({
         message: 'Backup restored successfully.',
         restoredAt: new Date().toISOString(),
-        overview: noteStore.getAdminOverview(),
+        overview: await noteStore.getAdminOverview(),
       })
     },
   )

@@ -52,6 +52,10 @@ Data initialized as Backend Dev for the initial project squad.
 - Control-plane shutdown should bound `server.close()` with a hard timeout; keep-alive sockets can otherwise block SIGINT/SIGTERM exit and leave SQLite handles open.
 - Locked issue #53 control-plane management routes live under `/internal/tenants*`; keep service code, tests, and README aligned to that internal-only contract instead of drifting to `/api/*`.
 - Control-plane state audit rows should read `current_state` inside the same write transaction used for the update, and `reason` should be omitted or non-empty so transition history never silently collapses `''` into `null`.
+- Issue #58 moved `apps/api/src/note-store.ts` behind an async statement wrapper in `apps/api/src/note-store-database.ts`, so the API can await the same `prepare/get/all/run` flow on SQLite and Postgres instead of forking route contracts.
+- The API now selects Postgres whenever `DATABASE_URL` is set and otherwise falls back to SQLite via `NOTES_DB_PATH`; Postgres pool tuning lives in `NOTES_DB_POOL_MIN`, `NOTES_DB_POOL_MAX`, `NOTES_DB_IDLE_TIMEOUT_MS`, `NOTES_DB_CONNECTION_TIMEOUT_MS`, and `NOTES_DB_STATEMENT_TIMEOUT_MS`.
+- Admin backup/restore keeps a SQLite-compatible snapshot format even for Postgres-backed tenants: `backupDatabase()` exports a `.sqlite` snapshot, and `restoreNoteStoreFromBackup()` can import that snapshot back into Postgres for migration/recovery.
+- Regression coverage for the adapter slice now lives in `apps/api/test/postgres-adapter.test.ts`, while the existing API suite still validates the SQLite fallback path.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 

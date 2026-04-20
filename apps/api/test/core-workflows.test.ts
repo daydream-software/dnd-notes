@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import Database from 'better-sqlite3'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -56,7 +57,7 @@ test('GET /readyz returns 503 when the database is unavailable', async (t) => {
   const { app, cleanup, closeNoteStore } = await createTestApp()
   t.after(cleanup)
 
-  closeNoteStore()
+  await closeNoteStore()
 
   const response = await request(app).get('/readyz')
 
@@ -181,20 +182,20 @@ test('site admins can restore a SQLite backup and invalid uploads are rejected',
 
   const sourceDbPath = join(sourceDirectory, 'notes.sqlite')
   const sourceBackupPath = join(sourceDirectory, 'restore.sqlite')
-  const sourceStore = createNoteStore({
+  const sourceStore = await createNoteStore({
     dbPath: sourceDbPath,
     siteAdminEmails: ['site-admin@example.com'],
   })
 
   try {
-    const restoredOwner = sourceStore.createOwnerAccount({
+    const restoredOwner = await sourceStore.createOwnerAccount({
       displayName: 'Restored Admin',
       email: 'site-admin@example.com',
       password: 'restored-password',
     })
     assert.ok(restoredOwner)
 
-    sourceStore.createNote({
+    await sourceStore.createNote({
       title: 'Restored note',
       body: 'Loaded from a restored admin backup.',
       tags: ['restore'],
@@ -206,7 +207,7 @@ test('site admins can restore a SQLite backup and invalid uploads are rejected',
 
     await sourceStore.backupDatabase(sourceBackupPath)
   } finally {
-    sourceStore.close()
+    await sourceStore.close()
   }
 
   const restoreSnapshot = await readFile(sourceBackupPath)
@@ -565,6 +566,55 @@ test('owner login is rate limited after repeated attempts', async (t) => {
   assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
 })
 
+test('owner auth normalizes email casing for registration, duplicate checks, and login', async (t) => {
+  const { app, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const registration = await registerOwner(request(app), {
+    displayName: 'Aela',
+    email: 'Aela@Example.com',
+  })
+  assert.equal(registration.owner.email, 'aela@example.com')
+
+  const duplicateResponse = await request(app).post('/api/auth/register').send({
+    displayName: 'Duplicate Aela',
+    email: 'AELA@example.com',
+    password: 'moonlit-secret',
+  })
+  assert.equal(duplicateResponse.status, 409)
+
+  const loginResponse = await request(app).post('/api/auth/login').send({
+    email: 'AELA@example.com',
+    password: 'moonlit-secret',
+  })
+  assert.equal(loginResponse.status, 200)
+  assert.equal(loginResponse.body.owner.email, 'aela@example.com')
+})
+
+test('owner email lookups are backed by a unique lower(email) index', async (t) => {
+  const { dbPath, closeNoteStore, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  await closeNoteStore()
+
+  const database = new Database(dbPath, { readonly: true, fileMustExist: true })
+  t.after(() => {
+    database.close()
+  })
+
+  const indexRow = database
+    .prepare(`
+      SELECT sql
+      FROM sqlite_master
+      WHERE type = 'index' AND name = 'idx_owner_accounts_email_lower'
+    `)
+    .get() as { sql: string } | undefined
+
+  assert.ok(indexRow)
+  assert.match(indexRow.sql, /CREATE UNIQUE INDEX/i)
+  assert.match(indexRow.sql, /LOWER\(email\)/i)
+})
+
 test('authenticated owners can run the note CRUD workflow in a selected campaign', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)
@@ -635,10 +685,10 @@ test('configured site-admin emails are promoted through registration and login',
   assert.equal(sessionResponse.status, 200)
   assert.equal(sessionResponse.body.owner.isSiteAdmin, true)
 
-  closeNoteStore()
+  await closeNoteStore()
 
-  const reopenedStore = createNoteStore({ dbPath, siteAdminEmails: [siteAdminEmail] })
-  t.after(() => reopenedStore.close())
+  const reopenedStore = await createNoteStore({ dbPath, siteAdminEmails: [siteAdminEmail] })
+  t.after(async () => reopenedStore.close())
 
   const reopenedApp = createApp({ noteStore: reopenedStore })
   const loginResponse = await request(reopenedApp).post('/api/auth/login').send({

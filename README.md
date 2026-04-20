@@ -1,6 +1,6 @@
 # dnd-notes
 
-A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript + SQLite API. Containerized for Kubernetes deployment with same-origin web + API serving.
+A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript API that targets Postgres in hosted environments while keeping SQLite as the local fallback. Containerized for Kubernetes deployment with same-origin web + API serving.
 
 ## Getting started
 
@@ -63,15 +63,26 @@ Conventional Commits format (for example `feat(api): harden CORS policy` or
 Copy `apps/api/.env.example` to `apps/api/.env` when you want a checked-in
 starting point for API configuration.
 
-The API stores notes in a local SQLite database at:
+By default, local development still stores notes in a SQLite database at:
 
 ```text
 apps/api/data/dnd-notes.sqlite
 ```
 
-You can override that path with `NOTES_DB_PATH`, and you can also set `PORT`
+Set `DATABASE_URL` when you want the API to use Postgres instead. If `DATABASE_URL`
+is unset, the API falls back to SQLite automatically.
+
+You can override the SQLite path with `NOTES_DB_PATH`, and you can also set `PORT`
 there for the API listener. When you set `NOTES_DB_PATH` in `apps/api/.env`, use
 paths relative to `apps/api` (for example `data/dnd-notes.sqlite`).
+
+Optional Postgres pool tuning env vars:
+
+- `NOTES_DB_POOL_MIN` (default `0`)
+- `NOTES_DB_POOL_MAX` (default `20`)
+- `NOTES_DB_IDLE_TIMEOUT_MS` (default `30000`)
+- `NOTES_DB_CONNECTION_TIMEOUT_MS` (default `10000`)
+- `NOTES_DB_STATEMENT_TIMEOUT_MS` (default `30000`)
 
 Set `PUBLIC_WEB_URL` to the canonical public web origin that should own app and
 share-link URLs in production (for example `https://notes.example.com`). The API
@@ -110,7 +121,19 @@ To replace whatever is currently in the local database with the starter notes:
 npm run reset:data
 ```
 
-Both commands use `NOTES_DB_PATH` when it is set, so you can seed or reset an alternate database file without changing code.
+Both commands use the active database backend. With SQLite they honor
+`NOTES_DB_PATH`; with Postgres they honor `DATABASE_URL`.
+
+### SQLite → Postgres migration
+
+For an existing SQLite tenant:
+
+1. Download a fresh admin backup (`GET /api/admin/backup`) while the app still runs on SQLite.
+2. Start the API with `DATABASE_URL` pointed at the target Postgres database.
+3. Restore that backup through the admin restore flow (`POST /api/admin/restore` or the site-admin UI).
+
+The backup format stays SQLite-compatible, so the same snapshot can seed a fresh
+Postgres database. Direct admin backup downloads remain `.sqlite` snapshots.
 
 ## Current note model
 

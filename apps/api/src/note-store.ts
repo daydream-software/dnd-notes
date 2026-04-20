@@ -6,8 +6,20 @@ import {
   scryptSync,
   timingSafeEqual,
 } from 'node:crypto'
-import { copyFileSync, mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
+import {
+  chmodSync,
+  closeSync,
+  copyFileSync,
+  createReadStream,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  rmSync,
+  writeSync,
+} from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 import {
   defaultCampaign,
@@ -15,6 +27,12 @@ import {
   defaultOwnerDisplayName,
 } from './campaign.js'
 import { initializeNoteStoreDatabase } from './note-store-bootstrap.js'
+import {
+  createPostgresDatabase,
+  createSqliteDatabase,
+  type NoteStoreDatabase,
+  type PostgresPoolLike,
+} from './note-store-database.js'
 import {
   composeNote,
   groupReferencesBySource,
@@ -155,6 +173,9 @@ type MembershipConsolidationResult =
 
 export interface CreateNoteStoreOptions {
   dbPath?: string
+  databaseUrl?: string
+  backend?: 'sqlite' | 'postgres'
+  postgresPool?: PostgresPoolLike
   siteAdminEmails?: readonly string[]
 }
 
@@ -169,10 +190,320 @@ const requiredBackupTables = [
   'notes',
 ] as const
 
+const snapshotTableDefinitions = [
+  {
+    name: 'owner_accounts',
+    columns: [
+      'id',
+      'email',
+      'display_name',
+      'password_hash',
+      'is_site_admin',
+      'created_at',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'owner_sessions',
+    columns: ['id', 'owner_user_id', 'token_hash', 'created_at', 'expires_at'],
+  },
+  {
+    name: 'campaigns',
+    columns: [
+      'id',
+      'name',
+      'tagline',
+      'system',
+      'setting',
+      'next_session',
+      'archived_at',
+      'created_at',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'campaign_memberships',
+    columns: [
+      'id',
+      'campaign_id',
+      'role',
+      'display_name',
+      'user_id',
+      'guest_token_id',
+      'created_at',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'campaign_share_links',
+    columns: [
+      'id',
+      'campaign_id',
+      'token_hash',
+      'token_plaintext',
+      'label',
+      'access_level',
+      'frame_ancestors',
+      'expires_at',
+      'revoked_at',
+      'created_at',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'notes',
+    columns: [
+      'id',
+      'campaign_id',
+      'title',
+      'body',
+      'status',
+      'tags_json',
+      'linked_notes_json',
+      'session_name',
+      'created_by_membership_id',
+      'last_edited_by_membership_id',
+      'created_at',
+      'updated_at',
+    ],
+  },
+  {
+    name: 'note_references',
+    columns: [
+      'id',
+      'source_note_id',
+      'target_note_id',
+      'campaign_id',
+      'reference_type',
+      'label',
+      'qualifier',
+      'position_in_body',
+      'created_at',
+      'updated_at',
+    ],
+  },
+] as const
+
+const snapshotDeletionOrder = [...snapshotTableDefinitions]
+  .reverse()
+  .map((definition) => definition.name)
+
+// Keep page reads small enough to cap peak memory during backup and restore work.
+const snapshotCopyBatchSize = 100
+// Stay under SQLite's 999-parameter ceiling and avoid giant multi-row INSERTs.
+const snapshotInsertParameterLimit = 900
+
+interface SnapshotRow extends Record<string, unknown> {
+  id: string
+}
+
+interface SnapshotSpoolFile {
+  definition: (typeof snapshotTableDefinitions)[number]
+  path: string
+}
+
+function buildSnapshotSelectSql(definition: (typeof snapshotTableDefinitions)[number]) {
+  return `
+    SELECT ${definition.columns.join(', ')}
+    FROM ${definition.name}
+    WHERE (@afterId IS NULL OR id > @afterId)
+    ORDER BY id ASC
+    LIMIT @batchSize
+  `
+}
+
+function buildSnapshotInsertSql(
+  definition: (typeof snapshotTableDefinitions)[number],
+  rowCount = 1,
+) {
+  return `
+    INSERT INTO ${definition.name} (${definition.columns.join(', ')})
+    VALUES ${Array.from(
+      { length: rowCount },
+      () => `(${definition.columns.map(() => '?').join(', ')})`,
+    ).join(', ')}
+  `
+}
+
+function resolveSnapshotInsertBatchSize(definition: (typeof snapshotTableDefinitions)[number]) {
+  return Math.max(
+    1,
+    Math.min(
+      snapshotCopyBatchSize,
+      Math.floor(snapshotInsertParameterLimit / definition.columns.length),
+    ),
+  )
+}
+
+function flattenSnapshotRows(
+  definition: (typeof snapshotTableDefinitions)[number],
+  rows: SnapshotRow[],
+) {
+  return rows.flatMap((row) => definition.columns.map((columnName) => row[columnName]))
+}
+
+function tightenSqliteFilePermissions(dbPath: string) {
+  chmodSync(dbPath, 0o600)
+}
+
+function createRestoreWorkingCopy(backend: 'sqlite' | 'postgres', dbPath: string) {
+  if (backend === 'postgres') {
+    const directory = mkdtempSync(join(tmpdir(), 'dnd-notes-restore-'))
+
+    return {
+      directory,
+      path: join(directory, `restore-working-${randomUUID()}.sqlite`),
+    }
+  }
+
+  return {
+    directory: null,
+    path: `${dbPath}.restore-working-${randomUUID()}.sqlite`,
+  }
+}
+
+async function clearSnapshotTables(database: NoteStoreDatabase) {
+  for (const tableName of snapshotDeletionOrder) {
+    await database.prepare(`DELETE FROM ${tableName}`).run()
+  }
+}
+
+function createSnapshotSpoolDirectory() {
+  return mkdtempSync(join(tmpdir(), 'dnd-notes-snapshot-'))
+}
+
+async function spoolSnapshotTables(sourceDatabase: NoteStoreDatabase, spoolDirectory: string) {
+  const snapshotSpoolFiles: SnapshotSpoolFile[] = []
+
+  for (const definition of snapshotTableDefinitions) {
+    const selectStatement = sourceDatabase.prepare<SnapshotRow>(buildSnapshotSelectSql(definition))
+    const spoolPath = join(spoolDirectory, `${definition.name}-${randomUUID()}.jsonl`)
+    const spoolHandle = openSync(spoolPath, 'w')
+    let afterId: string | null = null
+
+    try {
+      while (true) {
+        const rows = (await selectStatement.all({
+          afterId,
+          batchSize: snapshotCopyBatchSize,
+        })) as SnapshotRow[]
+
+        if (rows.length > 0) {
+          writeSync(spoolHandle, `${JSON.stringify(rows)}\n`)
+        }
+
+        if (rows.length < snapshotCopyBatchSize) {
+          break
+        }
+
+        afterId = rows.at(-1)?.id ?? null
+      }
+    } finally {
+      closeSync(spoolHandle)
+    }
+
+    snapshotSpoolFiles.push({ definition, path: spoolPath })
+  }
+
+  return snapshotSpoolFiles
+}
+
+async function insertSnapshotRows(
+  definition: (typeof snapshotTableDefinitions)[number],
+  rows: SnapshotRow[],
+  destinationDatabase: NoteStoreDatabase,
+) {
+  const insertBatchSize = resolveSnapshotInsertBatchSize(definition)
+  const insertStatements = new Map<number, ReturnType<typeof destinationDatabase.prepare>>()
+
+  for (let index = 0; index < rows.length; index += insertBatchSize) {
+    const rowBatch = rows.slice(index, index + insertBatchSize)
+    let insertStatement = insertStatements.get(rowBatch.length)
+
+    if (!insertStatement) {
+      insertStatement = destinationDatabase.prepare(
+        buildSnapshotInsertSql(definition, rowBatch.length),
+      )
+      insertStatements.set(rowBatch.length, insertStatement)
+    }
+
+    await insertStatement.run(flattenSnapshotRows(definition, rowBatch))
+  }
+}
+
+async function writeSnapshotSpoolFiles(
+  snapshotSpoolFiles: SnapshotSpoolFile[],
+  destinationDatabase: NoteStoreDatabase,
+) {
+  for (const { definition, path } of snapshotSpoolFiles) {
+    const stream = createReadStream(path, { encoding: 'utf8' })
+    const lineReader = createInterface({
+      input: stream,
+      crlfDelay: Infinity,
+    })
+
+    try {
+      for await (const line of lineReader) {
+        if (!line) {
+          continue
+        }
+
+        await insertSnapshotRows(
+          definition,
+          JSON.parse(line) as SnapshotRow[],
+          destinationDatabase,
+        )
+      }
+    } finally {
+      lineReader.close()
+      stream.destroy()
+    }
+  }
+}
+
+export async function copySnapshotTables(
+  sourceDatabase: NoteStoreDatabase,
+  destinationDatabase: NoteStoreDatabase,
+) {
+  const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
+
+  try {
+    const snapshotSpoolFiles = await spoolSnapshotTables(sourceDatabase, snapshotSpoolDirectory)
+    await writeSnapshotSpoolFiles(snapshotSpoolFiles, destinationDatabase)
+  } finally {
+    rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
+  }
+}
+
 const sessionTtlMs = 1000 * 60 * 60 * 24 * 30
 
 function normalizeEmailAddress(email: string) {
   return email.trim().toLowerCase()
+}
+
+function isOwnerEmailUniqueConstraintError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  const code =
+    'code' in error && typeof error.code === 'string'
+      ? error.code
+      : undefined
+  const constraint =
+    'constraint' in error && typeof error.constraint === 'string'
+      ? error.constraint
+      : undefined
+  const details = [code, constraint, error.message].filter(Boolean).join(' ')
+
+  return (
+    code === '23505' ||
+    code === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    code === 'SQLITE_CONSTRAINT' ||
+    /owner_accounts\.email/i.test(details) ||
+    /idx_owner_accounts_email_lower/i.test(details) ||
+    /duplicate key value/i.test(details)
+  )
 }
 
 function resolveConfiguredSiteAdminEmails(options: CreateNoteStoreOptions) {
@@ -189,79 +520,85 @@ function resolveConfiguredSiteAdminEmails(options: CreateNoteStoreOptions) {
 }
 
 export interface NoteStore {
-  listCampaigns(): CampaignSummary[]
-  listUserCampaigns(userId: string): CampaignSummary[]
-  listOwnedCampaigns(ownerUserId: string): CampaignSummary[]
-  getPrimaryCampaignForUser(userId: string): CampaignSummary
-  getPrimaryCampaign(ownerUserId?: string): CampaignSummary
-  getCampaign(campaignId: string): CampaignSummary | null
-  createCampaign(input: CampaignInput, owner: OwnerAccount): CampaignSummary
+  listCampaigns(): Promise<CampaignSummary[]>
+  listUserCampaigns(userId: string): Promise<CampaignSummary[]>
+  listOwnedCampaigns(ownerUserId: string): Promise<CampaignSummary[]>
+  getPrimaryCampaignForUser(userId: string): Promise<CampaignSummary>
+  getPrimaryCampaign(ownerUserId?: string): Promise<CampaignSummary>
+  getCampaign(campaignId: string): Promise<CampaignSummary | null>
+  createCampaign(input: CampaignInput, owner: OwnerAccount): Promise<CampaignSummary>
   updateCampaign(
     campaignId: string,
     input: CampaignInput,
     ownerUserId?: string,
-  ): CampaignSummary | null
-  listCampaignMemberships(campaignId: string): CampaignMembership[]
-  listCampaignShareLinks(campaignId: string): CampaignShareLink[]
-  userHasCampaignAccess(userId: string, campaignId: string): boolean
-  userOwnsCampaign(ownerUserId: string, campaignId: string): boolean
-  createOwnerAccount(input: OwnerRegistrationInput): OwnerAccount | null
-  authenticateOwner(email: string, password: string): OwnerAccount | null
-  getOwnerBySessionToken(token: string): OwnerAccount | null
-  listOwnerAccounts(): AdminAccountSummary[]
-  createOwnerSession(ownerUserId: string): string
-  deleteOwnerSession(token: string): void
+  ): Promise<CampaignSummary | null>
+  listCampaignMemberships(campaignId: string): Promise<CampaignMembership[]>
+  listCampaignShareLinks(campaignId: string): Promise<CampaignShareLink[]>
+  userHasCampaignAccess(userId: string, campaignId: string): Promise<boolean>
+  userOwnsCampaign(ownerUserId: string, campaignId: string): Promise<boolean>
+  createOwnerAccount(input: OwnerRegistrationInput): Promise<OwnerAccount | null>
+  authenticateOwner(email: string, password: string): Promise<OwnerAccount | null>
+  getOwnerBySessionToken(token: string): Promise<OwnerAccount | null>
+  listOwnerAccounts(): Promise<AdminAccountSummary[]>
+  createOwnerSession(ownerUserId: string): Promise<string>
+  deleteOwnerSession(token: string): Promise<void>
   createCampaignShareLink(
     campaignId: string,
     input: CampaignShareLinkInput,
     ownerUserId: string,
-  ): { shareLink: CampaignShareLink; token: string } | null
+  ): Promise<{ shareLink: CampaignShareLink; token: string } | null>
   revokeCampaignShareLink(
     campaignId: string,
     shareLinkId: string,
     ownerUserId: string,
-  ): boolean
+  ): Promise<boolean>
   getCampaignShareLinkReveal(
     campaignId: string,
     shareLinkId: string,
     ownerUserId: string,
-  ): CampaignShareLinkRevealResult | null
-  getCampaignShareLinkByToken(token: string): CampaignShareLink | null
+  ): Promise<CampaignShareLinkRevealResult | null>
+  getCampaignShareLinkByToken(token: string): Promise<CampaignShareLink | null>
   createGuestMembership(
     campaignId: string,
     displayName: string,
-  ): { membership: CampaignMembership; guestToken: string }
-  getGuestMembershipByToken(token: string): CampaignMembership | null
-  claimGuestMembership(membershipId: string, ownerUserId: string): ClaimGuestMembershipResult
+  ): Promise<{ membership: CampaignMembership; guestToken: string }>
+  getGuestMembershipByToken(token: string): Promise<CampaignMembership | null>
+  claimGuestMembership(
+    membershipId: string,
+    ownerUserId: string,
+  ): Promise<ClaimGuestMembershipResult>
   previewMembershipConsolidation(
     campaignId: string,
     sourceMembershipId: string,
     targetMembershipId: string,
     ownerUserId: string,
-  ): MembershipConsolidationPreviewResult
+  ): Promise<MembershipConsolidationPreviewResult>
   consolidateMemberships(
     campaignId: string,
     sourceMembershipId: string,
     targetMembershipId: string,
     ownerUserId: string,
-  ): MembershipConsolidationResult
-  getUserMembershipForCampaign(userId: string, campaignId: string): CampaignMembership | null
-  getOwnerMembershipForCampaign(ownerUserId: string, campaignId: string): CampaignMembership | null
-  listNotes(campaignId?: string): Note[]
-  listSessionNames(campaignId?: string): SessionSummary[]
-  listRecentNotes(limit: number, campaignId?: string): Note[]
-  getSessionNotes(campaignId: string, sessionName: string): Note[]
-  getNote(noteId: string): Note | null
-  getBacklinks(noteId: string): Note[]
-  createNote(input: NoteInput, membershipId?: string): Note
-  updateNote(noteId: string, input: NoteInput, membershipId?: string): Note | null
-  deleteNote(noteId: string): boolean
-  resetNotes(inputs: NoteInput[], campaignId?: string): Note[]
-  getStats(campaignId?: string): NoteStats
-  getAdminOverview(): AdminOverview
-  checkHealth(): void
+  ): Promise<MembershipConsolidationResult>
+  getUserMembershipForCampaign(userId: string, campaignId: string): Promise<CampaignMembership | null>
+  getOwnerMembershipForCampaign(
+    ownerUserId: string,
+    campaignId: string,
+  ): Promise<CampaignMembership | null>
+  listNotes(campaignId?: string): Promise<Note[]>
+  listSessionNames(campaignId?: string): Promise<SessionSummary[]>
+  listRecentNotes(limit: number, campaignId?: string): Promise<Note[]>
+  getSessionNotes(campaignId: string, sessionName: string): Promise<Note[]>
+  getNote(noteId: string): Promise<Note | null>
+  getBacklinks(noteId: string): Promise<Note[]>
+  createNote(input: NoteInput, membershipId?: string): Promise<Note>
+  updateNote(noteId: string, input: NoteInput, membershipId?: string): Promise<Note | null>
+  deleteNote(noteId: string): Promise<boolean>
+  resetNotes(inputs: NoteInput[], campaignId?: string): Promise<Note[]>
+  getStats(campaignId?: string): Promise<NoteStats>
+  getAdminOverview(): Promise<AdminOverview>
+  checkHealth(): Promise<void>
   backupDatabase(destinationPath: string): Promise<void>
-  close(): void
+  close(): Promise<void>
 }
 
 const defaultDbPath = fileURLToPath(
@@ -270,8 +607,71 @@ const defaultDbPath = fileURLToPath(
 
 export function resolveNoteDbPath(
   options: CreateNoteStoreOptions = {},
+  environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  return options.dbPath ?? process.env.NOTES_DB_PATH ?? defaultDbPath
+  return options.dbPath ?? environment.NOTES_DB_PATH ?? defaultDbPath
+}
+
+function resolveDatabaseUrl(
+  options: CreateNoteStoreOptions,
+  environment: NodeJS.ProcessEnv = process.env,
+) {
+  return options.databaseUrl ?? environment.DATABASE_URL ?? null
+}
+
+function hasExplicitOption<Key extends keyof CreateNoteStoreOptions>(
+  options: CreateNoteStoreOptions,
+  key: Key,
+) {
+  return Object.prototype.hasOwnProperty.call(options, key)
+}
+
+function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl = resolveDatabaseUrl(options)) {
+  if (!options.postgresPool && !databaseUrl) {
+    throw new Error('DATABASE_URL is required when the Postgres note store is selected.')
+  }
+
+  return databaseUrl
+}
+
+export function resolveNoteStoreBackend(
+  options: CreateNoteStoreOptions,
+  environment: NodeJS.ProcessEnv = process.env,
+): 'sqlite' | 'postgres' {
+  if (options.backend) {
+    return options.backend
+  }
+
+  if (options.postgresPool || hasExplicitOption(options, 'databaseUrl')) {
+    return 'postgres'
+  }
+
+  if (hasExplicitOption(options, 'dbPath')) {
+    return 'sqlite'
+  }
+
+  return resolveDatabaseUrl(options, environment) ? 'postgres' : 'sqlite'
+}
+
+export async function initializeDatabaseOrClose(
+  database: Pick<NoteStoreDatabase, 'close'>,
+  initialize: () => Promise<void>,
+) {
+  try {
+    await initialize()
+  } catch (error) {
+    try {
+      await database.close()
+    } catch (closeError) {
+      throw new AggregateError(
+        [error, closeError],
+        'Failed to initialize the note store database and close it cleanly.',
+        { cause: closeError },
+      )
+    }
+
+    throw error
+  }
 }
 
 function createPasswordHash(password: string) {
@@ -357,8 +757,8 @@ function mapAdminAccountSummaryRow(row: AdminAccountSummaryRow): AdminAccountSum
     isSiteAdmin: row.is_site_admin === 1,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    campaignMembershipCount: row.membership_count,
-    ownedCampaignCount: row.owned_campaign_count,
+    campaignMembershipCount: Number(row.membership_count),
+    ownedCampaignCount: Number(row.owned_campaign_count),
   }
 }
 
@@ -399,19 +799,24 @@ function mapCampaignShareLinkRow(row: CampaignShareLinkRow): CampaignShareLink {
   }
 }
 
-export function createNoteStore(
+export async function createNoteStore(
   options: CreateNoteStoreOptions = {},
-): NoteStore {
+): Promise<NoteStore> {
   const dbPath = resolveNoteDbPath(options)
+  const backend = resolveNoteStoreBackend(options)
+  const databaseUrl = backend === 'postgres' ? requirePostgresDatabaseUrl(options) : null
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
+  const database =
+    backend === 'postgres'
+      ? createPostgresDatabase({
+          connectionString: databaseUrl ?? undefined,
+          pool: options.postgresPool,
+        })
+      : createSqliteDatabase(dbPath)
 
-  if (dbPath !== ':memory:') {
-    mkdirSync(dirname(dbPath), { recursive: true })
-  }
-
-  const database = new Database(dbPath)
-  database.pragma('foreign_keys = ON')
-  initializeNoteStoreDatabase(database, configuredSiteAdminEmails)
+  await initializeDatabaseOrClose(database, () =>
+    initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
+  )
 
   const selectCampaignById = database.prepare(`
     SELECT
@@ -560,6 +965,31 @@ export function createNoteStore(
       @created_at,
       @updated_at
     )
+  `)
+
+  const insertDefaultCampaignIfMissing = database.prepare(`
+    INSERT INTO campaigns (
+      id,
+      name,
+      tagline,
+      system,
+      setting,
+      next_session,
+      archived_at,
+      created_at,
+      updated_at
+    ) VALUES (
+      @id,
+      @name,
+      @tagline,
+      @system,
+      @setting,
+      @next_session,
+      @archived_at,
+      @created_at,
+      @updated_at
+    )
+    ON CONFLICT (id) DO NOTHING
   `)
 
   const updateCampaignStatement = database.prepare(`
@@ -755,7 +1185,7 @@ export function createNoteStore(
       created_at,
       updated_at
     FROM owner_accounts
-    WHERE email = ?
+    WHERE LOWER(email) = LOWER(?)
   `)
 
   const selectAdminAccounts = database.prepare(`
@@ -996,31 +1426,27 @@ export function createNoteStore(
       )
   `)
 
-  const ensureDefaultCampaignTransaction = database.transaction(() => {
-    const existing = selectCampaignById.get(defaultCampaign.id) as CampaignRow | undefined
+  const ensureDefaultCampaignTransaction = database.transaction(async () => {
+    const campaignTimestamp = new Date().toISOString()
+    await insertDefaultCampaignIfMissing.run({
+      id: defaultCampaign.id,
+      name: defaultCampaign.name,
+      tagline: defaultCampaign.tagline,
+      system: defaultCampaign.system,
+      setting: defaultCampaign.setting,
+      next_session: defaultCampaign.nextSession,
+      archived_at: null,
+      created_at: campaignTimestamp,
+      updated_at: campaignTimestamp,
+    })
 
-    if (!existing) {
-      const timestamp = new Date().toISOString()
-      insertCampaign.run({
-        id: defaultCampaign.id,
-        name: defaultCampaign.name,
-        tagline: defaultCampaign.tagline,
-        system: defaultCampaign.system,
-        setting: defaultCampaign.setting,
-        next_session: defaultCampaign.nextSession,
-        archived_at: null,
-        created_at: timestamp,
-        updated_at: timestamp,
-      })
-    }
-
-    const ownerMembershipCount = countOwnerMemberships.get(defaultCampaign.id) as {
+    const ownerMembershipCount = (await countOwnerMemberships.get(defaultCampaign.id)) as {
       count: number
     }
 
-    if (ownerMembershipCount.count === 0) {
+    if (Number(ownerMembershipCount.count) === 0) {
       const timestamp = new Date().toISOString()
-      insertMembership.run({
+      await insertMembership.run({
         id: randomUUID(),
         campaign_id: defaultCampaign.id,
         role: 'owner',
@@ -1034,9 +1460,9 @@ export function createNoteStore(
   })
 
   const createOwnerAccountTransaction = database.transaction(
-    (input: OwnerRegistrationInput) => {
+    async (input: OwnerRegistrationInput) => {
       const normalizedEmail = normalizeEmailAddress(input.email)
-      const existing = selectOwnerAccountByEmail.get(input.email) as
+      const existing = (await selectOwnerAccountByEmail.get(normalizedEmail)) as
         | OwnerAccountRow
         | undefined
 
@@ -1047,24 +1473,32 @@ export function createNoteStore(
       const timestamp = new Date().toISOString()
       const owner: OwnerAccount = {
         id: randomUUID(),
-        email: input.email,
+        email: normalizedEmail,
         displayName: input.displayName,
         isSiteAdmin: configuredSiteAdminEmails.has(normalizedEmail),
         createdAt: timestamp,
         updatedAt: timestamp,
       }
 
-      insertOwnerAccount.run({
-        id: owner.id,
-        email: owner.email,
-        display_name: owner.displayName,
-        password_hash: createPasswordHash(input.password),
-        is_site_admin: owner.isSiteAdmin ? 1 : 0,
-        created_at: owner.createdAt,
-        updated_at: owner.updatedAt,
-      })
+      try {
+        await insertOwnerAccount.run({
+          id: owner.id,
+          email: owner.email,
+          display_name: owner.displayName,
+          password_hash: createPasswordHash(input.password),
+          is_site_admin: owner.isSiteAdmin ? 1 : 0,
+          created_at: owner.createdAt,
+          updated_at: owner.updatedAt,
+        })
+      } catch (error) {
+        if (isOwnerEmailUniqueConstraintError(error)) {
+          return null
+        }
 
-      updateUnclaimedDefaultMembership.run({
+        throw error
+      }
+
+      await updateUnclaimedDefaultMembership.run({
         user_id: owner.id,
         display_name: owner.displayName,
         updated_at: timestamp,
@@ -1076,7 +1510,7 @@ export function createNoteStore(
   )
 
   const createCampaignTransaction = database.transaction(
-    (input: CampaignInput, owner: OwnerAccount) => {
+    async (input: CampaignInput, owner: OwnerAccount) => {
       const timestamp = new Date().toISOString()
       const campaign: CampaignSummary = {
         id: randomUUID(),
@@ -1090,7 +1524,7 @@ export function createNoteStore(
         updatedAt: timestamp,
       }
 
-      insertCampaign.run({
+      await insertCampaign.run({
         id: campaign.id,
         name: campaign.name,
         tagline: campaign.tagline,
@@ -1102,7 +1536,7 @@ export function createNoteStore(
         updated_at: campaign.updatedAt,
       })
 
-      insertMembership.run({
+      await insertMembership.run({
         id: randomUUID(),
         campaign_id: campaign.id,
         role: 'owner',
@@ -1118,14 +1552,17 @@ export function createNoteStore(
   )
 
   const updateCampaignTransaction = database.transaction(
-    (campaignId: string, input: CampaignInput, ownerUserId?: string) => {
-      const existing = selectCampaignById.get(campaignId) as CampaignRow | undefined
+    async (campaignId: string, input: CampaignInput, ownerUserId?: string) => {
+      const existing = (await selectCampaignById.get(campaignId)) as CampaignRow | undefined
 
       if (!existing || existing.archived_at !== null) {
         return null
       }
 
-      if (ownerUserId && !selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+      if (
+        ownerUserId &&
+        !(await selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))
+      ) {
         return null
       }
 
@@ -1139,7 +1576,7 @@ export function createNoteStore(
         updatedAt: new Date().toISOString(),
       }
 
-      updateCampaignStatement.run({
+      await updateCampaignStatement.run({
         id: updatedCampaign.id,
         name: updatedCampaign.name,
         tagline: updatedCampaign.tagline,
@@ -1154,14 +1591,14 @@ export function createNoteStore(
   )
 
   const createCampaignShareLinkTransaction = database.transaction(
-    (campaignId: string, input: CampaignShareLinkInput, ownerUserId: string) => {
-      const campaign = selectCampaignById.get(campaignId) as CampaignRow | undefined
+    async (campaignId: string, input: CampaignShareLinkInput, ownerUserId: string) => {
+      const campaign = (await selectCampaignById.get(campaignId)) as CampaignRow | undefined
 
       if (!campaign || campaign.archived_at !== null) {
         return null
       }
 
-      if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+      if (!(await selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))) {
         return null
       }
 
@@ -1179,7 +1616,7 @@ export function createNoteStore(
         updatedAt: timestamp,
       }
 
-      insertShareLink.run({
+      await insertShareLink.run({
         id: shareLink.id,
         campaign_id: shareLink.campaignId,
         token_hash: hashSessionToken(token),
@@ -1198,8 +1635,8 @@ export function createNoteStore(
   )
 
   const createGuestMembershipTransaction = database.transaction(
-    (campaignId: string, displayName: string) => {
-      const campaign = selectCampaignById.get(campaignId) as CampaignRow | undefined
+    async (campaignId: string, displayName: string) => {
+      const campaign = (await selectCampaignById.get(campaignId)) as CampaignRow | undefined
 
       if (!campaign || campaign.archived_at !== null) {
         throw new Error(`Campaign "${campaignId}" was not found.`)
@@ -1218,7 +1655,7 @@ export function createNoteStore(
         updatedAt: timestamp,
       }
 
-      insertMembership.run({
+      await insertMembership.run({
         id: membership.id,
         campaign_id: membership.campaignId,
         role: membership.role,
@@ -1234,8 +1671,8 @@ export function createNoteStore(
   )
 
   const claimGuestMembershipTransaction = database.transaction(
-    (membershipId: string, ownerUserId: string): ClaimGuestMembershipResult => {
-      const membershipRow = selectMembershipById.get(membershipId) as
+    async (membershipId: string, ownerUserId: string): Promise<ClaimGuestMembershipResult> => {
+      const membershipRow = (await selectMembershipById.get(membershipId)) as
         | CampaignMembershipRow
         | undefined
 
@@ -1249,10 +1686,10 @@ export function createNoteStore(
         return { status: 'already-linked', membership }
       }
 
-      const existingMembership = selectMembershipByCampaignAndUser.get(
+      const existingMembership = (await selectMembershipByCampaignAndUser.get(
         membership.campaignId,
         ownerUserId,
-      ) as CampaignMembershipRow | undefined
+      )) as CampaignMembershipRow | undefined
 
       if (existingMembership) {
         return {
@@ -1265,7 +1702,7 @@ export function createNoteStore(
       const guestToken = createSessionToken()
       const guestTokenId = hashSessionToken(guestToken)
 
-      claimGuestMembershipStatement.run({
+      await claimGuestMembershipStatement.run({
         id: membership.id,
         user_id: ownerUserId,
         guest_token_id: guestTokenId,
@@ -1285,15 +1722,15 @@ export function createNoteStore(
     },
   )
 
-  const previewMembershipConsolidation = (
+  const previewMembershipConsolidation = async (
     campaignId: string,
     sourceMembershipId: string,
     targetMembershipId: string,
     ownerUserId: string,
-  ): MembershipConsolidationPreviewResult => {
-    requireCampaign(campaignId)
+  ): Promise<MembershipConsolidationPreviewResult> => {
+    await requireCampaign(campaignId)
 
-    if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+    if (!(await selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))) {
       return { status: 'forbidden' }
     }
 
@@ -1301,19 +1738,19 @@ export function createNoteStore(
       return { status: 'same-membership' }
     }
 
-    const sourceMembershipRow = selectMembershipByCampaignAndId.get(
+    const sourceMembershipRow = (await selectMembershipByCampaignAndId.get(
       campaignId,
       sourceMembershipId,
-    ) as CampaignMembershipRow | undefined
+    )) as CampaignMembershipRow | undefined
 
     if (!sourceMembershipRow) {
       return { status: 'source-not-found' }
     }
 
-    const targetMembershipRow = selectMembershipByCampaignAndId.get(
+    const targetMembershipRow = (await selectMembershipByCampaignAndId.get(
       campaignId,
       targetMembershipId,
-    ) as CampaignMembershipRow | undefined
+    )) as CampaignMembershipRow | undefined
 
     if (!targetMembershipRow) {
       return { status: 'target-not-found' }
@@ -1321,10 +1758,10 @@ export function createNoteStore(
 
     const sourceMembership = mapMembershipRow(sourceMembershipRow)
     const targetMembership = mapMembershipRow(targetMembershipRow)
-    const counts = selectMembershipConsolidationCounts.get({
+    const counts = (await selectMembershipConsolidationCounts.get({
       campaign_id: campaignId,
       source_membership_id: sourceMembership.id,
-    }) as MembershipConsolidationCountsRow
+    })) as MembershipConsolidationCountsRow
 
     return {
       status: 'ready',
@@ -1333,10 +1770,10 @@ export function createNoteStore(
         sourceMembership,
         targetMembership,
         noteChanges: {
-          authoredNoteCount: counts.authored_note_count,
-          editedNoteCount: counts.edited_note_count,
-          authoredAndEditedNoteCount: counts.authored_and_edited_note_count,
-          affectedNoteCount: counts.affected_note_count,
+          authoredNoteCount: Number(counts.authored_note_count),
+          editedNoteCount: Number(counts.edited_note_count),
+          authoredAndEditedNoteCount: Number(counts.authored_and_edited_note_count),
+          affectedNoteCount: Number(counts.affected_note_count),
         },
         warnings: buildMembershipConsolidationWarnings(
           sourceMembership,
@@ -1349,13 +1786,13 @@ export function createNoteStore(
   }
 
   const consolidateMembershipsTransaction = database.transaction(
-    (
+    async (
       campaignId: string,
       sourceMembershipId: string,
       targetMembershipId: string,
       ownerUserId: string,
-    ): MembershipConsolidationResult => {
-      const preview = previewMembershipConsolidation(
+    ): Promise<MembershipConsolidationResult> => {
+      const preview = await previewMembershipConsolidation(
         campaignId,
         sourceMembershipId,
         targetMembershipId,
@@ -1366,7 +1803,7 @@ export function createNoteStore(
         return preview
       }
 
-      reassignMembershipAttributionStatement.run({
+      await reassignMembershipAttributionStatement.run({
         campaign_id: campaignId,
         source_membership_id: sourceMembershipId,
         target_membership_id: targetMembershipId,
@@ -1382,25 +1819,27 @@ export function createNoteStore(
     },
   )
 
-  const listCampaigns = () =>
-    (selectAllCampaigns.all() as CampaignRow[]).map((row) => mapCampaignRow(row))
+  const listCampaigns = async () =>
+    ((await selectAllCampaigns.all()) as CampaignRow[]).map((row) => mapCampaignRow(row))
 
-  const listUserCampaigns = (userId: string) =>
-    (selectUserCampaigns.all(userId) as CampaignRow[]).map((row) => mapCampaignRow(row))
-
-  const listOwnedCampaigns = (ownerUserId: string) =>
-    (selectOwnedCampaigns.all(ownerUserId) as CampaignRow[]).map((row) =>
+  const listUserCampaigns = async (userId: string) =>
+    ((await selectUserCampaigns.all(userId)) as CampaignRow[]).map((row) =>
       mapCampaignRow(row),
     )
 
-  const getCampaign = (campaignId: string) => {
-    const row = selectCampaignById.get(campaignId) as CampaignRow | undefined
+  const listOwnedCampaigns = async (ownerUserId: string) =>
+    ((await selectOwnedCampaigns.all(ownerUserId)) as CampaignRow[]).map((row) =>
+      mapCampaignRow(row),
+    )
+
+  const getCampaign = async (campaignId: string) => {
+    const row = (await selectCampaignById.get(campaignId)) as CampaignRow | undefined
     return row ? mapCampaignRow(row) : null
   }
 
-  const getPrimaryCampaign = (ownerUserId?: string) => {
+  const getPrimaryCampaign = async (ownerUserId?: string) => {
     if (ownerUserId) {
-      const row = selectPrimaryOwnedCampaign.get(ownerUserId) as
+      const row = (await selectPrimaryOwnedCampaign.get(ownerUserId)) as
         | CampaignRow
         | undefined
 
@@ -1411,7 +1850,7 @@ export function createNoteStore(
       return mapCampaignRow(row)
     }
 
-    const campaigns = listCampaigns()
+    const campaigns = await listCampaigns()
     const primaryCampaign = campaigns[0]
 
     if (!primaryCampaign) {
@@ -1421,8 +1860,8 @@ export function createNoteStore(
     return primaryCampaign
   }
 
-  const getPrimaryCampaignForUser = (userId: string) => {
-    const row = selectPrimaryUserCampaign.get(userId) as CampaignRow | undefined
+  const getPrimaryCampaignForUser = async (userId: string) => {
+    const row = (await selectPrimaryUserCampaign.get(userId)) as CampaignRow | undefined
 
     if (!row) {
       throw new Error('No campaigns are available.')
@@ -1431,12 +1870,12 @@ export function createNoteStore(
     return mapCampaignRow(row)
   }
 
-  const requireCampaign = (campaignId?: string | null) => {
+  const requireCampaign = async (campaignId?: string | null) => {
     if (!campaignId) {
       return getPrimaryCampaign()
     }
 
-    const campaign = getCampaign(campaignId)
+    const campaign = await getCampaign(campaignId)
 
     if (!campaign || campaign.archivedAt !== null) {
       throw new Error(`Campaign "${campaignId}" was not found.`)
@@ -1445,8 +1884,10 @@ export function createNoteStore(
     return campaign
   }
 
-  const validateReferenceTarget = (targetNoteId: string, campaignId: string) => {
-    const targetNote = selectNoteIdentityById.get(targetNoteId) as NoteIdentityRow | undefined
+  const validateReferenceTarget = async (targetNoteId: string, campaignId: string) => {
+    const targetNote = (await selectNoteIdentityById.get(targetNoteId)) as
+      | NoteIdentityRow
+      | undefined
 
     if (!targetNote) {
       throw new Error(`Referenced note "${targetNoteId}" was not found.`)
@@ -1457,7 +1898,7 @@ export function createNoteStore(
     }
   }
 
-  const buildPendingReferences = (
+  const buildPendingReferences = async (
     body: string,
     explicitLinkedNoteIds: string[],
     campaignId: string,
@@ -1486,7 +1927,7 @@ export function createNoteStore(
       }
 
       try {
-        validateReferenceTarget(targetNoteId, campaignId)
+        await validateReferenceTarget(targetNoteId, campaignId)
       } catch (error) {
         if (!options.allowInvalidReferences) {
           throw error
@@ -1507,7 +1948,7 @@ export function createNoteStore(
 
     for (const reference of inlineReferences) {
       try {
-        validateReferenceTarget(reference.targetNoteId, campaignId)
+        await validateReferenceTarget(reference.targetNoteId, campaignId)
       } catch (error) {
         if (!options.allowInvalidReferences) {
           throw error
@@ -1528,7 +1969,7 @@ export function createNoteStore(
     return references
   }
 
-  const replaceNoteReferences = (
+  const replaceNoteReferences = async (
     noteId: string,
     campaignId: string,
     body: string,
@@ -1536,10 +1977,15 @@ export function createNoteStore(
     timestamp: string,
     options?: { allowInvalidReferences: boolean },
   ) => {
-    const references = buildPendingReferences(body, explicitLinkedNoteIds, campaignId, options)
+    const references = await buildPendingReferences(
+      body,
+      explicitLinkedNoteIds,
+      campaignId,
+      options,
+    )
     const persistedReferences: NoteReference[] = []
 
-    deleteNoteReferencesBySourceNoteId.run(noteId)
+    await deleteNoteReferencesBySourceNoteId.run(noteId)
 
     for (const reference of references) {
       const id = randomUUID()
@@ -1556,7 +2002,7 @@ export function createNoteStore(
         updated_at: timestamp,
       })
 
-      insertNoteReference.run({
+      await insertNoteReference.run({
         id,
         source_note_id: persistedReference.sourceNoteId,
         target_note_id: persistedReference.targetNoteId,
@@ -1576,15 +2022,15 @@ export function createNoteStore(
   }
 
   const syncNoteReferencesTransaction = database.transaction(
-    (options: { allowInvalidReferences: boolean } = { allowInvalidReferences: true }) => {
-      const noteRows = selectStoredNotesForReferenceSync.all() as StoredNoteForReferenceSyncRow[]
+    async (options: { allowInvalidReferences: boolean } = { allowInvalidReferences: true }) => {
+      const noteRows = (await selectStoredNotesForReferenceSync.all()) as StoredNoteForReferenceSyncRow[]
 
       for (const row of noteRows) {
         const explicitLinkedNoteIds = row.linked_notes_json
           ? (JSON.parse(row.linked_notes_json) as string[])
           : []
 
-        replaceNoteReferences(
+        await replaceNoteReferences(
           row.id,
           row.campaign_id,
           row.body,
@@ -1596,20 +2042,20 @@ export function createNoteStore(
     },
   )
 
-  const listNotes = (campaignId?: string) => {
-    const campaign = requireCampaign(campaignId)
-    const notes = (selectNotesByCampaignId.all(campaign.id) as NoteRow[]).map((row) =>
+  const listNotes = async (campaignId?: string) => {
+    const campaign = await requireCampaign(campaignId)
+    const notes = ((await selectNotesByCampaignId.all(campaign.id)) as NoteRow[]).map((row) =>
       mapNoteRow(row),
     )
     const referencesBySource = groupReferencesBySource(
-      selectNoteReferencesByCampaignId.all(campaign.id) as NoteReferenceRow[],
+      (await selectNoteReferencesByCampaignId.all(campaign.id)) as NoteReferenceRow[],
     )
 
     return notes.map((note) => composeNote(note, referencesBySource.get(note.id) ?? []))
   }
 
-  const insertPersistedNote = (note: NoteRecord) => {
-    insertNote.run({
+  const insertPersistedNote = async (note: NoteRecord) => {
+    await insertNote.run({
       id: note.id,
       campaign_id: note.campaignId,
       title: note.title,
@@ -1626,12 +2072,14 @@ export function createNoteStore(
   }
 
   const resetNotesTransaction = database.transaction(
-    (inputs: NoteInput[], campaignId?: string) => {
-      const campaign = requireCampaign(campaignId)
-      deleteNotesByCampaignIdStatement.run(campaign.id)
+    async (inputs: NoteInput[], campaignId?: string) => {
+      const campaign = await requireCampaign(campaignId)
+      await deleteNotesByCampaignIdStatement.run(campaign.id)
 
       const baseTimestamp = Date.now()
-      const notes = inputs.map((input, index) => {
+      const notes: NoteRecord[] = []
+
+      for (const [index, input] of inputs.entries()) {
         const timestamp = new Date(baseTimestamp - index).toISOString()
         const note: NoteRecord = {
           id: randomUUID(),
@@ -1648,12 +2096,12 @@ export function createNoteStore(
           updatedAt: timestamp,
         }
 
-        insertPersistedNote(note)
-        return note
-      })
+        await insertPersistedNote(note)
+        notes.push(note)
+      }
 
       for (const note of notes) {
-        replaceNoteReferences(
+        await replaceNoteReferences(
           note.id,
           note.campaignId,
           note.body,
@@ -1663,23 +2111,25 @@ export function createNoteStore(
         )
       }
 
-      return notes.map((note) =>
-        composeNote(
-          note,
-          (selectNoteReferencesBySourceNoteId.all(note.id) as NoteReferenceRow[]).map(
-            mapNoteReferenceRow,
+      return Promise.all(
+        notes.map(async (note) =>
+          composeNote(
+            note,
+            ((await selectNoteReferencesBySourceNoteId.all(note.id)) as NoteReferenceRow[]).map(
+              mapNoteReferenceRow,
+            ),
           ),
         ),
       )
     },
   )
 
-  const createNoteTransaction = database.transaction((input: NoteInput, membershipId?: string) => {
-    const campaign = requireCampaign(input.campaignId)
+  const createNoteTransaction = database.transaction(async (input: NoteInput, membershipId?: string) => {
+    const campaign = await requireCampaign(input.campaignId)
     const timestamp = new Date().toISOString()
 
     const membership = membershipId
-      ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
+      ? ((await selectMembershipById.get(membershipId)) as CampaignMembershipRow | undefined)
       : undefined
 
     const attribution: NoteAttribution | null = membership
@@ -1705,8 +2155,8 @@ export function createNoteStore(
       updatedAt: timestamp,
     }
 
-    insertPersistedNote(note)
-    const references = replaceNoteReferences(
+    await insertPersistedNote(note)
+    const references = await replaceNoteReferences(
       note.id,
       note.campaignId,
       note.body,
@@ -1719,8 +2169,8 @@ export function createNoteStore(
   })
 
   const updateNoteTransaction = database.transaction(
-    (noteId: string, input: NoteInput, membershipId?: string) => {
-      const existingRow = selectNoteById.get(noteId) as NoteRow | undefined
+    async (noteId: string, input: NoteInput, membershipId?: string) => {
+      const existingRow = (await selectNoteById.get(noteId)) as NoteRow | undefined
 
       if (!existingRow) {
         return null
@@ -1728,7 +2178,7 @@ export function createNoteStore(
 
       const existing = mapNoteRow(existingRow)
       const membership = membershipId
-        ? (selectMembershipById.get(membershipId) as CampaignMembershipRow | undefined)
+        ? ((await selectMembershipById.get(membershipId)) as CampaignMembershipRow | undefined)
         : undefined
 
       const editAttribution: NoteAttribution | null = membership
@@ -1751,7 +2201,7 @@ export function createNoteStore(
         updatedAt: createTimestampAfter(existing.updatedAt),
       }
 
-      updateNoteStatement.run({
+      await updateNoteStatement.run({
         id: nextNote.id,
         title: nextNote.title,
         body: nextNote.body,
@@ -1763,7 +2213,7 @@ export function createNoteStore(
         updated_at: nextNote.updatedAt,
       })
 
-      const references = replaceNoteReferences(
+      const references = await replaceNoteReferences(
         nextNote.id,
         nextNote.campaignId,
         nextNote.body,
@@ -1776,46 +2226,51 @@ export function createNoteStore(
     },
   )
 
-  ensureDefaultCampaignTransaction()
-  syncNoteReferencesTransaction()
+  await ensureDefaultCampaignTransaction()
+  await syncNoteReferencesTransaction()
 
-  return {
+  const noteStore: NoteStore = {
     listCampaigns,
     listUserCampaigns,
     listOwnedCampaigns,
     getPrimaryCampaignForUser,
     getPrimaryCampaign,
     getCampaign,
-    createCampaign(input, owner) {
+    async createCampaign(input, owner) {
       return createCampaignTransaction(input, owner)
     },
-    updateCampaign(campaignId, input, ownerUserId) {
+    async updateCampaign(campaignId, input, ownerUserId) {
       return updateCampaignTransaction(campaignId, input, ownerUserId)
     },
-    listCampaignMemberships(campaignId) {
-      requireCampaign(campaignId)
+    async listCampaignMemberships(campaignId) {
+      await requireCampaign(campaignId)
       return (
-        selectMembershipsByCampaignId.all(campaignId) as CampaignMembershipRow[]
+        (await selectMembershipsByCampaignId.all(campaignId)) as CampaignMembershipRow[]
       ).map((row) => mapMembershipRow(row))
     },
-    listCampaignShareLinks(campaignId) {
-      requireCampaign(campaignId)
+    async listCampaignShareLinks(campaignId) {
+      await requireCampaign(campaignId)
       return (
-        selectActiveShareLinksByCampaignId.all(campaignId, new Date().toISOString()) as
+        (await selectActiveShareLinksByCampaignId.all(campaignId, new Date().toISOString())) as
           CampaignShareLinkRow[]
       ).map((row) => mapCampaignShareLinkRow(row))
     },
-    userHasCampaignAccess(userId, campaignId) {
-      return Boolean(selectMembershipByCampaignAndUser.get(campaignId, userId))
+    async userHasCampaignAccess(userId, campaignId) {
+      return Boolean(await selectMembershipByCampaignAndUser.get(campaignId, userId))
     },
-    userOwnsCampaign(ownerUserId, campaignId) {
-      return Boolean(selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))
+    async userOwnsCampaign(ownerUserId, campaignId) {
+      return Boolean(
+        await selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId),
+      )
     },
-    createOwnerAccount(input) {
+    async createOwnerAccount(input) {
       return createOwnerAccountTransaction(input)
     },
-    authenticateOwner(email, password) {
-      const row = selectOwnerAccountByEmail.get(email) as OwnerAccountRow | undefined
+    async authenticateOwner(email, password) {
+      const normalizedEmail = normalizeEmailAddress(email)
+      const row = (await selectOwnerAccountByEmail.get(normalizedEmail)) as
+        | OwnerAccountRow
+        | undefined
 
       if (!row || !verifyPassword(password, row.password_hash)) {
         return null
@@ -1823,21 +2278,23 @@ export function createNoteStore(
 
       return mapOwnerAccountRow(row)
     },
-    getOwnerBySessionToken(token) {
-      deleteExpiredOwnerSessions.run(new Date().toISOString())
-      const row = selectOwnerBySessionToken.get(
+    async getOwnerBySessionToken(token) {
+      await deleteExpiredOwnerSessions.run(new Date().toISOString())
+      const row = (await selectOwnerBySessionToken.get(
         hashSessionToken(token),
         new Date().toISOString(),
-      ) as OwnerAccountRow | undefined
+      )) as OwnerAccountRow | undefined
 
       return row ? mapOwnerAccountRow(row) : null
     },
-    listOwnerAccounts() {
-      const rows = selectAdminAccounts.all() as AdminAccountSummaryRow[]
+    async listOwnerAccounts() {
+      const rows = (await selectAdminAccounts.all()) as AdminAccountSummaryRow[]
       return rows.map(mapAdminAccountSummaryRow)
     },
-    createOwnerSession(ownerUserId) {
-      const owner = selectOwnerAccountById.get(ownerUserId) as OwnerAccountRow | undefined
+    async createOwnerSession(ownerUserId) {
+      const owner = (await selectOwnerAccountById.get(ownerUserId)) as
+        | OwnerAccountRow
+        | undefined
 
       if (!owner) {
         throw new Error(`Owner "${ownerUserId}" was not found.`)
@@ -1847,7 +2304,7 @@ export function createNoteStore(
       const createdAt = new Date().toISOString()
       const expiresAt = new Date(Date.now() + sessionTtlMs).toISOString()
 
-      insertOwnerSession.run({
+      await insertOwnerSession.run({
         id: randomUUID(),
         owner_user_id: owner.id,
         token_hash: hashSessionToken(token),
@@ -1857,18 +2314,18 @@ export function createNoteStore(
 
       return token
     },
-    deleteOwnerSession(token) {
-      deleteOwnerSessionByTokenHash.run(hashSessionToken(token))
+    async deleteOwnerSession(token) {
+      await deleteOwnerSessionByTokenHash.run(hashSessionToken(token))
     },
-    createCampaignShareLink(campaignId, input, ownerUserId) {
+    async createCampaignShareLink(campaignId, input, ownerUserId) {
       return createCampaignShareLinkTransaction(campaignId, input, ownerUserId)
     },
-    revokeCampaignShareLink(campaignId, shareLinkId, ownerUserId) {
-      if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+    async revokeCampaignShareLink(campaignId, shareLinkId, ownerUserId) {
+      if (!(await selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))) {
         return false
       }
 
-      const result = revokeShareLinkStatement.run({
+      const result = await revokeShareLinkStatement.run({
         id: shareLinkId,
         campaign_id: campaignId,
         revoked_at: new Date().toISOString(),
@@ -1877,16 +2334,16 @@ export function createNoteStore(
 
       return result.changes > 0
     },
-    getCampaignShareLinkReveal(campaignId, shareLinkId, ownerUserId) {
-      if (!selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId)) {
+    async getCampaignShareLinkReveal(campaignId, shareLinkId, ownerUserId) {
+      if (!(await selectOwnerMembershipByCampaignAndUser.get(campaignId, ownerUserId))) {
         return null
       }
 
-      const row = selectShareLinkRevealById.get(
+      const row = (await selectShareLinkRevealById.get(
         shareLinkId,
         campaignId,
         new Date().toISOString(),
-      ) as Pick<CampaignShareLinkRow, 'token_plaintext'> | undefined
+      )) as Pick<CampaignShareLinkRow, 'token_plaintext'> | undefined
 
       if (!row) {
         return null
@@ -1901,28 +2358,33 @@ export function createNoteStore(
         token: row.token_plaintext,
       }
     },
-    getCampaignShareLinkByToken(token) {
-      const row = selectActiveShareLinkByTokenHash.get(
+    async getCampaignShareLinkByToken(token) {
+      const row = (await selectActiveShareLinkByTokenHash.get(
         hashSessionToken(token),
         new Date().toISOString(),
-      ) as CampaignShareLinkRow | undefined
+      )) as CampaignShareLinkRow | undefined
 
       return row ? mapCampaignShareLinkRow(row) : null
     },
-    createGuestMembership(campaignId, displayName) {
+    async createGuestMembership(campaignId, displayName) {
       return createGuestMembershipTransaction(campaignId, displayName)
     },
-    getGuestMembershipByToken(token) {
-      const row = selectGuestMembershipByTokenHash.get(
+    async getGuestMembershipByToken(token) {
+      const row = (await selectGuestMembershipByTokenHash.get(
         hashSessionToken(token),
-      ) as CampaignMembershipRow | undefined
+      )) as CampaignMembershipRow | undefined
 
       return row ? mapMembershipRow(row) : null
     },
-    claimGuestMembership(membershipId, ownerUserId) {
+    async claimGuestMembership(membershipId, ownerUserId) {
       return claimGuestMembershipTransaction(membershipId, ownerUserId)
     },
-    previewMembershipConsolidation(campaignId, sourceMembershipId, targetMembershipId, ownerUserId) {
+    async previewMembershipConsolidation(
+      campaignId,
+      sourceMembershipId,
+      targetMembershipId,
+      ownerUserId,
+    ) {
       return previewMembershipConsolidation(
         campaignId,
         sourceMembershipId,
@@ -1930,7 +2392,7 @@ export function createNoteStore(
         ownerUserId,
       )
     },
-    consolidateMemberships(campaignId, sourceMembershipId, targetMembershipId, ownerUserId) {
+    async consolidateMemberships(campaignId, sourceMembershipId, targetMembershipId, ownerUserId) {
       return consolidateMembershipsTransaction(
         campaignId,
         sourceMembershipId,
@@ -1938,25 +2400,25 @@ export function createNoteStore(
         ownerUserId,
       )
     },
-    getUserMembershipForCampaign(userId, campaignId) {
-      const row = selectMembershipByCampaignAndUser.get(
+    async getUserMembershipForCampaign(userId, campaignId) {
+      const row = (await selectMembershipByCampaignAndUser.get(
         campaignId,
         userId,
-      ) as CampaignMembershipRow | undefined
+      )) as CampaignMembershipRow | undefined
 
       return row ? mapMembershipRow(row) : null
     },
-    getOwnerMembershipForCampaign(ownerUserId, campaignId) {
-      const row = selectOwnerMembershipByCampaignAndUser.get(
+    async getOwnerMembershipForCampaign(ownerUserId, campaignId) {
+      const row = (await selectOwnerMembershipByCampaignAndUser.get(
         campaignId,
         ownerUserId,
-      ) as CampaignMembershipRow | undefined
+      )) as CampaignMembershipRow | undefined
 
       return row ? mapMembershipRow(row) : null
     },
     listNotes,
-    listSessionNames(campaignId) {
-      const notes = listNotes(campaignId)
+    async listSessionNames(campaignId) {
+      const notes = await listNotes(campaignId)
       const sessionMap = new Map<string, { noteCount: number; latestActivity: string }>()
 
       for (const note of notes) {
@@ -1993,16 +2455,16 @@ export function createNoteStore(
 
       return sessions
     },
-    listRecentNotes(limit, campaignId) {
-      return listNotes(campaignId).slice(0, limit)
+    async listRecentNotes(limit, campaignId) {
+      return (await listNotes(campaignId)).slice(0, limit)
     },
-    getSessionNotes(campaignId, sessionName) {
-      const rows = selectNotesBySessionName.all(
+    async getSessionNotes(campaignId, sessionName) {
+      const rows = (await selectNotesBySessionName.all(
         campaignId,
         sessionName,
-      ) as NoteRow[]
+      )) as NoteRow[]
       const referencesBySource = groupReferencesBySource(
-        selectNoteReferencesByCampaignId.all(campaignId) as NoteReferenceRow[],
+        (await selectNoteReferencesByCampaignId.all(campaignId)) as NoteReferenceRow[],
       )
 
       return rows.map((row) => {
@@ -2010,42 +2472,42 @@ export function createNoteStore(
         return composeNote(note, referencesBySource.get(note.id) ?? [])
       })
     },
-    getNote(noteId) {
-      const row = selectNoteById.get(noteId) as NoteRow | undefined
+    async getNote(noteId) {
+      const row = (await selectNoteById.get(noteId)) as NoteRow | undefined
       if (!row) {
         return null
       }
 
       const note = mapNoteRow(row)
-      const references = (selectNoteReferencesBySourceNoteId.all(noteId) as NoteReferenceRow[]).map(
-        mapNoteReferenceRow,
-      )
+      const references = (
+        (await selectNoteReferencesBySourceNoteId.all(noteId)) as NoteReferenceRow[]
+      ).map(mapNoteReferenceRow)
 
       return composeNote(note, references)
     },
-    getBacklinks(noteId) {
-      const targetNote = this.getNote(noteId)
+    async getBacklinks(noteId) {
+      const targetNote = await noteStore.getNote(noteId)
       if (!targetNote) {
         return []
       }
-      const allNotes = listNotes(targetNote.campaignId)
+      const allNotes = await listNotes(targetNote.campaignId)
       return allNotes.filter((note) => note.linkedNoteIds.includes(noteId))
     },
-    createNote(input, membershipId) {
+    async createNote(input, membershipId) {
       return createNoteTransaction(input, membershipId)
     },
-    updateNote(noteId, input, membershipId) {
+    async updateNote(noteId, input, membershipId) {
       return updateNoteTransaction(noteId, input, membershipId)
     },
-    deleteNote(noteId) {
-      const result = deleteNoteStatement.run(noteId)
+    async deleteNote(noteId) {
+      const result = await deleteNoteStatement.run(noteId)
       return result.changes > 0
     },
-    resetNotes(inputs, campaignId) {
+    async resetNotes(inputs, campaignId) {
       return resetNotesTransaction(inputs, campaignId)
     },
-    getStats(campaignId) {
-      const notes = listNotes(campaignId)
+    async getStats(campaignId) {
+      const notes = await listNotes(campaignId)
 
       return {
         totalNotes: notes.length,
@@ -2055,8 +2517,8 @@ export function createNoteStore(
         sessionLinkedNotes: notes.filter((note) => note.sessionName !== null).length,
       }
     },
-    getAdminOverview() {
-      const counts = selectAdminOverviewCounts.get() as {
+    async getAdminOverview() {
+      const counts = (await selectAdminOverviewCounts.get()) as {
         owner_account_count: number
         site_admin_count: number
         campaign_count: number
@@ -2075,51 +2537,92 @@ export function createNoteStore(
       return {
         generatedAt: new Date().toISOString(),
         accounts: {
-          total: counts.owner_account_count,
-          siteAdmins: counts.site_admin_count,
+          total: Number(counts.owner_account_count),
+          siteAdmins: Number(counts.site_admin_count),
         },
         campaigns: {
-          total: counts.campaign_count,
-          archived: counts.archived_campaign_count,
+          total: Number(counts.campaign_count),
+          archived: Number(counts.archived_campaign_count),
         },
         memberships: {
-          total: counts.membership_count,
-          linkedAccounts: counts.linked_membership_count,
-          guests: counts.guest_membership_count,
+          total: Number(counts.membership_count),
+          linkedAccounts: Number(counts.linked_membership_count),
+          guests: Number(counts.guest_membership_count),
         },
         shareLinks: {
-          active: counts.active_share_link_count,
-          revoked: counts.revoked_share_link_count,
+          active: Number(counts.active_share_link_count),
+          revoked: Number(counts.revoked_share_link_count),
         },
         notes: {
-          total: counts.note_count,
-          draft: counts.draft_note_count,
-          active: counts.active_note_count,
-          archived: counts.archived_note_count,
+          total: Number(counts.note_count),
+          draft: Number(counts.draft_note_count),
+          active: Number(counts.active_note_count),
+          archived: Number(counts.archived_note_count),
         },
       }
     },
-    checkHealth() {
-      checkDatabaseConnection.get()
+    async checkHealth() {
+      await checkDatabaseConnection.get()
     },
     backupDatabase(destinationPath) {
-      return database.backup(destinationPath).then(() => undefined)
+      if (database.backup) {
+        return database.backup(destinationPath).then(() => {
+          tightenSqliteFilePermissions(destinationPath)
+        })
+      }
+
+      return (async () => {
+        const snapshotDatabase = createSqliteDatabase(destinationPath)
+
+        try {
+          await initializeNoteStoreDatabase(snapshotDatabase, new Set())
+          tightenSqliteFilePermissions(destinationPath)
+
+          const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
+
+          try {
+            const exportSnapshot = database.transaction(async () =>
+              spoolSnapshotTables(database, snapshotSpoolDirectory),
+            )
+            const snapshotSpoolFiles = await exportSnapshot()
+            const writeSnapshot = snapshotDatabase.transaction(async () => {
+              await clearSnapshotTables(snapshotDatabase)
+              await writeSnapshotSpoolFiles(snapshotSpoolFiles, snapshotDatabase)
+            })
+
+            await writeSnapshot()
+            tightenSqliteFilePermissions(destinationPath)
+          } finally {
+            rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
+          }
+        } finally {
+          await snapshotDatabase.close()
+        }
+      })()
     },
     close() {
-      database.close()
+      return database.close()
     },
   }
+
+  return noteStore
 }
 
-export function restoreNoteStoreFromBackup(
+export async function restoreNoteStoreFromBackup(
   sourcePath: string,
   options: CreateNoteStoreOptions = {},
-): NoteStore {
+): Promise<NoteStore> {
+  const backend = resolveNoteStoreBackend(options)
   const dbPath = resolveNoteDbPath(options)
 
   if (dbPath === ':memory:') {
     throw new Error('Admin restore is not supported for in-memory note stores.')
   }
+
+  const { directory: workingCopyDirectory, path: workingCopyPath } = createRestoreWorkingCopy(
+    backend,
+    dbPath,
+  )
 
   const validationDatabase = new Database(sourcePath, {
     readonly: true,
@@ -2155,20 +2658,71 @@ export function restoreNoteStoreFromBackup(
     validationDatabase.close()
   }
 
-  const validationStore = createNoteStore({ ...options, dbPath: sourcePath })
+  let validationStore: NoteStore | undefined
 
   try {
-    validationStore.checkHealth()
-  } catch {
-    throw new InvalidBackupDatabaseError(
-      'The uploaded database could not be opened as a dnd-notes backup.',
-    )
+    mkdirSync(dirname(workingCopyPath), { recursive: true })
+    copyFileSync(sourcePath, workingCopyPath)
+    tightenSqliteFilePermissions(workingCopyPath)
+
+    try {
+      validationStore = await createNoteStore({
+        ...options,
+        dbPath: workingCopyPath,
+        backend: 'sqlite',
+      })
+      await validationStore.checkHealth()
+    } catch {
+      throw new InvalidBackupDatabaseError(
+        'The uploaded database could not be opened as a dnd-notes backup.',
+      )
+    } finally {
+      await validationStore?.close()
+    }
+
+    if (backend === 'sqlite') {
+      mkdirSync(dirname(dbPath), { recursive: true })
+      copyFileSync(workingCopyPath, dbPath)
+      tightenSqliteFilePermissions(dbPath)
+
+      return createNoteStore({ ...options, dbPath, backend: 'sqlite' })
+    }
+
+    const databaseUrl = requirePostgresDatabaseUrl(options)
+    const destinationDatabase = createPostgresDatabase({
+      connectionString: databaseUrl ?? undefined,
+      pool: options.postgresPool,
+    })
+    const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
+    const sourceDatabase = createSqliteDatabase(workingCopyPath, { readonly: true })
+
+    try {
+      await initializeNoteStoreDatabase(destinationDatabase, configuredSiteAdminEmails)
+
+      const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
+
+      try {
+        const snapshotSpoolFiles = await spoolSnapshotTables(sourceDatabase, snapshotSpoolDirectory)
+        const restoreTransaction = destinationDatabase.transaction(async () => {
+          await clearSnapshotTables(destinationDatabase)
+          await writeSnapshotSpoolFiles(snapshotSpoolFiles, destinationDatabase)
+        })
+
+        await restoreTransaction()
+      } finally {
+        rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
+      }
+    } finally {
+      await sourceDatabase.close()
+      await destinationDatabase.close()
+    }
+
+    return createNoteStore({ ...options, backend: 'postgres' })
   } finally {
-    validationStore.close()
+    rmSync(workingCopyPath, { force: true })
+
+    if (workingCopyDirectory) {
+      rmSync(workingCopyDirectory, { recursive: true, force: true })
+    }
   }
-
-  mkdirSync(dirname(dbPath), { recursive: true })
-  copyFileSync(sourcePath, dbPath)
-
-  return createNoteStore({ ...options, dbPath })
 }
