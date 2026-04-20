@@ -5,6 +5,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 TENANT_IMAGE_REPOSITORY="${TENANT_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes}"
 TENANT_IMAGE_TAG="${TENANT_IMAGE_TAG:-k3d}"
+IMAGE_IMPORT_MODE="${K3D_IMAGE_IMPORT_MODE:-direct}"
 IMAGE_REF="${TENANT_IMAGE_REPOSITORY}:${TENANT_IMAGE_TAG}"
 
 usage() {
@@ -15,6 +16,7 @@ Environment overrides:
   K3D_CLUSTER_NAME          Cluster name (default: dnd-notes)
   TENANT_IMAGE_REPOSITORY   Image repository (default: ghcr.io/daydream-software/dnd-notes)
   TENANT_IMAGE_TAG          Image tag (default: k3d)
+  K3D_IMAGE_IMPORT_MODE     k3d image import mode (default: direct)
 EOF
 }
 
@@ -46,7 +48,7 @@ fi
 echo "Building tenant image ${IMAGE_REF}..."
 docker build -t "${IMAGE_REF}" "${ROOT}"
 
-echo "Importing ${IMAGE_REF} into k3d cluster ${CLUSTER_NAME}..."
-k3d image import -c "${CLUSTER_NAME}" "${IMAGE_REF}"
+echo "Importing ${IMAGE_REF} into k3d cluster ${CLUSTER_NAME} with mode ${IMAGE_IMPORT_MODE}..."
+k3d image import --mode "${IMAGE_IMPORT_MODE}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"
 
 echo "Tenant image ready in k3d: ${IMAGE_REF}"

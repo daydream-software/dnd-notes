@@ -85,6 +85,7 @@ Both scripts honor a few env overrides when you need a different local shape:
 | --- | --- | --- |
 | `K3D_CLUSTER_NAME` | `dnd-notes` | k3d cluster name |
 | `K3D_K3S_IMAGE` | `rancher/k3s:v1.35.3-k3s1` | pinned k3s image used by the local cluster |
+| `K3D_IMAGE_IMPORT_MODE` | `direct` | k3d image import mode for the tenant image; `direct` avoids the flaky tarball-based tools-node path seen in CI |
 | `K3D_HTTP_PORT` | `8080` | host HTTP port for ingress |
 | `K3D_HTTPS_PORT` | `8443` | host HTTPS port for ingress |
 | `TENANT_IMAGE_REPOSITORY` | `ghcr.io/daydream-software/dnd-notes` | tenant image repository |
