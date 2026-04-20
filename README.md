@@ -73,6 +73,7 @@ only when you have a live kube context plus an admin Postgres connection string:
 - `TENANT_BASE_DOMAIN` — opaque tenant subdomains are created under this suffix
 - `TENANT_IMAGE_REPOSITORY` — image repository used for tenant deployments
 - `TENANT_DATABASE_ADMIN_URL` — admin Postgres URL used to create/drop per-tenant databases
+- `TENANT_DATABASE_RUNTIME_URL` — optional runtime Postgres URL injected into tenant pods; defaults to the admin URL when unset
 - `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret name for private images
 
 When provisioning is enabled, the control plane reconciles a tenant namespace,

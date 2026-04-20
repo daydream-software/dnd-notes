@@ -48,11 +48,13 @@ The imported realm is `dnd-notes-dev`. This keeps the local auth provider presen
 
 1. builds the tenant runtime image from the repo `Dockerfile`
 2. imports that image into k3d as `ghcr.io/daydream-software/dnd-notes:k3d`
-3. port-forwards the platform Postgres service to the host
+3. port-forwards the platform Postgres service to the host for the local control plane's admin connection
 4. starts the control plane locally with provisioning enabled against the active k3d kube context
 5. creates a tenant through `POST /internal/tenants`
 6. provisions the tenant through `POST /internal/tenants/:tenantId/provision`
 7. waits for the tenant deployment to become ready and verifies `GET /ready` through a service port-forward
+
+The tenant workload itself does **not** use the host port-forward. The smoke lane injects an in-cluster runtime URL that points at `platform-postgres.dnd-notes-platform.svc.cluster.local:5432`, while the local control-plane process keeps using the host-forwarded admin URL to create/drop per-tenant databases.
 
 By default the smoke script deprovisions the tenant during cleanup. Set `KEEP_K3D_SMOKE_TENANT=true` if you want to keep the tenant namespace around for debugging.
 
@@ -79,6 +81,7 @@ Both scripts honor a few env overrides when you need a different local shape:
 | `TENANT_IMAGE_TAG` | `k3d` | tenant image tag used by the smoke lane |
 | `CONTROL_PLANE_PORT` | `3101` | local smoke control-plane port |
 | `POSTGRES_LOCAL_PORT` | `55432` | local port-forward for platform Postgres |
+| `TENANT_DATABASE_RUNTIME_URL` | `postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres` | in-cluster Postgres URL injected into tenant pods |
 | `TENANT_LOCAL_PORT` | `38080` | local port-forward for the smoke tenant |
 | `KEEP_K3D_SMOKE_TENANT` | `false` | keep the provisioned tenant for debugging |
 

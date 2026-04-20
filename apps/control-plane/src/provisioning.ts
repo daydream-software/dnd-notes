@@ -40,7 +40,7 @@ type KubernetesObjectClient = Pick<
 
 interface TenantDatabase {
   databaseName: string
-  connectionString: string
+  runtimeConnectionString: string
 }
 
 interface TenantDatabaseManager {
@@ -281,9 +281,14 @@ export class TenantProvisioningService implements TenantProvisioningPort {
 export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
   private readonly pool: Pool
   private readonly adminDatabaseUrl: string
+  private readonly runtimeDatabaseUrl: string
 
-  constructor(adminDatabaseUrl: string) {
+  constructor(adminDatabaseUrl: string, runtimeDatabaseUrl?: string) {
     this.adminDatabaseUrl = adminDatabaseUrl
+    this.runtimeDatabaseUrl =
+      runtimeDatabaseUrl && runtimeDatabaseUrl.length > 0
+        ? runtimeDatabaseUrl
+        : adminDatabaseUrl
     this.pool = new Pool({
       connectionString: adminDatabaseUrl,
       max: 1,
@@ -307,12 +312,12 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
       client.release()
     }
 
-    const connectionString = new URL(this.adminDatabaseUrl)
-    connectionString.pathname = `/${databaseName}`
-
     return {
       databaseName,
-      connectionString: connectionString.toString(),
+      runtimeConnectionString: buildTenantDatabaseConnectionString(
+        this.runtimeDatabaseUrl,
+        databaseName,
+      ),
     }
   }
 
@@ -490,6 +495,7 @@ export function createLiveTenantProvisioningService(params: {
   baseDomain: string
   imageRepository: string
   databaseAdminUrl: string
+  databaseRuntimeUrl?: string
   imagePullSecretName?: string
   publicScheme?: 'http' | 'https'
   tenantPort?: number
@@ -498,7 +504,10 @@ export function createLiveTenantProvisioningService(params: {
   return new TenantProvisioningService({
     tenantRegistry: params.tenantRegistry,
     infrastructureManager: new KubernetesTenantInfrastructureManager(),
-    databaseManager: new PostgresTenantDatabaseManager(params.databaseAdminUrl),
+    databaseManager: new PostgresTenantDatabaseManager(
+      params.databaseAdminUrl,
+      params.databaseRuntimeUrl,
+    ),
     baseDomain: params.baseDomain,
     imageRepository: params.imageRepository,
     imagePullSecretName: params.imagePullSecretName,
@@ -556,7 +565,7 @@ export function buildTenantInfrastructureBundle(
       },
       type: 'Opaque',
       data: {
-        DATABASE_URL: encodeSecretValue(options.database.connectionString),
+        DATABASE_URL: encodeSecretValue(options.database.runtimeConnectionString),
       },
     },
     persistentVolumeClaim: {
@@ -677,6 +686,15 @@ export function buildTenantInfrastructureBundle(
       },
     },
   }
+}
+
+export function buildTenantDatabaseConnectionString(
+  baseDatabaseUrl: string,
+  databaseName: string,
+): string {
+  const connectionString = new URL(baseDatabaseUrl)
+  connectionString.pathname = `/${databaseName}`
+  return connectionString.toString()
 }
 
 export function buildTenantResourceNames(params: {

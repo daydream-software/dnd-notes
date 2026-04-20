@@ -109,3 +109,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Status: the smoke lane progressed into the tenant image build path and exposed a real Dockerfile issue on production installs: root `prepare` still ran under `npm ci --omit=dev`, but Husky was not installed in the image.
 - Delivered: root `prepare` now routes through `scripts/prepare.mjs`, which exits cleanly when `.git` or the Husky package is absent; the tenant Dockerfile now copies that script before `npm ci`; and `.dockerignore` now includes only that script from `scripts/` so the Docker build context stays tight.
 - Validation: `npm run prepare`, repo-wide `npm run lint && npm run test:ci && npm run build`, raw `docker build`, and `DOCKER_BUILDKIT=0 npm run k3d:build-image` all passed after the fix.
+
+## 2026-04-20 Issue #63 live validation follow-up (tenant Postgres runtime URL)
+- Status: the next live smoke failure showed the in-cluster tenant pod trying to connect to `127.0.0.1:55432`. That URL only works for the local control-plane process and must not be injected into the tenant workload.
+- Delivered: the control plane now accepts an optional `TENANT_DATABASE_RUNTIME_URL` override and uses it when building tenant `DATABASE_URL` secrets, while still using `TENANT_DATABASE_ADMIN_URL` for create/drop operations. The k3d smoke lane now defaults that runtime URL to `platform-postgres.dnd-notes-platform.svc.cluster.local:5432`, and control-plane docs/examples were updated accordingly.
+- Validation: control-plane `lint`, `test`, and `build` passed, `bash -n scripts/k3d/*.sh` passed, and repo-wide `npm run lint && npm run test:ci && npm run build` passed after the fix.

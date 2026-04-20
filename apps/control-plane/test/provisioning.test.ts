@@ -4,6 +4,7 @@ import { ApiException, type KubernetesObject, type V1Status } from '@kubernetes/
 import {
   KubernetesTenantInfrastructureManager,
   TenantProvisioningService,
+  buildTenantDatabaseConnectionString,
   buildTenantInfrastructureBundle,
   buildTenantResourceNames,
   type TenantProvisioningPort,
@@ -21,7 +22,7 @@ class FakeDatabaseManager {
     this.createdDatabaseNames.push(databaseName)
     return {
       databaseName,
-      connectionString: `postgresql://postgres:postgres@postgres.default:5432/${databaseName}`,
+      runtimeConnectionString: `postgresql://postgres:postgres@postgres.default:5432/${databaseName}`,
     }
   }
 
@@ -407,7 +408,7 @@ describe('TenantProvisioningService', () => {
         subdomain: 't-opaque123456',
         database: {
           databaseName: 'tenant_demo_t_opaque123456',
-          connectionString:
+          runtimeConnectionString:
             'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
         },
         baseDomain: 'dnd-notes.test',
@@ -461,7 +462,8 @@ describe('TenantProvisioningService', () => {
         subdomain: maxLengthSubdomain,
         database: {
           databaseName: 'tenant_demo',
-          connectionString: 'postgresql://postgres:postgres@postgres.default:5432/tenant_demo',
+          runtimeConnectionString:
+            'postgresql://postgres:postgres@postgres.default:5432/tenant_demo',
         },
         baseDomain: 'dnd-notes.test',
         imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -493,7 +495,7 @@ describe('TenantProvisioningService', () => {
         subdomain: 't-opaque123456',
         database: {
           databaseName: 'tenant_demo_t_opaque123456',
-          connectionString:
+          runtimeConnectionString:
             'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
         },
         baseDomain: 'dnd-notes.test',
@@ -519,6 +521,16 @@ describe('TenantProvisioningService', () => {
     } finally {
       tenantRegistry.close()
     }
+  })
+
+  it('can derive tenant runtime database URLs separately from the admin URL', () => {
+    assert.equal(
+      buildTenantDatabaseConnectionString(
+        'postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable',
+        'tenant_demo_t_opaque123456',
+      ),
+      'postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/tenant_demo_t_opaque123456?sslmode=disable',
+    )
   })
 })
 
@@ -610,7 +622,7 @@ describe('KubernetesTenantInfrastructureManager', () => {
       subdomain: 't-opaque123456',
       database: {
         databaseName: 'tenant_demo_t_opaque123456',
-        connectionString:
+        runtimeConnectionString:
           'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
       },
       baseDomain: 'dnd-notes.test',
@@ -687,7 +699,7 @@ describe('KubernetesTenantInfrastructureManager', () => {
       subdomain: 't-opaque123456',
       database: {
         databaseName: 'tenant_demo_t_opaque123456',
-        connectionString:
+        runtimeConnectionString:
           'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
       },
       baseDomain: 'dnd-notes.test',
