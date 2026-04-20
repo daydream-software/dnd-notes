@@ -351,7 +351,11 @@ export function createPostgresDatabase(options: {
           await client.query('COMMIT')
           return result
         } catch (error) {
-          await client.query('ROLLBACK')
+          try {
+            await client.query('ROLLBACK')
+          } catch {
+            // Preserve the original failure so rollback errors do not mask the real cause.
+          }
           throw error
         } finally {
           client.release()

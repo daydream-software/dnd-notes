@@ -2471,6 +2471,7 @@ export async function restoreNoteStoreFromBackup(
     if (backend === 'sqlite') {
       mkdirSync(dirname(dbPath), { recursive: true })
       copyFileSync(workingCopyPath, dbPath)
+      chmodSync(dbPath, 0o600)
 
       return createNoteStore({ ...options, dbPath, backend: 'sqlite' })
     }

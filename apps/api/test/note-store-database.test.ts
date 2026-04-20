@@ -159,6 +159,93 @@ test('createPostgresDatabase close preserves a provided external pool', async ()
   assert.equal(endCallCount, 0)
 })
 
+test('createPostgresDatabase preserves callback errors when rollback also fails', async () => {
+  let released = false
+  const queries: string[] = []
+  const callbackError = new Error('callback failed')
+  const rollbackError = new Error('rollback failed')
+  const pool: PostgresPoolLike = {
+    async query() {
+      throw new Error('pool.query should not be called')
+    },
+    async connect() {
+      return {
+        async query(text) {
+          queries.push(text)
+
+          if (text === 'ROLLBACK') {
+            throw rollbackError
+          }
+
+          return { rows: [], rowCount: 0 }
+        },
+        release() {
+          released = true
+        },
+      }
+    },
+    async end() {
+      throw new Error('pool.end should not be called')
+    },
+  }
+
+  const database = createPostgresDatabase({ pool })
+  const transaction = database.transaction(async () => {
+    throw callbackError
+  })
+
+  await assert.rejects(() => transaction(), callbackError)
+  assert.deepEqual(queries, ['BEGIN', 'ROLLBACK'])
+  assert.equal(released, true)
+})
+
+test('createPostgresDatabase preserves BEGIN errors when rollback also fails', async () => {
+  let callbackRan = false
+  let released = false
+  const queries: string[] = []
+  const beginError = new Error('begin failed')
+  const rollbackError = new Error('rollback failed')
+  const pool: PostgresPoolLike = {
+    async query() {
+      throw new Error('pool.query should not be called')
+    },
+    async connect() {
+      return {
+        async query(text) {
+          queries.push(text)
+
+          if (text === 'BEGIN') {
+            throw beginError
+          }
+
+          if (text === 'ROLLBACK') {
+            throw rollbackError
+          }
+
+          return { rows: [], rowCount: 0 }
+        },
+        release() {
+          released = true
+        },
+      }
+    },
+    async end() {
+      throw new Error('pool.end should not be called')
+    },
+  }
+
+  const database = createPostgresDatabase({ pool })
+  const transaction = database.transaction(async () => {
+    callbackRan = true
+    return 'unreachable'
+  })
+
+  await assert.rejects(() => transaction(), beginError)
+  assert.equal(callbackRan, false)
+  assert.deepEqual(queries, ['BEGIN', 'ROLLBACK'])
+  assert.equal(released, true)
+})
+
 test('createSqliteDatabase can open a read-only snapshot without write access', async (t) => {
   await mkdir(runtimeDirectory, { recursive: true })
   const dbPath = join(runtimeDirectory, `readonly-snapshot-${randomUUID()}.sqlite`)

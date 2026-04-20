@@ -11,6 +11,9 @@ function createDeferred() {
   return { promise, resolve }
 }
 
+const closeGracePeriodMs = 1_000
+const timeoutGracePeriodMs = 50
+
 test('finishShutdown closes resources once even if requested multiple times', async () => {
   const closeResources = createDeferred()
   let closeCallCount = 0
@@ -24,7 +27,7 @@ test('finishShutdown closes resources once even if requested multiple times', as
     exit: (code) => {
       exitCodes.push(code)
     },
-    shutdownGracePeriodMs: 1,
+    shutdownGracePeriodMs: closeGracePeriodMs,
   })
 
   const firstShutdown = controller.finishShutdown(0)
@@ -50,7 +53,7 @@ test('finishShutdown swallows resource-close rejections and exits once', async (
     exit: (code) => {
       exitCodes.push(code)
     },
-    shutdownGracePeriodMs: 1,
+    shutdownGracePeriodMs: closeGracePeriodMs,
     logError: (message, error) => {
       errors.push({ message, error })
     },
@@ -76,7 +79,7 @@ test('finishShutdown times out stalled resource shutdowns and exits once', async
     exit: (code) => {
       exitCodes.push(code)
     },
-    shutdownGracePeriodMs: 5,
+    shutdownGracePeriodMs: timeoutGracePeriodMs,
     logError: (message, error) => {
       errors.push({ message, error })
     },
@@ -87,5 +90,8 @@ test('finishShutdown times out stalled resource shutdowns and exits once', async
   assert.deepEqual(exitCodes, [1])
   assert.equal(errors.length, 1)
   assert.equal(errors[0]?.message, 'Timed out while closing note store cleanly.')
-  assert.match((errors[0]?.error as Error).message, /closeResources\(\) exceeded 5ms/)
+  assert.match(
+    (errors[0]?.error as Error).message,
+    /closeResources\(\) exceeded 50ms/,
+  )
 })

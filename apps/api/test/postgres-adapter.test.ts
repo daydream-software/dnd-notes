@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdir, readdir, rm } from 'node:fs/promises'
+import { chmod, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
 import Database from 'better-sqlite3'
@@ -343,6 +343,56 @@ test('sqlite restore cleanup removes working copies when restore validation fail
   )
 
   assert.deepEqual(leakedWorkingCopies, [])
+})
+
+test('sqlite restore reapplies restrictive permissions to the restored database file', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const sourceDbPath = join(runtimeDirectory, `restore-source-${randomUUID()}.sqlite`)
+  const backupPath = join(runtimeDirectory, `restore-backup-${randomUUID()}.sqlite`)
+  const destinationPath = join(runtimeDirectory, `restore-destination-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await rm(sourceDbPath, { force: true })
+    await rm(backupPath, { force: true })
+    await rm(destinationPath, { force: true })
+  })
+
+  const sourceStore = await createNoteStore({
+    backend: 'sqlite',
+    dbPath: sourceDbPath,
+  })
+
+  try {
+    await sourceStore.createNote({
+      campaignId: defaultCampaignId,
+      title: 'Restored permissions note',
+      body: 'Permission checks should stay tight.',
+      tags: [],
+      status: 'active',
+      sessionName: null,
+      linkedNoteIds: [],
+    })
+    await sourceStore.backupDatabase(backupPath)
+  } finally {
+    await sourceStore.close()
+  }
+
+  await writeFile(destinationPath, 'placeholder')
+  await chmod(destinationPath, 0o666)
+
+  const restoredStore = await restoreNoteStoreFromBackup(backupPath, {
+    backend: 'sqlite',
+    dbPath: destinationPath,
+  })
+
+  try {
+    const notes = await restoredStore.listNotes(defaultCampaignId)
+    assert.equal(notes.some((note) => note.title === 'Restored permissions note'), true)
+  } finally {
+    await restoredStore.close()
+  }
+
+  const destinationStats = await stat(destinationPath)
+  assert.equal(destinationStats.mode & 0o777, 0o600)
 })
 
 test('initializeDatabaseOrClose closes the database before rethrowing init failures', async () => {
