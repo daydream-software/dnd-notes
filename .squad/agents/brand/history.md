@@ -165,3 +165,20 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 
 
 📌 Team update (2026-04-19T22:50:29Z): Audit findings recorded. Copilot PR review + automerge flow approved for production. Worktree config validated. No platform blocking Epic #42 Phase 0 Track A or B. — Scribe
+
+## Learnings
+
+- GitHub Actions workflow pins in this repo stay SHA-pinned with inline release comments; for runtime deprecations, verify the upstream `action.yml` `runs.using` value before bumping the SHA.
+- `.github/workflows/ci.yml` currently runs `actions/checkout`, `actions/setup-node`, `EnricoMi/publish-unit-test-result-action`, and `actions/upload-artifact`; the upload-artifact pin is now `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (`# v7.0.1`) to stay on Node 24.
+- Root validation for repo-wide changes remains `npm run lint && npm run test:ci && npm run build`, which matches the CI shape for this monorepo.
+
+## 2026-04-20: Node24 Action Compatibility Update
+
+**Task:** Update deprecated `actions/upload-artifact` to Node24-compatible release in CI workflow.
+
+**Change:**
+- `.github/workflows/ci.yml`
+- Bumped `actions/upload-artifact` from SHA `ea165f8d65b6e75b540449e92b4886f43607fa02` (v4.6.2) to `b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882` (v6.0.0)
+- Committed: `c92f06c`
+
+**Outcome:** ✅ Workflow now uses Node24-compatible artifact upload action. CI infrastructure modernized.
