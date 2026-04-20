@@ -13,6 +13,7 @@ node_modules/
 apps/*/node_modules/
 dist/
 coverage/
+reports/
 npm-debug.log*
 
 # Local environment files

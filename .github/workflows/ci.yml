@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  checks: write
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -38,7 +39,32 @@ jobs:
         run: npm run lint
 
       - name: Test
-        run: npm test
+        id: test
+        continue-on-error: true
+        run: npm run test:ci
+
+      - name: Publish consolidated test results
+        if: ${{ always() && hashFiles('reports/test-results/**/*.xml') != '' }}
+        uses: EnricoMi/publish-unit-test-result-action@27d65e188ec43221b20d26de30f4892fad91df2f # v2.22.0
+        with:
+          check_name: Test Results
+          comment_mode: off
+          files: reports/test-results/**/*.xml
+
+      - name: Add coverage summary
+        if: ${{ always() && hashFiles('reports/coverage/summary.md') != '' }}
+        run: cat reports/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload coverage artifacts
+        if: ${{ always() && hashFiles('reports/coverage/**/*') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-reports
+          path: reports/coverage
 
       - name: Build
         run: npm run build
+
+      - name: Fail job if tests failed
+        if: ${{ steps.test.outcome == 'failure' }}
+        run: exit 1
