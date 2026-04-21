@@ -48,6 +48,8 @@ Chunk initialized as Tester for the initial project squad.
 - Session-browser state in `apps/web/src/App.tsx` must stay out of the auth bootstrap callback dependency chain; when `loadWorkspace()` depends on `noteBrowseMode`, clicking `All notes`, `Browse by session`, or `New note` re-runs the workspace bootstrap, flashes the full-screen loader, and can overwrite unsaved draft/create-note state.
 - Issue #58 QA review (2026-04-18): NoteStore Postgres adapter with SQLite fallback has six high-risk parity gaps — transaction semantics under failure, connection pooling resilience, schema idempotence, ACID isolation level mismatch, query result type coercion, and graceful shutdown. Identified 🟡 conditional blocker: isolation level and pool configuration must be clarified before implementation to prevent orphaned references and cascade failures under load. Created comprehensive QA brief at `.squad/qa-brief-issue-58.md` with 7 critical test cases and 5 decision points for Data to confirm.
 - Manual root test triage on 2026-04-20 did not reproduce a failure: from `/home/appuser/workspace/dnd-notes`, `npm test` exits 0 on Node `v22.21.1`/npm `10.9.4`, and the root script fans out cleanly to `apps/web` (`vitest run`), `apps/api` (`node --import tsx --test test/*.test.ts`), and `apps/control-plane` with all three workspace test commands returning exit 0.
+- Epic #42 Phase 0 review gate: repo evidence is strong enough to approve when `Dockerfile`, `README.md`, `RUNTIME.md`, `apps/api/src/note-store*.ts`, `apps/control-plane/src/provisioning.ts`, `platform/control-plane/**`, and `scripts/k3d/**` all line up with green validation (`npm run lint && npm run test && npm run build && npm run platform:validate`) plus recent green GitHub Actions runs for `ci.yml`, `k3d-smoke.yml`, and `deployment-artifacts.yml`.
+- The remaining false-green trap for Phase 0 is smoke depth, not missing wiring: `scripts/k3d/smoke.sh` proves live tenant provisioning and `/ready` against in-cluster Postgres wiring, but it still does not create/read a real note against that provisioned tenant, so future platform gates should call that out explicitly.
 📌 Team update (2026-04-20T13:31:33Z): npm-test-diagnosis complete — Chunk confirmed no code-level test failures; Brand fixed missing root npm install; all workspace tests now pass — Chunk, Brand
 
 *227 older learning items archived.*
@@ -157,3 +159,8 @@ Brand's PR #66 (feat(platform): add deployment artifacts for #43) received 7 Cop
 
 **Recommendation:** Ship-safe. All Copilot review feedback is addressed with working code, passing tests, and clean builds. PR #66 is ready to merge once other team gates clear (e.g., Brand's implementation of tenants manifest templates, end-to-end smoke test enhancements — both already tracked in issue #43 QA checklist).
 
+   - Scope: YES (all four Phase 0 slices landed: #52, #58, #63, #43)
+   - Gate: NOT YET (missing stateless proof, deferred k3s/stateful rehearsal, open #55)
+   - QA verdict: Practical YES with yellow risk (k3d smoke doesn't test full tenant CRUD yet)
+   - Control-plane artifacts: Image + Kustomize artifacts committed, tagged approach locked
+   - Decided by: Mikey (Lead), Chunk (Tester), Brand (Platform)
