@@ -28,6 +28,7 @@ class FakePostgresDatabase implements NoteStoreDatabase {
       allowSchemaChanges: boolean
       ownerEmails?: string[]
       ownerEmailIndexDefinition?: string | null
+      ownerKeycloakSubIndexDefinition?: string | null
       ownerAccountColumns?: readonly string[]
       ownerAccountUniqueColumns?: readonly string[]
       privilegeCheckError?: Error
@@ -64,6 +65,13 @@ class FakePostgresDatabase implements NoteStoreDatabase {
             this.options.ownerEmailIndexDefinition
           ) {
             return { indexdef: this.options.ownerEmailIndexDefinition }
+          }
+
+          if (
+            indexName === 'idx_owner_accounts_keycloak_sub' &&
+            this.options.ownerKeycloakSubIndexDefinition
+          ) {
+            return { indexdef: this.options.ownerKeycloakSubIndexDefinition }
           }
 
           return undefined
@@ -136,6 +144,22 @@ test('least-privilege postgres runtime skips schema DDL after control-plane boot
   assert.deepEqual(database.promotedEmails, ['admin@example.com'])
 })
 
+test('least-privilege postgres runtime accepts a unique keycloak_sub index', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerKeycloakSubIndexDefinition:
+      'CREATE UNIQUE INDEX idx_owner_accounts_keycloak_sub ON public.owner_accounts USING btree (keycloak_sub) WHERE (keycloak_sub IS NOT NULL)',
+    tableNames: requiredPostgresTables,
+  })
+
+  await initializeNoteStoreDatabase(database, new Set(['admin@example.com']))
+
+  assert.deepEqual(database.executedSql, [])
+})
+
 test('least-privilege postgres runtime fails fast when the pre-initialized schema is incomplete', async () => {
   const database = new FakePostgresDatabase({
     allowSchemaChanges: false,
@@ -191,7 +215,7 @@ test('least-privilege postgres runtime fails fast when owner_accounts.keycloak_s
 
   await assert.rejects(
     initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
-    /unique owner_accounts\.keycloak_sub constraint/,
+    /unique owner_accounts\.keycloak_sub enforcement/,
   )
   assert.deepEqual(database.executedSql, [])
 })
@@ -207,7 +231,12 @@ test('pg-mem style privilege lookup failures fall back to schema bootstrap', asy
 
   await initializeNoteStoreDatabase(database, new Set())
 
-  assert.equal(database.executedSql.length, 2)
+  assert.equal(database.executedSql.length, 4)
+  assert.match(database.executedSql[1] ?? '', /ADD COLUMN IF NOT EXISTS keycloak_sub TEXT/)
+  assert.match(
+    database.executedSql[2] ?? '',
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub/i,
+  )
 })
 
 test('sqlite migration adds keycloak_sub with a separate unique index', async () => {

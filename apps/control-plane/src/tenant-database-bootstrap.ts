@@ -9,7 +9,7 @@ const tenantNoteStoreSchemaSql = `
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     is_site_admin INTEGER NOT NULL DEFAULT 0,
-    keycloak_sub TEXT UNIQUE,
+    keycloak_sub TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -117,6 +117,15 @@ export async function initializeTenantNoteStoreDatabase(
   client: QueryableClient,
 ): Promise<void> {
   await client.query(tenantNoteStoreSchemaSql)
+  await client.query(`
+    ALTER TABLE owner_accounts
+    ADD COLUMN IF NOT EXISTS keycloak_sub TEXT
+  `)
+  await client.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+    ON owner_accounts(keycloak_sub)
+    WHERE keycloak_sub IS NOT NULL
+  `)
   await client.query(
     'UPDATE owner_accounts SET email = LOWER(email) WHERE email != LOWER(email)',
   )

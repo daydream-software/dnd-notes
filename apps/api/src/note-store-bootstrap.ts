@@ -20,7 +20,7 @@ const noteStoreSchemaSql = `
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     is_site_admin INTEGER NOT NULL DEFAULT 0,
-    keycloak_sub TEXT UNIQUE,
+    keycloak_sub TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -273,9 +273,24 @@ async function ensureRequiredPostgresOwnerAccountKeycloakSub(
     `)
     .get()
 
-  if (!keycloakSubUniqueConstraint) {
+  const keycloakSubUniqueIndex = await database
+    .prepare<{ indexdef: string }>(`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname = ?
+    `)
+    .get('idx_owner_accounts_keycloak_sub')
+
+  const indexDefinition = keycloakSubUniqueIndex?.indexdef ?? ''
+  const hasKeycloakSubUniqueIndex =
+    /\bcreate unique index\b/i.test(indexDefinition) &&
+    /\bon\b.*owner_accounts\b/i.test(indexDefinition) &&
+    /\bkeycloak_sub\b/i.test(indexDefinition)
+
+  if (!keycloakSubUniqueConstraint && !hasKeycloakSubUniqueIndex) {
     throw new Error(
-      'Postgres note store requires a unique owner_accounts.keycloak_sub constraint for least-privilege runtime credentials.',
+      'Postgres note store requires unique owner_accounts.keycloak_sub enforcement for least-privilege runtime credentials.',
     )
   }
 }
@@ -340,8 +355,24 @@ async function ensureOwnerSiteAdminColumn(database: NoteStoreDatabase) {
   await transaction()
 }
 
-async function ensureOwnerKeycloakSubColumn(database: NoteStoreDatabase) {
-  if (database.kind !== 'sqlite') {
+async function ensureOwnerKeycloakSubColumn(
+  database: NoteStoreDatabase,
+  options: { allowSchemaChanges: boolean },
+) {
+  if (database.kind === 'postgres') {
+    if (!options.allowSchemaChanges) {
+      return
+    }
+
+    await database.exec(`
+      ALTER TABLE owner_accounts
+      ADD COLUMN IF NOT EXISTS keycloak_sub TEXT
+    `)
+    await database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+      ON owner_accounts(keycloak_sub)
+      WHERE keycloak_sub IS NOT NULL
+    `)
     return
   }
 
@@ -357,13 +388,13 @@ async function ensureOwnerKeycloakSubColumn(database: NoteStoreDatabase) {
         ALTER TABLE owner_accounts
         ADD COLUMN keycloak_sub TEXT
       `)
-
-      await database.exec(`
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
-        ON owner_accounts(keycloak_sub)
-        WHERE keycloak_sub IS NOT NULL
-      `)
     }
+
+    await database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+      ON owner_accounts(keycloak_sub)
+      WHERE keycloak_sub IS NOT NULL
+    `)
   })
 
   await transaction()
@@ -478,7 +509,7 @@ export async function initializeNoteStoreDatabase(
   }
 
   await ensureOwnerSiteAdminColumn(database)
-  await ensureOwnerKeycloakSubColumn(database)
+  await ensureOwnerKeycloakSubColumn(database, { allowSchemaChanges })
   await ensureNotesAttributionColumns(database)
   await ensureShareLinkRevealTokens(database)
   await ensureOwnerEmailUniqueness(database, { allowSchemaChanges })
