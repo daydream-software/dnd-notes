@@ -85,6 +85,14 @@ database. The tenant workload uses `/ready` for readiness and `/healthz` for
 liveness, and the PVC stays mounted at `/app/data` for explicit tenant storage
 lifecycle plus SQLite-compatible fallback files.
 
+Postgres-backed tenant upgrades reuse `POST /internal/tenants/:tenantId/provision`
+with a version override. The generated tenant Deployment now makes the first
+rolling-update contract explicit (drain-first `RollingUpdate`, `maxSurge: 0`,
+`maxUnavailable: 1`, `minReadySeconds: 5`), while the tenant runtime drains
+HTTP traffic and Postgres connections on `SIGTERM`. See
+[`apps/control-plane/README.md`](apps/control-plane/README.md) and
+[`RUNTIME.md`](RUNTIME.md) for the operator choreography and rollout rationale.
+
 ## k3d platform loop
 
 Issue `#63` formalizes the daily local Kubernetes lane for platform work.

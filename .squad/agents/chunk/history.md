@@ -26,6 +26,15 @@ Chunk initialized as Tester for the initial project squad.
 
 ## Learnings
 
+### Issue #55 QA Gate (2026-04-22)
+- Graceful shutdown choreography is complete: API + control-plane both have SIGTERM handlers that mark readiness as unready immediately, then drain in-flight requests for 30s, then close HTTP server, then close database pool.
+- Postgres connection pool has tunable defaults via env vars (`NOTES_DB_POOL_MIN`, `NOTES_DB_POOL_MAX`, idle/connection/statement timeouts) and explicit `pool.end()` is awaited on close.
+- Kubernetes manifests have correct probes: liveness `/healthz` (always 200), readiness `/ready` (503 during shutdown or DB fail), 30s termination grace period.
+- **Five high-risk gaps exist but are currently manageable:** (1) readiness drain race window during rolling update—requires proof that old/new pods don't overlap on same Postgres; (2) pool drain under load—requires test that 20 concurrent queries complete or timeout gracefully; (3) connection timeout resilience—env vars exist, needs load test; (4) SPA fallback safety—guards exist in code, needs regression test to prove admin endpoints don't leak; (5) schema backward compatibility—not this gate, but document in future phases.
+- Created comprehensive QA brief at `.squad/qa-brief-issue-55.md` with 4 high-priority test cases, 4 failure drills (node drain, pod crash, Postgres unavailable, PVC contention), and conditional blocker: #55 ships only when all 6 tests pass + failure drills are documented.
+- **Likely blocker for Data:** Statement timeout (30s default) may fail backup/restore operations that take >30s; confirm in code review whether long operations have their own timeout or must be implemented.
+- **Architecture smell:** Current design puts readiness failure directly into the shutdown path (immediate 503 response). For future Phases 2+, consider explicit `POST /internal/drain` endpoint for explicit maintenance mode separate from automatic shutdown—this would let operators trigger drain without killing the pod.
+
 - Initial squad setup complete.
 - `apps/api/src/note-store.ts` owns SQLite bootstrap for the local DB at `apps/api/data/dnd-notes.sqlite`, so backward-compatible schema changes need in-place startup upgrades instead of relying on `CREATE TABLE IF NOT EXISTS`.
 - Regression coverage for legacy SQLite compatibility now lives in `apps/api/test/app.test.ts`, where a pre-attribution `notes` table is created and reopened through `createNoteStore()` to confirm legacy notes still load with null attribution.
@@ -48,6 +57,8 @@ Chunk initialized as Tester for the initial project squad.
 - Session-browser state in `apps/web/src/App.tsx` must stay out of the auth bootstrap callback dependency chain; when `loadWorkspace()` depends on `noteBrowseMode`, clicking `All notes`, `Browse by session`, or `New note` re-runs the workspace bootstrap, flashes the full-screen loader, and can overwrite unsaved draft/create-note state.
 - Issue #58 QA review (2026-04-18): NoteStore Postgres adapter with SQLite fallback has six high-risk parity gaps — transaction semantics under failure, connection pooling resilience, schema idempotence, ACID isolation level mismatch, query result type coercion, and graceful shutdown. Identified 🟡 conditional blocker: isolation level and pool configuration must be clarified before implementation to prevent orphaned references and cascade failures under load. Created comprehensive QA brief at `.squad/qa-brief-issue-58.md` with 7 critical test cases and 5 decision points for Data to confirm.
 - Manual root test triage on 2026-04-20 did not reproduce a failure: from `/home/appuser/workspace/dnd-notes`, `npm test` exits 0 on Node `v22.21.1`/npm `10.9.4`, and the root script fans out cleanly to `apps/web` (`vitest run`), `apps/api` (`node --import tsx --test test/*.test.ts`), and `apps/control-plane` with all three workspace test commands returning exit 0.
+- Epic #42 Phase 0 review gate: repo evidence is strong enough to approve when `Dockerfile`, `README.md`, `RUNTIME.md`, `apps/api/src/note-store*.ts`, `apps/control-plane/src/provisioning.ts`, `platform/control-plane/**`, and `scripts/k3d/**` all line up with green validation (`npm run lint && npm run test && npm run build && npm run platform:validate`) plus recent green GitHub Actions runs for `ci.yml`, `k3d-smoke.yml`, and `deployment-artifacts.yml`.
+- The remaining false-green trap for Phase 0 is smoke depth, not missing wiring: `scripts/k3d/smoke.sh` proves live tenant provisioning and `/ready` against in-cluster Postgres wiring, but it still does not create/read a real note against that provisioned tenant, so future platform gates should call that out explicitly.
 📌 Team update (2026-04-20T13:31:33Z): npm-test-diagnosis complete — Chunk confirmed no code-level test failures; Brand fixed missing root npm install; all workspace tests now pass — Chunk, Brand
 
 *227 older learning items archived.*
@@ -157,3 +168,8 @@ Brand's PR #66 (feat(platform): add deployment artifacts for #43) received 7 Cop
 
 **Recommendation:** Ship-safe. All Copilot review feedback is addressed with working code, passing tests, and clean builds. PR #66 is ready to merge once other team gates clear (e.g., Brand's implementation of tenants manifest templates, end-to-end smoke test enhancements — both already tracked in issue #43 QA checklist).
 
+   - Scope: YES (all four Phase 0 slices landed: #52, #58, #63, #43)
+   - Gate: NOT YET (missing stateless proof, deferred k3s/stateful rehearsal, open #55)
+   - QA verdict: Practical YES with yellow risk (k3d smoke doesn't test full tenant CRUD yet)
+   - Control-plane artifacts: Image + Kustomize artifacts committed, tagged approach locked
+   - Decided by: Mikey (Lead), Chunk (Tester), Brand (Platform)
