@@ -4199,3 +4199,198 @@ If FFMikha wants to finalize Phase 1 scope/timeline:
 **By:** FFMikha (via Copilot)
 **What:** Stop looping on PR #67; keep skill-only / squad-memory commits off the feature PR and land them on `main` instead.
 **Why:** User request — captured for team memory
+# Decision: Per-Tenant Postgres Credentials Issue Scope
+
+**Date:** 2026-04-21  
+**Agent:** Data (Backend Dev)  
+**Status:** Approved for implementation  
+**Related:** Epic #42 (Phase 0–1), Issue #69 (GitHub)
+
+## Summary
+
+Created GitHub issue #69 to implement per-tenant Postgres roles and least-privilege runtime credentials. This closes a **critical security gap** in the multi-tenant platform.
+
+## Current State (Problem)
+
+- All tenant instances share one Postgres runtime credential (`TENANT_DATABASE_RUNTIME_URL` env var)
+- Control plane uses single admin credential to provision all databases
+- Tenant app compromise exposes all tenant databases
+- No runtime privilege separation at database layer
+
+## Decision
+
+Implement per-tenant role + secret model before Phase 1 acceptance:
+
+1. **During provisioning:** Control plane creates per-tenant Postgres role with randomized password
+2. **Privilege boundary:** Role has only CONNECT + USAGE on schema; no superuser, no create/drop database
+3. **Secret storage:** Per-tenant K8s Secret (not shared cluster secret)
+4. **Tenant binding:** Pod mounts/reads only its own secret
+5. **Cleanup:** Role dropped on deprovisioning
+
+## Rationale
+
+- Least-privilege is non-negotiable for multi-tenant SaaS
+- Postgres roles are lightweight, native, and auditable
+- Per-tenant secrets in K8s are the standard isolation pattern
+- Early implementation reduces later rework (Phase 0 is the time to build right)
+
+## Scope and Acceptance
+
+See issue #69 for full technical details, acceptance criteria, and implementation notes.
+
+## Team Impact
+
+- **Data (me):** Owns backend implementation in `PostgresTenantDatabaseManager` and provisioning flow
+- **Mikey (infra):** May need to update K8s manifests for per-tenant secret mounting
+- **All:** Upgrade path must document shared → per-tenant credential migration for existing deployments
+# Operator App vs. Customer Portal — Scope Clarity
+
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-21  
+**Status:** Decision — answered in sync with FFMikha
+
+---
+
+## Question
+
+Should the operator app (internal control-plane UI) also serve as the public landing/signup/purchase site, or should those surfaces be separate?
+
+## Decision
+
+**Separate surfaces. No operator UI in the customer path.**
+
+- **Operator app** = internal-only fleet management dashboard (#57: health, rollout state, backup status, tenant visibility)
+- **Customer-facing portal** = future public registration, subscription, instance creation, billing
+- **Tenant app** = the dnd-notes workspace itself (notes, campaigns, members), unchanged from current single-tenant model
+
+## Why this split
+
+1. **Different stakeholders, different trust boundaries.**
+   - Operators (Daydream team) need deep fleet instrumentation: K8s state, Postgres connection pool status, backup verification state, version skew details.
+   - Customers need feature discovery, pricing, signup flow — none of which belongs in an ops surface.
+   - Mixing them creates UX smell: "why are operators seeing subscription details?" and "why can customers see cluster state?"
+
+2. **Phase sequencing.**
+   - Phase 0–1: You are the only operator. Internal dashboard (#57) is enough; you manage tenants via control-plane API directly (or a minimal CLI).
+   - Phase 2: Add Keycloak OIDC for auth boundaries. Still no customer-facing signup.
+   - Phase 3+: When you're ready to sell, build the portal as a *frontend to the control-plane API*, not a fork of the operator dashboard.
+
+3. **Scaling economics.**
+   - The operator surface scales with *operational surface area* (things that can break: K8s health, backup state, deploy pipelines).
+   - The portal scales with *customer count* (signup, billing webhooks, support integrations).
+   - Keep them separate so each can evolve its own scaling story without the other blocking it.
+
+4. **Single responsibility.**
+   - Operator dashboard: observability, incident response, manual fleet control.
+   - Portal: customer self-service, billing, onboarding.
+   - Each has a clear mission and doesn't carry the other's complexity.
+
+## Cleanest split (three-layer model)
+
+```
+
+     Reverse Proxy / Ingress             │
+  (wildcard DNS, TLS termination)        │
+
+     │
+     ├─ portal.{domain}/   → Portal (public)
+     │  (registration, subscription, instance dashboard)
+     │
+     ├─ ops.{domain}/      → Operator Dashboard (internal-only, Network Policy / auth gate)
+     │  (fleet health, rollout state, backup state, tenant list)
+     │
+     └─ {tenant}.{domain}/ → Tenant App (per-instance)
+        (dnd-notes workspace: notes, campaigns, members)
+```
+
+### Operator Dashboard (#57)
+- **Purpose:** Internal fleet visibility for the Daydream team.
+- **Scope:** Tenant health, version, rollout state, last backup/restore, dependency status (Postgres, Keycloak).
+- **Auth:** Control-plane OIDC + Network Policy limiting to operator IPs, or a simple bearer token for Phase 0–1.
+- **Lifecycle:** Standalone service, can be a separate small Node/React app or a single HTML page served from the control plane itself.
+
+### Customer Portal (future, Phase 3+)
+- **Purpose:** Public self-service for registration, subscription, and instance management.
+- **Scope:** Signup, billing, instance list (read customer's own instances only), instance creation request, password reset.
+- **Auth:** Keycloak OIDC (inherited from Phase 2), no special operator privileges.
+- **Lifecycle:** Separate from operator surface; can be a Next.js or similar SPA backed by control-plane REST API.
+
+### Tenant App (existing, unmodified)
+- **Purpose:** End-user workspace.
+- **Scope:** Notes, campaigns, members, shared links, sessions.
+- **Auth:** Keycloak OIDC (inherited from Phase 2), same OIDC realm as portal but instance-local authorization.
+- **Lifecycle:** One instance per customer; can run on K8s managed by control plane, or Docker host, or wherever you deploy.
+
+## What's NOT in #57
+
+Issue #57 is *not* building the public portal. It is *only* the operator dashboard for internal use. That dashboard can be a simple read-only surface (fleet state) or include lightweight control actions (trigger a manual backup, view logs), but it is **not a customer-facing signup flow.**
+
+## What #56 and #40 prepare for
+
+- **#56 (Keycloak OIDC):** Establishes auth boundaries and token validation. Control-plane admin API can use a separate admin realm; tenants use the shared customer realm. Portal inherits the same Keycloak instance.
+- **#40 (restore/maintenance):** Operator workflow for backup/restore. Triggered via control-plane API (not a UI flow in Phase 1), but future portal can expose "request restore" as a customer self-service if needed.
+
+## Build order (revised)
+
+1. **#57 (Phase 3):** Operator dashboard = internal fleet visibility. Thin, boring, read-heavy.
+2. **Portal (Phase 4, future):** Customer registration + subscription + self-service instance dashboard. Separate from operator surface, backed by control-plane REST API.
+
+## Key takeaway for FFMikha
+
+The operator app is for *you* and your team to see what the fleet is doing. The customer portal is for *them* to sign up and manage their own instances. Don't let those missions blur, and you'll avoid building a Swiss-army-knife UI that confuses both stakeholders. Start with a simple operator dashboard (Phase 3), prove the control-plane API is stable, then add the portal as a separate customer-facing layer (Phase 4+).
+# Phase 2–3 Roadmap Issues: Operator Portal, Landing Site, Postgres Isolation
+
+**Date:** 2026-04-21
+**Decision Maker:** Mikey (Lead)
+**Status:** Implemented (issues created: #68, #70, #71)
+
+## Summary
+
+Audit of epic #42 and open issue backlog revealed three critical scope gaps required for customer-facing multi-tenant SaaS. Each gap is now a separate GitHub issue, tied explicitly to Phase 2–3 delivery.
+
+## Issues Created
+
+### #68: Build the operator control portal for platform administration
+**Owner suggested:** Brand (platform squad)
+**Phase:** Phase 3 (operational maturity)
+**Rationale:** Issue #57 provides observability (fleet dashboard), but operators need a control surface to actually manage the platform. Provisioning, deprovisioning, rolling updates, and maintenance drain require a UI. Control-plane API (#53) is the backend; #68 is the frontend.
+
+### #70: Build the public landing and self-serve signup portal
+**Owner suggested:** Brand (platform squad)
+**Phase:** Phase 2–3 (customer readiness)
+**Rationale:** Current provisioning (#54) is manual operator workflow. Customers cannot self-serve. #70 delivers:
+- Public landing/marketing site
+- Self-serve signup (account + instance creation)
+- Customer instance dashboard
+- Integration with control-plane API to trigger provisioning from customer actions instead of operator scripts
+- Placeholder for billing/subscription integration
+
+### #71: Implement per-tenant Postgres credentials and database isolation (CRITICAL)
+**Owner suggested:** Data (backend squad)
+**Phase:** Phase 1 hardening (prerequisite for production)
+**Rationale:** **SECURITY ISSUE.** Current provisioning (#54) injects the admin Postgres URL (`TENANT_DATABASE_ADMIN_URL`) into all tenant pods. A compromised tenant container can read/modify other tenant data — isolation is violated. 
+
+Fix: Generate tenant-specific Postgres credentials (role + password) for each tenant. Inject only those credentials into the tenant pod via `DATABASE_URL`. Tenant role has LEAST privilege (no access to other databases, system tables, or DDL). Blocks Phase 1 production readiness.
+
+## Architecture Alignment
+
+**Unchanged:**
+- Control-plane thin API design (#53, #54, #55) is correct.
+- Per-tenant database isolation model is correct.
+- Keycloak OIDC integration (#56) for auth is correct.
+
+**Addressed:**
+- Operator UX: Now explicit (portal + observability separated).
+- Customer UX: Now explicit (landing + self-serve + dashboard).
+- Tenant security: Now explicit (per-tenant credentials + isolation testing).
+
+## Roadmap Impact
+
+- **Phase 1 blocker:** #71 must be resolved before Phase 1 production deployment. Recommend integrating into #54 provisioning lane or Phase 1 security hardening track.
+- **Phase 2–3 tracks:** #68 and #70 are parallel to Keycloak (#56) integration. Can start design during Phase 1 execution.
+
+## Next Steps
+
+1. Triage #68, #70, #71 into appropriate squad ownership and phase lanes.
+2. Add #71 to Phase 1 critical path; verify production readiness gate includes tenant credential isolation.
+3. Design #68 and #70 control-plane API contracts in parallel to avoid scope creep.

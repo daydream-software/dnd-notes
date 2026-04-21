@@ -50,3 +50,6 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 - **Deployment Artifacts Delivered (Phase 0):** Dockerfile (multi-stage: base → deps → build → runtime, non-root appuser, SQLite fallback), RUNTIME.md (env contract, probes, graceful shutdown, same-origin), CI yaml (lint → test → build pipeline), k3d smoke (k3s v1.35.3, tenant image build, provisioning validation), k3d bootstrap scripts, postgres.yaml (5Gi PVC, pg_isready probe, dev-only secrets).
 
 - **False-Green Trap in k3d-smoke:** Validates tenant provisioning + /ready probes but does NOT create/read actual notes. Smoke depth is shallow; future gates should call this out explicitly.
+
+---
+
