@@ -192,3 +192,18 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 - Committed: `c92f06c`
 
 **Outcome:** ✅ Workflow now uses Node24-compatible artifact upload action. CI infrastructure modernized.
+
+## 2026-04-21: Orchestration — Issue #43 Implementation Ready for Review
+
+
+All validation gates passed:
+- npm run lint ✓
+- npm run test:ci ✓
+- npm run build ✓
+- npm run platform:validate ✓
+- Docker builds ✓
+
+Brand's QA checklist (Chunk) and CI/CD decisions (Brand's own) now merged to decisions.md. PR awaits:
+1. Tenant K8s manifests
+2. End-to-end Postgres smoke test
+3. DATABASE_URL injection proof

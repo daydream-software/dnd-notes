@@ -3663,3 +3663,117 @@ When a GitHub-hosted action in this repo hits a runtime deprecation warning, upg
 
 - Workflow YAML parses correctly.
 - All external `uses:` entries in `.github/workflows/ci.yml` now declare `runs.using: node24`.
+
+### 2026-04-21: Issue #43 QA Reviewer Checklist — Deployment Artifacts
+**Decided by:** Chunk (Tester)  
+**Date:** 2026-04-21  
+**Type:** QA Gate & Deployment Validation
+
+## Summary
+
+Issue #43 deployment slice is **ship-safe for infrastructure review** once Brand implements three conditional blockers:
+
+1. **Tenant Kubernetes manifests** must exist and align with control-plane provisioning contract
+2. **End-to-end Postgres smoke test** must verify actual note create/read operations (not just readiness probes)
+3. **DATABASE_URL injection** must be proven end-to-end in tenant pods
+
+## Blockers for Approval
+
+#### Blocker 1: Tenant Manifest Completeness
+- Full Kubernetes manifests (Deployment, Service, ConfigMap, Secret, PVC)
+- Correct env variable injection matching RUNTIME.md contract
+- ConfigMap/Secret wires `DATABASE_URL`, `SITE_ADMIN_EMAILS`, `ALLOWED_ORIGINS`, `PUBLIC_WEB_URL`
+- PVC mount at `/app/data` preserved for compatibility
+
+#### Blocker 2: End-to-End Postgres Smoke Test
+- k3d smoke enhanced to verify actual note operations against Postgres
+- Test workflow: create tenant → create note → read note → verify Postgres backend
+- Include shared-link creation + guest access + claim flow
+- `GET /ready` succeeds when `DATABASE_URL` points to Postgres (not SQLite fallback)
+
+#### Blocker 3: DATABASE_URL Injection Verification
+- Control-plane provisioning sets `DATABASE_URL` in tenant pod environment
+- Readiness probe validates Postgres connectivity
+- Proof that `DATABASE_URL` is injected before container startup (not missing/malformed)
+
+## Edge Cases (Regression Tests Needed)
+
+1. **SPA Fallback Safety:** Add regression test for `GET /assets/missing.js` (should 404, not index.html)
+2. **Same-Origin CORS Default:** Document that `ALLOWED_ORIGINS` is for local dev only; production uses `SERVE_WEB=true` + reverse proxy
+3. **Postgres Connection Pool Resilience:** Defer detailed tuning to Phase 1; confirm pool initializes on startup and drains cleanly
+4. **Graceful Shutdown Under Load:** Defer load testing to Phase 1; verify HTTP server closes before connection draining
+5. **Admin Backup/Restore Postgres Compatibility:** Defer migration runbook to Phase 1; confirm endpoints work with both SQLite and Postgres
+
+## Acceptance Checklist
+
+- [ ] Tenant Deployment, Service, ConfigMap, Secret, PVC templates provided
+- [ ] Manifests spot-checked against RUNTIME.md (env names, probe paths, port 3000, user)
+- [ ] Control-plane integration verified; provisioning creates/reads manifests and injects config
+- [ ] k3d smoke runs full note workflow (create → read) against Postgres
+- [ ] Readiness probes return 200 with Postgres, 503 when unreachable
+- [ ] End-to-end shared-link + guest access + claim verified
+- [ ] No regressions: all tests pass; `npm run lint && npm run test && npm run build` green
+- [ ] SPA fallback regression test added
+- [ ] RUNTIME.md updated with new env variables or probe behavior
+- [ ] k3d smoke runs consistently on fresh cluster
+
+## Decision
+
+**Status:** 🟡 **Conditional Ready for Implementation**
+
+Deployment artifact scaffolding is **ship-safe** once Brand provides manifests, end-to-end smoke test, and proof of `DATABASE_URL` injection. No code changes required beyond manifest provisioning and smoke test enhancement.
+
+---
+
+### 2026-04-20: Normalize Node test-runner JUnit before GitHub publishing
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-20  
+**Type:** CI/CD & Test Reporting
+
+## Decision
+
+Keep the root local test contract unchanged (`npm test` stays fail-fast), but treat CI JUnit as a normalized artifact:
+
+1. Let each workspace keep emitting its native test output
+2. After `test:ci` runs, rewrite the shared JUnit XML under `reports/test-results/` into a publisher-friendly shape
+3. Flatten nested Node test-runner suites into direct leaf suites; synthesize a suite when root `<testsuites>` contains direct `<testcase>` nodes; give cases stable non-generic classnames so duplicate names do not collapse
+
+## Why
+
+- Vitest already emits JUnit in the shape the GitHub publisher expects, but Node's built-in JUnit output does not
+- Raw Node output caused the consolidated check to undercount repo totals because the publisher ignores root-level testcases and derives "runs" from outer suite attributes
+- Normalizing the XML in one repo-owned script is less brittle than teaching the workflow about runner-specific quirks
+
+## Impact
+
+- GitHub's consolidated test check now reflects repo-wide totals much more accurately for the mixed Vitest + Node test-runner setup
+- CI still publishes results and coverage even when tests fail because normalization happens inside the existing `test:ci` orchestration
+- Future Node-runner workspaces should feed the shared reports directory through the same normalization path instead of assuming raw built-in JUnit will publish correctly
+
+---
+
+### 2026-04-20: Keep SHA-Pinned GitHub Actions on Node 24-Supported Releases
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-20  
+**Type:** CI/CD & Action Supply Chain
+
+## Decision
+
+When a GitHub-hosted action in this repo hits a runtime deprecation, upgrade it to the latest suitable release that already declares a supported runtime in `action.yml`, while preserving immutable SHA pinning and the matching inline release comment.
+
+## Why
+
+- The checked-in workflow was already on `actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882` (`v6.0.0`), so this fix could stay surgical and move only that pin to the latest release
+- The current supported release `actions/upload-artifact@v7.0.1` declares `runs.using: node24`
+- Keeping the exact commit SHA plus the readable release comment preserves supply-chain hygiene without leaving CI on deprecated action runtimes
+
+## Applied Change
+
+- Updated `.github/workflows/ci.yml` from `actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v6.0.0`
+- To: `actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1`
+
+## Validation
+
+- Confirmed the workflow still parses after the edit
+- Audited every external `uses:` entry in `.github/workflows/ci.yml`; no `runs.using: node20` actions remain
+
