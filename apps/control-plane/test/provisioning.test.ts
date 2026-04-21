@@ -198,6 +198,57 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('rejects blank version overrides before starting a rollout', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'ready',
+        'control-plane',
+        'Provisioned already',
+      )
+
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+          version: '',
+        }),
+        /Tenant version must be a non-empty string/,
+      )
+
+      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal(infrastructureManager.bundles.length, 0)
+      assert.equal(
+        tenantRegistry.getStateTransitions('tenant-demo').some((transition) =>
+          transition.toState === 'upgrading'),
+        false,
+      )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
   it('marks tenant failed when infrastructure application throws', async () => {
     const tenantRegistry = new TenantRegistry(':memory:')
     const databaseManager = new FakeDatabaseManager()

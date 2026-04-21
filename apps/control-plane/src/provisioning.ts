@@ -136,15 +136,21 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     version?: string
   }): Promise<TenantProvisioningResponse> {
     const tenant = this.getExistingTenant(params.tenantId)
+    const requestedVersion = params.version
+
+    if (requestedVersion !== undefined && requestedVersion.trim().length === 0) {
+      throw new Error('Tenant version must be a non-empty string')
+    }
+
     const isVersionRollout =
-      params.version !== undefined && params.version !== tenant.version
+      requestedVersion !== undefined && requestedVersion !== tenant.version
 
     if (tenant.currentState === 'deprovisioned') {
       throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
     }
 
-    if (params.version && params.version !== tenant.version) {
-      this.tenantRegistry.updateTenantVersion(tenant.id, params.version)
+    if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
+      this.tenantRegistry.updateTenantVersion(tenant.id, requestedVersion)
     }
 
     const refreshedTenant = this.getExistingTenant(tenant.id)
