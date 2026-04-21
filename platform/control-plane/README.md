@@ -30,7 +30,7 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
   -n dnd-notes-platform \
   --from-literal=CONTROL_PLANE_ADMIN_TOKEN='replace-with-local-token' \
   --from-literal=TENANT_DATABASE_ADMIN_URL='postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres' \
-  --from-literal=TENANT_DATABASE_RUNTIME_URL='postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres' \
+  --from-literal=TENANT_DATABASE_RUNTIME_URL='postgresql://runtime-template:placeholder@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable' \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n dnd-notes-platform rollout status deployment/dnd-notes-control-plane
 kubectl -n dnd-notes-platform port-forward svc/dnd-notes-control-plane 3101:3001
@@ -40,6 +40,9 @@ The k3d overlay points the control plane at the in-cluster platform Postgres
 service and uses the `ghcr.io/daydream-software/dnd-notes-control-plane:k3d`
 image tag. Its committed Secret patch intentionally keeps placeholder values in
 source control, so replace the Secret locally before expecting a healthy pod.
+`TENANT_DATABASE_RUNTIME_URL` is only a connection template now: new tenants get
+their own generated runtime role, password, and database name in the tenant pod
+Secret.
 
 ## Hosted reference overlay
 
@@ -48,7 +51,7 @@ The hosted reference overlay is deliberately boring:
 - same namespace (`dnd-notes-platform`)
 - HTTPS tenant hosts by default
 - placeholder control-plane image tag via Kustomize `images`
-- placeholder admin/runtime Postgres URLs that operators must replace
+- placeholder admin Postgres URL plus runtime-template URL that operators must replace
 - placeholder bearer token values that must be replaced before apply
 
 Use it as the starting point for a managed-cluster rollout after image promotion.

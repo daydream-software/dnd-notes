@@ -52,6 +52,8 @@ Data initialized as Backend Dev for the initial project squad.
 - The generated tenant Deployment contract now explicitly stays single-replica `RollingUpdate` with drain-first replacement (`maxSurge: 0`, `maxUnavailable: 1`) to prevent pod overlap while the per-tenant RWO PVC remains mounted, plus `minReadySeconds: 5` and `terminationGracePeriodSeconds: 30`; the operator choreography and rollout rationale live in `apps/control-plane/README.md` and `RUNTIME.md`.
 - `TenantProvisioningService.provisionTenant()` must reject blank version overrides before rollout classification; otherwise direct callers can record an `upgrading` transition without persisting a new tenant version/image.
 - `TenantProvisioningService.provisionTenant()` must trim version overrides before comparing/persisting them and reject non–image-tag-safe values; the HTTP provision route should surface those validation failures as 400s instead of masking them as 500s.
+- Control-plane reprovision errors in `apps/control-plane/src/provisioning.ts` must not echo raw tenant `DATABASE_URL` values; include tenant context and guidance, but never reflect credentials back into logs or HTTP error details.
+- When Postgres tenant database/role identifiers in `apps/control-plane/src/provisioning.ts` would exceed the 63-character limit, truncate with a stable hash suffix instead of plain slicing so long subdomains cannot collide; regressions live in `apps/control-plane/test/provisioning.test.ts`.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
@@ -487,3 +489,7 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 
 ---
 
+- Issue #69 keeps `TENANT_DATABASE_RUNTIME_URL` as a runtime URL template only in `apps/control-plane/src/provisioning.ts`; newly provisioned tenants get a generated Postgres role/password, while already-provisioned tenants keep their existing runtime secret until an explicit migration.
+- Least-privilege hosted startup now splits bootstrap from runtime in `apps/control-plane/src/tenant-database-bootstrap.ts` and `apps/api/src/note-store-bootstrap.ts`: the control plane pre-initializes schema/privileges, and the API verifies the schema instead of attempting DDL when the Postgres runtime user lacks `CREATE`.
+- Safe tenant teardown for this slice lives in `apps/control-plane/src/provisioning.ts`: deprovisioning terminates tenant sessions, drops the tenant database, and drops the deterministic tenant runtime role, with regressions in `apps/control-plane/test/provisioning.test.ts`.
+- Validation for the least-privilege Postgres slice is `npm run lint --workspace apps/control-plane`, `npm run test --workspace apps/control-plane -- --runInBand`, `npm run build --workspace apps/control-plane`, `npm run lint --workspace apps/api`, `npm run test --workspace apps/api -- --runInBand`, `npm run build --workspace apps/api`, and `npm run platform:validate`.

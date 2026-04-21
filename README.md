@@ -76,14 +76,17 @@ only when you have a live kube context plus an admin Postgres connection string:
 - `TENANT_BASE_DOMAIN` — opaque tenant subdomains are created under this suffix
 - `TENANT_IMAGE_REPOSITORY` — image repository used for tenant deployments
 - `TENANT_DATABASE_ADMIN_URL` — admin Postgres URL used to create/drop per-tenant databases
-- `TENANT_DATABASE_RUNTIME_URL` — optional runtime Postgres URL injected into tenant pods; defaults to the admin URL when unset
+- `TENANT_DATABASE_RUNTIME_URL` — optional runtime Postgres URL template for tenant pods; host/port/SSL settings come from this URL, but newly provisioned tenants get their own generated role, password, and database name in `DATABASE_URL`
 - `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret name for private images
 
 When provisioning is enabled, the control plane reconciles a tenant namespace,
 runtime ConfigMap/Secret, PVC, Service, Deployment, and a per-tenant Postgres
-database. The tenant workload uses `/ready` for readiness and `/healthz` for
-liveness, and the PVC stays mounted at `/app/data` for explicit tenant storage
-lifecycle plus SQLite-compatible fallback files.
+database. New tenants also get a dedicated Postgres runtime role with a random
+password, plus control-plane schema bootstrap before the tenant pod starts, so
+the pod can run on least-privilege `DATABASE_URL` credentials. The tenant
+workload uses `/ready` for readiness and `/healthz` for liveness, and the PVC
+stays mounted at `/app/data` for explicit tenant storage lifecycle plus
+SQLite-compatible fallback files.
 
 Postgres-backed tenant upgrades reuse `POST /internal/tenants/:tenantId/provision`
 with a version override. The generated tenant Deployment now makes the first
@@ -92,6 +95,10 @@ rolling-update contract explicit (drain-first `RollingUpdate`, `maxSurge: 0`,
 HTTP traffic and Postgres connections on `SIGTERM`. See
 [`apps/control-plane/README.md`](apps/control-plane/README.md) and
 [`RUNTIME.md`](RUNTIME.md) for the operator choreography and rollout rationale.
+
+Existing hosted tenants that still use a shared runtime Postgres user stay on
+that credential until an operator performs an explicit migration. This slice
+only auto-hardens newly provisioned tenants.
 
 ## k3d platform loop
 

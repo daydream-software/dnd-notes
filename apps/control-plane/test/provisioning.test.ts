@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import { ApiException, type KubernetesObject, type V1Status } from '@kubernetes/client-node'
 import {
   KubernetesTenantInfrastructureManager,
+  PostgresTenantDatabaseManager,
   TenantProvisioningService,
   buildTenantDatabaseConnectionString,
   buildTenantInfrastructureBundle,
@@ -11,23 +12,50 @@ import {
 } from '../src/provisioning.js'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
-import type { TenantProvisioningResources } from '../src/types.js'
+import type { Tenant, TenantProvisioningResources } from '../src/types.js'
 
 class FakeDatabaseManager {
   createdDatabaseNames: string[] = []
   deletedDatabaseNames: string[] = []
+  ensureCalls: Array<{
+    existingRuntimeConnectionString?: string | null
+    requireExistingRuntimeConnectionString?: boolean
+    subdomain: string
+  }> = []
 
-  async ensureTenantDatabase(_tenant: { id: string }, subdomain: string) {
+  async ensureTenantDatabase(
+    _tenant: { id: string },
+    subdomain: string,
+    options?: {
+      existingRuntimeConnectionString?: string | null
+      requireExistingRuntimeConnectionString?: boolean
+    },
+  ) {
     const databaseName = `tenant_demo_${subdomain.replace(/-/g, '_')}`
+    const roleName = `tenant_rt_demo_${subdomain.replace(/-/g, '_')}`
+    this.ensureCalls.push({
+      existingRuntimeConnectionString: options?.existingRuntimeConnectionString,
+      requireExistingRuntimeConnectionString:
+        options?.requireExistingRuntimeConnectionString,
+      subdomain,
+    })
     this.createdDatabaseNames.push(databaseName)
     return {
       databaseName,
-      runtimeConnectionString: `postgresql://postgres:postgres@postgres.default:5432/${databaseName}`,
+      roleName,
+      runtimeConnectionString: buildTenantDatabaseConnectionString(
+        'postgresql://postgres:postgres@postgres.default:5432/postgres',
+        databaseName,
+        {
+          username: roleName,
+          password: 'generated-runtime-password',
+        },
+      ),
     }
   }
 
-  async deleteTenantDatabase(databaseName: string) {
-    this.deletedDatabaseNames.push(databaseName)
+  async deleteTenantDatabase(tenant: { id: string }, subdomain: string) {
+    this.deletedDatabaseNames.push(`tenant_${tenant.id.replace(/-/g, '_')}_${subdomain.replace(/-/g, '_')}`)
   }
 
   async close() {}
@@ -41,12 +69,19 @@ class FakeInfrastructureManager {
     maxSurge: number | string | undefined
     maxUnavailable: number | string | undefined
     minReadySeconds: number | undefined
+    runtimeConnectionString: string | undefined
   }> = []
   deletedResources: TenantProvisioningResources[] = []
   shouldThrow = false
+  runtimeConnectionStrings = new Map<string, string>()
 
   async applyTenantResources(bundle: {
     resources: TenantProvisioningResources
+    secret?: {
+      data?: {
+        DATABASE_URL?: string
+      }
+    }
     deployment: {
       spec?: {
         minReadySeconds?: number
@@ -81,17 +116,53 @@ class FakeInfrastructureManager {
       maxUnavailable:
         bundle.deployment.spec?.strategy?.rollingUpdate?.maxUnavailable,
       minReadySeconds: bundle.deployment.spec?.minReadySeconds,
+      runtimeConnectionString: bundle.secret?.data?.DATABASE_URL
+        ? Buffer.from(bundle.secret.data.DATABASE_URL, 'base64').toString('utf8')
+        : undefined,
     })
+
+    if (bundle.secret?.data?.DATABASE_URL) {
+      this.runtimeConnectionStrings.set(
+        this.secretKey(bundle.resources),
+        Buffer.from(bundle.secret.data.DATABASE_URL, 'base64').toString('utf8'),
+      )
+    }
 
     if (this.shouldThrow) {
       throw new Error('synthetic infrastructure failure')
     }
   }
 
+  async getTenantRuntimeConnectionString(resources: TenantProvisioningResources) {
+    return this.runtimeConnectionStrings.get(this.secretKey(resources)) ?? null
+  }
+
   async waitForTenantReady() {}
 
   async deleteTenantResources(resources: TenantProvisioningResources) {
+    this.runtimeConnectionStrings.delete(this.secretKey(resources))
     this.deletedResources.push(resources)
+  }
+
+  private secretKey(resources: TenantProvisioningResources) {
+    return `${resources.namespace}/${resources.secretName}`
+  }
+}
+
+function createTenantRecord(overrides: Partial<Tenant> = {}): Tenant {
+  return {
+    id: 'tenant-demo',
+    slug: 'demo',
+    subdomain: null,
+    ownerId: 'owner-1',
+    desiredState: 'provisioning',
+    currentState: 'provisioning',
+    version: '1.0.0',
+    storageReference: null,
+    backupMetadata: null,
+    createdAt: '2026-04-21T00:00:00.000Z',
+    updatedAt: '2026-04-21T00:00:00.000Z',
+    ...overrides,
   }
 }
 
@@ -139,6 +210,21 @@ describe('TenantProvisioningService', () => {
         infrastructureManager.bundles[0].resources.hostname,
         `${result.tenant.subdomain}.dnd-notes.test`,
       )
+      const runtimeDatabaseUrl = new URL(
+        infrastructureManager.bundles[0].runtimeConnectionString ?? '',
+      )
+      assert.equal(
+        decodeURIComponent(runtimeDatabaseUrl.username).startsWith('tenant_rt_'),
+        true,
+      )
+      assert.equal(
+        runtimeDatabaseUrl.pathname,
+        `/${databaseManager.createdDatabaseNames[0]}`,
+      )
+      assert.equal(
+        databaseManager.ensureCalls[0]?.requireExistingRuntimeConnectionString,
+        false,
+      )
     } finally {
       await provisioningService.close()
       tenantRegistry.close()
@@ -173,6 +259,10 @@ describe('TenantProvisioningService', () => {
         'control-plane',
         'Provisioned already',
       )
+      infrastructureManager.runtimeConnectionStrings.set(
+        'tenant-t-existing123456/dnd-notes-runtime-secret',
+        'postgresql://shared-runtime:shared-password@postgres.default:5432/tenant_demo_t_existing123456',
+      )
 
       const result = await provisioningService.provisionTenant({
         tenantId: 'tenant-demo',
@@ -190,6 +280,14 @@ describe('TenantProvisioningService', () => {
       assert.equal(
         tenantRegistry.getStateTransitions('tenant-demo').some((transition) =>
           transition.toState === 'upgrading'),
+        true,
+      )
+      assert.equal(
+        databaseManager.ensureCalls[0]?.existingRuntimeConnectionString,
+        'postgresql://shared-runtime:shared-password@postgres.default:5432/tenant_demo_t_existing123456',
+      )
+      assert.equal(
+        databaseManager.ensureCalls[0]?.requireExistingRuntimeConnectionString,
         true,
       )
     } finally {
@@ -381,6 +479,58 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('allows provisioning retry for tenants stuck in failed state with persisted subdomain but no runtime secret', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-failed123456')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'failed',
+        'control-plane',
+        'Previous provisioning attempt failed mid-flight',
+      )
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(result.tenant.subdomain, 't-failed123456')
+      assert.equal(
+        databaseManager.ensureCalls[0]?.requireExistingRuntimeConnectionString,
+        false,
+      )
+      const runtimeDatabaseUrl = new URL(
+        infrastructureManager.bundles[0].runtimeConnectionString ?? '',
+      )
+      assert.equal(
+        decodeURIComponent(runtimeDatabaseUrl.username).startsWith('tenant_rt_'),
+        true,
+      )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
   it('deprovisions tenant resources and clears the storage reference', async () => {
     const tenantRegistry = new TenantRegistry(':memory:')
     const databaseManager = new FakeDatabaseManager()
@@ -544,8 +694,9 @@ describe('TenantProvisioningService', () => {
         subdomain: 't-opaque123456',
         database: {
           databaseName: 'tenant_demo_t_opaque123456',
+          roleName: 'tenant_rt_demo_t_opaque123456',
           runtimeConnectionString:
-            'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+            'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
         },
         baseDomain: 'dnd-notes.test',
         imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -598,8 +749,9 @@ describe('TenantProvisioningService', () => {
         subdomain: maxLengthSubdomain,
         database: {
           databaseName: 'tenant_demo',
+          roleName: 'tenant_rt_demo',
           runtimeConnectionString:
-            'postgresql://postgres:postgres@postgres.default:5432/tenant_demo',
+            'postgresql://tenant_rt_demo:generated-runtime-password@postgres.default:5432/tenant_demo',
         },
         baseDomain: 'dnd-notes.test',
         imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -631,8 +783,9 @@ describe('TenantProvisioningService', () => {
         subdomain: 't-opaque123456',
         database: {
           databaseName: 'tenant_demo_t_opaque123456',
+          roleName: 'tenant_rt_demo_t_opaque123456',
           runtimeConnectionString:
-            'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+            'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
         },
         baseDomain: 'dnd-notes.test',
         imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -666,6 +819,304 @@ describe('TenantProvisioningService', () => {
         'tenant_demo_t_opaque123456',
       ),
       'postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/tenant_demo_t_opaque123456?sslmode=disable',
+    )
+  })
+})
+
+function extractQuotedIdentifier(sql: string) {
+  const match = sql.match(/"([^"]+)"/)
+
+  if (!match) {
+    throw new Error(`Expected quoted identifier in SQL: ${sql}`)
+  }
+
+  return match[1]
+}
+
+function createPostgresManagerHarness() {
+  const databases = new Set<string>()
+  const roles = new Set<string>()
+  const adminQueries: Array<{ sql: string; values?: readonly unknown[] }> = []
+  const tenantQueries: string[] = []
+  let adminPoolEnded = false
+  const tenantPoolEndCalls: string[] = []
+
+  const adminPool = {
+    async connect() {
+      return {
+        async query<Row extends { [key: string]: unknown } = Record<string, never>>(
+          sql: string,
+          values?: readonly unknown[],
+        ) {
+          adminQueries.push({ sql, values })
+
+          if (sql.includes('FROM pg_database')) {
+            return {
+              rows: [
+                {
+                  exists: databases.has(String(values?.[0] ?? '')),
+                },
+              ] as Row[],
+            }
+          }
+
+          if (sql.includes('FROM pg_roles')) {
+            return {
+              rows: [
+                {
+                  exists: roles.has(String(values?.[0] ?? '')),
+                },
+              ] as Row[],
+            }
+          }
+
+          if (sql.startsWith('CREATE DATABASE ')) {
+            databases.add(extractQuotedIdentifier(sql))
+          } else if (
+            sql.startsWith('CREATE ROLE ') ||
+            sql.startsWith('ALTER ROLE ')
+          ) {
+            roles.add(extractQuotedIdentifier(sql))
+          } else if (sql.startsWith('DROP DATABASE ')) {
+            databases.delete(extractQuotedIdentifier(sql))
+          } else if (sql.startsWith('DROP ROLE IF EXISTS ')) {
+            roles.delete(extractQuotedIdentifier(sql))
+          }
+
+          return { rows: [] as Row[] }
+        },
+        release() {},
+      }
+    },
+    async end() {
+      adminPoolEnded = true
+    },
+  }
+
+  const manager = new PostgresTenantDatabaseManager(
+    'postgresql://admin:admin@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable',
+    'postgresql://runtime-template:placeholder@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable',
+    {
+      pool: adminPool,
+      createTenantPool(connectionString: string) {
+        return {
+          async connect() {
+            return {
+              async query(sql: string) {
+                tenantQueries.push(sql)
+                return { rows: [] }
+              },
+              release() {},
+            }
+          },
+          async end() {
+            tenantPoolEndCalls.push(connectionString)
+          },
+        }
+      },
+      generatePassword: () => 'generated-runtime-password',
+    },
+  )
+
+  return {
+    adminPoolEnded: () => adminPoolEnded,
+    adminQueries,
+    databases,
+    manager,
+    roles,
+    tenantPoolEndCalls,
+    tenantQueries,
+  }
+}
+
+describe('PostgresTenantDatabaseManager', () => {
+  it('creates per-tenant runtime roles and grants least-privilege access for new tenants', async () => {
+    const harness = createPostgresManagerHarness()
+
+    const database = await harness.manager.ensureTenantDatabase(
+      createTenantRecord(),
+      't-opaque123456',
+    )
+
+    const runtimeDatabaseUrl = new URL(database.runtimeConnectionString)
+
+    assert.equal(database.roleName, decodeURIComponent(runtimeDatabaseUrl.username))
+    assert.equal(
+      decodeURIComponent(runtimeDatabaseUrl.password),
+      'generated-runtime-password',
+    )
+    assert.equal(runtimeDatabaseUrl.pathname, `/${database.databaseName}`)
+    assert.equal(runtimeDatabaseUrl.searchParams.get('sslmode'), 'disable')
+    assert.equal(
+      harness.adminQueries.some((query) => query.sql.startsWith('CREATE ROLE ')),
+      true,
+    )
+    const createRoleQuery = harness.adminQueries.find((query) =>
+      query.sql.startsWith('CREATE ROLE '),
+    )
+    assert.ok(createRoleQuery)
+    assert.equal(createRoleQuery.values, undefined)
+    assert.match(createRoleQuery.sql, /PASSWORD 'generated-runtime-password'/)
+    assert.equal(
+      harness.adminQueries.some((query) =>
+        query.sql.startsWith('GRANT CONNECT ON DATABASE '),
+      ),
+      true,
+    )
+    assert.equal(
+      harness.tenantQueries.some((sql) =>
+        sql.includes('CREATE TABLE IF NOT EXISTS owner_accounts'),
+      ),
+      true,
+    )
+    assert.equal(
+      harness.tenantQueries.some((sql) =>
+        sql.includes('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES'),
+      ),
+      true,
+    )
+
+    await harness.manager.close()
+    assert.equal(harness.adminPoolEnded(), true)
+    assert.equal(harness.tenantPoolEndCalls.length, 1)
+  })
+
+  it('preserves legacy runtime credentials during existing-tenant reprovisioning', async () => {
+    const harness = createPostgresManagerHarness()
+    const legacyRuntimeUrl =
+      'postgresql://shared-runtime:shared-password@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable'
+
+    const database = await harness.manager.ensureTenantDatabase(
+      createTenantRecord({ subdomain: 't-existing123456', currentState: 'ready' }),
+      't-existing123456',
+      {
+        existingRuntimeConnectionString: legacyRuntimeUrl,
+        requireExistingRuntimeConnectionString: true,
+      },
+    )
+
+    const runtimeDatabaseUrl = new URL(database.runtimeConnectionString)
+
+    assert.equal(database.roleName, null)
+    assert.equal(decodeURIComponent(runtimeDatabaseUrl.username), 'shared-runtime')
+    assert.equal(decodeURIComponent(runtimeDatabaseUrl.password), 'shared-password')
+    assert.equal(runtimeDatabaseUrl.pathname, `/${database.databaseName}`)
+    assert.equal(
+      harness.adminQueries.some((query) => query.sql.startsWith('CREATE ROLE ')),
+      false,
+    )
+    assert.equal(
+      harness.tenantQueries.some((sql) =>
+        sql.includes('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES'),
+      ),
+      false,
+    )
+  })
+
+  it('fails existing-tenant reprovisioning when the runtime secret is missing', async () => {
+    const harness = createPostgresManagerHarness()
+
+    await assert.rejects(
+      harness.manager.ensureTenantDatabase(
+        createTenantRecord({ subdomain: 't-existing123456', currentState: 'ready' }),
+        't-existing123456',
+        {
+          requireExistingRuntimeConnectionString: true,
+        },
+      ),
+      /runtime database secret is missing/,
+    )
+  })
+
+  it('fails existing-tenant reprovisioning when the runtime secret is blank', async () => {
+    const harness = createPostgresManagerHarness()
+
+    await assert.rejects(
+      harness.manager.ensureTenantDatabase(
+        createTenantRecord({ subdomain: 't-existing123456', currentState: 'ready' }),
+        't-existing123456',
+        {
+          existingRuntimeConnectionString: '   ',
+          requireExistingRuntimeConnectionString: true,
+        },
+      ),
+      /runtime database secret is missing/,
+    )
+  })
+
+  it('rejects existing-tenant reprovisioning with actionable error when DATABASE_URL is malformed', async () => {
+    const harness = createPostgresManagerHarness()
+    const malformedRuntimeUrl = 'postgresql://tenant-user:super-secret password@['
+
+    await assert.rejects(
+      harness.manager.ensureTenantDatabase(
+        createTenantRecord({ id: 'tenant-demo', subdomain: 't-existing123456', currentState: 'ready' }),
+        't-existing123456',
+        {
+          existingRuntimeConnectionString: malformedRuntimeUrl,
+          requireExistingRuntimeConnectionString: true,
+        },
+      ),
+      (error: Error) => {
+        assert.match(error.message, /Invalid DATABASE_URL in runtime secret/)
+        assert.match(error.message, /tenant-demo/)
+        assert.match(error.message, /must be a valid PostgreSQL connection string/)
+        assert.equal(error.message.includes('super-secret'), false)
+        assert.equal(error.message.includes(malformedRuntimeUrl), false)
+        return true
+      },
+    )
+  })
+
+  it('keeps long tenant database and role names unique when truncation is required', async () => {
+    const harness = createPostgresManagerHarness()
+    const sharedPrefix = `t-${'a'.repeat(maxTenantSubdomainLength - 3)}`
+    const firstDatabase = await harness.manager.ensureTenantDatabase(
+      createTenantRecord({ id: 'tenant-demo' }),
+      `${sharedPrefix}b`,
+    )
+    const secondDatabase = await harness.manager.ensureTenantDatabase(
+      createTenantRecord({ id: 'tenant-demo' }),
+      `${sharedPrefix}c`,
+    )
+
+    assert.notEqual(firstDatabase.databaseName, secondDatabase.databaseName)
+    assert.notEqual(firstDatabase.roleName, secondDatabase.roleName)
+    assert.ok(firstDatabase.databaseName.length <= 63)
+    assert.ok(secondDatabase.databaseName.length <= 63)
+    assert.ok((firstDatabase.roleName ?? '').length <= 63)
+    assert.ok((secondDatabase.roleName ?? '').length <= 63)
+  })
+
+  it('drops tenant sessions, the database, and the dedicated runtime role on deprovision', async () => {
+    const harness = createPostgresManagerHarness()
+    harness.databases.add('tenant_tenant_demo_t_existing123456')
+    harness.roles.add('tenant_rt_tenant_demo_t_existing123456')
+
+    await harness.manager.deleteTenantDatabase(
+      createTenantRecord({ subdomain: 't-existing123456', currentState: 'ready' }),
+      't-existing123456',
+    )
+
+    assert.equal(
+      harness.adminQueries.some((query) =>
+        query.sql.includes('SELECT pg_terminate_backend(pid)'),
+      ),
+      true,
+    )
+    assert.equal(
+      harness.adminQueries.some((query) =>
+        query.sql.startsWith('DROP DATABASE "tenant_tenant_demo_t_existing123456"'),
+      ),
+      true,
+    )
+    assert.equal(
+      harness.adminQueries.some((query) =>
+        query.sql.startsWith(
+          'DROP ROLE IF EXISTS "tenant_rt_tenant_demo_t_existing123456"',
+        ),
+      ),
+      true,
     )
   })
 })
@@ -758,8 +1209,9 @@ describe('KubernetesTenantInfrastructureManager', () => {
       subdomain: 't-opaque123456',
       database: {
         databaseName: 'tenant_demo_t_opaque123456',
+        roleName: 'tenant_rt_demo_t_opaque123456',
         runtimeConnectionString:
-          'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+          'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
       },
       baseDomain: 'dnd-notes.test',
       imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -835,8 +1287,9 @@ describe('KubernetesTenantInfrastructureManager', () => {
       subdomain: 't-opaque123456',
       database: {
         databaseName: 'tenant_demo_t_opaque123456',
+        roleName: 'tenant_rt_demo_t_opaque123456',
         runtimeConnectionString:
-          'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_opaque123456',
+          'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
       },
       baseDomain: 'dnd-notes.test',
       imageRepository: 'ghcr.io/daydream-software/dnd-notes',
