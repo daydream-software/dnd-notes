@@ -545,3 +545,33 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 - Tenant provisioning retry safety: check `currentState` against successful provisioning states, not just `hadPersistedSubdomain`
 - URL parsing error handling: always wrap with tenant/secret context to aid operational troubleshooting
 
+
+## 2026-04-21: PR #72 Latest Review Comments Resolution
+
+**Work:** Data addressed latest 2 new review comments on PR #72, fixing credential leakage and identifier collision risks.
+
+**Fixes Applied:**
+
+1. **DATABASE_URL error message leakage**
+   - **Issue:** Malformed DATABASE_URL errors were re-emitting raw connection strings and credentials to logs
+   - **Fix:** Sanitized error output in connection string validation; credentials never appear in error messages
+   - **Impact:** No more credential exposure in logs/monitoring systems
+
+2. **Postgres identifier generation collision handling**
+   - **Issue:** Long-subdomain scenarios risked identifier collisions in multi-tenant environments
+   - **Fix:** Implemented stable hashed suffixes for identifier generation; adjacent database-name handling prevents collisions
+   - **Impact:** Safe identifier generation at scale across tenant provisioning lifecycles
+
+**Validation:**
+- ✅ apps/control-plane lint passed
+- ✅ apps/control-plane tests passed
+- ✅ apps/control-plane build passed
+
+**GitHub State:**
+- All open review threads resolved (0 remaining)
+- PR #72 awaits CI/check rerun
+- No blocking feedback
+
+**Commit:** b7badaa
+
+**Outcome:** PR #72 is unblocked and ready for CI clearance and merge.
