@@ -507,3 +507,41 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 
 ## Team Updates
 
+- PR #72 third review wave (2026-04-21): Fixed final blocking correctness issues after CI fix batch. Issues: (1) `requireExistingRuntimeConnectionString` keyed solely off `hadPersistedSubdomain`, blocking retry for tenants stuck in 'provisioning'/'failed' state with persisted subdomain but no runtime Secret; (2) `resolveExistingTenantRuntimeIdentity()` let `new URL()` throw generic parse errors instead of actionable messages. Fixed: changed line 253 logic to only require existing runtime connection string for successfully provisioned tenants (ready/upgrading/maintenance/restoring), allowing failed-state retry; wrapped URL parsing in try-catch to throw actionable error naming tenant and explaining DATABASE_URL must be valid PostgreSQL connection string. Added tests: "allows provisioning retry for tenants stuck in failed state with persisted subdomain but no runtime secret" and "rejects existing-tenant reprovisioning with actionable error when DATABASE_URL is malformed". All 9 PR #72 review threads now resolved. Commit `e2d8059`. — Data (Agent)
+- Tenant provisioning state machine repair pattern: when provisioning fails mid-flight after subdomain is persisted but before the runtime Secret exists, a naive `requireExistingRuntimeConnectionString := hadPersistedSubdomain` blocks retry. The safe pattern is `requireExistingRuntimeConnectionString := wasSuccessfullyProvisioned` where `wasSuccessfullyProvisioned` checks `currentState` against `ready|upgrading|maintenance|restoring` so provisioning/failed tenants can mint new credentials on retry while ready tenants preserve their existing runtime identity.
+- Error handling pattern for URL parsing in credential resolution: when parsing an existing tenant runtime connection string, wrap `new URL()` in try-catch and throw an actionable error that includes the tenant ID and explains that DATABASE_URL must be a valid PostgreSQL connection string. This prevents generic URL parse errors from hiding which tenant/secret is at fault.
+
+## 2026-04-21: PR #72 Final Review Cycle Complete
+
+**Work:** Data resolved all 9 remaining review threads on PR #72 (per-tenant Postgres credentials), completing the final QA cycle.
+
+**Thread Resolutions (3 final unresolved → 0):**
+
+1. **`requireExistingRuntimeConnectionString` tenant state check**  
+   - **Issue:** Logic keyed off `hadPersistedSubdomain`, which incorrectly blocked retry for provisioning/failed-state tenants that had persisted subdomain but no runtime Secret
+   - **Fix:** Changed check to verify tenant is in a successfully-provisioned state (`ready|upgrading|maintenance|restoring`)
+   - **Impact:** Tenants stuck in provisioning/failed can now be retried with new credentials while live tenants preserve existing identity
+   - **Test added:** "allows provisioning retry for tenants stuck in failed state with persisted subdomain but no runtime secret"
+
+2. **`resolveExistingTenantRuntimeIdentity()` error messaging**  
+   - **Issue:** Let `new URL()` throw generic parse errors, obscuring which tenant/secret context was at fault
+   - **Fix:** Wrapped URL parsing in try-catch, throw custom `invalid-DATABASE_URL` error naming tenant and explaining expected format
+   - **Impact:** Operational debugging now has clear tenant/secret context instead of generic parse failures
+   - **Test added:** "rejects existing-tenant reprovisioning with actionable error when DATABASE_URL is malformed"
+
+3. **Additional unresolved threads (3 total in batch)**  
+   - All addressed and closed by Data during final review cycle
+
+**Validation:** Control-plane test suite PASSED (62/62)
+
+**Outcomes:**
+- PR #72 review status: 0 unresolved threads (9/9 resolved)
+- Branch pushed, awaiting final CI clearance
+- Ready for merge
+
+**Commit:** e2d8059
+
+**Patterns Documented:**
+- Tenant provisioning retry safety: check `currentState` against successful provisioning states, not just `hadPersistedSubdomain`
+- URL parsing error handling: always wrap with tenant/secret context to aid operational troubleshooting
+
