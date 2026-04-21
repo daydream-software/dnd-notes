@@ -312,8 +312,8 @@ replace the live SQLite database with a known-good snapshot.
 
 This runbook assumes single-file SQLite snapshots. The app intentionally keeps
 file-backed SQLite stores on rollback-journal mode instead of WAL, so operators
-do not need to coordinate `.sqlite-wal` / `.sqlite-shm` sidecars during backup
-and restore handling.
+do not need to coordinate `<dbPath>-wal` / `<dbPath>-shm` sidecars during
+backup and restore handling.
 
 ### Minimum operating expectations
 
