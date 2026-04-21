@@ -4,6 +4,7 @@ import { chmod, mkdir, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import Database from 'better-sqlite3'
 import {
   createPostgresDatabase,
   createSqliteDatabase,
@@ -281,6 +282,51 @@ test('createSqliteDatabase can open a read-only snapshot without write access', 
       () => readonlyDatabase.prepare('INSERT INTO notes (title) VALUES (?)').run('Nope'),
       /readonly/i,
     )
+  } finally {
+    await readonlyDatabase.close()
+  }
+})
+
+test('createSqliteDatabase keeps writable file-backed stores on rollback journals', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const dbPath = join(runtimeDirectory, `journal-mode-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await rm(dbPath, { force: true })
+    await rm(`${dbPath}-wal`, { force: true })
+    await rm(`${dbPath}-shm`, { force: true })
+  })
+
+  const seededDatabase = new Database(dbPath)
+  try {
+    seededDatabase.pragma('journal_mode = WAL')
+    seededDatabase.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL
+      );
+
+      INSERT INTO notes (title) VALUES ('WAL seed');
+    `)
+  } finally {
+    seededDatabase.close()
+  }
+
+  const writableDatabase = createSqliteDatabase(dbPath)
+  try {
+    const journalMode = await writableDatabase
+      .prepare<{ journal_mode: string }>('PRAGMA journal_mode')
+      .get()
+    assert.equal(journalMode?.journal_mode, 'delete')
+  } finally {
+    await writableDatabase.close()
+  }
+
+  const readonlyDatabase = createSqliteDatabase(dbPath, { readonly: true })
+  try {
+    const journalMode = await readonlyDatabase
+      .prepare<{ journal_mode: string }>('PRAGMA journal_mode')
+      .get()
+    assert.equal(journalMode?.journal_mode, 'delete')
   } finally {
     await readonlyDatabase.close()
   }

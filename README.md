@@ -147,6 +147,12 @@ You can override the SQLite path with `NOTES_DB_PATH`, and you can also set `POR
 there for the API listener. When you set `NOTES_DB_PATH` in `apps/api/.env`, use
 paths relative to `apps/api` (for example `data/dnd-notes.sqlite`).
 
+Writable SQLite note stores intentionally stay on rollback-journal mode
+(`journal_mode=DELETE`), not WAL. Hosted production now targets Postgres, while
+the remaining SQLite paths are local fallback plus backup/restore snapshot
+interchange; keeping SQLite on a single-file journal model avoids WAL sidecars
+and checkpoint handling in those workflows.
+
 Optional Postgres pool tuning env vars:
 
 - `NOTES_DB_POOL_MIN` (default `0`)
@@ -303,6 +309,11 @@ require signing in again immediately afterward.
 
 Use this runbook whenever you need to capture a backup, rehearse recovery, or
 replace the live SQLite database with a known-good snapshot.
+
+This runbook assumes single-file SQLite snapshots. The app intentionally keeps
+file-backed SQLite stores on rollback-journal mode instead of WAL, so operators
+do not need to coordinate `.sqlite-wal` / `.sqlite-shm` sidecars during backup
+and restore handling.
 
 ### Minimum operating expectations
 

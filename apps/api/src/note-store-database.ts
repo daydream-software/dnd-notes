@@ -120,6 +120,9 @@ export function createSqliteDatabase(
     : new Database(dbPath)
 
   if (!options.readonly) {
+    if (dbPath !== ':memory:') {
+      database.pragma('journal_mode = DELETE')
+    }
     database.pragma('foreign_keys = ON')
   }
   const transactionExecutor = new AsyncLocalStorage<SqliteTransactionContext>()
