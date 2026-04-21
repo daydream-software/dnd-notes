@@ -1,6 +1,6 @@
 ---
 name: "postgres-tenant-rolling-update"
-description: "Make a single-replica tenant rollout boring by tying RollingUpdate settings to runtime drain behavior and Postgres pool overlap."
+description: "Make a single-replica tenant rollout boring by tying RollingUpdate settings to runtime drain behavior and a drain-first, no-overlap Postgres shutdown contract."
 domain: "backend"
 confidence: "high"
 source: "earned"
