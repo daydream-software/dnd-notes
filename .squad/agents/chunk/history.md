@@ -26,6 +26,15 @@ Chunk initialized as Tester for the initial project squad.
 
 ## Learnings
 
+### Issue #55 QA Gate (2026-04-22)
+- Graceful shutdown choreography is complete: API + control-plane both have SIGTERM handlers that mark readiness as unready immediately, then drain in-flight requests for 30s, then close HTTP server, then close database pool.
+- Postgres connection pool has tunable defaults via env vars (`NOTES_DB_POOL_MIN`, `NOTES_DB_POOL_MAX`, idle/connection/statement timeouts) and explicit `pool.end()` is awaited on close.
+- Kubernetes manifests have correct probes: liveness `/healthz` (always 200), readiness `/ready` (503 during shutdown or DB fail), 30s termination grace period.
+- **Five high-risk gaps exist but are currently manageable:** (1) readiness drain race window during rolling update—requires proof that old/new pods don't overlap on same Postgres; (2) pool drain under load—requires test that 20 concurrent queries complete or timeout gracefully; (3) connection timeout resilience—env vars exist, needs load test; (4) SPA fallback safety—guards exist in code, needs regression test to prove admin endpoints don't leak; (5) schema backward compatibility—not this gate, but document in future phases.
+- Created comprehensive QA brief at `.squad/qa-brief-issue-55.md` with 4 high-priority test cases, 4 failure drills (node drain, pod crash, Postgres unavailable, PVC contention), and conditional blocker: #55 ships only when all 6 tests pass + failure drills are documented.
+- **Likely blocker for Data:** Statement timeout (30s default) may fail backup/restore operations that take >30s; confirm in code review whether long operations have their own timeout or must be implemented.
+- **Architecture smell:** Current design puts readiness failure directly into the shutdown path (immediate 503 response). For future Phases 2+, consider explicit `POST /internal/drain` endpoint for explicit maintenance mode separate from automatic shutdown—this would let operators trigger drain without killing the pod.
+
 - Initial squad setup complete.
 - `apps/api/src/note-store.ts` owns SQLite bootstrap for the local DB at `apps/api/data/dnd-notes.sqlite`, so backward-compatible schema changes need in-place startup upgrades instead of relying on `CREATE TABLE IF NOT EXISTS`.
 - Regression coverage for legacy SQLite compatibility now lives in `apps/api/test/app.test.ts`, where a pre-attribution `notes` table is created and reopened through `createNoteStore()` to confirm legacy notes still load with null attribution.
