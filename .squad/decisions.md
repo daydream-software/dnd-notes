@@ -4038,3 +4038,164 @@ These are valuable **Phase 1 QA hardening work**, not Phase 0 gate blockers. The
 - Chunk's QA brief: `.squad/qa-brief-issue-55.md` (commit c6a0f40)
 - Mikey's Phase 0 verdict (2026-04-21): `.squad/agents/mikey/history.md`
 - Changed files: `apps/control-plane/src/provisioning.ts`, `apps/control-plane/test/provisioning.test.ts`, `README.md`, `RUNTIME.md`, `apps/control-plane/README.md`
+# Decision: Control-Plane Operator Portal — Explicit Phase 3 Slice
+
+**Date:** 2026-04-21  
+**Context:** Epic #42 platform planning; review of remaining Phase 2–3 scope  
+**Participants:** Mikey (Lead), FFMikha  
+
+## Problem
+
+The epic #42 and remaining open issues (#40, #56, #57, #39) do **not explicitly own the operator/admin surface** for the control plane. This creates ambiguity about whether:
+- Operators interact with the control plane via REST API only (no UI)
+- The control plane is "headless" and platform control lives elsewhere
+- UI/operator surface responsibility is deferred or assumed elsewhere
+
+Current open issues cover pieces of the operator story:
+- **#57**: Fleet status dashboard (observability, read-only)
+- **#56**: Keycloak auth for control plane + tenant apps (identity layer)
+- **#40**: Restore safety during writes (workflow, not UI)
+- **#39**: SQLite WAL investigation (database tuning, not UI)
+
+None of these own: *"Create the control-plane operator UI where humans trigger provisioning, see state machines, manage tenants, and control the platform."*
+
+## Decision
+
+**Split Phase 3 into two explicit, sequential issues:**
+
+### A. Phase 3a: Fleet Status Dashboard (#57, existing)
+**Scope:** Internal-only observability dashboard
+- Show tenant health, current version, rollout state, last backup/restore status
+- Read-only data contract for operators
+- Foundation for future public status.example.com
+- **Owner:** Brand (squad:brand label, already assigned)
+
+### B. Phase 3b: Control-Plane Operator Portal (NEW ISSUE)
+**Scope:** Operator control surface for platform administration
+- Tenant lifecycle management (list, create, delete, manage state)
+- Provisioning and deprovision workflows
+- Manual state-transition controls (maintenance, upgrade, restore triggers)
+- Audit trail / state transition history browsing
+- Keycloak-authenticated operator identity (integrates auth from #56)
+- **Connection point:** Consumes control-plane REST APIs (`/internal/*`)
+- **Owner:** To be assigned (likely Data or Brand, TBD with FFMikha)
+
+## Rationale
+
+1. **Clear boundaries:** Observability (#57) ≠ Control (#57b). Separating them prevents scope creep and unblocks both.
+2. **Parallelizable:** Data can build #57b operator portal in parallel with Brand's #57 fleet dashboard, both using the same control-plane APIs.
+3. **Phased rollout:** Operators get read-only visibility first (#57), then full control surface (#57b). This matches the "observe → control" operational maturity curve.
+4. **Team clarity:** Each issue owns a specific surface with explicit entry points (control-plane REST APIs).
+
+## Implementation Path
+
+1. Create new issue #58b (or sequential numbering): *"Build control-plane operator portal UI"*
+   - Acceptance: Operators can provision, manage lifecycle, and trigger maintenance workflows via web UI
+   - Dependencies: Completed #56 (Keycloak auth), #53–#55 (control-plane APIs)
+   - Story: "As a platform operator, I want a web interface to manage tenants and orchestrate platform operations"
+
+2. Update epic #42 Phase 3 section to explicitly list both:
+   - #57: Fleet status (observability)
+   - #58b: Operator portal (control)
+
+3. No changes to #40, #56, #39, #57 scope — they remain as currently scoped.
+
+## Next Steps
+
+- FFMikha: Confirm assignment / squad for #58b (or next available number)
+- Data / Brand: Review operator portal scope and estimate effort
+- Record decision in `.squad/decisions.md` after alignment
+# Stef — Admin/Operator UI Surface Clarification
+
+**Date:** 2026-04-21  
+**Context:** FFMikha asked whether admin/operator UI is planned given control-plane exists but has no driver or frontend.  
+**Status:** Clarification, not a new decision — confirms existing Phase 3 plan.
+
+## What Exists Now
+
+1. **Control-plane REST API** (`apps/control-plane`)
+   - Thin Express service with admin token auth
+   - Endpoints: `POST /internal/tenants` (create), `PATCH` (state/version/backup), `GET` (list/detail)
+   - Manages tenant lifecycle: provisioning → ready → upgrading → deprovisioned
+   - Zero web UI, purely backend plumbing
+
+2. **Per-tenant SiteAdminPanel** (`apps/web/src/SiteAdminPanel.tsx`)
+   - Read-only fleet metrics (account/campaign/membership/share-link counts)
+   - Backup download + restore upload (single-instance only)
+   - NOT an operator/multi-tenant admin surface
+
+## What's Planned
+
+### Phase 1 (Weeks 6–9): Provisioning Worker / Driver
+- **Owned by:** Data (Issue #54, tentative)
+- **Responsibility:** Service or script that calls control-plane API to create/update/delete tenant instances
+- **Scope:** Orchestrate the control-plane, translate high-level provisioning requests into control-plane API calls
+- **Frontend:** None yet — likely triggered by script/CLI
+
+### Phase 3 (Weeks 14+): Fleet Admin Dashboard
+- **Owned by:** Brand (Issue #57)
+- **Output:** Internal admin UI to visualize fleet state
+- **Shows:**
+  - Tenant list with status (provisioning, ready, failed, etc.)
+  - Current version per tenant
+  - Last upgrade time
+  - PVC size and utilization
+  - Last backup age
+  - Pod readiness
+- **API:** `GET /api/v1/admin/fleet/status` (new endpoint for dashboard)
+- **Stretch:** Customer-facing status page (deferred further)
+
+### Post-Phase 1: Portal App
+- **NOT in Phase 0–1** to avoid coupling provisioning contract to UI prematurely
+- **Scope:** Registration, subscription, instance dashboard, admin access portal
+- **Decision:** Portal becomes a consumer of control-plane API only after Phase 1 API contract is stable
+
+## The "Missing Driver"
+
+FFMikha's point: control-plane API exists but no agent/service calls it yet.
+
+**Current state:** Brand built the API; no provisioning orchestration yet.
+
+**Phase 1 plan:** Data (or assigned owner) builds the provisioning worker that:
+1. Listens to provisioning requests (API, CLI, or script)
+2. Calls control-plane endpoints to create/manage tenants
+3. Tracks state transitions
+4. Handles rollbacks/failures
+5. Exposes lifecycle events back to control-plane registry
+
+**Why no web portal yet:** Admin workflows must prove stable API contract first. Building portal UI before provisioning API is finalized creates coupling; if API contract changes, portal breaks.
+
+## Implication for Current Work
+
+- **Phase 0 (now):** Control-plane API works; containerization works; k3d local K8s setup works
+- **Phase 1 next:** Provisioning orchestration (the worker/driver that calls control-plane API)
+- **Phase 1 parallel:** CI for container builds + manifest validation
+- **Phase 2 parallel:** Keycloak OIDC auth integration into tenant instances
+- **Phase 3 later:** Admin dashboard + observability + backup/restore validation
+
+## Recommendation
+
+If FFMikha wants to finalize Phase 1 scope/timeline:
+
+1. **Clarify Issue #54 (provisioning worker) ownership + acceptance criteria**
+   - What triggers provisioning? (script, API, operator CLI?)
+   - How does worker call control-plane API?
+   - What state does it track?
+   - How does it detect failures and recover?
+
+2. **Defer portal UI until Phase 1 API lands**
+   - Phase 1 goal: prove provisioning mechanics work (not build admin web UI)
+   - Portal can then become a thin frontend to control-plane API + provisioning worker API
+
+3. **Plan Issue #57 scope: what does "internal admin dashboard" require?**
+   - Does it read from control-plane DB directly or call control-plane API?
+   - Does it trigger actions (force backup, scale to zero) or only visualize state?
+   - Does it integrate K8s status (pod restarts, PVC usage) or just surface control-plane state?
+
+---
+
+**Next:** FFMikha to confirm Phase 1 driver/provisioning worker scope with Data. Stef (or assigned UI agent) can then plan #57 dashboard UX based on finalized provisioning contract.
+### 2026-04-21T18:41:44Z: User directive
+**By:** FFMikha (via Copilot)
+**What:** Stop looping on PR #67; keep skill-only / squad-memory commits off the feature PR and land them on `main` instead.
+**Why:** User request — captured for team memory

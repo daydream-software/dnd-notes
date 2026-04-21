@@ -451,3 +451,4 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 **Review loop:** Fixed issues through 3 iterations (4 Copilot reviews total), resolving all 13 review threads. Final review clean with no new comments.
 
 **Key learning:** Drain-first replacement (`maxSurge: 0`) is the safe default while RWO PVCs remain in the pod shape. Future zero-downtime rollouts (`maxSurge: 1`) can come once the PVC is removed or becomes RWX.
+
