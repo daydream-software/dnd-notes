@@ -479,6 +479,58 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('allows provisioning retry for tenants stuck in failed state with persisted subdomain but no runtime secret', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-failed123456')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'failed',
+        'control-plane',
+        'Previous provisioning attempt failed mid-flight',
+      )
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(result.tenant.subdomain, 't-failed123456')
+      assert.equal(
+        databaseManager.ensureCalls[0]?.requireExistingRuntimeConnectionString,
+        false,
+      )
+      const runtimeDatabaseUrl = new URL(
+        infrastructureManager.bundles[0].runtimeConnectionString ?? '',
+      )
+      assert.equal(
+        decodeURIComponent(runtimeDatabaseUrl.username).startsWith('tenant_rt_'),
+        true,
+      )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
   it('deprovisions tenant resources and clears the storage reference', async () => {
     const tenantRegistry = new TenantRegistry(':memory:')
     const databaseManager = new FakeDatabaseManager()
@@ -989,6 +1041,27 @@ describe('PostgresTenantDatabaseManager', () => {
         },
       ),
       /runtime database secret is missing/,
+    )
+  })
+
+  it('rejects existing-tenant reprovisioning with actionable error when DATABASE_URL is malformed', async () => {
+    const harness = createPostgresManagerHarness()
+
+    await assert.rejects(
+      harness.manager.ensureTenantDatabase(
+        createTenantRecord({ id: 'tenant-demo', subdomain: 't-existing123456', currentState: 'ready' }),
+        't-existing123456',
+        {
+          existingRuntimeConnectionString: 'not-a-valid-url-at-all',
+          requireExistingRuntimeConnectionString: true,
+        },
+      ),
+      (error: Error) => {
+        assert.match(error.message, /Invalid DATABASE_URL in runtime secret/)
+        assert.match(error.message, /tenant-demo/)
+        assert.match(error.message, /must be a valid PostgreSQL connection string/)
+        return true
+      },
     )
   })
 

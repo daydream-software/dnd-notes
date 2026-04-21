@@ -245,12 +245,17 @@ export class TenantProvisioningService implements TenantProvisioningPort {
             existingResources,
           )
         : null
+      const wasSuccessfullyProvisioned =
+        refreshedTenant.currentState === 'ready' ||
+        refreshedTenant.currentState === 'upgrading' ||
+        refreshedTenant.currentState === 'maintenance' ||
+        refreshedTenant.currentState === 'restoring'
       const database = await this.databaseManager.ensureTenantDatabase(
         refreshedTenant,
         subdomain,
         {
           existingRuntimeConnectionString,
-          requireExistingRuntimeConnectionString: hadPersistedSubdomain,
+          requireExistingRuntimeConnectionString: wasSuccessfullyProvisioned,
         },
       )
 
@@ -420,6 +425,7 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
       databaseName,
       expectedRoleName: roleName,
       runtimeDatabaseUrl: this.runtimeDatabaseUrl,
+      tenantId: tenant.id,
     })
 
     if (
@@ -967,13 +973,23 @@ function resolveExistingTenantRuntimeIdentity(params: {
   databaseName: string
   expectedRoleName: string
   runtimeDatabaseUrl: string
+  tenantId?: string
 }): TenantRuntimeIdentity | null {
   if (!hasRuntimeConnectionString(params.existingRuntimeConnectionString)) {
     return null
   }
 
   const existingRuntimeConnectionString = params.existingRuntimeConnectionString
-  const existingConnectionString = new URL(existingRuntimeConnectionString)
+  let existingConnectionString: URL
+  try {
+    existingConnectionString = new URL(existingRuntimeConnectionString)
+  } catch (error) {
+    const tenantContext = params.tenantId ? ` for tenant ${params.tenantId}` : ''
+    throw new Error(
+      `Invalid DATABASE_URL in runtime secret${tenantContext}: must be a valid PostgreSQL connection string (received: ${existingRuntimeConnectionString.slice(0, 50)}...)`,
+      { cause: error },
+    )
+  }
   const username = decodeURIComponent(existingConnectionString.username)
   const password = decodeURIComponent(existingConnectionString.password)
 
