@@ -1269,6 +1269,7 @@ export async function createNoteStore(
       owner_accounts.display_name,
       owner_accounts.password_hash,
       owner_accounts.is_site_admin,
+      owner_accounts.keycloak_sub,
       owner_accounts.created_at,
       owner_accounts.updated_at
     FROM owner_sessions

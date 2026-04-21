@@ -361,6 +361,7 @@ describe('Control Plane API', () => {
 
       assert.ok(tenant)
       assert.strictEqual(tenant.health, 'attention')
+      assert.strictEqual(tenant.backup.rawMetadata, null)
       assert.strictEqual(response.body.summary.tenantsWithBackupMetadata, 0)
       assert.strictEqual(response.body.summary.tenantsMissingBackupMetadata, 1)
       assert.strictEqual(response.body.summary.tenantsNeedingAttention, 1)

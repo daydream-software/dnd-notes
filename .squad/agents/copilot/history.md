@@ -47,3 +47,9 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Landed the first fleet-status slice as a read-only control-plane endpoint, `GET /internal/fleet/status`, instead of a standalone UI. The response now includes control-plane health, dependency status, summary counts by tenant state/version, and per-tenant details with latest transition plus lifted backup metadata fields when parseable JSON is already present.
 - Updated `apps/control-plane/README.md` to document the internal surface and the future path to a redacted public status page, while keeping issue `#68` as the richer operator portal.
 - Focused validation passed for `apps/control-plane` (`npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane`).
+
+## 2026-04-22: PR #75 review + smoke follow-up
+
+- Addressed the remaining live PR review items on `squad/57-fleet-status-surface`: `GET /internal/fleet/status` now trims whitespace-only backup metadata consistently, the tenant API session-token owner lookup selects `owner_accounts.keycloak_sub` again, and the control-plane tenant Postgres bootstrap now provisions `keycloak_sub` in `owner_accounts` so tenant pods do not boot against a stale schema contract.
+- Added regression coverage in `apps/control-plane/test/tenant-database-bootstrap.test.ts`, tightened the blank-backup assertion in `apps/control-plane/test/app.test.ts`, and asserted `keycloakSub: null` in the API auth login workflow test so the owner response shape cannot silently regress.
+- Workspace validation passed again for `apps/api` and `apps/control-plane`. Local `npm run k3d:smoke` is blocked in this environment before cluster creation because the Docker broker rejects the required `rancher/k3s:v1.35.3-k3s1` image, so smoke could not be replayed here end-to-end.

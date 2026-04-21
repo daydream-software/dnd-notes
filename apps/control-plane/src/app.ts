@@ -31,8 +31,11 @@ function readMetadataString(
 ): string | null {
   for (const key of keys) {
     const value = metadata[key]
-    if (typeof value === 'string' && value.length > 0) {
-      return value
+    if (typeof value === 'string') {
+      const trimmedValue = value.trim()
+      if (trimmedValue.length > 0) {
+        return trimmedValue
+      }
     }
   }
 
@@ -40,8 +43,10 @@ function readMetadataString(
 }
 
 function parseBackupMetadata(rawMetadata: string | null) {
+  const normalizedRawMetadata =
+    rawMetadata && hasBackupMetadata(rawMetadata) ? rawMetadata.trim() : null
   const emptyStatus = {
-    rawMetadata,
+    rawMetadata: normalizedRawMetadata,
     location: null,
     lastBackupAt: null,
     lastBackupStatus: null,
@@ -49,12 +54,12 @@ function parseBackupMetadata(rawMetadata: string | null) {
     lastRestoreDrillStatus: null,
   }
 
-  if (!rawMetadata) {
+  if (!normalizedRawMetadata) {
     return emptyStatus
   }
 
   try {
-    const parsed = JSON.parse(rawMetadata)
+    const parsed = JSON.parse(normalizedRawMetadata)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       return emptyStatus
     }
@@ -62,7 +67,7 @@ function parseBackupMetadata(rawMetadata: string | null) {
     const metadata = parsed as Record<string, unknown>
 
     return {
-      rawMetadata,
+      rawMetadata: normalizedRawMetadata,
       location: readMetadataString(metadata, ['location', 'backupLocation']),
       lastBackupAt: readMetadataString(metadata, ['lastBackupAt', 'lastBackup']),
       lastBackupStatus: readMetadataString(metadata, [

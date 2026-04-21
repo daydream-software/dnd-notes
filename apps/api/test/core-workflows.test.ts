@@ -595,6 +595,7 @@ test('owner auth normalizes email casing for registration, duplicate checks, and
   })
   assert.equal(loginResponse.status, 200)
   assert.equal(loginResponse.body.owner.email, 'aela@example.com')
+  assert.equal(loginResponse.body.owner.keycloakSub, null)
 })
 
 test('owner email lookups are backed by a unique lower(email) index', async (t) => {

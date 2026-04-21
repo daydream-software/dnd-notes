@@ -9,6 +9,7 @@ const tenantNoteStoreSchemaSql = `
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     is_site_admin INTEGER NOT NULL DEFAULT 0,
+    keycloak_sub TEXT UNIQUE,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
