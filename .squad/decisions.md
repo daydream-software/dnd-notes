@@ -2,7 +2,6 @@
 
 ## Active Decisions
 
-
 ### 2026-04-19: Code Review Response Patterns
 **Decided by:** Data (Backend Dev)  
 **Date:** 2026-04-19  
@@ -16,6 +15,7 @@ When addressing automated review feedback (Copilot or otherwise), reviews must b
 
 Adopt a three-tier classification framework for all PR review responses:
 
+
 ### Blocking
 - Type safety violations (e.g., string→number parse missing)
 - Data integrity risks (e.g., FK pragma missing, broken atomicity)
@@ -24,12 +24,14 @@ Adopt a three-tier classification framework for all PR review responses:
 
 **Action:** Fix immediately in current PR.
 
+
 ### Deferred (Follow-up)
 - Features explicitly deferred by team decisions
 - Optimizations that don't affect correctness
 - Extended test coverage beyond regressions
 
 **Action:** Respond on PR with rationale and tracking issue reference.
+
 
 ### Not Applicable
 - Comments based on outdated assumptions
@@ -55,6 +57,7 @@ Adopt a three-tier classification framework for all PR review responses:
 - Reduces reviewer/implementer friction by normalizing classification upfront
 
 ---
+
 
 
 ### 2026-04-17: Brand & FFMikha — copilot_yolo GitHub CLI Integration (consolidated)
@@ -90,6 +93,7 @@ Copilot and other agents can now rely on `gh` availability within sandbox contex
 
 
 
+
 ### 2026-04-17: PR #51 review — session planning scope
 
 **Decision:** Treat repo-root `plan.md` files as session-planning artifacts, not merge material, for docs-focused PRs.
@@ -101,6 +105,7 @@ Copilot and other agents can now rely on `gh` availability within sandbox contex
 **By:** Mikey
 
 ---
+
 
 
 ### 2026-04-17: PR #51 Re-review — approve after scope cleanup
@@ -166,6 +171,7 @@ If dnd-notes grows into multi-instance SaaS with SSO and a customer portal, the 
      └────────────────────┘
 ```
 
+
 ### Components
 
 | Component | Responsibility | Tech |
@@ -176,6 +182,7 @@ If dnd-notes grows into multi-instance SaaS with SSO and a customer portal, the 
 | **Routing layer** | Maps subdomain/path → instance, TLS termination | Caddy / Traefik / K8s Ingress |
 | **Control Plane** | Provisions/deprovisions instances, tracks lifecycle | New service or part of Portal |
 | **Control Plane DB** | Tenant registry, instance state, billing hooks | Postgres (shared) or SQLite |
+
 
 ### Auth flow (target)
 
@@ -191,6 +198,7 @@ If dnd-notes grows into multi-instance SaaS with SSO and a customer portal, the 
 
 **The prototype should prove instance lifecycle mechanics, not build the platform.**
 
+
 ### Scope IN for #42
 
 - **Provisioning script or minimal API** that can: create an instance (container + SQLite volume), start it, health-check it, stop it, destroy it
@@ -199,6 +207,7 @@ If dnd-notes grows into multi-instance SaaS with SSO and a customer portal, the 
 - **Routing stub**: a simple Caddy/Traefik config that maps `localhost:{port}` per instance (no real subdomain DNS yet)
 - **Documented control-plane contract**: what operations exist, what state they manage, what the operator needs to know
 
+
 ### Scope OUT for #42
 
 - No Keycloak integration (auth is a separate slice — see §3)
@@ -206,6 +215,7 @@ If dnd-notes grows into multi-instance SaaS with SSO and a customer portal, the 
 - No Kubernetes operator (deployment target is a later decision)
 - No billing, subscription, or public landing page
 - No production DNS or wildcard TLS
+
 
 ### Deliverable shape
 
@@ -230,6 +240,7 @@ A `provisioning/` directory (or `tools/provisioning/`) at repo root containing:
 
 ## 4. Decision Points to Settle Before Implementation
 
+
 ### Must decide now (before #42 coding starts)
 
 1. **Isolation boundary**: Container per customer, or process per customer on a shared host?
@@ -238,6 +249,7 @@ A `provisioning/` directory (or `tools/provisioning/`) at repo root containing:
 2. **Prototype scope confirmation**: Does #42 stay as a pure spike (throwaway), or should the provisioning script be production-path code?
    - *Recommendation:* Production-path but thin. Write it well enough to keep, but don't over-engineer. A clean shell script or Node CLI is fine.
 
+
 ### Decide soon (before auth slice)
 
 3. **Auth migration strategy**: Replace localStorage tokens with OIDC, or add OIDC as an alternative auth method alongside the current model?
@@ -245,6 +257,7 @@ A `provisioning/` directory (or `tools/provisioning/`) at repo root containing:
 
 4. **Routing model**: Subdomain per instance (`alice.dndnotes.app`) vs. path-prefix (`dndnotes.app/i/alice`)?
    - *Recommendation:* Subdomain. It gives each instance full origin isolation (cookies, localStorage, service workers stay separate). Path-prefix creates subtle sharing bugs.
+
 
 ### Can wait
 
@@ -315,12 +328,14 @@ Keep tenant content and tenant restore semantics out of the control plane so the
 
 ## Keycloak assessment
 
+
 ### Good fit when
 
 - the same human needs access across multiple customer instances;
 - enterprise SSO / IdP integration becomes a sales requirement;
 - centralized user lifecycle and offboarding matter more than per-instance autonomy;
 - support/admin workflows need a single identity plane.
+
 
 ### Operational costs
 
@@ -329,11 +344,13 @@ Keep tenant content and tenant restore semantics out of the control plane so the
 - single-service blast radius for login failures;
 - more moving parts around redirects, logout, cookies/tokens, and customer domains.
 
+
 ### Recommendation now
 
 **Do not make Keycloak part of the first prototype.** Revisit shared SSO only after the team proves the per-customer instance lifecycle and decides whether cross-instance identity is truly required. If that requirement appears, compare self-hosted Keycloak with a managed IdP instead of assuming self-hosting is worth it.
 
 ## Kubernetes operator + ingress automation
+
 
 ### Worth it when
 
@@ -342,52 +359,13 @@ Keep tenant content and tenant restore semantics out of the control plane so the
 - per-instance DNS, TLS, secrets, storage, and upgrades all need reliable automation;
 - the team needs repeatable fleet operations across dozens/hundreds of instances.
 
+
 ### Overkill when
 
 - the first target is a small number of customers;
 - the product is still validating whether per-customer isolation is even the right model;
 - a VM + reverse proxy + scripted container/service provisioning can still be understood and supported by one person.
 
-### Recommendation now
-
-Use plain provisioning automation first. Move to Kubernetes only after the operational pain is concrete and repeatable.
-
-## Smallest prototype that meaningfully de-risks #42
-
-Build the thinnest possible stack that can:
-
-1. create a new customer instance from a template;
-2. assign its public URL / same-origin config;
-3. attach dedicated SQLite storage;
-4. run health checks and expose instance status;
-5. exercise backup and restore on one provisioned instance;
-6. measure cold start, ready time, backup time, restore time, and basic concurrent usage behavior;
-7. prove one upgrade rollout across multiple isolated instances.
-
-That prototype answers the real go/no-go questions without prematurely committing to Keycloak or Kubernetes.
-
-## Platform guidance for next discussion
-
-- **Recommend first:** simple app-per-customer provisioning.
-- **Do not recommend first:** Kubernetes operator.
-- **Do not recommend first:** shared Keycloak.
-- **Re-evaluate later:** when customer count, enterprise SSO demand, or provisioning toil makes the simple model obviously too manual.
----
-title: Issue #42 backend direction
-date: 2026-04-17
-by: Data
----
-
-## Decision
-
-If `dnd-notes` moves toward a multi-instance SaaS, split responsibilities cleanly:
-
-1. **Control plane owns customer lifecycle**: signup, subscription, tenant registry, domain/ingress mapping, provisioning state, upgrade orchestration, fleet health, and backup policy.
-2. **Each tenant instance owns app data and app authorization**: campaigns, memberships, notes, share links, guest flows, and per-instance admin actions.
-3. **Shared SSO should do authentication, not replace local authorization**: a central IdP such as Keycloak can authenticate real users across the portal and tenant apps, but each tenant instance should still map the authenticated subject to local roles and campaign memberships.
-4. **Do not jump straight to a Kubernetes operator for the prototype**: start with a thin control-plane registry plus a provisioning worker and a narrow instance-management contract. Add an operator only if the spike shows instance count / drift / lifecycle complexity justifies it.
-
-## Control-plane / tenant boundary
 
 ### Control plane should own
 - account, organization, and subscription records;
@@ -398,6 +376,7 @@ If `dnd-notes` moves toward a multi-instance SaaS, split responsibilities cleanl
 - fleet-level health and operational telemetry;
 - support/admin access policy.
 
+
 ### Tenant instance should own
 - the existing app API and SQLite data model;
 - local user projection for authenticated users (keyed by stable IdP subject);
@@ -405,6 +384,7 @@ If `dnd-notes` moves toward a multi-instance SaaS, split responsibilities cleanl
 - share-link and guest-token flows;
 - local backup/restore execution against that instance's database;
 - maintenance/read-only behavior during restore or upgrade.
+
 
 ### Contract between them
 The control plane should not reach directly into note tables. It should talk to each instance through a narrow management surface such as:
@@ -493,6 +473,7 @@ This direction needs Brand + Mikey review because it crosses platform and produc
 ---
 
 
+
 ### 2026-04-18T00:40:33Z: User directive for issue #42 platform scope
 **By:** FFMikha (via Copilot)
 
@@ -501,6 +482,7 @@ This direction needs Brand + Mikey review because it crosses platform and produc
 **Why:** User request — captured for team memory to anchor platform architecture decisions around real production constraints rather than minimal spike assumptions.
 
 ---
+
 
 
 ### 2026-04-18: Issue #42 infrastructure choices for first hosted target
@@ -517,6 +499,7 @@ For local Kubernetes beyond kind, use k3d for fast daily work and k3s on a VM fo
 ---
 
 
+
 ### 2026-04-18: Issue #42 Kubernetes-first platform direction
 **By:** Brand (Infra)
 
@@ -531,6 +514,7 @@ Not as a custom product — early on, the higher-value move is an internal fleet
 **Why:** Managed Kubernetes avoids early engineering time on control-plane operations. Provider-managed control planes, good persistent block storage, low-friction small-cluster entry, boring ingress + LB + DNS story, strong snapshot/backup primitives, and simple automation surface all matter more than headline pricing for this workload. Shared ingress + cert-manager keep platform plumbing simple; per-tenant snowflakes create operational debt.
 
 ---
+
 
 
 ### 2026-04-18: Issue #42 backend direction for control plane, auth, and SQLite-backed tenant instances
@@ -551,6 +535,7 @@ Admin realm + note-takers realm is a reasonable shape (admin for operators/suppo
 ---
 
 
+
 ### 2026-04-18: Issue #42 persistence, auth, and versioning guidance
 **By:** Data (Backend Dev)
 
@@ -565,6 +550,7 @@ Safe rolling-update model: mark the tenant instance maintenance/read-only, finis
 **Why:** SQLite on Kubernetes requires operational discipline around ownership handoff. If the platform cannot guarantee single-writer rollout discipline, SQLite is the wrong tenant-database choice. One tenant database file is easy; hundreds are operational inventory: backup age, restoreability, schema version skew, WAL growth, disk pressure, failed checkpoints, and corrupted-file detection. Versioning guidance: keep control plane, portal, and tenant code on the same release train early (easier debugging, fewer compatibility questions) but do not require perfect lockstep at runtime because tenant rollouts are inherently staggered.
 
 ---
+
 
 
 ### 2026-04-18: Issue #42 — canonical epic shape and child-issue breakdown
@@ -587,6 +573,7 @@ Monorepo stays — re-evaluate after Phase 1 only if release cadence diverges. S
 ---
 
 
+
 ### 2026-04-18: Issue #42 — Expanded Platform Architecture Plan
 **By:** Mikey (Lead)
 
@@ -603,6 +590,7 @@ Relationship to existing issues: #43 (deployment artifacts) is unblocked by Phas
 ---
 
 
+
 ### 2026-04-18: Cross-Agent History Propagation Scope
 **By:** Scribe
 
@@ -617,6 +605,7 @@ When merging decision inbox files and propagating team updates, parse the decisi
 **Why:** Clarity — each agent's history reflects their actual work and decisions, not decisions they observed or heard about. Signal — when reviewing Copilot's history, readers should see Copilot's contributions, not a full team transcript. Accountability — architecture decisions should be visible in the originating agent's history (Data, Brand), not scattered across all agents' logs. Scalability — as the team grows, scoped history propagation prevents history logs from becoming noise archives.
 
 ---
+
 
 
 ### 2026-04-18: Issue #42 Architecture Gaps — Mikey's Platform Direction Risk Analysis
@@ -665,6 +654,7 @@ When merging decision inbox files and propagating team updates, parse the decisi
 **Next:** FFMikha to review with Mikey, approve assignments, adjust Phase 0–1 timeline to include k3d dev loop and ingress/TLS spikes.
 
 ---
+
 
 
 ### 2026-04-18: Issue #42 Infrastructure & Operations Gaps — Brand's Platform Risk Analysis
@@ -732,6 +722,7 @@ When merging decision inbox files and propagating team updates, parse the decisi
 **Next:** FFMikha + Mikey to review with Brand, assign Phase 0–1 spikes (k3d dev loop, ingress/TLS, backup verification, observability baseline).
 
 ---
+
 
 
 ### 2026-04-18: Issue #42 Backend & Data Safety Gaps — Data's Platform Risk Analysis
@@ -836,6 +827,7 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
 
 ## Concrete Dependency Graph
 
+
 ### Phase 0: Containerize + Single-Instance K8s Deploy
 
 **Goal:** Prove the app runs in a container on K8s with zero-downtime rolling updates.
@@ -883,6 +875,7 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
 - Dockerfile is maintainable (not a one-off)
 
 ---
+
 
 ### Phase 1: Control Plane Skeleton + Second Tenant Instance
 
@@ -947,6 +940,7 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
 
 ---
 
+
 ### Phase 2: Auth Integration (Keycloak OIDC)
 
 **Goal:** Replace app-issued bearer tokens with Keycloak OIDC. One note-takers realm for all customers.
@@ -1008,6 +1002,7 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
 
 ---
 
+
 ### Phase 3: Operational Maturity
 
 **Goal:** Backup/restore, fleet status page, tenant lifecycle observability, measured data on performance.
@@ -1063,10 +1058,12 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
 
 ## Cross-Cutting Risks & Decision Points
 
+
 ### 1. **Local K8s Dev Loop Parity**
 - **Risk:** k3d behavior ≠ AKS behavior on storage, networking, ingress
 - **Mitigation:** Early parity matrix (Phase 0); test PVC behavior in both environments before Phase 1
 - **Decision needed:** Accept k3d limitations (no multi-node, limited storage options) and test AKS separately, or require full parity?
+
 
 ### 2. **Single-Writer Enforcement**
 - **Risk:** Multiple pods on same tenant PVC can corrupt SQLite without any visible warning until data loss
@@ -1075,11 +1072,13 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
   - K8s admission webhook or control-plane validation that rejects Deployment with >1 replica for a tenant
 - **Decision needed:** Who enforces the constraint — K8s RBAC + webhook, or control-plane business logic?
 
+
 ### 3. **Image Registry & Build Pipeline**
 - **Risk:** No image registry chosen yet; Phase 0 Dockerfile is aimless without a registry
 - **Decision needed:** Docker Hub, GitHub Packages, Azure ACR, or private registry?
 - **Impact:** Phase 0 CI + Phase 1 deployment
 - **Recommended:** Start with GitHub Packages (free for public, works with existing OIDC)
+
 
 ### 4. **Keycloak Operational Load**
 - **Risk:** Keycloak + Postgres add operational weight; local dev needs lightweight Keycloak
@@ -1089,12 +1088,14 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
   - Phase 2 hosted: Keycloak StatefulSet + Postgres (separate from tenant app)
 - **Decision needed:** Can Keycloak share a Postgres with the control plane, or must it be separate?
 
+
 ### 5. **Secret Management**
 - **Risk:** API keys, database passwords, TLS certs need secure storage
 - **Mitigation:**
   - Phase 0–1: K8s Secrets (built-in; not production-hardened)
   - Phase 2+: Consider Sealed Secrets or HashiCorp Vault
 - **Decision needed:** Is K8s Secrets acceptable for MVP, or start with Sealed Secrets now?
+
 
 ### 6. **Ingress & TLS**
 - **Risk:** Ingress controller, wildcard DNS, cert-manager add configuration complexity
@@ -1103,6 +1104,7 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
   - Phase 1: Basic ingress without TLS (HTTP only, for testing)
   - Phase 2–3: Cert-manager + Let's Encrypt for wildcard DNS
 - **Decision needed:** Which ingress controller (traefik built-in k3s, nginx, others)? Wildcard or per-tenant certs?
+
 
 ### 7. **Versioning & Version Skew**
 - **Risk:** Control plane, tenant app, and Keycloak on different versions; compatibility matrix explodes
@@ -1116,6 +1118,7 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
 
 ## Recommended Sequencing for Mikey & FFMikha
 
+
 ### Immediate (Next 1–2 weeks)
 1. **Decide:** Image registry choice (GitHub Packages recommended)
 2. **Decide:** Keycloak operational model (shared Postgres or separate?)
@@ -1124,20 +1127,24 @@ Issue #42 is now canonical — not a spike, but the real platform plan. The team
 5. **Assign:** #52 (Dockerfile) to Brand — can start immediately
 6. **Assign:** State machine design (pre-#53) to Data + Brand — 2 days, inform #53 scope
 
+
 ### Phase 0 (Weeks 3–5)
 - Brand: #52 (Dockerfile) + #43 (K8s manifests) + CI container build lane
 - Parallel: Brand + Data design state machine, tenant contract (pre-#53)
 - Gate: Single-instance rolling update proven on k3d + AKS parity checklist complete
+
 
 ### Phase 1 (Weeks 6–9)
 - Brand + Data: #53 (control-plane skeleton) + #54 (provisioning + PVC)
 - Parallel: Stef + Brand investigate #55 single-writer choreography
 - Gate: Two isolated tenants, data isolation verified, backup isolation verified
 
+
 ### Phase 2 (Weeks 10–13)
 - Data + Brand: Auth migration strategy, #56 (Keycloak integration)
 - Parallel: Data + Brand validate #55 (rollout rules) against real Keycloak auth
 - Gate: One user can auth to multiple tenants; Keycloak JWT validated locally
+
 
 ### Phase 3 (Weeks 14+)
 - Data: #39 (WAL) + #40 (restore), measured backup/restore cycles
@@ -1213,6 +1220,7 @@ Phase 0 gate: one tenant rolls from old pod → new pod without losing PVC state
 
 Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 code starts*. Two can defer to Phase 1.
 
+
 ### ✅ Decide NOW (before Phase 0 coding)
 
 **1. Image registry** (impacts #52 CI + #43 manifests)
@@ -1240,6 +1248,7 @@ Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 cod
 - **Why:** Webhooks are complex to deploy/test locally. Control plane already owns tenant lifecycle — enforce `replicas: 1` at provisioning, reject manual scale-up.
 - **Safety:** Add readiness check in tenant app that fails if multiple pods see same PVC (detects multi-writer before data loss).
 
+
 ### 🟡 Decide LATER (Phase 1 handoff, no Phase 0 blocker)
 
 **6. Keycloak operational model** (Phase 2)
@@ -1253,6 +1262,7 @@ Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 cod
 ---
 
 ## Part 3: Execution Order
+
 
 ### Phase 0: Prove Container + PVC Rollout (Weeks 1–3)
 
@@ -1274,6 +1284,7 @@ Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 cod
 **Scope:** No auth, no control plane, no second tenant. Just: "Can we roll a pod without losing SQLite state?"
 
 ---
+
 
 ### Phase 1: Control Plane + Second Tenant (Weeks 4–7)
 
@@ -1303,6 +1314,7 @@ Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 cod
 
 ---
 
+
 ### Phase 2: Auth Integration (Weeks 8–11)
 
 **Assignees:** Data + Brand  
@@ -1329,6 +1341,7 @@ Brand identified 7 cross-cutting risks. Five must be decided *before Phase 0 cod
 **Scope:** "Can auth scale across tenants without per-tenant identity plumbing?"
 
 ---
+
 
 ### Phase 3: Operational Maturity (Weeks 12+)
 
@@ -1407,6 +1420,7 @@ This is not a spike — it's a measured build. Team can stop at any gate if oper
 ---
 
 
+
 ### 2026-04-18: Issue #42 User Directive — Postgres & Per-Instance DB Users Evaluation
 **By:** FFMikha (User)  
 **Date:** 2026-04-18T14:40:44Z  
@@ -1416,6 +1430,7 @@ This is not a spike — it's a measured build. Team can stop at any gate if oper
 ---
 
 
+
 ### 2026-04-18: Issue #42 Accepted Cross-Cutting Decisions
 **By:** Squad (Coordinator) via FFMikha  
 **Date:** 2026-04-18  
@@ -1423,6 +1438,7 @@ This is not a spike — it's a measured build. Team can stop at any gate if oper
 **Why:** The user explicitly confirmed that moving tenant persistence to Postgres materially solves the rolling-update problem tied to SQLite single-writer constraints. The remaining operational concerns (version skew, draining, restore, rollback, pooling, quotas) stay in scope, but they no longer block this persistence choice.
 
 ---
+
 
 
 ### 2026-04-18T14:54:06Z: Epic Synchronization Directive — GitHub Epics Stay In Sync with Squad Decisions
@@ -1438,11 +1454,13 @@ This is not a spike — it's a measured build. Team can stop at any gate if oper
 **Status:** ACCEPTED by FFMikha (User)  
 **Date:** 2026-04-18  
 
+
 ### Summary
 
 Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **managed Azure Postgres PITR** (fleet-level disaster recovery) with **daily per-tenant logical backups** (`pg_dump` → Azure Blob Storage) for single-tenant surgical restore.
 
 **Accepted Phase 1 cadence:** Logical backup runs once per day (RPO ≤ 24 hours).
+
 
 ### Locked Direction
 
@@ -1450,6 +1468,7 @@ Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **m
 |-------|-----------|-------|-----|-----|---------|
 | **Managed PITR** | Azure Flexible Server built-in continuous WAL archiving + daily snapshots | Entire Postgres server (all tenants) | ~5 min | 15–30 min | Fleet-wide disaster recovery (DRP escalation path) |
 | **Logical backup** | Scheduled `pg_dump --format=custom` per tenant database → Azure Blob Storage | Single tenant database | **1 day** | 5–15 min | Routine single-tenant restore (primary path) |
+
 
 ### Phase 1 Build Scope
 
@@ -1461,12 +1480,14 @@ Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **m
 - **Manual restore runbook:** 7-step operator procedure (identify dump, download, create fresh database, restore via `pg_restore`, validate, swap control-plane pointer, notify).
 - **Backup health check:** Control-plane `/internal/status` includes `last_backup_age` per tenant. Alert if any tenant backup is stale >12 hours.
 
+
 ### Phase 2+ Deferrals
 
 - Automated restore API (`POST /internal/tenants/{id}/restore?timestamp=...`)
 - Expanded backup verification beyond the required Phase 1 weekly automated test-restore job (for example: higher-frequency runs, broader tenant sampling, and richer reporting)
 - Per-tier backup frequency (premium tenants: hourly, free tier: daily)
 - Cross-region replication / geo-redundant backups
+
 
 ### Rationale
 
@@ -1485,6 +1506,7 @@ Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **m
 - pgBackRest is powerful but adds operational complexity: dedicated storage, config, monitoring, testing burden at scale. Deferred until justifiable (100+ tenants, enterprise SLA).
 - Clear upgrade path exists: if Phase 1 traffic or customer requirements justify tighter RPO, Phase 2 adds WAL-level per-database archiving or moves to per-tenant instance topology.
 
+
 ### Key Operational Constraints
 
 1. **Shared server PITR is all-or-nothing.** Cannot use PITR to cherry-pick a single tenant without restoring all of them. Workaround (PITR to temp server → dump one DB → restore to prod) is clunky. Logical backups are the real single-tenant safety net.
@@ -1501,6 +1523,7 @@ Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **m
 
 7. **Blob storage access control and encryption.** Backup artifacts in Blob storage must be encrypted at rest (Azure default), access-controlled (control-plane service account identity only), and tenant-isolated by storage path prefix. Do not flatten all backups into one namespace.
 
+
 ### Measurements & Acceptance
 
 - **RTO for single tenant restore:** ≤ 30 minutes (from blob download to data ready, before pointer swap)
@@ -1508,6 +1531,7 @@ Phase 1 tenant Postgres backup/restore posture: two-layer strategy combining **m
 - **PITR RTO for fleet disaster recovery:** ≤ 2 hours (from decision to all tenants restored and validated)
 - **Backup age alerting:** Alert when any tenant's most recent backup is >12 hours old
 - **Backup success rate:** >99% of scheduled backups complete without error (measured per-tenant)
+
 
 ### Documentation & Handoff
 
@@ -1542,9 +1566,11 @@ The Phase 1 control-plane ↔ tenant contract is now **decided and locked**. Tea
 
 ## Locked Shape
 
+
 ### Orchestration Model
 - **Control plane is the sole active orchestrator.** It drives all tenant lifecycle transitions (provisioning, rolling updates, maintenance, restore, deprovisioning).
 - **Tenant app never calls back to control plane.** Zero outbound dependencies. The tenant does not know the control plane exists.
+
 
 ### Tenant Internal API Surface (Cluster-Internal Only)
 - **`GET /health`** — Process liveness; returns 200 if alive.
@@ -1552,15 +1578,18 @@ The Phase 1 control-plane ↔ tenant contract is now **decided and locked**. Tea
 - **`GET /_control/info`** — Runtime state (tenant ID, app version, schema version, maintenance mode flag, optional stats).
 - **`POST /_control/maintenance`** — Drain mode control. Body: `{ "enabled": true|false, "reason": "..." }`. Tenant stops accepting writes, finishes in-flight requests, responds 200 when drained.
 
+
 ### Explicitly NOT Included in Phase 1
 - **No `/_control/bootstrap`** — Deferred to Phase 2 if tenant self-registration is needed.
 - **No tenant → control plane callbacks** — Control plane polls. No heartbeat, no webhooks, no state push from tenant.
 - **No shared authentication tokens or credentials.** Each tenant manages its own auth; control plane has no session coupling.
 
+
 ### Coordination Layer & Backup Strategy
 - **Kubernetes is the orchestration layer.** Control plane reads K8s API (Deployment, Pod, Service, Ingress) for workload state.
 - **Postgres backups are direct DB operations.** Control plane runs `pg_dump` / `pg_restore` against the tenant database directly; tenant app is not involved in the data path.
 - **Restore lifecycle:** pre-restore safety snapshot → maintenance mode drain → `pg_restore` → verify → exit maintenance mode.
+
 
 ### Failure & Idempotency
 - Provisioning steps are idempotent and ordered. Control plane retries on failure.
@@ -1630,11 +1659,6 @@ Merge this into `.squad/decisions.md` as:
 **Date:** 2026-04-19  
 **Epic:** #42  
 
-### Summary
-
-All four remaining "Next points to clarify together" items in #42 are now locked. These decisions complete the Phase 1 architectural contract.
-
----
 
 ### Decision 7: Tenant Lifecycle / State Machine (Phase 1 Shape)
 
@@ -1673,6 +1697,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 
 ---
 
+
 ### Decision 8: Rollout / Version-Skew Policy (Phase 1 Shape)
 
 **Same train, coordinated rollout, transient N-1 skew during update only.**
@@ -1696,6 +1721,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 - Migration design: All schema changes within a release must be forward-compatible (N-1 code can run against N schema).
 
 ---
+
 
 ### Decision 9: Auth Migration Shape (Phase 2 work, Phase 1 must prepare)
 
@@ -1742,6 +1768,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 
 ---
 
+
 ### Decision 10: Local Keycloak Operational Model (Phase 1 dev readiness)
 
 **Docker Compose + realm import + test user seeding. k3d is the standard dev environment.**
@@ -1779,6 +1806,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 The epic's open clarifications list becomes **empty**. Issue #42 is fully scoped for Phase 1 execution.
 
 ---
+
 
 
 ### 2026-04-19: Epic #42 Phase 0 Execution Priority — Wave 1 Decision
@@ -1824,6 +1852,7 @@ None. All platform decisions locked in #42; Wave 1 can start immediately.
 ---
 
 
+
 ### 2026-04-19: Brand Phase 0 Slice — Execution Readiness
 **Decided by:** Brand (Platform Dev)  
 **Date:** 2026-04-19  
@@ -1837,11 +1866,13 @@ None. All platform decisions locked in #42; Wave 1 can start immediately.
 
 ## Scope (Brand-owned Phase 0)
 
+
 ### #52 Deliverables
 1. **Production Dockerfile:** Multi-stage, minimal runtime base, SQLite volume mount ready
 2. **Health/readiness endpoints:** Stubs in `apps/api/src/app.ts` (`GET /healthz`, `GET /readyz`)
 3. **CI container build:** Update `.github/workflows/ci.yml` to build image + validate with API smoke tests (no push to GHCR Phase 0)
 4. **Runtime contract documentation:** Environment variables, health behavior, port binding
+
 
 ### #43 Current Status
 - Do not start yet; scope overlaps with #52 (both produce container, runtime contract, k3d proof)
@@ -1862,6 +1893,7 @@ None. All platform decisions locked in #42; Wave 1 can start immediately.
 - **Acceptance criteria:** Reproducible Dockerfile, health endpoints defined and tested, runtime contract documented, CI validates with API smoke tests
 
 ---
+
 
 
 ### 2026-04-19: Control-Plane Skeleton Architecture — Issue #53
@@ -1938,6 +1970,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 ---
 
 
+
 ### 2026-04-19: Phase 0 Test-Readiness Analysis — Acceptance Gates & Regression Watch
 **Prepared by:** Chunk (Tester)  
 **Date:** 2026-04-19  
@@ -1951,11 +1984,13 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 
 ## Phase 0 Acceptance Gates (Hard Stops)
 
+
 ### Gate 1a: Container image builds and validates
 - ✅ `docker build` succeeds with explicit `NODE_VERSION` ARG
 - ✅ Image is reproducible (same source = same digest)
 - ✅ Image runs in k3d, serves HTTP on configurable port
 - ✅ `HEALTHCHECK` / liveness probe responds within 2 seconds
+
 
 ### Gate 1b: Runtime environment contract documented
 - ✅ All env vars documented (PORT, POSTGRES_URL, TLS, etc.)
@@ -1963,11 +1998,13 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 - ✅ Health/readiness endpoints at fixed paths (`/healthz`, `/readyz`)
 - ✅ App returns 503 Ready until preconditions met (graceful degradation)
 
+
 ### Gate 1c: Single tenant instance persists data
 - ✅ K8s deployment with PVC mounts single volume
 - ✅ Postgres initializes schema on first run
 - ✅ Web UI loads without CORS errors; API requests succeed (same-origin)
 - ✅ Pod restart does NOT lose notes, campaigns, or share-link metadata
+
 
 ### Gate 2a: Postgres backend is primary
 - ✅ `node-postgres` adapter replaces SQLite in `apps/api/src/note-store.ts`
@@ -1975,11 +2012,13 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 - ✅ All test suites pass against Postgres (no SQLite-specific mocks)
 - ✅ CI runs tests against `postgres:15` container
 
+
 ### Gate 2b: Local SQLite fallback seamless
 - ✅ `POSTGRES_URL` absent/invalid → fallback to SQLite (not error)
 - ✅ `npm run dev` starts with no config; local notes persist in `apps/api/data/dnd-notes.sqlite`
 - ✅ Switch between Postgres (staging) and SQLite (local) without code changes
 - ✅ Zero fallback errors in local dev logs
+
 
 ### Gate 2c: Schema forward-compatible
 - ✅ Postgres schema includes Phase 1 auth prep (e.g., `users.keycloak_sub`)
@@ -1988,20 +2027,24 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 
 ## Regression Watch-List (Phase 0–1 Transition)
 
+
 ### R1: Pod identity & storage isolation (🔴 Critical)
 - PVC selectors use `tenant-id` label correctly
 - Pod security policy doesn't grant all-to-all PVC access
 - Postgres connection string includes correct database per tenant (no cross-DB queries)
+
 
 ### R2: Graceful shutdown under load (🟡 High)
 - App catches SIGTERM, stops accepting requests (returns 503 on health check)
 - Active Postgres transactions committed or rolled back before exit
 - HTTP server drains existing requests (Node.js `server.close()`)
 
+
 ### R3: Liveness vs. readiness probe semantics (🟡 High)
 - `/healthz` checks process health only (not external dependencies)
 - `/readyz` checks external dependencies (Postgres, schema migrations)
 - K8s `livenessProbe` calls `/healthz`; `readinessProbe` calls `/readyz`
+
 
 ### R4: Connection pool exhaustion (🟡 High)
 - Pool size configurable via env var (default sensible)
@@ -2009,16 +2052,19 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 - Idle connection cleanup tuned
 - Request timeout explicit; slow queries logged
 
+
 ### R5: Schema migration idempotence & rollback (🟡 High)
 - Migrations use `IF NOT EXISTS` or equivalent guards
 - Migrations are one-way (forward only)
 - Schema version tracked (no re-runs)
 - Rollback documented
 
+
 ### R6: Auth state preservation across pod restart (🟡 Medium)
 - Session tokens stored in DB or signed JWT (not in-memory)
 - Pod restart during active session does NOT require re-login
 - Logout atomically invalidates tokens
+
 
 ### R7: Postgres schema changes don't break app startup (🟡 Medium)
 - Migrations run before app starts (init container or startup hook)
@@ -2065,6 +2111,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 
 ## Critical (Block Coding Immediately) 🔴
 
+
 ### 1. **k3d/k3s dev loop + parity** (Point #1)
 **Why it matters:**
 - Every developer needs a local cluster that behaves like AKS/GCP in essence (ingress, storage, rolling updates, Postgres).
@@ -2081,6 +2128,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 **Blocker for:** #52, #43, #46
 
 ---
+
 
 ### 2. **Ingress/DNS/TLS for Phase 1 hosted slice** (Point #2)
 **Why it matters:**
@@ -2101,6 +2149,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 
 ---
 
+
 ### 3. **CI coverage for containers, manifests, platform workflows** (Point #8)
 **Why it matters:**
 - Phase 0 gate: "App runs against Postgres (all API tests pass), rolling update is stateless, SQLite fallback works, Dockerfile is maintainable."
@@ -2120,6 +2169,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 
 ## Early Answers (Needed Phase 0 → Phase 1) 🟡
 
+
 ### 4. **Backup / restore strategy for tenant Postgres** (Point #3)
 **Why it matters:**
 - Phase 0 doesn't require operational restore. But the model (continuous replication vs. snapshots vs. WAL archival) affects whether tenant instances can stateless-restart or hold PVCs at rest.
@@ -2137,7 +2187,9 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 
 ---
 
+
 ### 5. **Control-plane ↔ tenant contract** (Point #4)  
+
 ### 6. **Control-plane state machine (lifecycle states)** (Point #5)
 **Why it matters (combined):**
 - Phase 1 provisioning (#54) cannot start until the tenant API shape is clear: `POST /tenants` → what happens? What states can a tenant occupy?
@@ -2154,6 +2206,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 **Target:** Phase 1 design, Phase 0 gate can defer or mock a simple state machine
 
 ---
+
 
 ### 7. **Rollout / version-skew policy** (Point #7)
 **Why it matters:**
@@ -2174,6 +2227,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 
 ## Later (Phase 2+ or parallel) 🟢
 
+
 ### 8. **Auth migration path to OIDC / Keycloak** (Point #6)
 **Why it matters:**
 - Phase 0–1 can use the current auth (HTTP Basic or JWT + local users).
@@ -2183,6 +2237,7 @@ Phase 0 (#52, #43, #46) proves tenant workload containerizes. Phase 1 (#53 paral
 **Can defer to:** Phase 2 planning, parallel design track
 
 ---
+
 
 ### 9. **Local Keycloak ops model (Docker Compose + realm import)** (Point #9)
 **Why it matters:**
@@ -2246,9 +2301,11 @@ Everything below is written from the platform/ops angle — what operations need
 
 ## 1. State Machine — Minimum Shape Ops Needs
 
+
 ### Context
 
 The tenant contract is locked: control plane is the sole orchestrator, tenant app never calls back, coordination runs through K8s API + `/_control/*` endpoints, Postgres backups are direct DB ops. The state machine must tell the control-plane worker **what it can safely do next** and **what it must not touch**.
+
 
 ### Recommended States (Platform-Minimum)
 
@@ -2274,6 +2331,7 @@ provisioning → ready ⇄ maintenance → ready
 | `failed` | A transition broke; needs operator attention | Depends on failure point | If DB exists | No |
 | `deprovisioned` | Tenant archived or deleted, resources released | No | Retention policy only | No |
 
+
 ### What I'd Lock Now
 
 - **These 7 states are sufficient for Phase 1.** Don't add `suspended`, `scaling`, or `bootstrapping` until a real use case demands them. `suspended` is just `maintenance` with no planned exit; `scaling` doesn't apply (one pod per tenant); `bootstrapping` was already deferred from the contract decision.
@@ -2281,6 +2339,7 @@ provisioning → ready ⇄ maintenance → ready
 - **Every transition must be idempotent except restore.** The pre-restore safety snapshot is the escape hatch (already locked in backup/restore decision).
 - **`failed` is a sink state with manual recovery.** Control plane logs the failure reason and stops retrying. Operator investigates, then explicitly transitions to `provisioning` (rebuild) or `maintenance` (manual fix) → `ready`.
 - **State persists in control-plane DB.** K8s resource status is the observed truth; control-plane DB state is the desired/intended truth. Reconciliation loop compares the two.
+
 
 ### What Should Stay Open
 
@@ -2292,9 +2351,6 @@ provisioning → ready ⇄ maintenance → ready
 
 ## 2. Rollout / Version-Skew Policy
 
-### Context
-
-Locked direction: one monorepo, one release train, one image tag, control plane + tenant app deploy from the same image matrix. Persistence is Postgres (not SQLite). Rolling updates are stateless container restarts with connection pooling and graceful shutdown.
 
 ### Recommended Policy (Phase 0–1)
 
@@ -2310,25 +2366,6 @@ Locked direction: one monorepo, one release train, one image tag, control plane 
 | **Downgrade** | Not supported. If a version is bad, roll forward with a fix. Pre-rollout safety snapshot (already locked in backup decision) is the escape hatch. |
 | **Canary failure** | If canary batch fails health checks within 2 minutes, halt rollout. Operator decides: fix-forward or restore from pre-rollout backup. |
 
-### What I'd Lock Now
-
-- **N-only tolerance.** Don't promise N-1 compatibility. It adds testing cost (CI must run both versions against both schema states), migration complexity (schema must be forward-compatible *and* backward-compatible), and operational confusion (which version is canonical?). At this scale (single-digit tenants), coordinated upgrade is cheap.
-- **Control plane upgrades first.** Always. If control-plane schema changes (tenant registry, backup catalog), tenants must talk to the new control plane, not the other way around.
-- **Additive-only migrations within a version.** No column drops, no renames, no type changes in the same release that introduces them. Destructive cleanup happens in the *next* release after the old code path is removed.
-
-### What Should Stay Open
-
-- **N/N-1 tolerance for Phase 2+.** When tenant count reaches double digits and rollout takes >30 minutes, brief version skew becomes unavoidable. Design the migration strategy to be forward-compatible (new code reads old schema gracefully) so N/N-1 can be introduced later without rework. But don't commit to testing or supporting it now.
-- **Blue-green vs. rolling.** Phase 1 uses simple rolling (one tenant at a time). Blue-green (full parallel fleet) is a Phase 3 optimization if rollout speed matters.
-- **Automated canary analysis.** Phase 1 canary is manual (operator watches health checks). Automated canary promotion/rollback is Phase 3.
-
----
-
-## 3. Local Keycloak Developer Model
-
-### Context
-
-Keycloak is the target IdP (two realms: admin + note-takers). Phase 2 is the integration point. But developers need a local Keycloak before Phase 2 coding starts — you can't write OIDC middleware against air.
 
 ### Recommended Model
 
@@ -2352,6 +2389,7 @@ infra/keycloak/
 | **Network** | `localhost:8080` for Keycloak, tenant apps reach via Docker network or host | Simple; no DNS hacks needed for dev |
 | **Persistence** | Named Docker volume for Keycloak Postgres | Survives `docker compose stop`; `docker compose down -v` resets |
 
+
 ### Parity Expectations
 
 **Local Keycloak is NOT production-identical.** Accept these differences:
@@ -2366,25 +2404,6 @@ infra/keycloak/
 
 **Parity contract:** Local Keycloak must produce valid OIDC tokens with the same claim shape as production (tenant ID, realm, roles, groups). Token validation code in the tenant app must work identically against local and production Keycloak — the only difference is the issuer URL (`localhost:8080` vs. `auth.dnd-notes.app`).
 
-### What I'd Lock Now
-
-- **Docker Compose, not Helm.** Keycloak-on-K8s is a Phase 2 production concern. Local dev should not require k3d just to test OIDC flows.
-- **Realm JSON is version-controlled.** Changes to realm config (new roles, new groups, new client scopes) go through PR review. No manual realm editing in the Keycloak admin console.
-- **`docker compose up` is the entire setup.** No init scripts, no post-start curl commands, no manual admin console clicks. If the realm JSON can't express it, it's not in local dev.
-
-### What Should Stay Open
-
-- **Keycloak version pin.** Use latest during Phase 1.5 spike; pin to a specific minor before Phase 2 implementation starts.
-- **Production Keycloak deployment model.** Helm chart vs. K8s manifests vs. managed Keycloak service — production decision, not local dev decision.
-- **Theme customization.** Branding the login page is a UI concern (Stef's domain), not a platform concern.
-
----
-
-## 4. Auth Migration — Platform Sequencing Impact
-
-### Context
-
-Current app uses email/password + app-issued bearer tokens stored in localStorage. Target is Keycloak OIDC with two realms. The question for platform is: **how does this migration affect the build order and phase gates?**
 
 ### Recommended Sequencing
 
@@ -2398,23 +2417,6 @@ Current app uses email/password + app-issued bearer tokens stored in localStorag
 | **Phase 2** | Dual auth: current + Keycloak | Tenant app accepts both old bearer tokens AND Keycloak JWTs. `AuthAdapter` middleware checks token type and validates accordingly. Grace period: 2–4 weeks for existing users to migrate. |
 | **Phase 2 exit** | Keycloak-only | Old bearer token validation removed. All login flows redirect to Keycloak. localStorage tokens invalidated. |
 
-### What I'd Lock Now
-
-- **Phase 1 control-plane auth is independent.** Don't wait for Keycloak to build admin endpoints. Use API key or basic auth with a shared secret in K8s Secrets. Swap to Keycloak admin realm token validation in Phase 2.
-- **Tenant app auth stays untouched until Phase 2.** No feature flags, no "prepare for OIDC" middleware in Phase 0–1. The app works as-is. OIDC middleware lands in one focused PR during Phase 2.
-- **Grace period is mandatory.** No big-bang cutover. Dual auth runs for a defined window. Old tokens expire naturally or are invalidated at the end of the grace period.
-- **Guest/share-link flows survive migration.** Share links must work without Keycloak login (anonymous access). Guest-to-user claim (#20) happens post-Keycloak-login, not during share-link access. Platform must not require authenticated sessions for share-link rendering.
-
-### What Should Stay Open
-
-- **Grace period duration.** 2 weeks? 4 weeks? Depends on user base size at Phase 2 start. Product decision, not platform.
-- **User account linking UX.** How existing email/password users link to Keycloak accounts — Stef/Mikey territory.
-- **Token revocation strategy.** Per-user, per-tenant, or fleet-wide? Depends on Keycloak setup. Design during Phase 2 implementation.
-- **Social login / federation.** Phase 4+. Don't design for it now.
-
----
-
-## Summary: Lock vs. Open
 
 ### Lock Now ✅
 
@@ -2431,6 +2433,7 @@ Current app uses email/password + app-issued bearer tokens stored in localStorag
 | Auth migration timing | Phase 2. Dual auth with grace period. No Phase 0–1 impact. |
 | Control-plane admin auth | Independent of tenant auth. API key/basic auth in Phase 1. |
 | Share-link survival | Anonymous access preserved across auth migration. |
+
 
 ### Intentionally Open 🟡
 
@@ -2600,6 +2603,7 @@ Brand delivered exactly what was asked for in issue #52 without drift. Ship it.
 
 ---
 
+
 ### 2026-04-18T16:00:49Z: User directive
 **By:** FFMikha (via Copilot)
 **What:** Le dev normal doit être monté sur k3d, avec Keycloak disponible en tout temps; ne pas supporter un mode basic séparé juste pour le dev.
@@ -2624,6 +2628,7 @@ Epic #42 requires a control plane to track tenant instances and lifecycle state.
 
 ## Rationale
 
+
 ### Why SQLite for Phase 1:
 
 1. **Write Volume Fits:** Tenant creation and state transitions are infrequent (measured in minutes/hours, not seconds).
@@ -2631,6 +2636,7 @@ Epic #42 requires a control plane to track tenant instances and lifecycle state.
 3. **Proven Pattern:** Tenant app already uses SQLite successfully; team has operational experience.
 4. **Low Operational Overhead:** No connection pooling, authentication, or network layer to manage.
 5. **Sufficient Performance:** Registry queries are simple lookups and small result sets.
+
 
 ### Upgrade Path to Postgres (deferred):
 
@@ -2682,11 +2688,13 @@ Issue #42 lists 9 clarification points necessary to move from locked platform di
 
 ## Decision Sequence
 
+
 ### Tier 1: Phase 0 Blockers (Decide This Week)
 
 These must be locked *before* Phase 0 work starts (Postgres migration, containerization, k3d dev loop).
 
-#### 1️⃣ Local Kubernetes Dev Loop (k3d / k3s + Parity Definition)
+
+### 1️⃣ Local Kubernetes Dev Loop (k3d / k3s + Parity Definition)
 **Issue:** #42 point 1  
 **Blocker Level:** CRITICAL  
 **Rationale:**  
@@ -2705,7 +2713,8 @@ These must be locked *before* Phase 0 work starts (Postgres migration, container
 
 ---
 
-#### 2️⃣ Ingress + Wildcard DNS + TLS Model for Phase 1 Hosted Slice
+
+### 2️⃣ Ingress + Wildcard DNS + TLS Model for Phase 1 Hosted Slice
 **Issue:** #42 point 2  
 **Blocker Level:** CRITICAL (Phase 1 gate, not Phase 0)  
 **Rationale:**
@@ -2727,7 +2736,8 @@ These must be locked *before* Phase 0 work starts (Postgres migration, container
 
 ---
 
-#### 3️⃣ CI Coverage Scope for Phase 0 Handoff
+
+### 3️⃣ CI Coverage Scope for Phase 0 Handoff
 **Issue:** #42 point 8  
 **Blocker Level:** MEDIUM (not a blocking gate, but defines Phase 0 → Phase 1 handoff health)  
 **Rationale:**
@@ -2746,11 +2756,13 @@ These must be locked *before* Phase 0 work starts (Postgres migration, container
 
 ---
 
+
 ### Tier 2: Phase 1 Decisions (Revisit Before Phase 1 Sprint)
 
 Lock these before Phase 1 work starts, but they don't block Phase 0. Revisit 1 week before Phase 1 kickoff.
 
-#### 4️⃣ Control-Plane ↔ Tenant Contract + Internal APIs
+
+### 4️⃣ Control-Plane ↔ Tenant Contract + Internal APIs
 **Issue:** #42 point 4  
 **Blocker Level:** Phase 1 critical  
 **Rationale:**
@@ -2770,7 +2782,8 @@ Lock these before Phase 1 work starts, but they don't block Phase 0. Revisit 1 w
 
 ---
 
-#### 5️⃣ Control-Plane State Machine + Tenant Lifecycle States
+
+### 5️⃣ Control-Plane State Machine + Tenant Lifecycle States
 **Issue:** #42 point 5  
 **Blocker Level:** Phase 1 critical (tightly coupled with point 4)  
 **Rationale:**
@@ -2790,7 +2803,8 @@ Lock these before Phase 1 work starts, but they don't block Phase 0. Revisit 1 w
 
 ---
 
-#### 6️⃣ Backup / Restore Strategy for Tenant Postgres Databases
+
+### 6️⃣ Backup / Restore Strategy for Tenant Postgres Databases
 **Issue:** #42 point 3  
 **Blocker Level:** Phase 1 critical  
 **Rationale:**
@@ -2814,11 +2828,13 @@ Lock these before Phase 1 work starts, but they don't block Phase 0. Revisit 1 w
 
 ---
 
+
 ### Tier 3: Post-Phase-1 Decisions (Explicitly Defer)
 
 These are important but do not block Phase 0/1 execution. Revisit after Phase 1 acceptance.
 
-#### 7️⃣ Auth Migration Path: Current → OIDC / Keycloak (Coexistence + Cutover)
+
+### 7️⃣ Auth Migration Path: Current → OIDC / Keycloak (Coexistence + Cutover)
 **Issue:** #42 point 6  
 **Blocker Level:** Phase 2 (explicitly defer)  
 **Rationale:**
@@ -2840,7 +2856,8 @@ These are important but do not block Phase 0/1 execution. Revisit after Phase 1 
 
 ---
 
-#### 8️⃣ Rollout / Version-Skew Policy (N / N-1 Compatibility)
+
+### 8️⃣ Rollout / Version-Skew Policy (N / N-1 Compatibility)
 **Issue:** #42 point 7  
 **Blocker Level:** Phase 2+ (explicitly defer)  
 **Rationale:**
@@ -2862,7 +2879,8 @@ These are important but do not block Phase 0/1 execution. Revisit after Phase 1 
 
 ---
 
-#### 9️⃣ Local Keycloak Operational Model (Docker Compose + Realm Import)
+
+### 9️⃣ Local Keycloak Operational Model (Docker Compose + Realm Import)
 **Issue:** #42 point 9  
 **Blocker Level:** Phase 2 (deferred, nice-to-have for Phase 1 dev prep)  
 **Rationale:**
@@ -2886,15 +2904,18 @@ These are important but do not block Phase 0/1 execution. Revisit after Phase 1 
 
 ## Practical Decision Sequence for Team Sync
 
+
 ### This Week (Before Phase 0 Ramp)
 1. **Lock the local K8d dev loop** → can #52 (containerize) and #43 (artifacts) start work?
 2. **Clarify CI scope for Phase 0** → what validation gates does container + API tests need?
 3. **Light spec on Phase 1 ingress/DNS/TLS** → Brand knows what to prepare for Phase 1, doesn't block Phase 0
 
+
 ### Before Phase 1 Kickoff (1 Week Prior)
 4. Control-plane ↔ tenant contract (internal APIs)
 5. Control-plane state machine + lifecycle states
 6. Backup / restore strategy scope (snapshots in Phase 1? WAL in Phase 2?)
+
 
 ### Before Phase 2 Kickoff
 7. Auth migration + cutover (product decision: when do existing users move to Keycloak?)
@@ -3069,6 +3090,7 @@ From the epic's "Next points to clarify together" list:
 
 **Thinnest acceptable shape to lock now:**
 
+
 ### Migration model: Coexistence → Cutover (two releases)
 
 **Release A (coexistence):**
@@ -3085,10 +3107,12 @@ From the epic's "Next points to clarify together" list:
 - All users must have Keycloak accounts. Migration script: for each user in tenant DB, create Keycloak user (email match) if not already present, send password-reset email.
 - Grace period: Release A runs for ≥2 weeks before Release B ships, to catch edge cases.
 
+
 ### What to lock now (affects Phase 1 design):
 - **User identity column:** `users.keycloak_sub` (nullable) added in Phase 1 schema alongside existing `users.email`. Keycloak `sub` claim becomes the canonical identifier once populated. Email remains fallback for matching.
 - **Auth middleware interface:** Single `AuthMiddleware` that delegates to `LocalAuthStrategy` or `KeycloakAuthStrategy` based on `AUTH_PROVIDER`. Both strategies produce the same `AuthenticatedUser` shape (`{ userId, email, tenantId, roles }`).
 - **Share links stay anonymous.** No Keycloak redirect for share-link access. Guest elevation to authenticated user is opt-in.
+
 
 ### What to defer to pre-Phase 2 design:
 - Token refresh and session lifecycle details.
@@ -3143,6 +3167,7 @@ Three of the four remaining "Next points to clarify together" items in #42 are n
 
 ## Locked Decisions
 
+
 ### 1. Tenant Lifecycle / State Machine
 
 **7-state thin model:**
@@ -3171,6 +3196,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 
 ---
 
+
 ### 2. Rollout / Version-Skew Policy (Phase 1 shape)
 
 **Same train, same version, no N-1 support after rollout completes.**
@@ -3188,6 +3214,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 **Rationale:** Coordinated upgrades are cheap at single-digit tenant scale. Widens testing cost and migration complexity; defer N-1 support until fleet size justifies it.
 
 ---
+
 
 ### 3. Auth Migration Shape (Phase 2 work, but Phase 1 must prepare)
 
@@ -3264,17 +3291,20 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 
 ## Actions Taken
 
+
 ### 1. Retitled Issue #55
 - **From:** "Define single-writer rollout rules for SQLite tenant instances on Kubernetes"
 - **To:** "Define tenant rolling-update and database connection-draining choreography (Postgres-backed)"
 - **Reason:** Decisions locked Postgres-based persistence (2026-04-18); SQLite references are stale
 - **GitHub:** https://github.com/daydream-software/dnd-notes/issues/55
 
+
 ### 2. Unblocked Issue #43 with Context
 - **Status change:** Blocked → Ready (hosting target now locked)
 - **Clarification:** Added comment explaining Phase 0 Track B scope: Dockerfile, K8s manifests (Deployment/Service/StatefulSet), CI pipeline for Postgres-based rollout
 - **Connection:** Explicitly linked to Phase 0 gate and Track A/C parallel execution
 - **GitHub:** https://github.com/daydream-software/dnd-notes/issues/43#issuecomment-4274696089
+
 
 ### 3. Created Missing Issue #58 — NoteStore Postgres Adapter Port
 - **Title:** "Port NoteStore adapter from SQLite (better-sqlite3) to Postgres (node-postgres)"
@@ -3283,6 +3313,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 - **Labels:** go:yes, release:backlog, type:feature
 - **Rationale:** `.squad/identity/now.md` describes Track A as "NoteStore Postgres adapter (5–7 days)" but this was missing from GitHub issue tracker
 - **GitHub:** https://github.com/daydream-software/dnd-notes/issues/58
+
 
 ### 4. Verified `.squad/identity/now.md` is Current
 - Phase 0 execution tracks accurately reflect locked decisions
@@ -3311,6 +3342,7 @@ Synchronizing GitHub immediately after decision-lock ensures team and stakeholde
 ---
 
 
+
 ### 2026-04-19: PR #59 / Issue #53 Control-Plane Skeleton Review — APPROVED
 **Decided by:** Chunk (Tester)
 **Date:** 2026-04-19
@@ -3320,6 +3352,7 @@ Synchronizing GitHub immediately after decision-lock ensures team and stakeholde
 **Next:** Merge PR #59, start #54 (K8s provisioning) and #55 (rolling update choreography) in parallel.
 
 ---
+
 
 
 ### 2026-04-19: PR #60 / Issue #52 Containerize Tenant App — APPROVED
@@ -3332,6 +3365,7 @@ Synchronizing GitHub immediately after decision-lock ensures team and stakeholde
 
 
 ---
+
 
 
 ### 2026-04-19: Worktree + Copilot PR Review Flow — APPROVED FOR PRODUCTION
@@ -3359,6 +3393,7 @@ Synchronizing GitHub immediately after decision-lock ensures team and stakeholde
 **Next:** Proceed with Issue #58 PR using existing workflow setup.
 
 ---
+
 
 
 ### 2026-04-19: Issue #58 QA Review Gate — CONDITIONAL BLOCKER
@@ -3399,6 +3434,7 @@ Synchronizing GitHub immediately after decision-lock ensures team and stakeholde
 **Do not merge without Chunk approval.**
 
 ---
+
 
 
 ### 2026-04-19: Issue #58 — Postgres Adapter Architecture (Three Decisions LOCKED)
@@ -3528,6 +3564,7 @@ If SERIALIZABLE causes unacceptable performance (profiled lock contention > 5% s
 **Expected outcome:** This decision sticks for Phase 0 and Phase 1. Optimization post-Phase-1 if needed.
 
 
+
 ### 2026-04-20: Issue #58 Snapshot Bridge — Backup Format Compatibility
 
 **Context**
@@ -3553,6 +3590,7 @@ This keeps the operator-facing contract boring during the adapter port. We get P
 - Future control-plane backup work can replace the artifact format later if needed, but this slice stays backward-compatible now.
 
 **By:** Data
+
 
 
 
@@ -3660,6 +3698,7 @@ When a GitHub-hosted action in this repo hits a runtime deprecation warning, upg
 - Workflow YAML parses correctly.
 - All external `uses:` entries in `.github/workflows/ci.yml` now declare `runs.using: node24`.
 
+
 ### 2026-04-21: Issue #43 QA Reviewer Checklist — Deployment Artifacts
 **Decided by:** Chunk (Tester)  
 **Date:** 2026-04-21  
@@ -3675,19 +3714,22 @@ Issue #43 deployment slice is **ship-safe for infrastructure review** once Brand
 
 ## Blockers for Approval
 
-#### Blocker 1: Tenant Manifest Completeness
+
+### Blocker 1: Tenant Manifest Completeness
 - Full Kubernetes manifests (Deployment, Service, ConfigMap, Secret, PVC)
 - Correct env variable injection matching RUNTIME.md contract
 - ConfigMap/Secret wires `DATABASE_URL`, `SITE_ADMIN_EMAILS`, `ALLOWED_ORIGINS`, `PUBLIC_WEB_URL`
 - PVC mount at `/app/data` preserved for compatibility
 
-#### Blocker 2: End-to-End Postgres Smoke Test
+
+### Blocker 2: End-to-End Postgres Smoke Test
 - k3d smoke enhanced to verify actual note operations against Postgres
 - Test workflow: create tenant → create note → read note → verify Postgres backend
 - Include shared-link creation + guest access + claim flow
 - `GET /ready` succeeds when `DATABASE_URL` points to Postgres (not SQLite fallback)
 
-#### Blocker 3: DATABASE_URL Injection Verification
+
+### Blocker 3: DATABASE_URL Injection Verification
 - Control-plane provisioning sets `DATABASE_URL` in tenant pod environment
 - Readiness probe validates Postgres connectivity
 - Proof that `DATABASE_URL` is injected before container startup (not missing/malformed)
@@ -3721,6 +3763,7 @@ Deployment artifact scaffolding is **ship-safe** once Brand provides manifests, 
 
 ---
 
+
 ### 2026-04-20: Normalize Node test-runner JUnit before GitHub publishing
 **Decided by:** Brand (Platform Dev)  
 **Date:** 2026-04-20  
@@ -3748,6 +3791,7 @@ Keep the root local test contract unchanged (`npm test` stays fail-fast), but tr
 
 ---
 
+
 ### 2026-04-20: Keep SHA-Pinned GitHub Actions on Node 24-Supported Releases
 **Decided by:** Brand (Platform Dev)  
 **Date:** 2026-04-20  
@@ -3772,6 +3816,7 @@ When a GitHub-hosted action in this repo hits a runtime deprecation, upgrade it 
 
 - Confirmed the workflow still parses after the edit
 - Audited every external `uses:` entry in `.github/workflows/ci.yml`; no `runs.using: node20` actions remain
+
 
 
 ### 2026-04-21T14:57:44Z: User directive
@@ -3805,6 +3850,7 @@ Do **not** re-open tenant containerization work from `#52`, and do **not** fold 
 - Platform contributors now have a single committed path for control-plane image building and Kustomize-based manifest review.
 - Same-origin tenant hosts remain the default through `TENANT_BASE_DOMAIN` + `TENANT_PUBLIC_SCHEME`; no split-origin deployment flow was introduced.
 - CI can validate deployment artifacts without requiring registry push automation.
+
 
 ### 2026-04-21: Control-plane artifact hygiene for PR #66
 **Decided by:** Brand (Platform Dev)  
@@ -4063,12 +4109,14 @@ None of these own: *"Create the control-plane operator UI where humans trigger p
 
 **Split Phase 3 into two explicit, sequential issues:**
 
+
 ### A. Phase 3a: Fleet Status Dashboard (#57, existing)
 **Scope:** Internal-only observability dashboard
 - Show tenant health, current version, rollout state, last backup/restore status
 - Read-only data contract for operators
 - Foundation for future public status.example.com
 - **Owner:** Brand (squad:brand label, already assigned)
+
 
 ### B. Phase 3b: Control-Plane Operator Portal (NEW ISSUE)
 **Scope:** Operator control surface for platform administration
@@ -4126,11 +4174,13 @@ None of these own: *"Create the control-plane operator UI where humans trigger p
 
 ## What's Planned
 
+
 ### Phase 1 (Weeks 6–9): Provisioning Worker / Driver
 - **Owned by:** Data (Issue #54, tentative)
 - **Responsibility:** Service or script that calls control-plane API to create/update/delete tenant instances
 - **Scope:** Orchestrate the control-plane, translate high-level provisioning requests into control-plane API calls
 - **Frontend:** None yet — likely triggered by script/CLI
+
 
 ### Phase 3 (Weeks 14+): Fleet Admin Dashboard
 - **Owned by:** Brand (Issue #57)
@@ -4144,6 +4194,7 @@ None of these own: *"Create the control-plane operator UI where humans trigger p
   - Pod readiness
 - **API:** `GET /api/v1/admin/fleet/status` (new endpoint for dashboard)
 - **Stretch:** Customer-facing status page (deferred further)
+
 
 ### Post-Phase 1: Portal App
 - **NOT in Phase 0–1** to avoid coupling provisioning contract to UI prematurely
@@ -4195,6 +4246,7 @@ If FFMikha wants to finalize Phase 1 scope/timeline:
 ---
 
 **Next:** FFMikha to confirm Phase 1 driver/provisioning worker scope with Data. Stef (or assigned UI agent) can then plan #57 dashboard UX based on finalized provisioning contract.
+
 ### 2026-04-21T18:41:44Z: User directive
 **By:** FFMikha (via Copilot)
 **What:** Stop looping on PR #67; keep skill-only / squad-memory commits off the feature PR and land them on `main` instead.
@@ -4303,17 +4355,20 @@ Should the operator app (internal control-plane UI) also serve as the public lan
         (dnd-notes workspace: notes, campaigns, members)
 ```
 
+
 ### Operator Dashboard (#57)
 - **Purpose:** Internal fleet visibility for the Daydream team.
 - **Scope:** Tenant health, version, rollout state, last backup/restore, dependency status (Postgres, Keycloak).
 - **Auth:** Control-plane OIDC + Network Policy limiting to operator IPs, or a simple bearer token for Phase 0–1.
 - **Lifecycle:** Standalone service, can be a separate small Node/React app or a single HTML page served from the control plane itself.
 
+
 ### Customer Portal (future, Phase 3+)
 - **Purpose:** Public self-service for registration, subscription, and instance management.
 - **Scope:** Signup, billing, instance list (read customer's own instances only), instance creation request, password reset.
 - **Auth:** Keycloak OIDC (inherited from Phase 2), no special operator privileges.
 - **Lifecycle:** Separate from operator surface; can be a Next.js or similar SPA backed by control-plane REST API.
+
 
 ### Tenant App (existing, unmodified)
 - **Purpose:** End-user workspace.
@@ -4350,10 +4405,12 @@ Audit of epic #42 and open issue backlog revealed three critical scope gaps requ
 
 ## Issues Created
 
+
 ### #68: Build the operator control portal for platform administration
 **Owner suggested:** Brand (platform squad)
 **Phase:** Phase 3 (operational maturity)
 **Rationale:** Issue #57 provides observability (fleet dashboard), but operators need a control surface to actually manage the platform. Provisioning, deprovisioning, rolling updates, and maintenance drain require a UI. Control-plane API (#53) is the backend; #68 is the frontend.
+
 
 ### #70: Build the public landing and self-serve signup portal
 **Owner suggested:** Brand (platform squad)
@@ -4364,6 +4421,7 @@ Audit of epic #42 and open issue backlog revealed three critical scope gaps requ
 - Customer instance dashboard
 - Integration with control-plane API to trigger provisioning from customer actions instead of operator scripts
 - Placeholder for billing/subscription integration
+
 
 ### #71: Implement per-tenant Postgres credentials and database isolation (CRITICAL)
 **Owner suggested:** Data (backend squad)
@@ -4394,3 +4452,451 @@ Fix: Generate tenant-specific Postgres credentials (role + password) for each te
 1. Triage #68, #70, #71 into appropriate squad ownership and phase lanes.
 2. Add #71 to Phase 1 critical path; verify production readiness gate includes tenant credential isolation.
 3. Design #68 and #70 control-plane API contracts in parallel to avoid scope creep.
+
+
+# Phase 2 Platform Readiness: Keycloak & Per-Tenant Secrets
+
+**Assessed by:** Brand (Platform Dev)  
+**Date:** 2026-04-21  
+**Issues:** #56 (Keycloak OIDC), #69 (Per-tenant Postgres roles)
+
+## Executive Summary
+
+Phase 2 can proceed with Keycloak bootstrap (k3d infrastructure **ready**) and per-tenant database role work (**critical path identified** for #69).
+
+**Key finding:** Issue #69 (per-tenant Postgres roles) requires 3–4 focused PRs to split the currently shared runtime credential model. Issue #56 (Keycloak control-plane integration) has foundational infrastructure but needs control-plane ↔ Keycloak token validation code. **The two issues are independent after foundational work lands.**
+
+---
+
+## 1. Keycloak Foundation (Phase 2a — Non-Blocking)
+
+
+### Current State ✓
+- `scripts/k3d/bootstrap.sh` deploys Keycloak into `dnd-notes-platform` namespace
+- `platform/k3d/keycloak.yaml` seeds a dev realm with ConfigMap
+- k3d bootstrap includes `wait_for_rollout platform-keycloak` and applies the manifest
+- Admin credentials available in development mode
+
+
+### Gaps (non-blocking for Phase 2 start) ⚠️
+- **No control-plane ↔ Keycloak integration**: Missing OIDC client creation, token validation, realm bootstrap service calls
+- **No tenant OIDC client provisioning**: Deferred to Phase 2c (depends on Phase 2a completion)
+- **No documented local dev flow**: Operators don't know Keycloak admin URL or how to create test clients
+
+
+### Recommendation
+✅ **Land Keycloak bootstrap as-is for Phase 2a.** Add this task for Phase 2a:
+- Implement control-plane service that creates/validates OIDC clients in Keycloak
+- Document Keycloak admin access for local testing (URL: `http://keycloak.127.0.0.1.nip.io:8080`)
+
+---
+
+## 2. Per-Tenant Database Secrets (Phase 2b — CRITICAL PATH for #69)
+
+
+### Current State (Phase 0) ❌
+
+```
+Control-plane uses shared credentials across all tenant instances:
+├─ One Postgres superuser/admin (for control-plane provisioning)
+└─ One TENANT_DATABASE_RUNTIME_URL (all tenants connect as same role)
+    ├─ platform/control-plane/base/secret.yaml line 16
+    ├─ provisioning.ts line 626 (shared runtimeConnectionString)
+    └─ PostgresTenantDatabaseManager line 363 (buildTenantDatabaseConnectionString)
+```
+
+**Risk:** If any tenant pod is compromised, attacker gains access to **all tenant databases**.
+
+
+### Required State (Phase 2b) ✅
+
+```
+Per-tenant Postgres role + secret model:
+├─ Control-plane (admin credentials) creates per-tenant role
+│  ├─ CREATE ROLE tenant_<id>_<subdomain> WITH PASSWORD '<random>'
+│  ├─ Grant CONNECT on tenant database
+│  ├─ Grant USAGE on public schema
+│  └─ NO superuser, NO create database, NO create role
+├─ Control-plane stores per-tenant connection string in K8s Secret
+│  └─ Each Secret lives in the tenant's namespace (not platform namespace)
+├─ Tenant pod mounts and reads **its own Secret** (tenant-scoped)
+└─ On deprovisioning, control-plane drops the per-tenant role
+```
+
+
+### Work Decomposition (3–4 PRs)
+
+| Phase | Title | Scope | Owner Notes |
+|-------|-------|-------|-------------|
+| Phase 2b-1 | Per-tenant role creation | `PostgresTenantDatabaseManager.ensureTenantDatabase()`: create per-tenant role with random password, grant minimal privileges, return secret material (role + password). Add unit tests for role creation + privilege validation. | Control-plane backend. Est: 1 PR |
+| Phase 2b-2 | Tenant secret materialization | `buildTenantInfrastructureBundle()`: accept per-tenant secret material (role name + password), embed in tenant Secret manifest instead of shared TENANT_DATABASE_RUNTIME_URL reference. Remove reference to platform secret from tenant Deployment env. | Control-plane provisioning. Est: 1 PR |
+| Phase 2b-3 | Deprovisioning cleanup | `deleteTenantDatabase()`: add `DROP ROLE` after terminating connections. Verify idempotency (role may already be deleted). | Control-plane backend. Est: 1 PR (often combined with Phase 2b-1) |
+| Phase 2b-4 | Integration tests | End-to-end provisioning test: verify per-tenant role created, tenant pod uses per-tenant connection string, least-privilege constraints validated (CREATE DATABASE should fail), role cleaned up on deprovision. Update k3d-smoke test to validate privilege isolation. | Control-plane test suite + CI. Est: 1 PR |
+
+
+### Testing Strategy
+
+**Unit tests (Phase 2b-1):**
+```sql
+-- Per-tenant role should exist with correct password
+SELECT 1 FROM pg_roles WHERE rolname = 'tenant_<id>_<subdomain>' AND rolcanlogin = true;
+
+-- Should NOT have superuser or create database privileges
+SELECT rolsuper, rolcreatedb FROM pg_roles WHERE rolname = 'tenant_<id>_<subdomain>'
+-- Expected: (false, false)
+
+-- Should NOT be able to create databases
+-- (run CREATE DATABASE <name> as the per-tenant role; should fail with permission denied)
+```
+
+**Integration tests (Phase 2b-4):**
+- Provision a tenant, verify Secret created in tenant namespace with per-tenant credentials
+- Connect as the per-tenant role; verify it can connect + read/write notes
+- Try CREATE DATABASE as per-tenant role; verify it fails
+- Deprovision tenant, verify role dropped, Secret deleted
+
+**k3d-smoke enhancement:**
+- After provisioning, extract per-tenant Secret from tenant namespace
+- Verify `DATABASE_URL` in Secret uses per-tenant role name, not shared runtime URL
+- Attempt `CREATE DATABASE test_db` as per-tenant user; confirm 403 Forbidden
+
+
+### RBAC Readiness ✓
+
+`platform/control-plane/base/clusterrole.yaml` already includes:
+- `secrets` resource (verbs: create, patch, update, delete) ✓
+- No restrictions on namespaces (line 16, no namespace field) ✓
+
+**No RBAC changes needed.**
+
+---
+
+## 3. Local Development Experience
+
+
+### Gaps ⚠️
+- No documented Keycloak admin URL for local testing
+- No guide to create OIDC test clients manually (until Phase 2c auto-provisioning lands)
+- No environment variable setup for local Keycloak integration (VITE_KEYCLOAK_CLIENT_ID, etc.)
+
+
+### Access Keycloak Admin Console
+1. k3d cluster running: `npm run k3d:bootstrap`
+2. Keycloak admin URL: http://keycloak.127.0.0.1.nip.io:8080/
+3. Admin credentials: `admin` / `admin` (from platform/k3d/keycloak.yaml)
+
+
+### Create a Test OIDC Client (manual, Phase 2a)
+1. Log in to admin console as `admin`
+2. Select realm: `dnd-notes-dev`
+3. Clients → Create → Fill in Client ID: `dnd-notes-web-dev`
+4. Client Protocol: `openid-connect`
+5. Access Type: `public`
+6. Valid Redirect URIs: `http://localhost:5173/*` (web dev server)
+7. Save
+8. Set VITE_KEYCLOAK_CLIENT_ID=dnd-notes-web-dev and VITE_KEYCLOAK_REALM=dnd-notes-dev in .env.local
+
+(Phase 2c will auto-create OIDC clients during tenant provisioning.)
+```
+
+---
+
+## 4. CI Coverage Gaps
+
+
+### Current Coverage ✓
+- Lint, test, build on all workspaces
+- CI workflow: `.github/workflows/ci.yml` (validate → test → build)
+
+
+### Recommendation for Phase 2b
+✅ Update `scripts/k3d/smoke.sh` after Phase 2b-2 lands:
+```bash
+# After tenant provisioning:
+# 1. Extract per-tenant Secret from tenant namespace
+# 2. Verify DATABASE_URL uses per-tenant role name
+# 3. Connect as that role, try CREATE DATABASE (should fail)
+# 4. Verify tenant can read/write to its own database
+```
+
+---
+
+## 5. Kubernetes Manifests & Networking
+
+
+### Keycloak Service Access (Phase 2a)
+From control-plane pod:
+- Service DNS: `platform-keycloak.dnd-notes-platform.svc.cluster.local:8080`
+- Port: 8080 (HTTP, cluster-internal)
+- Admin realm: `http://platform-keycloak.../admin` (use service account token)
+
+
+### RBAC (Phase 2b)
+Control-plane is already authorized to create/patch/delete Secrets in any namespace.
+This is required for per-tenant Secret generation during provisioning.
+```
+
+---
+
+## 6. Secrets Management Strategy
+
+
+### Current Posture (Phase 0)
+- Kubernetes Secrets for plaintext environment variables
+- No encryption at rest
+- Platform secrets in `dnd-notes-platform` namespace
+- Tenant secrets auto-generated in per-tenant namespaces
+
+
+### Phase 2+ Target (deferred, RUNTIME.md §301)
+- Sealed Secrets or Vault for encryption + rotation
+- Reserved for Phase 2+ hardening
+
+
+### Recommendation for Phase 2b Start
+✅ **Keep K8s Secrets for now** (lowest barrier, Phase 2b focuses on isolation not encryption):
+1. Per-tenant role passwords are **ephemeral** (not exported, not rotated manually)
+2. Control-plane knows the password only during provisioning
+3. If a tenant Secret is exposed, only that tenant's Postgres role is compromised (not all tenants)
+4. **Phase 2+ follow-up:** Implement periodic password rotation + Sealed Secrets
+
+---
+
+## 7. Rollout Dependencies & Critical Path
+
+
+### Dependency Graph
+
+```
+Phase 2a: Keycloak foundation
+├─ Deploy Keycloak (already ready ✓)
+├─ Implement control-plane ↔ Keycloak integration (token validation, client mgmt)
+└─ Document local Keycloak dev flow
+
+Phase 2b: Per-tenant DB roles (PARALLEL with 2a's token validation work)
+├─ Per-tenant role creation in TenantDatabaseManager
+├─ Update buildTenantInfrastructureBundle for per-tenant secrets
+├─ Update provisioning flow + deprovisioning cleanup
+└─ Integration tests + smoke test enhancements
+
+Phase 2c: Tenant OIDC integration (depends on Phase 2a completion)
+├─ Auto-provision OIDC clients during tenant provisioning
+├─ Tenant app integrates auth middleware
+└─ Update local dev docs
+```
+
+
+### Critical Path Insight
+
+**#69 (per-tenant DB roles) does NOT depend on #56 (Keycloak).** They can land in parallel branches after Phase 2a foundational work. Data team can pursue #69 independently while identity/auth team completes #56 Phase 2a.
+
+---
+
+## 8. Documentation & Handoff
+
+
+### Current Docs ✓
+- `RUNTIME.md` — tenant container environment contract, health endpoints, lifecycle
+- `apps/control-plane/README.md` — provisioning logic, tenant lifecycle states
+- `platform/control-plane/base/clusterrole.yaml` — RBAC for Kubernetes API access
+
+
+### Docs Tasks for Phase 2
+
+| Task | Landing | Scope |
+|------|---------|-------|
+| `docs/LOCAL_DEV_KEYCLOAK.md` | Phase 2a | Keycloak admin URL, manual client creation, env var setup |
+| Append to `RUNTIME.md` | Phase 2b | "Phase 2b Secrets Management" section: per-tenant role model, password strategy, rotation future work |
+| Append to `apps/control-plane/README.md` | Phase 2b | "Per-tenant Role Provisioning" design: role creation, least-privilege grants, cleanup logic, testing strategy |
+| `docs/MIGRATION_PHASE0_TO_PHASE2.md` | Phase 2b | Operators: how to migrate existing Phase 0 deployments (shared credentials → per-tenant roles) |
+
+---
+
+## Recommendation: Phase 2 Green Light ✅
+
+**Platform is ready for Phase 2 with clear decomposition.**
+
+**Phase 2a:** Keycloak foundation can land immediately (infrastructure ready, needs control-plane integration code).
+
+**Phase 2b:** Per-tenant roles path is clear (3–4 focused PRs, no blocking dependencies, critical for security).
+
+**Phase 2c:** Tenant OIDC integration deferred to after Phase 2a (not blocking Phase 2b).
+
+**No platform/tooling work needs to be split from feature work**—both fit within the current k3d, CI, and Kubernetes infrastructure.
+
+---
+
+
+# Decision: Phase 2 Execution Order & QA Gates
+
+**Recorded by:** Chunk (Tester)  
+**Date:** 2026-04-22  
+**Context:** FFMikha green-lit Phase 2 with three parallel issues: #56 (Keycloak OIDC), #40 (Restore Safety), #69 (Per-Tenant Roles)
+
+---
+
+## Decision
+
+**Execution order is NOT optional—#40 must ship before #69 or #56 implementation merges.**
+
+
+### Reasoning
+
+1. **#40 (Restore Safety) is a blocker for #69 and #56 because:**
+   - #69 (per-tenant credential rotation) requires maintenance-mode signaling; without #40's restore-safety gates, credential rotation creates orphan-auth failures
+   - #56 (OIDC token refresh) requires graceful state transitions; without #40's maintenance-mode, token refresh during state transition leaves clients orphaned
+   - Both #69 and #56 depend on the control-plane tenant state machine moving through `restoring` state with proper client notification
+
+2. **Four specific failure modes occur if #69 starts before #40:**
+   - Silent restore with stale auth: user sees 401 instead of maintenance notification
+   - Orphaned Postgres connections: old credentials in pool, new requests timeout
+   - OIDC realm token confusion: admin token leaks into second tenant's environment
+   - Restore credential sync race: pod hangs during graceful shutdown due to stale credentials
+
+3. **Test infrastructure is decoupled from implementation:**
+   - 13 regression test files can be scaffolded immediately (zero product code changes)
+   - Tests serve as acceptance gates for each issue
+   - Allows parallel track planning while maintaining gate dependencies
+
+---
+
+## Approved Roadmap
+
+**Phase 2a (Week 1):** Scaffold regression test files  
+**Phase 2b (Weeks 2–3):** Implement #40 in isolation; unblock #69 and #56 when #40 merges  
+**Phase 2c (Weeks 4–7):** #69 and #56 in parallel, each gated on own test suite  
+
+---
+
+## Acceptance Criteria
+
+Each issue ships only when:
+- All issue-specific gates pass (`npm test` subset)
+- Root validation passes (`npm run lint && npm run test && npm run build`)
+- No test flakiness (3 consecutive runs pass)
+- Audit trail and logs reviewed for leakage
+
+---
+
+## References
+
+- `.squad/qa-brief-phase-2.md` — Full QA gate specification
+- Issue #56 — Keycloak OIDC integration
+- Issue #40 — Restore safety during active usage
+- Issue #69 — Per-tenant Postgres roles and least-privilege credentials
+
+
+# Data — Phase 2 backend/platform-security start order
+
+**Date:** 2026-04-21  
+**Author:** Data (Backend Dev)
+
+## Decision
+
+Start Phase 2 with **#69 per-tenant Postgres credentials** before full #56 OIDC wiring or #40 restore orchestration.
+
+But do **not** implement #69 as a simple secret swap. The safe thin slice is:
+
+1. Control plane creates a tenant-scoped runtime role + password
+2. Control plane pre-seeds the tenant database schema with elevated credentials before first pod start
+3. Tenant pod receives only the tenant-scoped runtime `DATABASE_URL`
+4. Control plane records credential lifecycle metadata/audit events
+
+## Why
+
+- Current provisioning still fans one shared runtime credential into every tenant pod, so one compromised tenant can reach the whole fleet.
+- `apps/api/src/note-store-bootstrap.ts` still runs schema DDL on startup, which means a truly least-privilege runtime role will fail unless bootstrap moves earlier or splits into a dedicated migrator path.
+- #56 and #40 both get cleaner boundaries once the database secret model is boring and tenant-scoped.
+
+## Thin safe slice
+
+
+### #69 first-pass implementation
+- `apps/control-plane/src/provisioning.ts`
+  - extend `TenantDatabase` / manager output to include runtime role metadata
+  - create tenant role + password
+  - initialize schema/default grants before returning runtime secret material
+  - terminate sessions and drop role on deprovision
+- `apps/control-plane/src/index.ts`
+  - remove the assumption that `TENANT_DATABASE_RUNTIME_URL` is the steady-state runtime model
+  - keep only admin/bootstrap connection config (or rename envs explicitly if a bootstrap/runtime split remains)
+- `apps/control-plane/test/provisioning.test.ts`
+  - assert tenant-scoped secret content and role cleanup intent
+- `apps/control-plane/src/tenant-registry.ts` (+ maybe `types.ts`)
+  - add explicit credential audit metadata/table rather than hiding this in state transitions
+- `platform/control-plane/base/secret.yaml`
+  - stop documenting a shared tenant runtime URL as the normal contract
+- `platform/control-plane/overlays/*/secret-patch.yaml`
+  - same cleanup for k3d and hosted reference overlays
+- `apps/control-plane/.env.example`, `README.md`, `RUNTIME.md`, `apps/control-plane/README.md`, `platform/control-plane/README.md`, `platform/k3d/README.md`
+  - document tenant-scoped secret generation and the migration from shared runtime creds
+
+
+### #56 prep only (do not fully wire OIDC yet)
+- `apps/api/src/route-support.ts`
+  - introduce an auth-provider seam so `requireAuthenticatedAccount()` no longer assumes local session lookup forever
+- `apps/api/src/routes/auth-routes.ts`
+  - keep local login/register for now, but isolate them behind that seam
+- `apps/api/src/types.ts`
+  - define a stable authenticated principal shape that survives the OIDC switch
+- `apps/api/src/note-store.ts`
+  - keep authorization data local (`campaign_memberships`, `is_site_admin` mapping) even when identity comes from Keycloak
+- `apps/control-plane/src/app.ts`
+  - plan a second auth mode beside static bearer token for future admin OIDC validation
+
+
+### #40 prep only (do not implement full operator workflow yet)
+- `apps/api/src/app.ts`
+  - add a process-level maintenance / write-block hook that routes can consult
+- `apps/api/src/routes/admin-routes.ts`
+  - stop doing an immediate blind store swap; enter maintenance first, then restore, then reopen
+- `apps/api/src/route-support.ts` and owner/shared route files
+  - centralize “writes blocked / maintenance active” behavior so write endpoints fail consistently
+- `apps/api/test/core-workflows.test.ts` (+ shared/owner route tests)
+  - lock in 503/409-style behavior during restore windows and session invalidation after restore
+
+## Main risks
+
+1. **Bootstrap privilege mismatch** — a runtime role with only CONNECT/USAGE/DML cannot execute current startup DDL.
+2. **Existing tenants** — reprovisioning a ready tenant must rotate credentials without silently orphaning the old role or breaking rollback.
+3. **Audit gap** — current control-plane state transitions are not enough to answer “when was this credential created/rotated?”
+4. **Test harness gap** — unit tests can cover manifest generation, but privilege isolation needs a real Postgres-backed integration lane.
+5. **Restore interaction** — #40 should not assume one long-lived shared database credential once #69 lands.
+
+## Recommendation to squad
+
+Treat #69 as the first backend/platform-security Phase 2 slice. Keep #56 on auth-boundary prep and #40 on maintenance semantics until tenant-scoped runtime credentials are in place.
+
+
+---
+title: "Phase 2 sequencing for #69, #56, and #40"
+decided_by: "Mikey"
+date: "2026-04-21"
+status: "proposed"
+---
+
+## Decision
+
+Run the next Phase 2 execution wave in this order:
+
+1. **#69 — per-tenant Postgres roles and least-privilege runtime credentials**
+2. **#56 — Keycloak OIDC for control plane and tenant apps**
+3. **#40 — protect active sessions and writes during admin restore**
+
+## Why
+
+- `#69` is the thinnest credible first slice and removes an active security smell at the provisioning seam. `apps/control-plane/src/provisioning.ts` already has a narrow place to swap shared runtime credentials for per-tenant credentials without dragging UI or auth migration along for the ride.
+- `#56` is cross-cutting, but its realm/client boundaries are clearer once tenant runtime credentials are no longer shared. That keeps identity isolation and data isolation aligned instead of partially fixing both in one noisy change.
+- `#40` should consume the established boundaries, not define them. The current restore flow is still tenant-local (`apps/api/src/routes/admin-routes.ts`) and the product docs explicitly warn that active users are not yet placed into maintenance automatically, so restore safety belongs after auth and credential contracts are set.
+
+## Thin first slice
+
+Start with `#69` by changing provisioning to mint a tenant-specific Postgres role/password, store only that tenant's `DATABASE_URL` in the per-tenant Secret, and cover it with provisioning tests. That proves the security boundary with the fewest moving parts.
+
+## Dependency notes
+
+- `#40` should not drive Keycloak design.
+- `#56` and `#69` are complementary, but `#69` is the safer first move because it lives behind the existing control-plane seam.
+- If hosted restore orchestration needs `/_control/maintenance` or proactive client notifications in the first slice, track that as a follow-up instead of hiding it inside `#40`.
+
+

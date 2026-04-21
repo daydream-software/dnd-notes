@@ -25,3 +25,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## 2026-04-21: Issue #69 least-privilege tenant Postgres credentials
 - New-tenant provisioning now creates dedicated Postgres runtime roles/passwords, bootstraps schema before pod start, and keeps ordinary reprovisioning on existing runtime secrets unless an explicit migration is performed.
+## 2026-04-21: Phase 2 backend/security attack plan
+
+- Data reviewed the Phase 2 backend/platform-security starting slice and recommends landing per-tenant Postgres credentials first (#69) before full OIDC wiring (#56) or restore orchestration (#40).
+- Main blocker to a naive least-privilege swap: `apps/api/src/note-store-bootstrap.ts` still runs Postgres schema DDL on startup, so the control plane must pre-seed schema/default grants (or a separate migrator path) before tenant pods receive runtime-only credentials.
+- Follow-up plan captured in `.squad/decisions/inbox/data-phase-2-backend-plan.md`; reusable pattern captured in `.squad/skills/postgres-tenant-least-privilege/SKILL.md`.
