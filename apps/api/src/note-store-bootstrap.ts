@@ -355,7 +355,13 @@ async function ensureOwnerKeycloakSubColumn(database: NoteStoreDatabase) {
     if (!ownerColumns.has('keycloak_sub')) {
       await database.exec(`
         ALTER TABLE owner_accounts
-        ADD COLUMN keycloak_sub TEXT UNIQUE
+        ADD COLUMN keycloak_sub TEXT
+      `)
+
+      await database.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+        ON owner_accounts(keycloak_sub)
+        WHERE keycloak_sub IS NOT NULL
       `)
     }
   })

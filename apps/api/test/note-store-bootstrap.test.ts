@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { initializeNoteStoreDatabase } from '../src/note-store-bootstrap.js'
+import { createSqliteDatabase } from '../src/note-store-database.js'
 import type { NoteStoreDatabase } from '../src/note-store-database.js'
 
 const requiredPostgresTables = [
@@ -207,4 +208,96 @@ test('pg-mem style privilege lookup failures fall back to schema bootstrap', asy
   await initializeNoteStoreDatabase(database, new Set())
 
   assert.equal(database.executedSql.length, 2)
+})
+
+test('sqlite migration adds keycloak_sub with a separate unique index', async () => {
+  const database = createSqliteDatabase(':memory:')
+
+  try {
+    await database.exec(`
+      CREATE TABLE owner_accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `)
+
+    await initializeNoteStoreDatabase(database, new Set())
+
+    const ownerColumns = (await database
+      .prepare<{ name: string }>(`
+        PRAGMA table_info("owner_accounts")
+      `)
+      .all()) as Array<{ name: string }>
+    assert.equal(
+      ownerColumns.some((column) => column.name === 'keycloak_sub'),
+      true,
+    )
+
+    const indexRow = await database
+      .prepare<{ sql: string | null }>(`
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_owner_accounts_keycloak_sub'
+      `)
+      .get()
+    assert.ok(indexRow?.sql)
+    assert.match(indexRow.sql, /CREATE UNIQUE INDEX/i)
+    assert.match(indexRow.sql, /WHERE keycloak_sub IS NOT NULL/i)
+
+    await database
+      .prepare(`
+        INSERT INTO owner_accounts (
+          id,
+          email,
+          display_name,
+          password_hash,
+          is_site_admin,
+          keycloak_sub,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        'owner-1',
+        'owner1@example.com',
+        'Owner One',
+        'hash',
+        0,
+        'kc-123',
+        '2026-04-21T00:00:00.000Z',
+        '2026-04-21T00:00:00.000Z',
+      )
+
+    await assert.rejects(
+      database
+        .prepare(`
+          INSERT INTO owner_accounts (
+            id,
+            email,
+            display_name,
+            password_hash,
+            is_site_admin,
+            keycloak_sub,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          'owner-2',
+          'owner2@example.com',
+          'Owner Two',
+          'hash',
+          0,
+          'kc-123',
+          '2026-04-21T00:00:00.000Z',
+          '2026-04-21T00:00:00.000Z',
+        ),
+    )
+  } finally {
+    await database.close()
+  }
 })
