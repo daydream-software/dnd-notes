@@ -14,6 +14,7 @@ Data initialized as Backend Dev for the initial project squad.
 
 ## Recent Updates
 
+📌 Issue #69 delivered (2026-04-21T19:55:31Z): Per-tenant Postgres credentials fully implemented — new tenants get dedicated roles + tenant-scoped DATABASE_URL, control-plane pre-seeds schema before first pod start, safe deprovision cleanup in place; existing tenants stay on shared creds until explicit migration. Session log at `.squad/log/20260421-195544-issue-69-delivery.md`. Validation: lint/test/build passed for control-plane + api, platform:validate passed. — Data (Agent)
 
 
 ## Learnings
