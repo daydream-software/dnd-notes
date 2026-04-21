@@ -177,6 +177,8 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 - Reusable operator entrypoints for this slice: `npm run platform:validate`, `npm run k3d:build-control-plane-image`, and `.github/workflows/deployment-artifacts.yml`.
 - PR `#66` follow-up locked the control-plane manifest pattern: keep `platform/control-plane/base/deployment.yaml` tagless and make each overlay own its explicit image tag via Kustomize `images`.
 - Committed control-plane Secret manifests now stay placeholder-only (`platform/control-plane/base/secret.yaml`, `platform/control-plane/overlays/k3d/secret-patch.yaml`, `platform/control-plane/overlays/hosted-reference/secret-patch.yaml`); local k3d docs in `platform/control-plane/README.md` show the out-of-band `kubectl create secret ... | kubectl apply -f -` replacement step.
+- `scripts/platform/validate-manifests.sh` should stream `kubectl kustomize` output and reduce it to a tiny content flag instead of buffering full rendered manifests in shell variables.
+- FFMikha’s PR-review rule is explicit: after every push on a PR, wait for the follow-up Copilot review before concluding the branch is ready.
 
 ## 2026-04-20: Node24 Action Compatibility Update
 

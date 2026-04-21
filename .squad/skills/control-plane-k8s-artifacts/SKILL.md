@@ -21,6 +21,7 @@ Use this when a repo already has a fast local control-plane/dev loop, but hosted
 5. Validate overlays in CI by rendering them (`kubectl kustomize`) and build the control-plane image alongside the tenant image.
 6. Keep the base Deployment image reference tagless and force each overlay to pin its own promoted/local tag through `images`.
 7. Keep committed Secret manifests placeholder-only; document the local or managed secret creation step outside the committed overlay values.
+8. When a validation script only needs to prove rendered manifests are non-empty, stream `kubectl kustomize` through a line-oriented reducer (for example `awk`) instead of buffering the full render in a shell variable.
 
 ## Examples
 

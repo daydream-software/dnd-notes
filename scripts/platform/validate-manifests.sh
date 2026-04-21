@@ -13,11 +13,16 @@ require_tool() {
 validate_overlay() {
   local overlay_path="$1"
   local display_path="${overlay_path#"${ROOT}/"}"
+  local has_manifest_content
+  has_manifest_content="$(
+    kubectl kustomize "$overlay_path" | awk '
+      BEGIN { found = 0 }
+      /[^[:space:]]/ { found = 1 }
+      END { print found }
+    '
+  )"
 
-  local rendered_manifest
-  rendered_manifest="$(kubectl kustomize "$overlay_path")"
-
-  if [[ -z "${rendered_manifest}" ]]; then
+  if [[ "${has_manifest_content}" != "1" ]]; then
     echo "Rendered manifest was empty for ${display_path}" >&2
     exit 1
   fi

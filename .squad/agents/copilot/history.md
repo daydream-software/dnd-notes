@@ -152,3 +152,9 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Delivered: extracted a shared control-plane readiness handler, added SHA-pinned `actions/setup-node` with the repo `.nvmrc` to `.github/workflows/deployment-artifacts.yml`, made the base control-plane Deployment image tagless with overlay-owned tags, added PVC-friendly pod `fsGroup`, replaced committed secret defaults with placeholders plus k3d secret-creation docs, and removed duplicate control-plane README sections.
 - Validation: `npm run lint && npm run test:ci && npm run build && npm run platform:validate` passed in the dedicated worktree.
 - Next: push the branch update, reply on every Copilot thread, and resolve all review threads on PR `#66`.
+
+## 2026-04-21 PR #66 final review follow-up
+- Scope: address the last Copilot comment on `scripts/platform/validate-manifests.sh` without widening beyond the manifest validation helper.
+- Delivered: `validate_overlay()` now streams `kubectl kustomize` through `awk` and captures only a `0/1` content flag, so the script still rejects empty renders without buffering whole manifests in memory.
+- Validation: `npm run platform:validate` passed in `.worktrees/43-deployment-artifacts`.
+- Review gate: FFMikha requires waiting for the post-push Copilot review after every PR push before concluding readiness.
