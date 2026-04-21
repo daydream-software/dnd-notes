@@ -32,6 +32,7 @@ const defaultDeleteTimeoutMs = 120_000
 const defaultTenantStorageRequest = '1Gi'
 const defaultTenantStorageMountPath = '/app/data'
 const maxKubernetesLabelValueLength = 63
+const containerImageTagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/
 
 type KubernetesObjectClient = Pick<
   KubernetesObjectApi,
@@ -106,6 +107,35 @@ interface BuildTenantInfrastructureBundleOptions {
   tenantPort: number
 }
 
+export class TenantProvisioningValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TenantProvisioningValidationError'
+  }
+}
+
+function normalizeTenantVersionOverride(version?: string): string | undefined {
+  if (version === undefined) {
+    return undefined
+  }
+
+  const normalizedVersion = version.trim()
+
+  if (normalizedVersion.length === 0) {
+    throw new TenantProvisioningValidationError(
+      'Tenant version must be a non-empty string',
+    )
+  }
+
+  if (!containerImageTagPattern.test(normalizedVersion)) {
+    throw new TenantProvisioningValidationError(
+      'Tenant version must be a valid container image tag',
+    )
+  }
+
+  return normalizedVersion
+}
+
 export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly tenantRegistry: TenantRegistry
   private readonly infrastructureManager: TenantInfrastructureManager
@@ -136,19 +166,35 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     version?: string
   }): Promise<TenantProvisioningResponse> {
     const tenant = this.getExistingTenant(params.tenantId)
+    const requestedVersion = normalizeTenantVersionOverride(params.version)
+
+    const isVersionRollout =
+      requestedVersion !== undefined && requestedVersion !== tenant.version
 
     if (tenant.currentState === 'deprovisioned') {
       throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
     }
 
-    if (params.version && params.version !== tenant.version) {
-      this.tenantRegistry.updateTenantVersion(tenant.id, params.version)
+    if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
+      this.tenantRegistry.updateTenantVersion(tenant.id, requestedVersion)
     }
 
     const refreshedTenant = this.getExistingTenant(tenant.id)
+    const shouldMarkUpgrading =
+      isVersionRollout &&
+      refreshedTenant.subdomain != null &&
+      refreshedTenant.currentState === 'ready'
 
     try {
       this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
+      if (shouldMarkUpgrading) {
+        this.tenantRegistry.updateTenantState(
+          refreshedTenant.id,
+          'upgrading',
+          params.triggeredBy,
+          params.reason ?? 'Tenant rolling update started',
+        )
+      }
       const subdomain = assertPersistedTenantSubdomain(
         refreshedTenant.id,
         this.tenantRegistry.reserveTenantSubdomain(
@@ -402,14 +448,26 @@ export class KubernetesTenantInfrastructureManager
         },
       })
 
-      const isAvailable =
-        (deployment.status?.availableReplicas ?? 0) >= 1 &&
+      const generation = deployment.metadata?.generation ?? 0
+      const observedGeneration = deployment.status?.observedGeneration ?? 0
+      const specReplicas = deployment.spec?.replicas ?? 0
+      const updatedReplicas = deployment.status?.updatedReplicas ?? 0
+      const availableReplicas = deployment.status?.availableReplicas ?? 0
+      const replicas = deployment.status?.replicas ?? 0
+      const unavailableReplicas = deployment.status?.unavailableReplicas ?? 0
+
+      const isFullyRolledOut =
+        observedGeneration >= generation &&
+        updatedReplicas === specReplicas &&
+        availableReplicas === specReplicas &&
+        replicas === specReplicas &&
+        unavailableReplicas === 0 &&
         deployment.status?.conditions?.some(
           (condition) =>
             condition.type === 'Available' && condition.status === 'True',
         ) === true
 
-      if (isAvailable) {
+      if (isFullyRolledOut) {
         return
       }
 
@@ -614,6 +672,14 @@ export function buildTenantInfrastructureBundle(
       },
       spec: {
         replicas: 1,
+        minReadySeconds: 5,
+        strategy: {
+          type: 'RollingUpdate',
+          rollingUpdate: {
+            maxSurge: 0,
+            maxUnavailable: 1,
+          },
+        },
         selector: {
           matchLabels: buildTenantSelectorLabels(options.tenant),
         },

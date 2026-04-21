@@ -38,6 +38,7 @@ Mikey initialized as Lead for the initial project squad.
 - **Decision point triage:** Data's 4 blocking questions were the right forcing function. Without explicit answers to auth strategy, versioning, backup ownership, and Keycloak timing, no child issue can be confidently scoped.
 - **Phase overlap reduces idle time:** Design tasks for Phase N+1 can start during Phase N implementation when outputs are interfaces/contracts rather than code. State machine, API contract, and adapter interface drafts are all non-blocking on Phase 0 code.
 - **Key file paths:** Epic decisions consolidated in `.squad/decisions.md` lines 3492–4180. Sub-issues: #52 (containerize), #43 (artifacts), #39 (WAL), #53 (control plane), #54 (provisioning), #55 (rollout), #56 (OIDC), #40 (restore), #57 (fleet status).
+- **Issue #42 Phase 0 verdict (2026-04-21):** Scope is effectively landed (`#52`, `#58`, `#63`, `#43` are closed and the repo now has the tenant image, Postgres adapter, k3d smoke lane, and committed control-plane artifacts). Gate is still **not** met: the tenant provisioning path still mounts a per-tenant PVC at `/app/data` (`apps/control-plane/src/provisioning.ts`), the docs explicitly defer k3s/stateful rehearsal beyond the k3d lane (`platform/k3d/README.md`), and there is no rollout proof beyond graceful-shutdown/readiness plumbing while `#55` remains open. **Key lesson:** close the child issues, but do not call the phase done until the acceptance sentence itself has concrete proof behind it.
 
 ## 2026-04-18: Issue #42 Platform Planning — Execution Recommendation
 
@@ -144,3 +145,9 @@ Locked three critical Phase 0–1 clarifications into GitHub issue #42 body and 
 
 
 📌 Team update (2026-04-19T22:50:29Z): Three Issue #58 decisions locked and merged to decisions.md. Architecture approved. Worktree + Copilot review flow validated by Brand (no platform changes). Phase 0 Track A (Data) ready to start. — Scribe
+
+   - Scope: YES (all four Phase 0 slices landed: #52, #58, #63, #43)
+   - Gate: NOT YET (missing stateless proof, deferred k3s/stateful rehearsal, open #55)
+   - QA verdict: Practical YES with yellow risk (k3d smoke doesn't test full tenant CRUD yet)
+   - Control-plane artifacts: Image + Kustomize artifacts committed, tagged approach locked
+   - Decided by: Mikey (Lead), Chunk (Tester), Brand (Platform)

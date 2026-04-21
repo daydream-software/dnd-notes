@@ -2,10 +2,6 @@
 
 ## Active Decisions
 
-# Squad Decisions
-
-## Active Decisions
-
 
 ### 2026-04-19: Code Review Response Patterns
 **Decided by:** Data (Backend Dev)  
@@ -3782,3 +3778,95 @@ When a GitHub-hosted action in this repo hits a runtime deprecation, upgrade it 
 **By:** FFMikha (via Copilot)
 **What:** After every push on a pull request, wait for the follow-up review before concluding the PR is ready; do not declare readiness before that review lands.
 **Why:** User request — captured for team memory
+
+# 2026-04-21: Issue #43 execution slice — control-plane artifacts first
+
+**Decided by:** Brand (Platform Dev)  
+**Issue:** #43 — Track deployment artifacts after hosting target selection
+
+## Decision
+
+Treat the coherent non-overlapping implementation slice for `#43` as:
+
+1. a committed **control-plane image** (`docker/control-plane/Dockerfile`)
+2. committed **control-plane Kubernetes artifacts** (RBAC, PVC, Service, Deployment, Kustomize overlays)
+3. a **build + manifest-validation workflow** in GitHub Actions
+
+Do **not** re-open tenant containerization work from `#52`, and do **not** fold the fast `k3d:smoke` loop into an in-cluster control-plane deployment yet.
+
+## Why
+
+- The tenant app already has a production-minded Dockerfile, runtime contract, and k3d smoke rehearsal.
+- The repo explicitly called out the missing control-plane container/deployment artifact lane as the next deployment-artifact gap.
+- Keeping `k3d:smoke` local preserves the quickest provisioning debug loop while the newly committed artifacts cover the hosted packaging story.
+
+## Impact
+
+- Platform contributors now have a single committed path for control-plane image building and Kustomize-based manifest review.
+- Same-origin tenant hosts remain the default through `TENANT_BASE_DOMAIN` + `TENANT_PUBLIC_SCHEME`; no split-origin deployment flow was introduced.
+- CI can validate deployment artifacts without requiring registry push automation.
+
+### 2026-04-21: Control-plane artifact hygiene for PR #66
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-21
+
+## Decision
+
+For the control-plane deployment artifacts:
+
+1. Keep the base Deployment image reference tagless (`ghcr.io/daydream-software/dnd-notes-control-plane`) so overlays must own the concrete promoted/local tag through Kustomize `images`.
+2. Keep committed Secret manifests placeholder-only in source control; local k3d runs and hosted operators must inject real values out of band.
+
+## Why
+
+- Mutable tags like `:latest` make hosted rollouts and rollback audits harder to reason about.
+- Local-default bearer tokens and DB credentials are too easy to cargo-cult into other environments once they live in committed Secret manifests.
+- This keeps the fast k3d lane intact while making the artifact lane boring and reproducible.
+
+## Impact
+
+- `platform/control-plane/overlays/k3d` keeps the `k3d` image tag pin and now expects a local secret replacement step before rollout.
+- `platform/control-plane/overlays/hosted-reference` stays a placeholder-only reference overlay until an operator supplies promoted image and secret values.
+
+# Chunk — Epic #42 Phase 0 QA verdict
+
+## Verdict
+
+Approve Phase 0 as done.
+
+## Evidence
+
+- **Container/runtime contract exists:** `Dockerfile`, `README.md`, and `RUNTIME.md` define the tenant image, health/readiness contract, same-origin serving contract, and SQLite mount path.
+- **Deployment artifacts exist:** committed control-plane manifests live under `platform/control-plane/`, and tenant runtime resources are generated in `apps/control-plane/src/provisioning.ts` as Namespace + ConfigMap + Secret + PVC + Service + Deployment.
+- **Postgres primary + SQLite fallback exists:** `apps/api/src/note-store.ts` and `apps/api/src/note-store-database.ts` select Postgres from `DATABASE_URL`, keep SQLite as the default fallback, configure pooling, and expose health checks; `apps/api/test/postgres-adapter.test.ts`, `apps/api/test/note-store-database.test.ts`, and `apps/api/test/seed.test.ts` cover the bridge behavior.
+- **Validation path exists and is green:** local repo validation passed with `npm run lint && npm run test && npm run build && npm run platform:validate`; GitHub Actions also shows recent green runs for `CI` on `main` (`24732139528`), `k3d Smoke` on `main` (`24709553342`), and `Deployment Artifacts` (`24730489022`).
+- **Issue closure lines up with repo evidence:** #52, #58, #43, and #63 are closed, and #63 specifically is backed by `scripts/k3d/bootstrap.sh`, `scripts/k3d/smoke.sh`, `platform/k3d/README.md`, and the dedicated `k3d-smoke.yml` workflow.
+
+## Remaining risk
+
+The meaningful residual risk is **smoke depth**: the live k3d lane proves provisioning plus readiness, but it still does not exercise note create/read against the provisioned tenant's real Postgres path. That is a yellow follow-up, not a Phase 0 blocker.
+
+## Note on local re-run
+
+I could not re-run the k3d lane end-to-end in this shell because the local Docker policy blocks the pinned `rancher/k3s` image, so the live-cluster proof here relies on the current repo wiring plus the recent green GitHub Actions smoke run.
+
+# Issue #42 — Phase 0 verdict
+
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-21
+
+## Verdict
+
+- **Scope verdict:** YES — the intended Phase 0 slices are landed. `#52`, `#58`, `#63`, and `#43` are all closed, and the repo now contains the tenant container/runtime contract, Postgres-backed note-store path with SQLite fallback, formalized k3d bootstrap + smoke lane, and committed control-plane image/manifests plus CI validation.
+- **Gate verdict:** NOT YET — the current repo does not satisfy the Phase 0 acceptance bar as written in epic `#42`.
+
+## Why the gate is still open
+
+1. **Not stateless yet.** Tenant provisioning still creates and mounts a per-tenant PVC at `/app/data`, and the runtime docs explicitly preserve that mount even when `DATABASE_URL` is the primary backend.
+2. **No k3s/stateful rehearsal proof yet.** The repo documents k3d clearly, but it also explicitly says the later k3s/stateful rehearsal lane still owns the remaining stateful validation.
+3. **Rolling-update proof is missing.** The app has graceful shutdown/readiness plumbing, but the evidence stops short of a real rollout rehearsal; `#55` is still open and no current smoke/test lane proves tenant update + drain behavior end-to-end.
+
+## Reviewer note
+
+This is a classic “scope complete, gate incomplete” case. The team should keep the child issues closed, but Phase 0 itself should stay unapproved until the acceptance bar is either proven or rewritten to match what the repo actually intends to ship at this stage.
+

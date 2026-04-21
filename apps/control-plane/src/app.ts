@@ -1,7 +1,10 @@
 import { createRequire } from 'node:module'
 import express, { type Express, type Request, type Response } from 'express'
 import { z } from 'zod'
-import type { TenantProvisioningPort } from './provisioning.js'
+import {
+  TenantProvisioningValidationError,
+  type TenantProvisioningPort,
+} from './provisioning.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import { tenantStates } from './types.js'
 import type {
@@ -487,6 +490,14 @@ export function createApp({
         })
         response.json(provisioningResult)
       } catch (error) {
+        if (error instanceof TenantProvisioningValidationError) {
+          response.status(400).json({
+            error: 'Invalid tenant provisioning request',
+            details: error.message,
+          })
+          return
+        }
+
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error'
         response.status(500).json({

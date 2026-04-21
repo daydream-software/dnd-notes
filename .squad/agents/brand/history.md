@@ -209,3 +209,9 @@ Brand's QA checklist (Chunk) and CI/CD decisions (Brand's own) now merged to dec
 3. DATABASE_URL injection proof
 
 
+
+   - Scope: YES (all four Phase 0 slices landed: #52, #58, #63, #43)
+   - Gate: NOT YET (missing stateless proof, deferred k3s/stateful rehearsal, open #55)
+   - QA verdict: Practical YES with yellow risk (k3d smoke doesn't test full tenant CRUD yet)
+   - Control-plane artifacts: Image + Kustomize artifacts committed, tagged approach locked
+   - Decided by: Mikey (Lead), Chunk (Tester), Brand (Platform)
