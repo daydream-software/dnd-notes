@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dnd-notes-control-plane-config
+  namespace: dnd-notes-platform
+data:
+  TENANT_BASE_DOMAIN: 127.0.0.1.nip.io
+  TENANT_PUBLIC_SCHEME: http

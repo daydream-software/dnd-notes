@@ -117,6 +117,24 @@ export function createApp({
   tenantProvisioningService,
 }: CreateAppOptions): Express {
   const app = express()
+  const buildHealthResponse = (): HealthResponse => ({
+    status: 'healthy',
+    uptime: process.uptime(),
+    version: appVersion,
+  })
+  const readinessHandler = (
+    _request: Request,
+    response: Response<HealthResponse | ErrorResponse>,
+  ) => {
+    try {
+      tenantRegistry.checkHealth()
+      response.json(buildHealthResponse())
+    } catch {
+      response.status(503).json({
+        error: 'Tenant registry unavailable',
+      })
+    }
+  }
 
   app.disable('x-powered-by')
   app.use((_request, response, next) => {
@@ -130,12 +148,15 @@ export function createApp({
   app.use(internalRoutePrefix, express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
-    response.json({
-      status: 'healthy',
-      uptime: process.uptime(),
-      version: appVersion,
-    })
+    response.json(buildHealthResponse())
   })
+
+  app.get('/healthz', (_request: Request, response: Response<HealthResponse>) => {
+    response.json(buildHealthResponse())
+  })
+
+  app.get('/readyz', readinessHandler)
+  app.get('/ready', readinessHandler)
 
   app.get(
     tenantRoutePrefix,

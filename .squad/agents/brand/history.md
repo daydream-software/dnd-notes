@@ -171,6 +171,16 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 - GitHub Actions workflow pins in this repo stay SHA-pinned with inline release comments; for runtime deprecations, verify the upstream `action.yml` `runs.using` value before bumping the SHA.
 - `.github/workflows/ci.yml` currently runs `actions/checkout`, `actions/setup-node`, `EnricoMi/publish-unit-test-result-action`, and `actions/upload-artifact`; the upload-artifact pin is now `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (`# v7.0.1`) to stay on Node 24.
 - Root validation for repo-wide changes remains `npm run lint && npm run test:ci && npm run build`, which matches the CI shape for this monorepo.
+- Issue `#43` can avoid redoing tenant packaging by owning the **control-plane** deployment lane: `docker/control-plane/Dockerfile`, `platform/control-plane/base`, and the `k3d` / `hosted-reference` overlays are the committed artifact set.
+- Keep the daily `k3d:smoke` workflow on a local control-plane process even after committing in-cluster manifests; it stays faster for provisioning/debugging while the new artifacts cover hosted packaging.
+- Control-plane K8s deployment requires cluster-scoped RBAC for `namespaces`, `configmaps`, `secrets`, `services`, `persistentvolumeclaims`, and `deployments` because provisioning spans per-tenant namespaces.
+- Reusable operator entrypoints for this slice: `npm run platform:validate`, `npm run k3d:build-control-plane-image`, and `.github/workflows/deployment-artifacts.yml`.
+- PR `#66` follow-up locked the control-plane manifest pattern: keep `platform/control-plane/base/deployment.yaml` tagless and make each overlay own its explicit image tag via Kustomize `images`.
+- Committed control-plane Secret manifests now stay placeholder-only (`platform/control-plane/base/secret.yaml`, `platform/control-plane/overlays/k3d/secret-patch.yaml`, `platform/control-plane/overlays/hosted-reference/secret-patch.yaml`); local k3d docs in `platform/control-plane/README.md` show the out-of-band `kubectl create secret ... | kubectl apply -f -` replacement step.
+- `scripts/platform/validate-manifests.sh` should stream `kubectl kustomize` output and reduce it to a tiny content flag instead of buffering full rendered manifests in shell variables.
+- FFMikha’s PR-review rule is explicit: after every push on a PR, wait for the follow-up Copilot review before concluding the branch is ready.
+- Control-plane probe handlers in `apps/control-plane/src/app.ts` should keep `/ready` and `/readyz` failure payloads stable and non-sensitive (`{ error: 'Tenant registry unavailable' }`) even when `tenantRegistry.checkHealth()` throws raw SQLite or filesystem errors.
+- The tight regression check for that probe contract lives in `apps/control-plane/test/app.test.ts`, asserting the readiness 503 body omits `details` for both `/ready` and `/readyz`.
 
 ## 2026-04-20: Node24 Action Compatibility Update
 

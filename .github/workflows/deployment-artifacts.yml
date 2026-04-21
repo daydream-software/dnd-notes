@@ -1,0 +1,78 @@
+name: Deployment Artifacts
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/deployment-artifacts.yml'
+      - '.dockerignore'
+      - 'Dockerfile'
+      - 'docker/control-plane/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'apps/api/**'
+      - 'apps/control-plane/**'
+      - 'apps/web/**'
+      - 'platform/control-plane/**'
+      - 'scripts/platform/**'
+      - 'scripts/prepare.mjs'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/deployment-artifacts.yml'
+      - '.dockerignore'
+      - 'Dockerfile'
+      - 'docker/control-plane/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'tsconfig.json'
+      - 'apps/api/**'
+      - 'apps/control-plane/**'
+      - 'apps/web/**'
+      - 'platform/control-plane/**'
+      - 'scripts/platform/**'
+      - 'scripts/prepare.mjs'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deployment-artifacts-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DOCKER_BUILDKIT: '0'
+      KUBECTL_VERSION: v1.35.4
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: '.nvmrc'
+          cache: 'npm'
+
+      - name: Install kubectl
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+
+      - name: Validate control-plane manifests
+        run: npm run platform:validate
+
+      - name: Build tenant image
+        run: docker build --tag dnd-notes-tenant:test .
+
+      - name: Build control-plane image
+        run: docker build --file docker/control-plane/Dockerfile --tag dnd-notes-control-plane:test .
