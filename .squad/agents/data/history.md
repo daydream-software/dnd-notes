@@ -18,6 +18,8 @@ Data initialized as Backend Dev for the initial project squad.
 
 📌 PR #72 second review wave (2026-04-21T20:14Z): Hardening fixes after first review addressing blank credential guards and index verification. Fixed: (1) blank/whitespace DATABASE_URL values now throw missing-secret error before credential rotation paths run, (2) owner email uniqueness index explicitly verified in least-privilege mode, (3) pre-init schema verification in control-plane provisioning, (4) comprehensive regression coverage added (12 new tests). All 6 review threads resolved. Commit `f85831b`. Session log at `.squad/log/20260421-pr72-second-review-wave.md`. Fresh review requested. — Data (Agent)
 
+📌 PR #72 CI fix batch (2026-04-21T20:32:58Z): Fixed focused regressions after second review wave. Root causes: pg-mem tests fell into least-privilege path incorrectly; tenant runtime role provisioning password form Postgres rejected in smoke path. Fixed both and added focused regression coverage. Commit `f033b69`. apps/api and apps/control-plane lint/test/build all pass. Fresh check cycle running on main; awaits fresh review. Session log at `.squad/log/20260421-203258-pr72-ci-fix-batch.md`. — Data (Agent)
+
 
 ## Learnings
 
