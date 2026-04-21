@@ -146,3 +146,9 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 
 ## 2026-04-20 PR #65 third review follow-up
 - Delivered: vendored the ingress-nginx controller manifest into `platform/k3d/ingress-nginx-controller-v1.12.1.yaml` so bootstrap no longer depends on a runtime network fetch, switched `scripts/k3d/bootstrap.sh` to consume that local file via `INGRESS_NGINX_MANIFEST_PATH`, pinned the platform Postgres image to `postgres:17.9-bookworm`, and cleaned up the lingering README grammar nit around the Husky `prepare` hook.
+
+## 2026-04-21 PR #66 deployment-artifacts review follow-up
+- Scope: address the seven Copilot review threads on `squad/43-deployment-artifacts` without widening beyond the deployment-artifact workflow, control-plane manifests, and closely coupled docs/tests.
+- Delivered: extracted a shared control-plane readiness handler, added SHA-pinned `actions/setup-node` with the repo `.nvmrc` to `.github/workflows/deployment-artifacts.yml`, made the base control-plane Deployment image tagless with overlay-owned tags, added PVC-friendly pod `fsGroup`, replaced committed secret defaults with placeholders plus k3d secret-creation docs, and removed duplicate control-plane README sections.
+- Validation: `npm run lint && npm run test:ci && npm run build && npm run platform:validate` passed in the dedicated worktree.
+- Next: push the branch update, reply on every Copilot thread, and resolve all review threads on PR `#66`.

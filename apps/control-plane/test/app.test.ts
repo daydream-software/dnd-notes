@@ -85,6 +85,14 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.status, 'healthy')
       assert.strictEqual(response.body.version, appVersion)
     })
+
+    it('returns service unavailable when the tenant registry is closed', async () => {
+      tenantRegistry.close()
+
+      const response = await request(app).get('/ready').expect(503)
+
+      assert.strictEqual(response.body.error, 'Tenant registry unavailable')
+    })
   })
 
   describe('POST /internal/tenants', () => {

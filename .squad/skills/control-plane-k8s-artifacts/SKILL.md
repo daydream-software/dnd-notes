@@ -19,12 +19,15 @@ Use this when a repo already has a fast local control-plane/dev loop, but hosted
    - a local-cluster lane (`k3d`, `kind`, etc.)
    - a boring hosted-reference lane with placeholder secrets/domains
 5. Validate overlays in CI by rendering them (`kubectl kustomize`) and build the control-plane image alongside the tenant image.
+6. Keep the base Deployment image reference tagless and force each overlay to pin its own promoted/local tag through `images`.
+7. Keep committed Secret manifests placeholder-only; document the local or managed secret creation step outside the committed overlay values.
 
 ## Examples
 
 - `docker/control-plane/Dockerfile`
 - `platform/control-plane/base/clusterrole.yaml`
 - `platform/control-plane/overlays/k3d/`
+- `platform/control-plane/overlays/hosted-reference/kustomization.yaml`
 - `.github/workflows/deployment-artifacts.yml`
 
 ## Anti-Patterns
@@ -32,3 +35,5 @@ Use this when a repo already has a fast local control-plane/dev loop, but hosted
 - Reusing the tenant container image for the control plane
 - Forcing the daily smoke lane to use the in-cluster control plane before the team actually needs that slower path
 - Hiding provisioning permissions behind undocumented cluster-admin assumptions
+- Leaving `:latest` or other mutable tags in the base manifest where overlays cannot own promotion
+- Checking local-only bearer tokens or database URLs into committed overlay secrets

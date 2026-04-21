@@ -21,9 +21,12 @@ spec:
     spec:
       serviceAccountName: dnd-notes-control-plane
       terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: control-plane
-          image: ghcr.io/daydream-software/dnd-notes-control-plane:latest
+          image: ghcr.io/daydream-software/dnd-notes-control-plane
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

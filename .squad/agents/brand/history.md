@@ -175,6 +175,8 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 - Keep the daily `k3d:smoke` workflow on a local control-plane process even after committing in-cluster manifests; it stays faster for provisioning/debugging while the new artifacts cover hosted packaging.
 - Control-plane K8s deployment requires cluster-scoped RBAC for `namespaces`, `configmaps`, `secrets`, `services`, `persistentvolumeclaims`, and `deployments` because provisioning spans per-tenant namespaces.
 - Reusable operator entrypoints for this slice: `npm run platform:validate`, `npm run k3d:build-control-plane-image`, and `.github/workflows/deployment-artifacts.yml`.
+- PR `#66` follow-up locked the control-plane manifest pattern: keep `platform/control-plane/base/deployment.yaml` tagless and make each overlay own its explicit image tag via Kustomize `images`.
+- Committed control-plane Secret manifests now stay placeholder-only (`platform/control-plane/base/secret.yaml`, `platform/control-plane/overlays/k3d/secret-patch.yaml`, `platform/control-plane/overlays/hosted-reference/secret-patch.yaml`); local k3d docs in `platform/control-plane/README.md` show the out-of-band `kubectl create secret ... | kubectl apply -f -` replacement step.
 
 ## 2026-04-20: Node24 Action Compatibility Update
 
