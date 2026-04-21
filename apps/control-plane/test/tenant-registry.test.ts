@@ -241,4 +241,35 @@ describe('TenantRegistry', () => {
       await rm(directory, { recursive: true, force: true })
     }
   })
+
+  it('returns the latest recorded transition for each tenant in one snapshot', () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.createTenant({
+        id: 'tenant-2',
+        slug: 'tenant-two',
+        ownerId: 'owner-2',
+        version: '1.0.0',
+      })
+
+      tenantRegistry.updateTenantState('tenant-1', 'ready', 'test-suite')
+      tenantRegistry.updateTenantState('tenant-2', 'failed', 'test-suite')
+      tenantRegistry.updateTenantState('tenant-2', 'ready', 'test-suite')
+
+      const latestTransitions = tenantRegistry.getLatestStateTransitions()
+
+      assert.equal(latestTransitions.size, 2)
+      assert.equal(latestTransitions.get('tenant-1')?.toState, 'ready')
+      assert.equal(latestTransitions.get('tenant-2')?.toState, 'ready')
+    } finally {
+      tenantRegistry.close()
+    }
+  })
 })

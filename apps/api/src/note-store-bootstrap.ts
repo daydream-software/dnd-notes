@@ -235,6 +235,51 @@ async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
   }
 }
 
+async function ensureRequiredPostgresOwnerAccountKeycloakSub(
+  database: NoteStoreDatabase,
+) {
+  if (database.kind !== 'postgres') {
+    return
+  }
+
+  const keycloakSubColumn = await database
+    .prepare<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'owner_accounts'
+        AND column_name = 'keycloak_sub'
+    `)
+    .get()
+
+  if (!keycloakSubColumn) {
+    throw new Error(
+      'Postgres note store requires the owner_accounts.keycloak_sub column for least-privilege runtime credentials.',
+    )
+  }
+
+  const keycloakSubUniqueConstraint = await database
+    .prepare<{ constraint_name: string }>(`
+      SELECT tc.constraint_name
+      FROM information_schema.table_constraints tc
+      INNER JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name
+       AND kcu.table_schema = tc.table_schema
+      WHERE tc.table_schema = current_schema()
+        AND tc.table_name = 'owner_accounts'
+        AND tc.constraint_type = 'UNIQUE'
+        AND kcu.column_name = 'keycloak_sub'
+      LIMIT 1
+    `)
+    .get()
+
+  if (!keycloakSubUniqueConstraint) {
+    throw new Error(
+      'Postgres note store requires a unique owner_accounts.keycloak_sub constraint for least-privilege runtime credentials.',
+    )
+  }
+}
+
 async function ensureNotesAttributionColumns(database: NoteStoreDatabase) {
   if (database.kind !== 'sqlite') {
     return
@@ -423,6 +468,7 @@ export async function initializeNoteStoreDatabase(
     await database.exec(noteStoreSchemaSql)
   } else {
     await ensureRequiredPostgresTables(database)
+    await ensureRequiredPostgresOwnerAccountKeycloakSub(database)
   }
 
   await ensureOwnerSiteAdminColumn(database)

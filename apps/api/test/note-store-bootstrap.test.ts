@@ -27,6 +27,8 @@ class FakePostgresDatabase implements NoteStoreDatabase {
       allowSchemaChanges: boolean
       ownerEmails?: string[]
       ownerEmailIndexDefinition?: string | null
+      ownerAccountColumns?: readonly string[]
+      ownerAccountUniqueColumns?: readonly string[]
       privilegeCheckError?: Error
       tableNames?: readonly string[]
     },
@@ -64,6 +66,18 @@ class FakePostgresDatabase implements NoteStoreDatabase {
           }
 
           return undefined
+        }
+
+        if (sql.includes('FROM information_schema.columns')) {
+          return this.options.ownerAccountColumns?.includes('keycloak_sub')
+            ? { column_name: 'keycloak_sub' }
+            : undefined
+        }
+
+        if (sql.includes('FROM information_schema.table_constraints')) {
+          return this.options.ownerAccountUniqueColumns?.includes('keycloak_sub')
+            ? { constraint_name: 'owner_accounts_keycloak_sub_key' }
+            : undefined
         }
 
         throw new Error(`Unexpected get SQL in test double: ${sql}`)
@@ -109,6 +123,8 @@ test('least-privilege postgres runtime skips schema DDL after control-plane boot
     allowSchemaChanges: false,
     ownerEmails: ['Admin@Example.com'],
     ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerAccountUniqueColumns: ['keycloak_sub'],
     tableNames: requiredPostgresTables,
   })
 
@@ -136,12 +152,45 @@ test('least-privilege postgres runtime fails fast when the owner email uniquenes
   const database = new FakePostgresDatabase({
     allowSchemaChanges: false,
     ownerEmails: ['Admin@Example.com'],
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerAccountUniqueColumns: ['keycloak_sub'],
     tableNames: requiredPostgresTables,
   })
 
   await assert.rejects(
     initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
     /idx_owner_accounts_email_lower unique index/,
+  )
+  assert.deepEqual(database.executedSql, [])
+})
+
+test('least-privilege postgres runtime fails fast when owner_accounts.keycloak_sub is missing', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /owner_accounts\.keycloak_sub column/,
+  )
+  assert.deepEqual(database.executedSql, [])
+})
+
+test('least-privilege postgres runtime fails fast when owner_accounts.keycloak_sub is not unique', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /unique owner_accounts\.keycloak_sub constraint/,
   )
   assert.deepEqual(database.executedSql, [])
 })

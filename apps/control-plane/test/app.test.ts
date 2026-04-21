@@ -337,6 +337,34 @@ describe('Control Plane API', () => {
       assert.strictEqual(tenant.backup.lastRestoreDrillStatus, null)
       assert.strictEqual(tenant.backup.location, null)
     })
+
+    it('treats blank backup metadata as missing and needing attention', async () => {
+      tenantRegistry.createTenant({
+        id: 'tenant-blank',
+        slug: 'tenant-blank',
+        ownerId: 'owner-4',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantDesiredState('tenant-blank', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-blank',
+        'ready',
+        'test-suite',
+        'Provisioned in test',
+      )
+      tenantRegistry.updateTenantBackupMetadata('tenant-blank', '   ')
+
+      const response = await authedGet('/internal/fleet/status').expect(200)
+      const tenant = response.body.tenants.find(
+        (entry: { tenant: { id: string } }) => entry.tenant.id === 'tenant-blank',
+      )
+
+      assert.ok(tenant)
+      assert.strictEqual(tenant.health, 'attention')
+      assert.strictEqual(response.body.summary.tenantsWithBackupMetadata, 0)
+      assert.strictEqual(response.body.summary.tenantsMissingBackupMetadata, 1)
+      assert.strictEqual(response.body.summary.tenantsNeedingAttention, 1)
+    })
   })
 
   describe('GET /internal/tenants/:tenantId', () => {

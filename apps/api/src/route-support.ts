@@ -291,12 +291,9 @@ export async function requireAuthenticatedAccount(
   request: Request,
   response: Response<ErrorResponse>,
 ) {
-  // Auth provider seam: This function delegates to local session-based auth.
-  // In Phase 2a, this will check AUTH_PROVIDER env var and delegate to either:
-  // - LocalAuthStrategy (current: session token lookup in owner_sessions)
-  // - KeycloakAuthStrategy (future: JWT validation, map sub to user via keycloak_sub)
-  // Both strategies will produce AuthenticatedUser { userId, email, isSiteAdmin }.
-  // Authorization (campaign_memberships, is_site_admin) remains local.
+  // Today this returns the local OwnerAccount for the authenticated owner.
+  // Authorization (campaign_memberships, is_site_admin) remains local, and this
+  // boundary can be narrowed to an AuthenticatedUser shape in a future phase.
   const token = parseAuthorizationToken(request)
 
   if (!token) {

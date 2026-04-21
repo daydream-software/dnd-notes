@@ -84,6 +84,10 @@ function parseBackupMetadata(rawMetadata: string | null) {
   }
 }
 
+function hasBackupMetadata(rawMetadata: string | null) {
+  return rawMetadata !== null && rawMetadata.trim().length > 0
+}
+
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
   adminToken: string
@@ -198,6 +202,7 @@ export function createApp({
     version: appVersion,
   })
   const buildFleetStatusResponse = (): FleetStatusResponse => {
+    const latestTransitionsByTenant = tenantRegistry.getLatestStateTransitions()
     const tenantsByCurrentState = createTenantStateCounts()
     const tenantsByDesiredState = createTenantStateCounts()
     const tenantsByVersion: Record<string, number> = {}
@@ -210,7 +215,7 @@ export function createApp({
       tenantsByDesiredState[tenant.desiredState] += 1
       tenantsByVersion[tenant.version] = (tenantsByVersion[tenant.version] ?? 0) + 1
 
-      if (tenant.backupMetadata) {
+      if (hasBackupMetadata(tenant.backupMetadata)) {
         tenantsWithBackupMetadata += 1
       } else {
         tenantsMissingBackupMetadata += 1
@@ -219,7 +224,7 @@ export function createApp({
       const needsAttention =
         tenant.currentState !== 'ready' ||
         tenant.currentState !== tenant.desiredState ||
-        tenant.backupMetadata === null
+        !hasBackupMetadata(tenant.backupMetadata)
       const health: 'healthy' | 'attention' = needsAttention
         ? 'attention'
         : 'healthy'
@@ -232,7 +237,7 @@ export function createApp({
         tenant,
         health,
         backup: parseBackupMetadata(tenant.backupMetadata),
-        latestTransition: tenantRegistry.getStateTransitions(tenant.id)[0] ?? null,
+        latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
       }
     })
 
