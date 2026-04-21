@@ -51,3 +51,14 @@ Stef initialized as Frontend Dev for the initial project squad.
 - Tag entry now works best as a free-solo Material UI `Autocomplete` backed by loaded note tags, with blur/Enter committing comma-separated input so quick capture stays fast.
 
 *96 older learning items archived.*
+
+### Admin/Operator UI Discovery (2026-04-21)
+
+- **Control-plane API exists** (apps/control-plane/src): thin Express REST layer with admin token auth, manages tenant lifecycle (create, state transitions, version/backup metadata). No web frontend.
+- **Per-tenant SiteAdminPanel** (apps/web/src/SiteAdminPanel.tsx): read-only metrics + backup/restore for single instance only, not multi-tenant admin.
+- **Fleet admin dashboard = Issue #57** (Phase 3): planned internal UI to show all tenants, pod health, PVC usage, backup age, version state. Stretch goal is customer-facing status page.
+- **Portal / customer provisioning UI** = deferred post-Phase 1 until control-plane API contract stabilizes.
+- **Missing piece**: Phase 1 provisioning driver/worker (Issue #54?) that actually orchestrates the control-plane API to create/manage instances. Currently no service or script calls the control-plane endpoints.
+- **Decision**: Control plane plumbing is in place; next phase adds the provisioning orchestrator (backend service/worker), then the operator dashboard (#57).
+
+
