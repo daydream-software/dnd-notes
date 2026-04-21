@@ -27,7 +27,7 @@ None. The application will start with defaults.
 - **`DATABASE_URL`**  
   Postgres connection string for production tenant databases.  
   Format: `postgresql://user:pass@host:5432/dbname`  
-  **Behavior:** When set, the API uses `node-postgres` with connection pooling.
+  **Behavior:** When set, the API uses `node-postgres` with connection pooling. In control-plane provisioned environments this should be a tenant-scoped least-privilege role, not a shared fleet credential.
 
 - **`NOTES_DB_POOL_MIN`** (default: `0`)  
   Minimum pooled Postgres connections.
@@ -141,6 +141,10 @@ volumes:
 
 ### Postgres (Phase 1 target)
 - **Connection:** Via `DATABASE_URL` environment variable  
+- **Least-privilege boundary:** Newly provisioned tenants receive a dedicated
+  Postgres role and randomized password from the control plane. The control
+  plane bootstraps the note-store schema before the tenant pod starts, so the
+  runtime user does not need schema-creation rights.
 - **Persistence:** Managed by Postgres for note data; the control plane may also
   mount `/app/data` on a PVC for runtime scratch/fallback storage.  
 - **Backup:** Control-plane orchestrated `pg_dump` to object storage
@@ -150,7 +154,8 @@ volumes:
 ### Startup
 1. Resolve environment variables
 2. Initialize database connection (`DATABASE_URL` when set, otherwise `NOTES_DB_PATH`)
-3. Run schema migrations (if needed)
+3. Run compatible startup upgrades (if needed). Least-privilege Postgres runtime
+   users verify the pre-initialized schema instead of creating it.
 4. Start HTTP server on `PORT`
 5. Readiness probe begins succeeding
 
@@ -217,7 +222,8 @@ See issue #43 for full manifest examples after Phase 0 validation.
 - Backup via admin API (`GET /api/admin/backup`) using SQLite-compatible snapshots
 
 **Hosted rollout path (`#55`):**
-- Postgres via `DATABASE_URL`
+- Postgres via `DATABASE_URL`, with newly provisioned tenants using
+  tenant-scoped runtime credentials
 - PVC may stay mounted at `/app/data` for fallback/runtime files, but it is not
   the primary hosted write path
 - Rolling updates use drain-first replacement (`maxSurge: 0`, `maxUnavailable: 1`)
@@ -227,9 +233,14 @@ See issue #43 for full manifest examples after Phase 0 validation.
 
 **Migration:**
 1. Download a fresh SQLite-compatible admin backup from the old SQLite-backed tenant.
-2. Start the target tenant with `DATABASE_URL` pointed at Postgres.
+2. Create or provision the target Postgres tenant so the control plane can
+   pre-initialize the schema and emit tenant-scoped runtime credentials.
 3. Restore the backup through the admin restore flow; the API imports the snapshot into Postgres.
 4. Keep SQLite support for local development when `DATABASE_URL` is unset.
+
+Existing hosted tenants that already run on a shared runtime Postgres user are a
+deliberate migration boundary. This slice does not silently rotate those live
+credentials during ordinary reprovisioning.
 
 ## Postgres-backed rolling-update choreography
 

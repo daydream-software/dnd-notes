@@ -15,6 +15,10 @@ import {
 } from '@kubernetes/client-node'
 import { createHash, randomBytes } from 'node:crypto'
 import { Pool } from 'pg'
+import {
+  applyLeastPrivilegeTenantGrants,
+  initializeTenantNoteStoreDatabase,
+} from './tenant-database-bootstrap.js'
 import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
 import type {
   Tenant,
@@ -39,14 +43,37 @@ type KubernetesObjectClient = Pick<
   'create' | 'delete' | 'read' | 'replace'
 >
 
+interface PostgresPoolLike {
+  connect(): Promise<PostgresClientLike>
+  end(): Promise<void>
+}
+
+interface PostgresClientLike {
+  query<Row extends { [key: string]: unknown } = Record<string, never>>(
+    text: string,
+    values?: readonly unknown[],
+  ): Promise<{ rows: Row[] }>
+  release(): void
+}
+
 interface TenantDatabase {
   databaseName: string
+  roleName: string | null
   runtimeConnectionString: string
 }
 
+interface EnsureTenantDatabaseOptions {
+  existingRuntimeConnectionString?: string | null
+  requireExistingRuntimeConnectionString?: boolean
+}
+
 interface TenantDatabaseManager {
-  ensureTenantDatabase(tenant: Tenant, subdomain: string): Promise<TenantDatabase>
-  deleteTenantDatabase(databaseName: string): Promise<void>
+  ensureTenantDatabase(
+    tenant: Tenant,
+    subdomain: string,
+    options?: EnsureTenantDatabaseOptions,
+  ): Promise<TenantDatabase>
+  deleteTenantDatabase(tenant: Tenant, subdomain: string): Promise<void>
   close(): Promise<void>
 }
 
@@ -62,6 +89,9 @@ interface TenantInfrastructureBundle {
 
 interface TenantInfrastructureManager {
   applyTenantResources(bundle: TenantInfrastructureBundle): Promise<void>
+  getTenantRuntimeConnectionString(
+    resources: TenantProvisioningResources,
+  ): Promise<string | null>
   waitForTenantReady(
     resources: TenantProvisioningResources,
     timeoutMs?: number,
@@ -180,9 +210,10 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     }
 
     const refreshedTenant = this.getExistingTenant(tenant.id)
+    const hadPersistedSubdomain = refreshedTenant.subdomain != null
     const shouldMarkUpgrading =
       isVersionRollout &&
-      refreshedTenant.subdomain != null &&
+      hadPersistedSubdomain &&
       refreshedTenant.currentState === 'ready'
 
     try {
@@ -203,9 +234,29 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         ),
         'provisioning tenant resources',
       )
+      const existingResources = buildTenantResourceNames({
+        tenant: this.getExistingTenant(refreshedTenant.id),
+        subdomain,
+        baseDomain: this.baseDomain,
+        imageRepository: this.imageRepository,
+      })
+      const existingRuntimeConnectionString = hadPersistedSubdomain
+        ? await this.infrastructureManager.getTenantRuntimeConnectionString(
+            existingResources,
+          )
+        : null
+      const wasSuccessfullyProvisioned =
+        refreshedTenant.currentState === 'ready' ||
+        refreshedTenant.currentState === 'upgrading' ||
+        refreshedTenant.currentState === 'maintenance' ||
+        refreshedTenant.currentState === 'restoring'
       const database = await this.databaseManager.ensureTenantDatabase(
         refreshedTenant,
         subdomain,
+        {
+          existingRuntimeConnectionString,
+          requireExistingRuntimeConnectionString: wasSuccessfullyProvisioned,
+        },
       )
 
       const bundle = buildTenantInfrastructureBundle({
@@ -285,7 +336,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       })
 
       await this.infrastructureManager.deleteTenantResources(resources)
-      await this.databaseManager.deleteTenantDatabase(resources.databaseName)
+      await this.databaseManager.deleteTenantDatabase(tenant, subdomain)
     }
 
     if (tenant.storageReference) {
@@ -325,24 +376,76 @@ export class TenantProvisioningService implements TenantProvisioningPort {
 }
 
 export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
-  private readonly pool: Pool
+  private readonly pool: PostgresPoolLike
   private readonly adminDatabaseUrl: string
   private readonly runtimeDatabaseUrl: string
+  private readonly createTenantPool: (connectionString: string) => PostgresPoolLike
+  private readonly generatePassword: () => string
 
-  constructor(adminDatabaseUrl: string, runtimeDatabaseUrl?: string) {
+  constructor(
+    adminDatabaseUrl: string,
+    runtimeDatabaseUrl?: string,
+    options?: {
+      pool?: PostgresPoolLike
+      createTenantPool?: (connectionString: string) => PostgresPoolLike
+      generatePassword?: () => string
+    },
+  ) {
     this.adminDatabaseUrl = adminDatabaseUrl
     this.runtimeDatabaseUrl =
       runtimeDatabaseUrl && runtimeDatabaseUrl.length > 0
         ? runtimeDatabaseUrl
         : adminDatabaseUrl
-    this.pool = new Pool({
-      connectionString: adminDatabaseUrl,
-      max: 1,
-    })
+    this.pool =
+      options?.pool ??
+      new Pool({
+        connectionString: adminDatabaseUrl,
+        max: 1,
+      })
+    this.createTenantPool =
+      options?.createTenantPool ??
+      ((connectionString) =>
+        new Pool({
+          connectionString,
+          max: 1,
+        }))
+    this.generatePassword =
+      options?.generatePassword ?? (() => randomBytes(24).toString('base64url'))
   }
 
-  async ensureTenantDatabase(tenant: Tenant, subdomain: string): Promise<TenantDatabase> {
+  async ensureTenantDatabase(
+    tenant: Tenant,
+    subdomain: string,
+    options: EnsureTenantDatabaseOptions = {},
+  ): Promise<TenantDatabase> {
     const databaseName = buildTenantDatabaseName(tenant.id, subdomain)
+    const roleName = buildTenantDatabaseRoleName(tenant.id, subdomain)
+    const existingRuntimeIdentity = resolveExistingTenantRuntimeIdentity({
+      existingRuntimeConnectionString: options.existingRuntimeConnectionString,
+      databaseName,
+      expectedRoleName: roleName,
+      runtimeDatabaseUrl: this.runtimeDatabaseUrl,
+      tenantId: tenant.id,
+    })
+
+    if (
+      options.requireExistingRuntimeConnectionString &&
+      !existingRuntimeIdentity &&
+      !hasRuntimeConnectionString(options.existingRuntimeConnectionString)
+    ) {
+      throw new Error(
+        `Tenant ${tenant.id} is already provisioned but its runtime database secret is missing; explicit credential migration is required before reprovisioning.`,
+      )
+    }
+
+    const runtimeIdentity =
+      existingRuntimeIdentity ??
+      createDedicatedTenantRuntimeIdentity({
+        databaseName,
+        roleName,
+        runtimeDatabaseUrl: this.runtimeDatabaseUrl,
+        password: this.generatePassword(),
+      })
     const client = await this.pool.connect()
 
     try {
@@ -354,20 +457,68 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
       if (!existing.rows[0]?.exists) {
         await client.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
       }
+
+      if (runtimeIdentity.mode === 'dedicated') {
+        await client.query(
+          `REVOKE ALL ON DATABASE ${quoteIdentifier(databaseName)} FROM PUBLIC`,
+        )
+
+        const existingRole = await client.query<{ exists: boolean }>(
+          'SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists',
+          [runtimeIdentity.roleName],
+        )
+
+        if (existingRole.rows[0]?.exists) {
+          await client.query(
+            `ALTER ROLE ${quoteIdentifier(runtimeIdentity.roleName)} WITH LOGIN PASSWORD ${quoteLiteral(runtimeIdentity.password)} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`,
+          )
+        } else {
+          await client.query(
+            `CREATE ROLE ${quoteIdentifier(runtimeIdentity.roleName)} WITH LOGIN PASSWORD ${quoteLiteral(runtimeIdentity.password)} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`,
+          )
+        }
+
+        await client.query(
+          `GRANT CONNECT ON DATABASE ${quoteIdentifier(databaseName)} TO ${quoteIdentifier(runtimeIdentity.roleName)}`,
+        )
+      }
     } finally {
       client.release()
     }
 
+    const tenantPool = this.createTenantPool(
+      buildTenantDatabaseConnectionString(this.adminDatabaseUrl, databaseName),
+    )
+
+    try {
+      const tenantClient = await tenantPool.connect()
+
+      try {
+        await initializeTenantNoteStoreDatabase(tenantClient)
+
+        if (runtimeIdentity.mode === 'dedicated') {
+          await applyLeastPrivilegeTenantGrants(
+            tenantClient,
+            runtimeIdentity.roleName,
+          )
+        }
+      } finally {
+        tenantClient.release()
+      }
+    } finally {
+      await tenantPool.end()
+    }
+
     return {
       databaseName,
-      runtimeConnectionString: buildTenantDatabaseConnectionString(
-        this.runtimeDatabaseUrl,
-        databaseName,
-      ),
+      roleName: runtimeIdentity.mode === 'dedicated' ? runtimeIdentity.roleName : null,
+      runtimeConnectionString: runtimeIdentity.runtimeConnectionString,
     }
   }
 
-  async deleteTenantDatabase(databaseName: string): Promise<void> {
+  async deleteTenantDatabase(tenant: Tenant, subdomain: string): Promise<void> {
+    const databaseName = buildTenantDatabaseName(tenant.id, subdomain)
+    const roleName = buildTenantDatabaseRoleName(tenant.id, subdomain)
     const client = await this.pool.connect()
 
     try {
@@ -376,18 +527,19 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
         [databaseName],
       )
 
-      if (!existing.rows[0]?.exists) {
-        return
-      }
-
       await client.query(
         `SELECT pg_terminate_backend(pid)
            FROM pg_stat_activity
-          WHERE datname = $1
+          WHERE (datname = $1 OR usename = $2)
             AND pid <> pg_backend_pid()`,
-        [databaseName],
+        [databaseName, roleName],
       )
-      await client.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`)
+
+      if (existing.rows[0]?.exists) {
+        await client.query(`DROP DATABASE ${quoteIdentifier(databaseName)}`)
+      }
+
+      await client.query(`DROP ROLE IF EXISTS ${quoteIdentifier(roleName)}`)
     } finally {
       client.release()
     }
@@ -430,6 +582,35 @@ export class KubernetesTenantInfrastructureManager
     await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
     await upsertKubernetesObject(this.client, bundle.service)
     await upsertKubernetesObject(this.client, bundle.deployment)
+  }
+
+  async getTenantRuntimeConnectionString(
+    resources: TenantProvisioningResources,
+  ): Promise<string | null> {
+    try {
+      const secret = await this.client.read<V1Secret>({
+        apiVersion: 'v1',
+        kind: 'Secret',
+        metadata: {
+          name: resources.secretName,
+          namespace: resources.namespace,
+        },
+      })
+
+      const encodedConnectionString = secret.data?.DATABASE_URL
+
+      if (!encodedConnectionString) {
+        return null
+      }
+
+      return Buffer.from(encodedConnectionString, 'base64').toString('utf8')
+    } catch (error) {
+      if (isApiException(error, 404)) {
+        return null
+      }
+
+      throw error
+    }
   }
 
   async waitForTenantReady(
@@ -754,13 +935,106 @@ export function buildTenantInfrastructureBundle(
   }
 }
 
+type TenantRuntimeIdentity =
+  | {
+      mode: 'dedicated'
+      roleName: string
+      password: string
+      runtimeConnectionString: string
+    }
+  | {
+      mode: 'legacy'
+      runtimeConnectionString: string
+    }
+
+function createDedicatedTenantRuntimeIdentity(params: {
+  databaseName: string
+  roleName: string
+  runtimeDatabaseUrl: string
+  password: string
+}): TenantRuntimeIdentity {
+  return {
+    mode: 'dedicated',
+    roleName: params.roleName,
+    password: params.password,
+    runtimeConnectionString: buildTenantDatabaseConnectionString(
+      params.runtimeDatabaseUrl,
+      params.databaseName,
+      {
+        username: params.roleName,
+        password: params.password,
+      },
+    ),
+  }
+}
+
+function resolveExistingTenantRuntimeIdentity(params: {
+  existingRuntimeConnectionString?: string | null
+  databaseName: string
+  expectedRoleName: string
+  runtimeDatabaseUrl: string
+  tenantId?: string
+}): TenantRuntimeIdentity | null {
+  if (!hasRuntimeConnectionString(params.existingRuntimeConnectionString)) {
+    return null
+  }
+
+  const existingRuntimeConnectionString = params.existingRuntimeConnectionString
+  let existingConnectionString: URL
+  try {
+    existingConnectionString = new URL(existingRuntimeConnectionString)
+  } catch (error) {
+    const tenantContext = params.tenantId ? ` for tenant ${params.tenantId}` : ''
+    throw new Error(
+      `Invalid DATABASE_URL in runtime secret${tenantContext}: must be a valid PostgreSQL connection string`,
+      { cause: error },
+    )
+  }
+  const username = decodeURIComponent(existingConnectionString.username)
+  const password = decodeURIComponent(existingConnectionString.password)
+
+  if (username === params.expectedRoleName && password.length > 0) {
+    return createDedicatedTenantRuntimeIdentity({
+      databaseName: params.databaseName,
+      roleName: params.expectedRoleName,
+      runtimeDatabaseUrl: params.runtimeDatabaseUrl,
+      password,
+    })
+  }
+
+  return {
+    mode: 'legacy',
+    runtimeConnectionString: buildTenantDatabaseConnectionString(
+      existingRuntimeConnectionString,
+      params.databaseName,
+    ),
+  }
+}
+
 export function buildTenantDatabaseConnectionString(
   baseDatabaseUrl: string,
   databaseName: string,
+  options?: {
+    username?: string
+    password?: string
+  },
 ): string {
   const connectionString = new URL(baseDatabaseUrl)
   connectionString.pathname = `/${databaseName}`
+
+  if (options?.username !== undefined) {
+    connectionString.username = options.username
+  }
+
+  if (options?.password !== undefined) {
+    connectionString.password = options.password
+  }
+
   return connectionString.toString()
+}
+
+function hasRuntimeConnectionString(connectionString?: string | null): connectionString is string {
+  return connectionString != null && connectionString.trim() !== ''
 }
 
 export function buildTenantResourceNames(params: {
@@ -810,10 +1084,9 @@ function buildTenantDatabaseName(tenantId: string, subdomain: string): string {
     .replace(/^_+|_+$/g, '')
     .slice(0, 20)
   const normalizedSubdomain = subdomain.replace(/-/g, '_')
-
-  const name = `tenant_${normalizedTenantId}_${normalizedSubdomain}`.slice(0, 63)
-
-  return name.replace(/_+$/g, '')
+  return buildUniqueDatabaseIdentifier(
+    `tenant_${normalizedTenantId}_${normalizedSubdomain}`,
+  )
 }
 
 function normalizeKubernetesLabelValue(value: string): string {
@@ -839,12 +1112,44 @@ function normalizeKubernetesLabelValue(value: string): string {
   return `${trimmedPrefix}-${digest}`
 }
 
+function buildTenantDatabaseRoleName(tenantId: string, subdomain: string): string {
+  const normalizedTenantId = tenantId
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 18)
+  const normalizedSubdomain = subdomain.replace(/-/g, '_')
+  return buildUniqueDatabaseIdentifier(
+    `tenant_rt_${normalizedTenantId}_${normalizedSubdomain}`,
+  )
+}
+
+function buildUniqueDatabaseIdentifier(identifier: string): string {
+  const maxIdentifierLength = 63
+
+  if (identifier.length <= maxIdentifierLength) {
+    return identifier.replace(/_+$/g, '')
+  }
+
+  const digest = createHash('sha256').update(identifier).digest('hex').slice(0, 8)
+  const maxPrefixLength = maxIdentifierLength - digest.length - 1
+  const trimmedPrefix = identifier
+    .slice(0, maxPrefixLength)
+    .replace(/_+$/g, '')
+
+  return `${trimmedPrefix}_${digest}`
+}
+
 function quoteIdentifier(identifier: string): string {
   if (!/^[a-z0-9_]+$/.test(identifier)) {
     throw new Error(`Unsafe database identifier: ${identifier}`)
   }
 
   return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function quoteLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
 }
 
 function encodeSecretValue(value: string): string {
