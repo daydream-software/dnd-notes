@@ -37,6 +37,10 @@ class FakeInfrastructureManager {
   bundles: Array<{
     resources: TenantProvisioningResources
     deploymentReadinessPath: string | undefined
+    deploymentStrategyType: string | undefined
+    maxSurge: number | string | undefined
+    maxUnavailable: number | string | undefined
+    minReadySeconds: number | undefined
   }> = []
   deletedResources: TenantProvisioningResources[] = []
   shouldThrow = false
@@ -45,6 +49,14 @@ class FakeInfrastructureManager {
     resources: TenantProvisioningResources
     deployment: {
       spec?: {
+        minReadySeconds?: number
+        strategy?: {
+          type?: string
+          rollingUpdate?: {
+            maxSurge?: number | string
+            maxUnavailable?: number | string
+          }
+        }
         template?: {
           spec?: {
             containers?: Array<{
@@ -64,6 +76,11 @@ class FakeInfrastructureManager {
       deploymentReadinessPath:
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.readinessProbe
           ?.httpGet?.path,
+      deploymentStrategyType: bundle.deployment.spec?.strategy?.type,
+      maxSurge: bundle.deployment.spec?.strategy?.rollingUpdate?.maxSurge,
+      maxUnavailable:
+        bundle.deployment.spec?.strategy?.rollingUpdate?.maxUnavailable,
+      minReadySeconds: bundle.deployment.spec?.minReadySeconds,
     })
 
     if (this.shouldThrow) {
@@ -114,6 +131,10 @@ describe('TenantProvisioningService', () => {
       )
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
+      assert.equal(infrastructureManager.bundles[0].deploymentStrategyType, 'RollingUpdate')
+      assert.equal(infrastructureManager.bundles[0].maxSurge, 1)
+      assert.equal(infrastructureManager.bundles[0].maxUnavailable, 0)
+      assert.equal(infrastructureManager.bundles[0].minReadySeconds, 5)
       assert.equal(
         infrastructureManager.bundles[0].resources.hostname,
         `${result.tenant.subdomain}.dnd-notes.test`,
@@ -145,6 +166,13 @@ describe('TenantProvisioningService', () => {
         version: '1.0.0',
       })
       tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'ready',
+        'control-plane',
+        'Provisioned already',
+      )
 
       const result = await provisioningService.provisionTenant({
         tenantId: 'tenant-demo',
@@ -158,6 +186,12 @@ describe('TenantProvisioningService', () => {
         'ghcr.io/daydream-software/dnd-notes:1.1.0',
       )
       assert.equal(result.tenant.subdomain, 't-existing123456')
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(
+        tenantRegistry.getStateTransitions('tenant-demo').some((transition) =>
+          transition.toState === 'upgrading'),
+        true,
+      )
     } finally {
       await provisioningService.close()
       tenantRegistry.close()

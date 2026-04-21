@@ -136,6 +136,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     version?: string
   }): Promise<TenantProvisioningResponse> {
     const tenant = this.getExistingTenant(params.tenantId)
+    const isVersionRollout =
+      params.version !== undefined && params.version !== tenant.version
 
     if (tenant.currentState === 'deprovisioned') {
       throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
@@ -146,9 +148,21 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     }
 
     const refreshedTenant = this.getExistingTenant(tenant.id)
+    const shouldMarkUpgrading =
+      isVersionRollout &&
+      refreshedTenant.subdomain != null &&
+      refreshedTenant.currentState === 'ready'
 
     try {
       this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
+      if (shouldMarkUpgrading) {
+        this.tenantRegistry.updateTenantState(
+          refreshedTenant.id,
+          'upgrading',
+          params.triggeredBy,
+          params.reason ?? 'Tenant rolling update started',
+        )
+      }
       const subdomain = assertPersistedTenantSubdomain(
         refreshedTenant.id,
         this.tenantRegistry.reserveTenantSubdomain(
@@ -614,6 +628,14 @@ export function buildTenantInfrastructureBundle(
       },
       spec: {
         replicas: 1,
+        minReadySeconds: 5,
+        strategy: {
+          type: 'RollingUpdate',
+          rollingUpdate: {
+            maxSurge: 1,
+            maxUnavailable: 0,
+          },
+        },
         selector: {
           matchLabels: buildTenantSelectorLabels(options.tenant),
         },

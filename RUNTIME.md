@@ -216,11 +216,13 @@ See issue #43 for full manifest examples after Phase 0 validation.
 - Local fallback: SQLite at `/app/data/dnd-notes.sqlite`
 - Backup via admin API (`GET /api/admin/backup`) using SQLite-compatible snapshots
 
-**Future (Phase 1):**
+**Hosted rollout path (`#55`):**
 - Postgres via `DATABASE_URL`
-- Stateless container (no volume mount needed)
-- Rolling updates without single-writer handoff
-- Backup via control-plane `pg_dump` CronJob
+- PVC may stay mounted at `/app/data` for fallback/runtime files, but it is not
+  the primary hosted write path
+- Rolling updates use overlapped old/new pods plus readiness + shutdown drain
+  instead of SQLite single-writer handoff
+- Backup via control-plane `pg_dump` CronJob remains a later slice
 
 **Migration:**
 1. Download a fresh SQLite-compatible admin backup from the old SQLite-backed tenant.
@@ -228,18 +230,35 @@ See issue #43 for full manifest examples after Phase 0 validation.
 3. Restore the backup through the admin restore flow; the API imports the snapshot into Postgres.
 4. Keep SQLite support for local development when `DATABASE_URL` is unset.
 
-## Maintenance Mode (Phase 1)
+## Postgres-backed rolling-update choreography
 
-**Status:** Not yet implemented. Reserved for control-plane orchestration.
+The first supported hosted upgrade path assumes the tenant is already using
+`DATABASE_URL`.
 
-**Design intent (issue #42):**
-- `POST /internal/maintenance` endpoint to enable drain mode
-- Readiness probe fails during maintenance
-- Kubernetes removes pod from load balancer
-- Control plane executes maintenance operations (backup, restore, schema migration)
-- `DELETE /internal/maintenance` to resume normal operation
+1. The control plane calls `POST /internal/tenants/:tenantId/provision` with a
+   new `version`.
+2. If the tenant is already serving traffic, the registry records
+   `currentState = upgrading` while the target remains `desiredState = ready`.
+3. The tenant Deployment uses single-replica `RollingUpdate` semantics with
+   `maxSurge: 1`, `maxUnavailable: 0`, and `minReadySeconds: 5`.
+4. Once the new pod passes `/ready`, Kubernetes can terminate the old pod.
+5. On `SIGTERM`, the old pod immediately returns `503` from `/ready`, stops
+   accepting new connections, drains in-flight requests for up to 30 seconds,
+   closes idle keep-alive sockets, and only then closes the Postgres pool.
+6. The control plane marks the tenant back to `ready` after the rollout becomes
+   Available.
 
-## Control Plane Contract (Phase 1)
+**Operator budget note:** one old pod plus one new pod can overlap briefly, so
+size Postgres for up to `2 × NOTES_DB_POOL_MAX` connections per actively
+upgrading tenant.
+
+## Exclusive maintenance work
+
+**Status:** Not yet implemented. Reserved for restore drills, incompatible
+schema steps, and other flows that need exclusive access instead of an ordinary
+rolling image update.
+
+## Control Plane Contract (future exclusive-maintenance follow-up)
 
 **Cluster-internal endpoints (not yet implemented):**
 - `GET /internal/status` - Runtime state (version, database health, uptime)
