@@ -52,8 +52,8 @@ This brief captures the **required proof points** before #55 is considered done.
 **False-green trap:** Readiness probe can return 503 during shutdown, but there's a time window where:
 - Kubernetes removes the pod from the load balancer
 - Old in-flight requests are still being processed (30s grace period)
-- A new rolling update pod starts immediately
-- Both old and new pods are executing queries against the same Postgres instance
+- With drain-first replacement (`maxSurge: 0`), the new pod only starts after
+  the old one terminates, so no concurrent pod execution occurs
 
 **Required proof:**
 - [ ] Manifest sets `terminationGracePeriodSeconds: 30` (confirmed in `platform/control-plane/base/deployment.yaml`)

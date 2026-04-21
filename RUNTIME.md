@@ -220,8 +220,9 @@ See issue #43 for full manifest examples after Phase 0 validation.
 - Postgres via `DATABASE_URL`
 - PVC may stay mounted at `/app/data` for fallback/runtime files, but it is not
   the primary hosted write path
-- Rolling updates use overlapped old/new pods plus readiness + shutdown drain
-  instead of SQLite single-writer handoff
+- Rolling updates use drain-first replacement (`maxSurge: 0`, `maxUnavailable: 1`)
+  to prevent pod overlap while the RWO PVC remains, plus readiness + shutdown
+  drain instead of SQLite single-writer handoff
 - Backup via control-plane `pg_dump` CronJob remains a later slice
 
 **Migration:**
