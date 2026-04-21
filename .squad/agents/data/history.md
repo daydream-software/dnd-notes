@@ -452,3 +452,38 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 
 **Key learning:** Drain-first replacement (`maxSurge: 0`) is the safe default while RWO PVCs remain in the pod shape. Future zero-downtime rollouts (`maxSurge: 1`) can come once the PVC is removed or becomes RWX.
 
+
+## 2026-04-21: Issue Audit and Hardening Gaps Analysis
+
+**Work:** Audited existing issues to avoid duplicates, created GitHub issue #69 (per-tenant Postgres credentials), identified 2 high-confidence backend gaps.
+
+**Issue #69 Created:** "Implement per-tenant Postgres roles and least-privilege runtime credentials"
+- **Current state:** All tenant instances share single runtime Postgres credential (`TENANT_DATABASE_RUNTIME_URL`)
+- **Problem:** Breaks least-privilege isolation; tenant app compromise = all databases exposed
+- **Solution:** Per-tenant Postgres roles with minimal privileges (CONNECT, USAGE only; no superuser/create database)
+- **Scope:** Extend `PostgresTenantDatabaseManager.ensureTenantDatabase()` to create randomized per-tenant role, store in per-tenant K8s Secret, cleanup on deprovision
+- **Related:** Complements Epic #42 Phase 1 decisions on tenant persistence + #56 Keycloak identity work0
+
+**Duplicate Audit Results:**
+- Searched for "postgres credentials OR per-tenant role OR per-tenant secret" — only Epic #42 matched
+- Searched for "operator site OR landing site OR operator dashboard" — only Issue #57 (internal fleet status) matched (not a duplicate)
+- Conclusion: No existing issues duplicate the per-tenant credential scope; #69 is novel
+
+**Backend Hardening Gaps Identified** (high-confidence, unresolved in Phase 0–1):
+
+1. **Per-Tenant Transition Locking** (MEDIUM priority, affects state consistency)
+   - **Current state:** Control-plane README §159–165 explicitly documents: "Single active transition (target): Transitions are intended to be serialized per tenant, **but Phase 1 does not yet enforce this with locking or transactional guards**"
+   - **Risk:** Concurrent `PATCH /internal/tenants/:tenantId/state` calls could interleave updates, skip state transitions, or create orphaned K8s resources (e.g., concurrent provision + restore both try to create same PVC)
+   - **Gap:** No per-tenant lock (file lock, database row lock, or in-memory semaphore) prevents concurrent transitions
+   - **Why not created as issue:** This is already documented as Phase 1 limitation in the README; team is aware. No need to create speculative ticket.
+
+2. **Incomplete Provisioning Rollback** (MEDIUM priority, affects recovery)
+   - **Current state:** Provisioning is a multi-step flow: (1) reserve subdomain, (2) create database, (3) apply K8s resources, (4) wait for ready, (5) update registry
+   - **Risk:** If step 3 fails (K8s API down), step 2 succeeds (Postgres DB created, orphaned) and registry state moves to `failed`, but the orphaned DB is never deleted until deprovisioning
+   - **Gap:** If tenant is stuck in `failed` state and operator retries provision without first deprovisioning, the old database remains; no idempotent cleanup or garbage-collection sweep
+   - **Why not created as issue:** Phase 1 deprovisioning (#54 follow-up) is scoped to clean up failed tenants; team intends to handle this operationally. Should be explicitly documented in runbook, not a code gap.
+
+**Conclusion:** Issue #69 is the only actionable missing ticket at this scale. The two gaps are already recognized design tradeoffs documented in control-plane README and Phase 1 scope.
+
+---
+

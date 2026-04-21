@@ -24,8 +24,10 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 
 ## Recent Updates (Last 10)
 
-
-
+- **Roadmap Issues Created (2026-04-21T22:45Z):** Per FFMikha request, created three GitHub issues to fill scope gaps:
+  - #68 "Build the operator control portal for platform administration" — distinct from #57 (fleet observability). This is the control surface: provision/deprovision, manage lifecycle, trigger operations. Operator persona + UI layer for the control-plane API.
+  - #70 "Build the public landing and self-serve signup portal" — customer-facing front door. Marketing site + self-serve signup + instance dashboard. Drives control-plane provisioning (#53) from customer actions instead of manual operator scripts.
+  - #71 "Implement per-tenant Postgres credentials and database isolation" — **CRITICAL SECURITY issue**. Current provisioning (#54) injects admin credentials into all tenant pods (tenant isolation violation). Each tenant needs credentials that grant access ONLY to its own database. Blocks Phase 1 production readiness.
 
 
 
@@ -52,3 +54,13 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 - **Key file paths:** Epic decisions consolidated in `.squad/decisions.md`. Sub-issues: #52 (containerize), #43 (artifacts), #39 (WAL), #53 (control plane), #54 (provisioning), #55 (rollout), #56 (OIDC), #40 (restore), #57 (fleet status).
 
 - **Issue #42 Phase 0 verdict (2026-04-21):** Scope is effectively landed (`#52`, `#58`, `#63`, `#43` are closed and the repo now has the tenant image, Postgres adapter, k3d smoke lane, and committed control-plane artifacts). Phase 0 gate now COMPLETE: PR #67 closes #55 (rollout contract); all Phase 0 child issues resolved; Phase 1 execution can begin on #56 (Keycloak) and #40 (backup/restore).
+
+- **Phase 2–3 Roadmap Coherence (2026-04-21T22:45Z):** Audit of open issues + decisions.md + history reveals three critical scope gaps for customer-facing SaaS rollout:
+  1. *Operator control surface gap*: Issue #57 provides fleet observability (what operators see), but no control portal (how they provision/manage instances). Split now as #68 (control portal) distinct from #57 (fleet dashboard).
+  2. *Customer self-serve gap*: No public landing site or self-serve signup portal. Customers cannot provision themselves; all provisioning is manual operator work. Addressed by new #70 (landing + self-serve portal).
+  3. *Tenant credential isolation gap (CRITICAL)*: Issue #54 provisioning shares admin Postgres URL across all tenants — any compromised tenant container can read/modify other tenant data. Fixed by new #71 (per-tenant Postgres credentials). Blocks Phase 1 production deployment.
+  Pattern: Architecture decisions are right (control-plane thin API, per-tenant databases), but operator/customer UX and security hardening require explicit issues.
+
+
+---
+
