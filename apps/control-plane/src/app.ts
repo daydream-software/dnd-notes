@@ -129,12 +129,9 @@ export function createApp({
     try {
       tenantRegistry.checkHealth()
       response.json(buildHealthResponse())
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : 'Unknown error'
+    } catch {
       response.status(503).json({
         error: 'Tenant registry unavailable',
-        details: errorMessage,
       })
     }
   }

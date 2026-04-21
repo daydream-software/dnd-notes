@@ -18,6 +18,7 @@ Use this when a workspace app is being packaged into a single-origin container t
 4. In npm workspace images, prefer root production `node_modules` in the runtime stage unless a workspace has a proven runtime-only local module requirement.
 5. Runtime docs must distinguish between application defaults and container-image overrides, especially for ports and shutdown behavior.
 6. Do not document graceful drain unless the entrypoint actually closes the HTTP server and waits for in-flight requests before exiting.
+7. Probe failure payloads should stay fixed and non-sensitive; return a stable `error` string instead of echoing raw database, filesystem, or dependency exception text to `/ready` callers.
 
 ## Example
 
@@ -32,3 +33,4 @@ Use this when a workspace app is being packaged into a single-origin container t
 - Returning `index.html` for `GET /assets/missing.js` or JSON/XHR requests
 - Copying workspace-local `node_modules` from an `npm ci --omit=dev` stage without proving they exist
 - Claiming a 30-second graceful shutdown when the process exits immediately on `SIGTERM`
+- Returning raw dependency error text in `/ready` or `/readyz` responses

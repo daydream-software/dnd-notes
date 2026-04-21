@@ -74,7 +74,9 @@ describe('Control Plane API', () => {
 
       const response = await request(app).get('/readyz').expect(503)
 
-      assert.strictEqual(response.body.error, 'Tenant registry unavailable')
+      assert.deepStrictEqual(response.body, {
+        error: 'Tenant registry unavailable',
+      })
     })
   })
 
@@ -91,7 +93,9 @@ describe('Control Plane API', () => {
 
       const response = await request(app).get('/ready').expect(503)
 
-      assert.strictEqual(response.body.error, 'Tenant registry unavailable')
+      assert.deepStrictEqual(response.body, {
+        error: 'Tenant registry unavailable',
+      })
     })
   })
 

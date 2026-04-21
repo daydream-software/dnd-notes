@@ -158,3 +158,8 @@ Status: verified branch HEAD already contains the #58 PR #62 backend review fixe
 - Delivered: `validate_overlay()` now streams `kubectl kustomize` through `awk` and captures only a `0/1` content flag, so the script still rejects empty renders without buffering whole manifests in memory.
 - Validation: `npm run platform:validate` passed in `.worktrees/43-deployment-artifacts`.
 - Review gate: FFMikha requires waiting for the post-push Copilot review after every PR push before concluding readiness.
+
+## 2026-04-21 PR #66 readiness probe redaction follow-up
+- Scope: address the next Copilot review comment on `apps/control-plane/src/app.ts` after commit `e84cd14`.
+- Delivered: the shared control-plane readiness handler now returns only the stable `error: 'Tenant registry unavailable'` payload on `/ready` and `/readyz` failures, without echoing raw thrown error details from the tenant-registry layer.
+- Validation: `npm test --workspace apps/control-plane --` passed in `.worktrees/43-deployment-artifacts`, with regression assertions for both readiness endpoints verifying the 503 body omits `details`.

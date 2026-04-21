@@ -179,6 +179,8 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 - Committed control-plane Secret manifests now stay placeholder-only (`platform/control-plane/base/secret.yaml`, `platform/control-plane/overlays/k3d/secret-patch.yaml`, `platform/control-plane/overlays/hosted-reference/secret-patch.yaml`); local k3d docs in `platform/control-plane/README.md` show the out-of-band `kubectl create secret ... | kubectl apply -f -` replacement step.
 - `scripts/platform/validate-manifests.sh` should stream `kubectl kustomize` output and reduce it to a tiny content flag instead of buffering full rendered manifests in shell variables.
 - FFMikha’s PR-review rule is explicit: after every push on a PR, wait for the follow-up Copilot review before concluding the branch is ready.
+- Control-plane probe handlers in `apps/control-plane/src/app.ts` should keep `/ready` and `/readyz` failure payloads stable and non-sensitive (`{ error: 'Tenant registry unavailable' }`) even when `tenantRegistry.checkHealth()` throws raw SQLite or filesystem errors.
+- The tight regression check for that probe contract lives in `apps/control-plane/test/app.test.ts`, asserting the readiness 503 body omits `details` for both `/ready` and `/readyz`.
 
 ## 2026-04-20: Node24 Action Compatibility Update
 
