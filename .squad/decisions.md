@@ -3778,3 +3778,7 @@ When a GitHub-hosted action in this repo hits a runtime deprecation, upgrade it 
 - Audited every external `uses:` entry in `.github/workflows/ci.yml`; no `runs.using: node20` actions remain
 
 
+### 2026-04-21T14:57:44Z: User directive
+**By:** FFMikha (via Copilot)
+**What:** After every push on a pull request, wait for the follow-up review before concluding the PR is ready; do not declare readiness before that review lands.
+**Why:** User request — captured for team memory

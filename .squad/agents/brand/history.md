@@ -208,3 +208,4 @@ Brand's QA checklist (Chunk) and CI/CD decisions (Brand's own) now merged to dec
 2. End-to-end Postgres smoke test
 3. DATABASE_URL injection proof
 
+
