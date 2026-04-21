@@ -42,6 +42,8 @@ For detailed runtime configuration, health endpoints, and Kubernetes deployment 
 - `npm run build` builds the web app and syntax-checks the API
 - `npm run lint` runs ESLint in both workspaces
 - `npm run test` runs the web and API tests
+- `npm run platform:validate` renders the committed control-plane Kustomize overlays
+- `npm run k3d:build-control-plane-image` builds/imports the control-plane image into k3d
 - `npm run copilot:yolo` launches the local Copilot Squad image wrapper
 - `npm run copilot:wait-review -- --pr 123` waits for Copilot review on a PR and exits with `0` (clear), `10` (review finished but work remains), `124` (timeout), or `1` (error). It prefers `gh` when available and otherwise uses `GH_TOKEN` / `GITHUB_TOKEN`.
 - `.github/workflows/copilot-pr-review.yml` uses the `COPILOT_ASSIGN_TOKEN` Actions secret so Copilot reviewer requests come from a real user token and fail loudly if the reviewer was not actually attached.
@@ -98,9 +100,19 @@ npm run k3d:smoke
   against the live k3d kube context, provisions a tenant, and verifies tenant
   readiness.
 
+Issue `#43` also commits the in-cluster control-plane packaging lane without
+changing that fast smoke path:
+
+```bash
+npm run k3d:build-control-plane-image
+kubectl apply -k platform/control-plane/overlays/k3d
+```
+
 See [`platform/k3d/README.md`](platform/k3d/README.md) for the full workflow and
 the documented boundary between the fast k3d lane and the later k3s/stateful
-rehearsal lane.
+rehearsal lane, plus
+[`platform/control-plane/README.md`](platform/control-plane/README.md) for the
+committed control-plane image + manifest set.
 
 ## Local persistence
 

@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dnd-notes-platform
+  labels:
+    app.kubernetes.io/part-of: dnd-notes
+    app.kubernetes.io/component: control-plane

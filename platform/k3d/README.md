@@ -75,10 +75,16 @@ By default the smoke script deprovisions the tenant during cleanup. Set `KEEP_K3
 That is deliberate scope control, not a missing piece:
 
 - `#63` formalizes the local **cluster dependencies** and a real provisioning rehearsal
-- the repo does **not** yet have a committed control-plane container/deployment artifact lane
-- that wider packaging/deployment shape still belongs with the deployment-artifact follow-up work, not this issue
+- issue `#43` now carries the committed control-plane image + manifest lane under `platform/control-plane/`
+- the daily smoke path still keeps the control plane local because that is the fastest feedback loop for provisioning/debugging
 
-So the daily k3d loop today is: **live cluster + local control-plane process**.
+So the daily k3d loop today is still: **live cluster + local control-plane process**.
+When you need to rehearse the in-cluster artifact set itself, use:
+
+```bash
+npm run k3d:build-control-plane-image
+kubectl apply -k platform/control-plane/overlays/k3d
+```
 
 ## Environment overrides
 

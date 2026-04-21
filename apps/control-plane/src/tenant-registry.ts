@@ -120,6 +120,10 @@ export class TenantRegistry {
     `)
   }
 
+  checkHealth(): void {
+    this.db.prepare('SELECT 1').get()
+  }
+
   listTenants(): Tenant[] {
     const rows = this.db
       .prepare(
