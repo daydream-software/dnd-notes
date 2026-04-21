@@ -416,14 +416,26 @@ export class KubernetesTenantInfrastructureManager
         },
       })
 
-      const isAvailable =
-        (deployment.status?.availableReplicas ?? 0) >= 1 &&
+      const generation = deployment.metadata?.generation ?? 0
+      const observedGeneration = deployment.status?.observedGeneration ?? 0
+      const specReplicas = deployment.spec?.replicas ?? 0
+      const updatedReplicas = deployment.status?.updatedReplicas ?? 0
+      const availableReplicas = deployment.status?.availableReplicas ?? 0
+      const replicas = deployment.status?.replicas ?? 0
+      const unavailableReplicas = deployment.status?.unavailableReplicas ?? 0
+
+      const isFullyRolledOut =
+        observedGeneration >= generation &&
+        updatedReplicas === specReplicas &&
+        availableReplicas === specReplicas &&
+        replicas === specReplicas &&
+        unavailableReplicas === 0 &&
         deployment.status?.conditions?.some(
           (condition) =>
             condition.type === 'Available' && condition.status === 'True',
         ) === true
 
-      if (isAvailable) {
+      if (isFullyRolledOut) {
         return
       }
 
@@ -632,8 +644,8 @@ export function buildTenantInfrastructureBundle(
         strategy: {
           type: 'RollingUpdate',
           rollingUpdate: {
-            maxSurge: 1,
-            maxUnavailable: 0,
+            maxSurge: 0,
+            maxUnavailable: 1,
           },
         },
         selector: {

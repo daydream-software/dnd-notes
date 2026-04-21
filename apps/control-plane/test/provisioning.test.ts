@@ -132,8 +132,8 @@ describe('TenantProvisioningService', () => {
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
       assert.equal(infrastructureManager.bundles[0].deploymentStrategyType, 'RollingUpdate')
-      assert.equal(infrastructureManager.bundles[0].maxSurge, 1)
-      assert.equal(infrastructureManager.bundles[0].maxUnavailable, 0)
+      assert.equal(infrastructureManager.bundles[0].maxSurge, 0)
+      assert.equal(infrastructureManager.bundles[0].maxUnavailable, 1)
       assert.equal(infrastructureManager.bundles[0].minReadySeconds, 5)
       assert.equal(
         infrastructureManager.bundles[0].resources.hostname,

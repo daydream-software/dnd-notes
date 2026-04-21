@@ -239,18 +239,22 @@ The first supported hosted upgrade path assumes the tenant is already using
    new `version`.
 2. If the tenant is already serving traffic, the registry records
    `currentState = upgrading` while the target remains `desiredState = ready`.
-3. The tenant Deployment uses single-replica `RollingUpdate` semantics with
-   `maxSurge: 1`, `maxUnavailable: 0`, and `minReadySeconds: 5`.
-4. Once the new pod passes `/ready`, Kubernetes can terminate the old pod.
-5. On `SIGTERM`, the old pod immediately returns `503` from `/ready`, stops
+3. The tenant Deployment uses single-replica drain-first rollout semantics
+   (`RollingUpdate`, `maxSurge: 0`, `maxUnavailable: 1`, `minReadySeconds: 5`).
+   The old pod is terminated before the new pod becomes ready.
+4. On `SIGTERM`, the old pod immediately returns `503` from `/ready`, stops
    accepting new connections, drains in-flight requests for up to 30 seconds,
    closes idle keep-alive sockets, and only then closes the Postgres pool.
-6. The control plane marks the tenant back to `ready` after the rollout becomes
-   Available.
+5. The control plane marks the tenant back to `ready` after the rollout is
+   fully complete (`observedGeneration` matches, `updatedReplicas` and
+   `availableReplicas` equal `spec.replicas`, no unavailable replicas remain).
 
-**Operator budget note:** one old pod plus one new pod can overlap briefly, so
-size Postgres for up to `2 × NOTES_DB_POOL_MAX` connections per actively
-upgrading tenant.
+The `/app/data` PVC remains mounted but causes no multi-attach contention since
+the rollout strategy prevents pod overlap.
+
+**Future:** Once the PVC is removed from the normal pod shape or moved to
+RWX-capable storage, the rollout strategy can switch to `maxSurge: 1` /
+`maxUnavailable: 0` for zero-downtime updates without drain windows.
 
 ## Exclusive maintenance work
 

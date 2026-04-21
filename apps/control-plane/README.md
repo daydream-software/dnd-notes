@@ -93,23 +93,28 @@ with a version override:
 1. `POST /internal/tenants/:tenantId/provision` with `{"triggeredBy":"...","version":"x.y.z"}`.
 2. If the tenant is already `ready`, the control plane records `upgrading`,
    reapplies the tenant manifests, and updates the Deployment image tag.
-3. Kubernetes performs a single-replica `RollingUpdate` with `maxSurge: 1`,
-   `maxUnavailable: 0`, `minReadySeconds: 5`, and
-   `terminationGracePeriodSeconds: 30`.
+3. Kubernetes performs a single-replica drain-first rollout (`RollingUpdate`,
+   `maxSurge: 0`, `maxUnavailable: 1`) with `minReadySeconds: 5` and
+   `terminationGracePeriodSeconds: 30`. The old pod is terminated before the new
+   pod becomes ready.
 4. The old pod flips `/ready` to `503` on `SIGTERM`, drains in-flight HTTP
    work, closes idle keep-alives, and only then closes the Postgres pool.
-5. When the new pod is Available, the control plane moves the tenant back to
-   `ready`.
+5. When the new pod is fully rolled out (observedGeneration matches,
+   updatedReplicas/availableReplicas equal spec.replicas), the control plane
+   moves the tenant back to `ready`.
 
 This path assumes tenant note traffic is Postgres-backed via `DATABASE_URL`.
-The `/app/data` PVC may still be mounted for fallback/runtime files, but it is
-not the primary write path during hosted rollouts.
+The `/app/data` PVC remains mounted but causes no multi-attach contention since
+the rollout strategy prevents pod overlap.
+
+**Future:** Once the PVC is removed from the normal pod shape, the rollout
+strategy can switch to `maxSurge: 1` / `maxUnavailable: 0` for zero-downtime
+updates without drain windows.
 
 ### Operator notes
 
-- Budget Postgres connections for temporary overlap: one old pod plus one new
-  pod can briefly consume up to `2 × NOTES_DB_POOL_MAX` connections for an
-  actively upgrading tenant.
+- Rolling updates use a drain-first replacement: one pod is terminated before
+  the new one becomes ready. No connection overlap occurs.
 - Use a separate maintenance window for exclusive operations such as restore
   drills or incompatible schema work. The future maintenance endpoints stay
   reserved for that narrower path; ordinary image rollouts should use the
