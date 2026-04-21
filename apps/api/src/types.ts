@@ -65,8 +65,15 @@ export interface OwnerAccount {
   email: string
   displayName: string
   isSiteAdmin: boolean
+  keycloakSub: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface AuthenticatedUser {
+  userId: string
+  email: string
+  isSiteAdmin: boolean
 }
 
 export interface OwnerRegistrationInput {

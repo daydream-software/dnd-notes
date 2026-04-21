@@ -169,6 +169,11 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
 }
 
 function createAdminAuthMiddleware(adminToken: string): express.RequestHandler {
+  // Control-plane auth seam: Currently validates static bearer token.
+  // In Phase 2a, this can be extended to support admin-realm JWT validation:
+  // - Check if token matches static adminToken (current behavior)
+  // - OR validate JWT from Keycloak admin realm, extract admin claims
+  // Authorization remains control-plane-local (admin token grants full access).
   return (request, response, next) => {
     const authorizationHeader = request.header('authorization')
     if (authorizationHeader !== `Bearer ${adminToken}`) {

@@ -20,6 +20,7 @@ const noteStoreSchemaSql = `
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     is_site_admin INTEGER NOT NULL DEFAULT 0,
+    keycloak_sub TEXT UNIQUE,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -294,6 +295,29 @@ async function ensureOwnerSiteAdminColumn(database: NoteStoreDatabase) {
   await transaction()
 }
 
+async function ensureOwnerKeycloakSubColumn(database: NoteStoreDatabase) {
+  if (database.kind !== 'sqlite') {
+    return
+  }
+
+  const transaction = database.transaction(async () => {
+    if (!(await tableExists(database, 'owner_accounts'))) {
+      return
+    }
+
+    const ownerColumns = await listTableColumns(database, 'owner_accounts')
+
+    if (!ownerColumns.has('keycloak_sub')) {
+      await database.exec(`
+        ALTER TABLE owner_accounts
+        ADD COLUMN keycloak_sub TEXT UNIQUE
+      `)
+    }
+  })
+
+  await transaction()
+}
+
 async function ensureShareLinkRevealTokens(database: NoteStoreDatabase) {
   if (database.kind !== 'sqlite') {
     return
@@ -402,6 +426,7 @@ export async function initializeNoteStoreDatabase(
   }
 
   await ensureOwnerSiteAdminColumn(database)
+  await ensureOwnerKeycloakSubColumn(database)
   await ensureNotesAttributionColumns(database)
   await ensureShareLinkRevealTokens(database)
   await ensureOwnerEmailUniqueness(database, { allowSchemaChanges })

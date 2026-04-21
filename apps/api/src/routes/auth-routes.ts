@@ -17,6 +17,9 @@ import {
 } from '../validation.js'
 
 export function registerAuthRoutes(app: Express, context: AppRouteContext) {
+  // Phase 2a local auth: These routes implement email/password authentication.
+  // In Phase 2a coexistence mode, these will coexist with Keycloak OIDC.
+  // In Phase 2b cutover, these routes will be removed.
   app.post(
     '/api/auth/register',
     async (

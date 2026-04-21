@@ -106,6 +106,7 @@ interface OwnerAccountRow {
   display_name: string
   password_hash: string
   is_site_admin: number
+  keycloak_sub: string | null
   created_at: string
   updated_at: string
 }
@@ -115,6 +116,7 @@ interface AdminAccountSummaryRow {
   email: string
   display_name: string
   is_site_admin: number
+  keycloak_sub: string | null
   created_at: string
   updated_at: string
   membership_count: number
@@ -199,6 +201,7 @@ const snapshotTableDefinitions = [
       'display_name',
       'password_hash',
       'is_site_admin',
+      'keycloak_sub',
       'created_at',
       'updated_at',
     ],
@@ -744,6 +747,7 @@ function mapOwnerAccountRow(row: OwnerAccountRow): OwnerAccount {
     email: row.email,
     displayName: row.display_name,
     isSiteAdmin: row.is_site_admin === 1,
+    keycloakSub: row.keycloak_sub,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -755,6 +759,7 @@ function mapAdminAccountSummaryRow(row: AdminAccountSummaryRow): AdminAccountSum
     email: row.email,
     displayName: row.display_name,
     isSiteAdmin: row.is_site_admin === 1,
+    keycloakSub: row.keycloak_sub,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     campaignMembershipCount: Number(row.membership_count),
@@ -1169,6 +1174,7 @@ export async function createNoteStore(
       display_name,
       password_hash,
       is_site_admin,
+      keycloak_sub,
       created_at,
       updated_at
     FROM owner_accounts
@@ -1182,6 +1188,7 @@ export async function createNoteStore(
       display_name,
       password_hash,
       is_site_admin,
+      keycloak_sub,
       created_at,
       updated_at
     FROM owner_accounts
@@ -1194,6 +1201,7 @@ export async function createNoteStore(
       owner_accounts.email,
       owner_accounts.display_name,
       owner_accounts.is_site_admin,
+      owner_accounts.keycloak_sub,
       owner_accounts.created_at,
       owner_accounts.updated_at,
       COUNT(DISTINCT campaign_memberships.id) AS membership_count,
@@ -1210,6 +1218,7 @@ export async function createNoteStore(
       owner_accounts.email,
       owner_accounts.display_name,
       owner_accounts.is_site_admin,
+      owner_accounts.keycloak_sub,
       owner_accounts.created_at,
       owner_accounts.updated_at
     ORDER BY owner_accounts.is_site_admin DESC, owner_accounts.email ASC
@@ -1222,6 +1231,7 @@ export async function createNoteStore(
       display_name,
       password_hash,
       is_site_admin,
+      keycloak_sub,
       created_at,
       updated_at
     ) VALUES (
@@ -1230,6 +1240,7 @@ export async function createNoteStore(
       @display_name,
       @password_hash,
       @is_site_admin,
+      @keycloak_sub,
       @created_at,
       @updated_at
     )
@@ -1476,6 +1487,7 @@ export async function createNoteStore(
         email: normalizedEmail,
         displayName: input.displayName,
         isSiteAdmin: configuredSiteAdminEmails.has(normalizedEmail),
+        keycloakSub: null,
         createdAt: timestamp,
         updatedAt: timestamp,
       }
@@ -1487,6 +1499,7 @@ export async function createNoteStore(
           display_name: owner.displayName,
           password_hash: createPasswordHash(input.password),
           is_site_admin: owner.isSiteAdmin ? 1 : 0,
+          keycloak_sub: owner.keycloakSub,
           created_at: owner.createdAt,
           updated_at: owner.updatedAt,
         })
