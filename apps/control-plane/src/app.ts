@@ -8,6 +8,7 @@ import {
 import type { TenantRegistry } from './tenant-registry.js'
 import { tenantStates } from './types.js'
 import type {
+  FleetStatusResponse,
   TenantDeprovisionResponse,
   ErrorResponse,
   HealthResponse,
@@ -16,6 +17,72 @@ import type {
   TenantListResponse,
   TenantProvisioningResponse,
 } from './types.js'
+
+function createTenantStateCounts() {
+  return Object.fromEntries(tenantStates.map((state) => [state, 0])) as Record<
+    (typeof tenantStates)[number],
+    number
+  >
+}
+
+function readMetadataString(
+  metadata: Record<string, unknown>,
+  keys: string[],
+): string | null {
+  for (const key of keys) {
+    const value = metadata[key]
+    if (typeof value === 'string' && value.length > 0) {
+      return value
+    }
+  }
+
+  return null
+}
+
+function parseBackupMetadata(rawMetadata: string | null) {
+  const emptyStatus = {
+    rawMetadata,
+    location: null,
+    lastBackupAt: null,
+    lastBackupStatus: null,
+    lastRestoreDrillAt: null,
+    lastRestoreDrillStatus: null,
+  }
+
+  if (!rawMetadata) {
+    return emptyStatus
+  }
+
+  try {
+    const parsed = JSON.parse(rawMetadata)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return emptyStatus
+    }
+
+    const metadata = parsed as Record<string, unknown>
+
+    return {
+      rawMetadata,
+      location: readMetadataString(metadata, ['location', 'backupLocation']),
+      lastBackupAt: readMetadataString(metadata, ['lastBackupAt', 'lastBackup']),
+      lastBackupStatus: readMetadataString(metadata, [
+        'lastBackupStatus',
+        'backupStatus',
+      ]),
+      lastRestoreDrillAt: readMetadataString(metadata, [
+        'lastRestoreDrillAt',
+        'lastRestoreDrill',
+      ]),
+      lastRestoreDrillStatus: readMetadataString(metadata, [
+        'lastRestoreDrillStatus',
+        'restoreDrillStatus',
+        'lastRestoreStatus',
+      ]),
+    }
+  } catch {
+    return emptyStatus
+  }
+}
 
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
@@ -125,6 +192,74 @@ export function createApp({
     uptime: process.uptime(),
     version: appVersion,
   })
+  const buildFleetStatusResponse = (): FleetStatusResponse => {
+    const tenantsByCurrentState = createTenantStateCounts()
+    const tenantsByDesiredState = createTenantStateCounts()
+    const tenantsByVersion: Record<string, number> = {}
+    let tenantsWithBackupMetadata = 0
+    let tenantsMissingBackupMetadata = 0
+    let tenantsNeedingAttention = 0
+
+    const tenants = tenantRegistry.listTenants().map((tenant) => {
+      tenantsByCurrentState[tenant.currentState] += 1
+      tenantsByDesiredState[tenant.desiredState] += 1
+      tenantsByVersion[tenant.version] = (tenantsByVersion[tenant.version] ?? 0) + 1
+
+      if (tenant.backupMetadata) {
+        tenantsWithBackupMetadata += 1
+      } else {
+        tenantsMissingBackupMetadata += 1
+      }
+
+      const needsAttention =
+        tenant.currentState !== 'ready' ||
+        tenant.currentState !== tenant.desiredState ||
+        tenant.backupMetadata === null
+      const health: 'healthy' | 'attention' = needsAttention
+        ? 'attention'
+        : 'healthy'
+
+      if (needsAttention) {
+        tenantsNeedingAttention += 1
+      }
+
+      return {
+        tenant,
+        health,
+        backup: parseBackupMetadata(tenant.backupMetadata),
+        latestTransition: tenantRegistry.getStateTransitions(tenant.id)[0] ?? null,
+      }
+    })
+
+    return {
+      generatedAt: new Date().toISOString(),
+      controlPlane: buildHealthResponse(),
+      dependencies: {
+        tenantRegistry: {
+          status: 'healthy',
+        },
+        tenantProvisioning: tenantProvisioningService
+          ? {
+              status: 'healthy',
+              details: 'Tenant provisioning service configured.',
+            }
+          : {
+              status: 'disabled',
+              details: 'Tenant provisioning is disabled in this environment.',
+            },
+      },
+      summary: {
+        totalTenants: tenants.length,
+        tenantsByCurrentState,
+        tenantsByDesiredState,
+        tenantsByVersion,
+        tenantsWithBackupMetadata,
+        tenantsMissingBackupMetadata,
+        tenantsNeedingAttention,
+      },
+      tenants,
+    }
+  }
   const readinessHandler = (
     _request: Request,
     response: Response<HealthResponse | ErrorResponse>,
@@ -160,6 +295,23 @@ export function createApp({
 
   app.get('/readyz', readinessHandler)
   app.get('/ready', readinessHandler)
+
+  app.get(
+    '/internal/fleet/status',
+    (
+      _request: Request,
+      response: Response<FleetStatusResponse | ErrorResponse>,
+    ) => {
+      try {
+        tenantRegistry.checkHealth()
+        response.json(buildFleetStatusResponse())
+      } catch {
+        response.status(503).json({
+          error: 'Tenant registry unavailable',
+        })
+      }
+    },
+  )
 
   app.get(
     tenantRoutePrefix,

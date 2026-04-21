@@ -40,3 +40,10 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Planned thin slice: keep SQLite on rollback-journal mode by default unless a concrete restore/concurrency need proves otherwise, add regression coverage, and document that hosted production targets Postgres while SQLite remains the local/snapshot format.
 - Completed the thin slice: `createSqliteDatabase()` now normalizes writable file-backed SQLite databases to `journal_mode=DELETE`, API regression coverage proves the persisted journal mode stays `delete`, README/runbook guidance documents the choice, and the team decision was recorded in `.squad/decisions/inbox/data-sqlite-wal-default.md`.
 - Focused validation passed for `apps/api` (`npm run lint --workspace apps/api && npm run test --workspace apps/api && npm run build --workspace apps/api`).
+
+## 2026-04-21: Issue #57 fleet status surface
+
+- Picked up issue `#57` on branch `squad/57-fleet-status-surface` after handing the auth-heavy `#56` slice back to the assigned data lane.
+- Landed the first fleet-status slice as a read-only control-plane endpoint, `GET /internal/fleet/status`, instead of a standalone UI. The response now includes control-plane health, dependency status, summary counts by tenant state/version, and per-tenant details with latest transition plus lifted backup metadata fields when parseable JSON is already present.
+- Updated `apps/control-plane/README.md` to document the internal surface and the future path to a redacted public status page, while keeping issue `#68` as the richer operator portal.
+- Focused validation passed for `apps/control-plane` (`npm run lint --workspace apps/control-plane && npm test --workspace apps/control-plane && npm run build --workspace apps/control-plane`).
