@@ -59,6 +59,7 @@ Data initialized as Backend Dev for the initial project squad.
 - Postgres-backed tenant image rollouts now reuse `POST /internal/tenants/:tenantId/provision` with a version override; `apps/control-plane/src/provisioning.ts` marks ready tenants as `upgrading` during the rollout and returns them to `ready` once the rollout is fully complete (observedGeneration matches, updatedReplicas/availableReplicas equal spec.replicas).
 - The generated tenant Deployment contract now explicitly stays single-replica `RollingUpdate` with drain-first replacement (`maxSurge: 0`, `maxUnavailable: 1`) to prevent pod overlap while the per-tenant RWO PVC remains mounted, plus `minReadySeconds: 5` and `terminationGracePeriodSeconds: 30`; the operator choreography and rollout rationale live in `apps/control-plane/README.md` and `RUNTIME.md`.
 - `TenantProvisioningService.provisionTenant()` must reject blank version overrides before rollout classification; otherwise direct callers can record an `upgrading` transition without persisting a new tenant version/image.
+- `TenantProvisioningService.provisionTenant()` must trim version overrides before comparing/persisting them and reject non–image-tag-safe values; the HTTP provision route should surface those validation failures as 400s instead of masking them as 500s.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 

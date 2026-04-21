@@ -3,7 +3,10 @@ import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
-import type { TenantProvisioningPort } from '../src/provisioning.js'
+import {
+  TenantProvisioningValidationError,
+  type TenantProvisioningPort,
+} from '../src/provisioning.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 
 const require = createRequire(import.meta.url)
@@ -486,6 +489,42 @@ describe('Control Plane API', () => {
       assert.strictEqual(
         response.body.resources.pvcName,
         'dnd-notes-data-t-opaque123456',
+      )
+    })
+
+    it('returns 400 when the provisioning service rejects an invalid version override', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new TenantProvisioningValidationError(
+            'Tenant version must be a valid container image tag',
+          )
+        },
+        async deprovisionTenant() {
+          throw new Error('not used')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+          version: '1.1.0 release',
+        })
+        .expect(400)
+
+      assert.strictEqual(response.body.error, 'Invalid tenant provisioning request')
+      assert.strictEqual(
+        response.body.details,
+        'Tenant version must be a valid container image tag',
       )
     })
   })

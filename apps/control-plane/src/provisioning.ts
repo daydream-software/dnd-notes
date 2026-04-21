@@ -32,6 +32,7 @@ const defaultDeleteTimeoutMs = 120_000
 const defaultTenantStorageRequest = '1Gi'
 const defaultTenantStorageMountPath = '/app/data'
 const maxKubernetesLabelValueLength = 63
+const containerImageTagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/
 
 type KubernetesObjectClient = Pick<
   KubernetesObjectApi,
@@ -106,6 +107,35 @@ interface BuildTenantInfrastructureBundleOptions {
   tenantPort: number
 }
 
+export class TenantProvisioningValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TenantProvisioningValidationError'
+  }
+}
+
+function normalizeTenantVersionOverride(version?: string): string | undefined {
+  if (version === undefined) {
+    return undefined
+  }
+
+  const normalizedVersion = version.trim()
+
+  if (normalizedVersion.length === 0) {
+    throw new TenantProvisioningValidationError(
+      'Tenant version must be a non-empty string',
+    )
+  }
+
+  if (!containerImageTagPattern.test(normalizedVersion)) {
+    throw new TenantProvisioningValidationError(
+      'Tenant version must be a valid container image tag',
+    )
+  }
+
+  return normalizedVersion
+}
+
 export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly tenantRegistry: TenantRegistry
   private readonly infrastructureManager: TenantInfrastructureManager
@@ -136,11 +166,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     version?: string
   }): Promise<TenantProvisioningResponse> {
     const tenant = this.getExistingTenant(params.tenantId)
-    const requestedVersion = params.version
-
-    if (requestedVersion !== undefined && requestedVersion.trim().length === 0) {
-      throw new Error('Tenant version must be a non-empty string')
-    }
+    const requestedVersion = normalizeTenantVersionOverride(params.version)
 
     const isVersionRollout =
       requestedVersion !== undefined && requestedVersion !== tenant.version
