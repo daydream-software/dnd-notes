@@ -163,6 +163,13 @@ async function canManagePostgresSchema(database: NoteStoreDatabase) {
 
     return privileges?.can_create === true || privileges?.can_create === 't'
   } catch (error) {
+    if (
+      error instanceof Error &&
+      /function has_schema_privilege\(text,text\) does not exist/i.test(error.message)
+    ) {
+      return true
+    }
+
     console.error(
       '[note-store-bootstrap] Failed to check schema privileges; assuming least-privilege mode:',
       error,

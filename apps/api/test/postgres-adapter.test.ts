@@ -26,14 +26,6 @@ function createPostgresMemDb() {
     autoCreateForeignKeyIndices: true,
   })
 
-  // Register Postgres functions used by the runtime
-  db.public.registerFunction({
-    name: 'has_schema_privilege',
-    args: ['text', 'text'],
-    returns: 'boolean',
-    implementation: () => true,
-  })
-
   return db
 }
 

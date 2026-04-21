@@ -899,6 +899,12 @@ describe('PostgresTenantDatabaseManager', () => {
       harness.adminQueries.some((query) => query.sql.startsWith('CREATE ROLE ')),
       true,
     )
+    const createRoleQuery = harness.adminQueries.find((query) =>
+      query.sql.startsWith('CREATE ROLE '),
+    )
+    assert.ok(createRoleQuery)
+    assert.equal(createRoleQuery.values, undefined)
+    assert.match(createRoleQuery.sql, /PASSWORD 'generated-runtime-password'/)
     assert.equal(
       harness.adminQueries.some((query) =>
         query.sql.startsWith('GRANT CONNECT ON DATABASE '),

@@ -464,13 +464,11 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
 
         if (existingRole.rows[0]?.exists) {
           await client.query(
-            `ALTER ROLE ${quoteIdentifier(runtimeIdentity.roleName)} WITH LOGIN PASSWORD $1 NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`,
-            [runtimeIdentity.password],
+            `ALTER ROLE ${quoteIdentifier(runtimeIdentity.roleName)} WITH LOGIN PASSWORD ${quoteLiteral(runtimeIdentity.password)} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`,
           )
         } else {
           await client.query(
-            `CREATE ROLE ${quoteIdentifier(runtimeIdentity.roleName)} WITH LOGIN PASSWORD $1 NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`,
-            [runtimeIdentity.password],
+            `CREATE ROLE ${quoteIdentifier(runtimeIdentity.roleName)} WITH LOGIN PASSWORD ${quoteLiteral(runtimeIdentity.password)} NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOREPLICATION`,
           )
         }
 
@@ -1117,6 +1115,10 @@ function quoteIdentifier(identifier: string): string {
   }
 
   return `"${identifier.replace(/"/g, '""')}"`
+}
+
+function quoteLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`
 }
 
 function encodeSecretValue(value: string): string {

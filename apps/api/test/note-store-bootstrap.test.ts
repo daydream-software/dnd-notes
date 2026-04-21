@@ -27,6 +27,7 @@ class FakePostgresDatabase implements NoteStoreDatabase {
       allowSchemaChanges: boolean
       ownerEmails?: string[]
       ownerEmailIndexDefinition?: string | null
+      privilegeCheckError?: Error
       tableNames?: readonly string[]
     },
   ) {}
@@ -35,6 +36,10 @@ class FakePostgresDatabase implements NoteStoreDatabase {
     return {
       get: async (...params: unknown[]) => {
         if (sql.includes('has_schema_privilege')) {
+          if (this.options.privilegeCheckError) {
+            throw this.options.privilegeCheckError
+          }
+
           return { can_create: this.options.allowSchemaChanges }
         }
 
@@ -139,4 +144,18 @@ test('least-privilege postgres runtime fails fast when the owner email uniquenes
     /idx_owner_accounts_email_lower unique index/,
   )
   assert.deepEqual(database.executedSql, [])
+})
+
+test('pg-mem style privilege lookup failures fall back to schema bootstrap', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: [],
+    privilegeCheckError: new Error(
+      'function has_schema_privilege(text,text) does not exist',
+    ),
+  })
+
+  await initializeNoteStoreDatabase(database, new Set())
+
+  assert.equal(database.executedSql.length, 2)
 })
