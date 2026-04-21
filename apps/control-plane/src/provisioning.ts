@@ -452,11 +452,11 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
         await client.query(`CREATE DATABASE ${quoteIdentifier(databaseName)}`)
       }
 
-      await client.query(
-        `REVOKE ALL ON DATABASE ${quoteIdentifier(databaseName)} FROM PUBLIC`,
-      )
-
       if (runtimeIdentity.mode === 'dedicated') {
+        await client.query(
+          `REVOKE ALL ON DATABASE ${quoteIdentifier(databaseName)} FROM PUBLIC`,
+        )
+
         const existingRole = await client.query<{ exists: boolean }>(
           'SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1) AS exists',
           [runtimeIdentity.roleName],
@@ -970,7 +970,10 @@ function resolveExistingTenantRuntimeIdentity(params: {
   expectedRoleName: string
   runtimeDatabaseUrl: string
 }): TenantRuntimeIdentity | null {
-  if (!params.existingRuntimeConnectionString) {
+  if (
+    !params.existingRuntimeConnectionString ||
+    params.existingRuntimeConnectionString.trim() === ''
+  ) {
     return null
   }
 
