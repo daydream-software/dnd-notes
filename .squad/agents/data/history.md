@@ -52,6 +52,8 @@ Data initialized as Backend Dev for the initial project squad.
 - The generated tenant Deployment contract now explicitly stays single-replica `RollingUpdate` with drain-first replacement (`maxSurge: 0`, `maxUnavailable: 1`) to prevent pod overlap while the per-tenant RWO PVC remains mounted, plus `minReadySeconds: 5` and `terminationGracePeriodSeconds: 30`; the operator choreography and rollout rationale live in `apps/control-plane/README.md` and `RUNTIME.md`.
 - `TenantProvisioningService.provisionTenant()` must reject blank version overrides before rollout classification; otherwise direct callers can record an `upgrading` transition without persisting a new tenant version/image.
 - `TenantProvisioningService.provisionTenant()` must trim version overrides before comparing/persisting them and reject non–image-tag-safe values; the HTTP provision route should surface those validation failures as 400s instead of masking them as 500s.
+- Control-plane reprovision errors in `apps/control-plane/src/provisioning.ts` must not echo raw tenant `DATABASE_URL` values; include tenant context and guidance, but never reflect credentials back into logs or HTTP error details.
+- When Postgres tenant database/role identifiers in `apps/control-plane/src/provisioning.ts` would exceed the 63-character limit, truncate with a stable hash suffix instead of plain slicing so long subdomains cannot collide; regressions live in `apps/control-plane/test/provisioning.test.ts`.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 

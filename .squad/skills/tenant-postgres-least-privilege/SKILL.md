@@ -17,6 +17,8 @@ Use this when a control plane provisions tenant-scoped Postgres databases and yo
 3. In the app startup path, detect when a Postgres runtime user lacks schema-creation rights and verify the expected tables instead of trying to run DDL anyway.
 4. Preserve any existing tenant runtime secret during ordinary reprovisioning so upgrades do not silently rotate credentials. If the tenant is already provisioned but the runtime secret is missing, fail loudly and require an explicit operator migration/reset.
 5. On deprovision, terminate tenant sessions, drop the tenant database, and drop the deterministic runtime role.
+6. When tenant database or role identifiers must fit PostgreSQL's 63-character limit, keep a readable prefix and append a deterministic hash suffix instead of plain truncation so long subdomains cannot collide onto the same identifier.
+7. Treat malformed tenant runtime secrets as sensitive input: fail with tenant-scoped guidance, but never echo raw `DATABASE_URL` contents back into logs or API error payloads.
 
 ## Examples
 
@@ -31,3 +33,5 @@ Use this when a control plane provisions tenant-scoped Postgres databases and yo
 - Reusing one shared runtime Postgres user across multiple tenants.
 - Letting the tenant app create tables/indexes at startup when the goal is least privilege.
 - Silently rotating credentials for already-live tenants during a routine image rollout.
+- Plainly truncating long tenant database/role names until distinct tenants collide on the same PostgreSQL identifier.
+- Including raw tenant `DATABASE_URL` values in malformed-secret errors or operator logs.

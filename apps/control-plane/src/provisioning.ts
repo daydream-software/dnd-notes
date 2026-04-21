@@ -986,7 +986,7 @@ function resolveExistingTenantRuntimeIdentity(params: {
   } catch (error) {
     const tenantContext = params.tenantId ? ` for tenant ${params.tenantId}` : ''
     throw new Error(
-      `Invalid DATABASE_URL in runtime secret${tenantContext}: must be a valid PostgreSQL connection string (received: ${existingRuntimeConnectionString.slice(0, 50)}...)`,
+      `Invalid DATABASE_URL in runtime secret${tenantContext}: must be a valid PostgreSQL connection string`,
       { cause: error },
     )
   }
@@ -1084,10 +1084,9 @@ function buildTenantDatabaseName(tenantId: string, subdomain: string): string {
     .replace(/^_+|_+$/g, '')
     .slice(0, 20)
   const normalizedSubdomain = subdomain.replace(/-/g, '_')
-
-  const name = `tenant_${normalizedTenantId}_${normalizedSubdomain}`.slice(0, 63)
-
-  return name.replace(/_+$/g, '')
+  return buildUniqueDatabaseIdentifier(
+    `tenant_${normalizedTenantId}_${normalizedSubdomain}`,
+  )
 }
 
 function normalizeKubernetesLabelValue(value: string): string {
@@ -1120,9 +1119,25 @@ function buildTenantDatabaseRoleName(tenantId: string, subdomain: string): strin
     .replace(/^_+|_+$/g, '')
     .slice(0, 18)
   const normalizedSubdomain = subdomain.replace(/-/g, '_')
-  const name = `tenant_rt_${normalizedTenantId}_${normalizedSubdomain}`.slice(0, 63)
+  return buildUniqueDatabaseIdentifier(
+    `tenant_rt_${normalizedTenantId}_${normalizedSubdomain}`,
+  )
+}
 
-  return name.replace(/_+$/g, '')
+function buildUniqueDatabaseIdentifier(identifier: string): string {
+  const maxIdentifierLength = 63
+
+  if (identifier.length <= maxIdentifierLength) {
+    return identifier.replace(/_+$/g, '')
+  }
+
+  const digest = createHash('sha256').update(identifier).digest('hex').slice(0, 8)
+  const maxPrefixLength = maxIdentifierLength - digest.length - 1
+  const trimmedPrefix = identifier
+    .slice(0, maxPrefixLength)
+    .replace(/_+$/g, '')
+
+  return `${trimmedPrefix}_${digest}`
 }
 
 function quoteIdentifier(identifier: string): string {

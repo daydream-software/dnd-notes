@@ -1046,13 +1046,14 @@ describe('PostgresTenantDatabaseManager', () => {
 
   it('rejects existing-tenant reprovisioning with actionable error when DATABASE_URL is malformed', async () => {
     const harness = createPostgresManagerHarness()
+    const malformedRuntimeUrl = 'postgresql://tenant-user:super-secret password@['
 
     await assert.rejects(
       harness.manager.ensureTenantDatabase(
         createTenantRecord({ id: 'tenant-demo', subdomain: 't-existing123456', currentState: 'ready' }),
         't-existing123456',
         {
-          existingRuntimeConnectionString: 'not-a-valid-url-at-all',
+          existingRuntimeConnectionString: malformedRuntimeUrl,
           requireExistingRuntimeConnectionString: true,
         },
       ),
@@ -1060,9 +1061,31 @@ describe('PostgresTenantDatabaseManager', () => {
         assert.match(error.message, /Invalid DATABASE_URL in runtime secret/)
         assert.match(error.message, /tenant-demo/)
         assert.match(error.message, /must be a valid PostgreSQL connection string/)
+        assert.equal(error.message.includes('super-secret'), false)
+        assert.equal(error.message.includes(malformedRuntimeUrl), false)
         return true
       },
     )
+  })
+
+  it('keeps long tenant database and role names unique when truncation is required', async () => {
+    const harness = createPostgresManagerHarness()
+    const sharedPrefix = `t-${'a'.repeat(maxTenantSubdomainLength - 3)}`
+    const firstDatabase = await harness.manager.ensureTenantDatabase(
+      createTenantRecord({ id: 'tenant-demo' }),
+      `${sharedPrefix}b`,
+    )
+    const secondDatabase = await harness.manager.ensureTenantDatabase(
+      createTenantRecord({ id: 'tenant-demo' }),
+      `${sharedPrefix}c`,
+    )
+
+    assert.notEqual(firstDatabase.databaseName, secondDatabase.databaseName)
+    assert.notEqual(firstDatabase.roleName, secondDatabase.roleName)
+    assert.ok(firstDatabase.databaseName.length <= 63)
+    assert.ok(secondDatabase.databaseName.length <= 63)
+    assert.ok((firstDatabase.roleName ?? '').length <= 63)
+    assert.ok((secondDatabase.roleName ?? '').length <= 63)
   })
 
   it('drops tenant sessions, the database, and the dedicated runtime role on deprovision', async () => {
