@@ -16,6 +16,8 @@ Data initialized as Backend Dev for the initial project squad.
 
 📌 Issue #69 delivered (2026-04-21T19:55:31Z): Per-tenant Postgres credentials fully implemented — new tenants get dedicated roles + tenant-scoped DATABASE_URL, control-plane pre-seeds schema before first pod start, safe deprovision cleanup in place; existing tenants stay on shared creds until explicit migration. Session log at `.squad/log/20260421-195544-issue-69-delivery.md`. Validation: lint/test/build passed for control-plane + api, platform:validate passed. — Data (Agent)
 
+📌 PR #72 second review wave (2026-04-21T20:14Z): Hardening fixes after first review addressing blank credential guards and index verification. Fixed: (1) blank/whitespace DATABASE_URL values now throw missing-secret error before credential rotation paths run, (2) owner email uniqueness index explicitly verified in least-privilege mode, (3) pre-init schema verification in control-plane provisioning, (4) comprehensive regression coverage added (12 new tests). All 6 review threads resolved. Commit `f85831b`. Session log at `.squad/log/20260421-pr72-second-review-wave.md`. Fresh review requested. — Data (Agent)
+
 
 ## Learnings
 
