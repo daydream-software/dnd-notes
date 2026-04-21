@@ -20,6 +20,8 @@ Data initialized as Backend Dev for the initial project squad.
 
 📌 PR #72 CI fix batch (2026-04-21T20:32:58Z): Fixed focused regressions after second review wave. Root causes: pg-mem tests fell into least-privilege path incorrectly; tenant runtime role provisioning password form Postgres rejected in smoke path. Fixed both and added focused regression coverage. Commit `f033b69`. apps/api and apps/control-plane lint/test/build all pass. Fresh check cycle running on main; awaits fresh review. Session log at `.squad/log/20260421-203258-pr72-ci-fix-batch.md`. — Data (Agent)
 
+📌 Issue #56 auth-seam prep completed (2026-04-21T22:45:02Z): Delivered Phase 2 auth-provider abstraction boundaries. Added `owner_accounts.keycloak_sub` column (nullable, unique), introduced `AuthenticatedUser` shared contract, documented `requireAuthenticatedAccount()` and `createAdminAuthMiddleware()` as future delegation points, kept local auth fully functional, marked `/api/auth/*` routes as Phase 2a coexist/2b cutover. No speculative provider code. All tests pass (96/96 api, 63/63 control-plane), lint/build clean. Commit `e69b93d` on `squad/56-integrate-keycloak-oidc`. Ready for follow-up OIDC implementation per Epic #42 Decision 9. — Data (Agent)
+
 
 ## Learnings
 
@@ -575,3 +577,6 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 **Commit:** b7badaa
 
 **Outcome:** PR #72 is unblocked and ready for CI clearance and merge.
+
+## 2026-04-21: Issue #56 Auth Seam Prep
+
