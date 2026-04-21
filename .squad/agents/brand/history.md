@@ -20,8 +20,7 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Recent Updates (Last 5)
 
-
-
+- **Phase 2 Platform Readiness Assessment (2026-04-21):** Conducted full audit of #56 (Keycloak OIDC) and #69 (per-tenant Postgres roles) platform prerequisites. Identified 8 critical areas: Keycloak bootstrap (partial, needs control-plane integration), database secret wiring (CRITICAL GAP: all tenants share one runtime URL, must split to per-tenant role + secret), local dev experience (k3d works, docs missing), CI coverage (smoke test gaps for auth/privileges), K8s manifests (RBAC ready, network policy not documented), secrets strategy (defer Sealed Secrets to Phase 2+), rollout dependencies (#69 independent of #56 after foundational work), and documentation gaps. Produced 8-item readiness list with 3-4 PR decomposition for #69 work.
 
 
 
@@ -40,6 +39,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 - **Backup/Restore Strategy (Phase 1):** Two-layer approach: managed Postgres PITR (~5 min RPO for fleet DR) + daily per-tenant pg_dump (24h RPO for single-tenant restore). CronJob iterates tenant list, pg_dump per tenant per day to blob storage. Blob lifecycle auto-expires backups >7 days. Health monitoring: /internal/status includes last_backup_age; alert if >12h stale. Control-plane owns backup catalog + restore log schema; tenant lifecycle includes `restoring` state.
 
 - **Phase 0–1 Critical Gaps:** Single-writer enforcement on K8s; PVC lifecycle during scale-to-zero; ingress/DNS/TLS routing; observability baseline; backup/restore at scale. Control-plane DB persistence; tenant realm isolation; rollout discipline; cost model; disaster recovery; compliance.
+
+- **Phase 2 Platform Requirements:** (1) Keycloak bootstrap present in k3d (scripts/k3d/bootstrap.sh, platform/k3d/keycloak.yaml) but lacks control-plane ↔ Keycloak token validation + realm setup logic. (2) Per-tenant Postgres role strategy critical for #69: currently all tenants share TENANT_DATABASE_RUNTIME_URL; Phase 2b must split to per-tenant role (CREATE ROLE tenant_<id>_<subdomain> WITH PASSWORD, grant CONNECT + USAGE only), update buildTenantInfrastructureBundle to pass per-tenant secret material, remove shared secret reference from tenant Deployment. (3) Control-plane RBAC already includes create/patch/delete on Secrets (clusterrole.yaml lines 15–16); no networking gaps. (4) k3d-smoke validates provisioning + /ready but misses: Keycloak realm/client presence, per-tenant role privilege constraints, environment isolation. (5) CI coverage: lint/test/build complete; add per-tenant role creation + deprovisioning tests to control-plane suite. (6) Secrets strategy: keep K8s Secrets for Phase 2 start (lowest friction); defer Sealed Secrets/Vault to Phase 2+. (7) Rollout dependencies: #69 (per-tenant roles) does NOT depend on #56 (Keycloak); can land in parallel after Phase 2a Keycloak foundational work. (8) Docs: add LOCAL_DEV_KEYCLOAK.md, append "Phase 2 Secrets Management" section to RUNTIME.md, update apps/control-plane/README.md with per-tenant role provisioning design.
 
 - **Issue #43 QA Checkers (5 critical):** (1) Manifest/runtime mismatch — full K8s manifests for tenant provisioning missing. (2) Workflow drift — k3d-smoke validates only readiness, not CRUD. (3) Postgres env wiring — DATABASE_URL not tested end-to-end. (4) SPA fallback safety — no regression tests for missing routes or XHR. (5) Same-origin default enforcement — ALLOWED_ORIGINS doesn't accidentally split origins.
 

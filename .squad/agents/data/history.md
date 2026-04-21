@@ -18,6 +18,12 @@ Data initialized as Backend Dev for the initial project squad.
 
 ## Learnings
 
+- Phase 2 backend/security sequencing: start with per-tenant Postgres credentials before OIDC or restore orchestration, because `apps/control-plane/src/provisioning.ts` still injects one shared `DATABASE_URL` into every tenant secret and `apps/control-plane/src/index.ts` still accepts the shared `TENANT_DATABASE_RUNTIME_URL` model.
+- Least-privilege runtime roles are not a drop-in swap today: `apps/api/src/note-store-bootstrap.ts` still runs schema DDL on startup for Postgres, so a runtime role limited to CONNECT/USAGE/DML will fail unless the control plane pre-seeds the tenant database schema (or a separate migrator credential path exists) before the pod starts.
+- Key file path for #69: control-plane credential flow lives in `apps/control-plane/src/provisioning.ts`, startup env parsing in `apps/control-plane/src/index.ts`, tenant credential manifests in `platform/control-plane/base/secret.yaml` plus overlay patches, and operator docs in `README.md`, `RUNTIME.md`, and `apps/control-plane/README.md`.
+- Key file path for #56 prep: owner auth is hard-wired to local `owner_accounts` + `owner_sessions` in `apps/api/src/note-store.ts`, `apps/api/src/routes/auth-routes.ts`, `apps/api/src/route-support.ts`, and `apps/api/src/types.ts`; keep campaign authorization in `campaign_memberships` local even after identity moves to OIDC.
+- Key file path for #40 prep: restore still swaps the live store immediately in `apps/api/src/routes/admin-routes.ts`, while readiness and route registration live in `apps/api/src/app.ts`; add a process-level maintenance/write gate before full restore orchestration so active clients see an explicit failure mode instead of stale success.
+- User preference: FFMikha is sequencing Epic #42 in thin, concrete backend slices and asked for a file-level attack plan plus risk list before writing more code.
 - Initial squad setup complete.
 - `apps/api/src/note-store.ts` owns SQLite schema bootstrap, so compatibility fixes for local dev databases should run there before prepared note queries are created.
 - The default dev database lives at `apps/api/data/dnd-notes.sqlite`; when note schema adds nullable attribution fields, prefer an in-place startup upgrade over asking developers to reset data.

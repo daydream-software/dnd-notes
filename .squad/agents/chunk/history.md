@@ -33,6 +33,14 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 
 ## Learnings
 
+### Phase 2 QA Gate (2026-04-22)
+- **Critical discovery:** #40 (Restore Safety) is a blocker for both #56 (OIDC) and #69 (Per-Tenant Roles). Execution order is not optional.
+- **Why:** #69 credential rotation and #56 token refresh both require maintenance-mode signaling. Without #40's restore-safety gates, both create orphan-auth failures (silent 401 instead of "maintenance", orphaned Postgres connections, token realm confusion, credential sync races during graceful shutdown).
+- **Test infrastructure decoupled from implementation:** 13 regression test files can scaffold immediately (zero product code changes), serving as acceptance gates for each issue.
+- **Recommended roadmap:** Phase 2a (scaffold tests) → Phase 2b (implement #40) → Phase 2c (#69 and #56 parallel after #40 merges).
+- **Created `.squad/qa-brief-phase-2.md`** with full gate specifications: 5 restore gates, 7 per-tenant role gates, 7 OIDC gates. Also flagged 4 highest-risk user-facing failures if #69 starts first.
+- **Created `.squad/decisions/inbox/chunk-phase-2-qa-gate.md`** recording execution-order decision and approval checklist.
+
 ### Issue #55 QA Gate (2026-04-22)
 - Graceful shutdown choreography is complete: API + control-plane both have SIGTERM handlers that mark readiness as unready immediately, then drain in-flight requests for 30s, then close HTTP server, then close database pool.
 - Postgres connection pool has tunable defaults via env vars (`NOTES_DB_POOL_MIN`, `NOTES_DB_POOL_MAX`, idle/connection/statement timeouts) and explicit `pool.end()` is awaited on close.
