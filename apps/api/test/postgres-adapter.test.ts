@@ -21,10 +21,24 @@ import { registerOwner, withAuth } from './test-helpers.js'
 
 const runtimeDirectory = join(dirname(fileURLToPath(import.meta.url)), '.runtime')
 
-async function createPostgresTestStore() {
+function createPostgresMemDb() {
   const db = newDb({
     autoCreateForeignKeyIndices: true,
   })
+
+  // Register Postgres functions used by the runtime
+  db.public.registerFunction({
+    name: 'has_schema_privilege',
+    args: ['text', 'text'],
+    returns: 'boolean',
+    implementation: () => true,
+  })
+
+  return db
+}
+
+async function createPostgresTestStore() {
+  const db = createPostgresMemDb()
   const { Pool } = db.adapters.createPg()
   const pool = new Pool()
   const noteStore = await createNoteStore({
@@ -162,9 +176,7 @@ test('postgres-backed backups tighten restrictive permissions on snapshot files'
 })
 
 test('postgres-backed backups copy snapshot tables in bounded batches', async (t) => {
-  const db = newDb({
-    autoCreateForeignKeyIndices: true,
-  })
+  const db = createPostgresMemDb()
   const { Pool } = db.adapters.createPg()
   const pool = new Pool()
   const noteStore = await createNoteStore({
@@ -214,9 +226,7 @@ test('postgres-backed backups copy snapshot tables in bounded batches', async (t
 })
 
 test('postgres-backed backups roll back partial snapshot writes when export fails', async (t) => {
-  const db = newDb({
-    autoCreateForeignKeyIndices: true,
-  })
+  const db = createPostgresMemDb()
   const { Pool } = db.adapters.createPg()
   const pool = new Pool()
   const noteStore = await createNoteStore({
