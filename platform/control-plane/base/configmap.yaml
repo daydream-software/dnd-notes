@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dnd-notes-control-plane-config
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: dnd-notes-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: dnd-notes
+data:
+  PORT: "3001"
+  DATABASE_PATH: /app/data/control-plane.sqlite
+  CONTROL_PLANE_ENABLE_PROVISIONING: "true"
+  TENANT_BASE_DOMAIN: replace-me.example.com
+  TENANT_IMAGE_REPOSITORY: ghcr.io/daydream-software/dnd-notes
+  TENANT_PUBLIC_SCHEME: https
+  TENANT_APP_PORT: "3000"
+  TENANT_READY_TIMEOUT_MS: "120000"

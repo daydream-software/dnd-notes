@@ -1,0 +1,16 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dnd-notes-control-plane
+  labels:
+    app.kubernetes.io/name: dnd-notes-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: dnd-notes
+subjects:
+  - kind: ServiceAccount
+    name: dnd-notes-control-plane
+    namespace: dnd-notes-platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dnd-notes-control-plane

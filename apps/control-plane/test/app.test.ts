@@ -52,6 +52,41 @@ describe('Control Plane API', () => {
     })
   })
 
+  describe('GET /healthz', () => {
+    it('returns the Kubernetes liveness response', async () => {
+      const response = await request(app).get('/healthz').expect(200)
+
+      assert.strictEqual(response.body.status, 'healthy')
+      assert.strictEqual(response.body.version, appVersion)
+    })
+  })
+
+  describe('GET /readyz', () => {
+    it('returns healthy status when the tenant registry is available', async () => {
+      const response = await request(app).get('/readyz').expect(200)
+
+      assert.strictEqual(response.body.status, 'healthy')
+      assert.strictEqual(response.body.version, appVersion)
+    })
+
+    it('returns service unavailable when the tenant registry is closed', async () => {
+      tenantRegistry.close()
+
+      const response = await request(app).get('/readyz').expect(503)
+
+      assert.strictEqual(response.body.error, 'Tenant registry unavailable')
+    })
+  })
+
+  describe('GET /ready', () => {
+    it('keeps the short readiness alias for in-cluster callers', async () => {
+      const response = await request(app).get('/ready').expect(200)
+
+      assert.strictEqual(response.body.status, 'healthy')
+      assert.strictEqual(response.body.version, appVersion)
+    })
+  })
+
   describe('POST /internal/tenants', () => {
     it('rejects unauthenticated API requests', async () => {
       const response = await request(app).post(tenantsPath).send({

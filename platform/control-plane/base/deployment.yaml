@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnd-notes-control-plane
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: dnd-notes-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dnd-notes-control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dnd-notes-control-plane
+        app.kubernetes.io/component: control-plane
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      serviceAccountName: dnd-notes-control-plane
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: control-plane
+          image: ghcr.io/daydream-software/dnd-notes-control-plane:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: dnd-notes-control-plane-config
+            - secretRef:
+                name: dnd-notes-control-plane-secrets
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+          volumeMounts:
+            - name: control-plane-data
+              mountPath: /app/data
+      volumes:
+        - name: control-plane-data
+          persistentVolumeClaim:
+            claimName: dnd-notes-control-plane-data

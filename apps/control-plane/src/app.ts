@@ -117,6 +117,11 @@ export function createApp({
   tenantProvisioningService,
 }: CreateAppOptions): Express {
   const app = express()
+  const buildHealthResponse = (): HealthResponse => ({
+    status: 'healthy',
+    uptime: process.uptime(),
+    version: appVersion,
+  })
 
   app.disable('x-powered-by')
   app.use((_request, response, next) => {
@@ -130,12 +135,52 @@ export function createApp({
   app.use(internalRoutePrefix, express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
-    response.json({
-      status: 'healthy',
-      uptime: process.uptime(),
-      version: appVersion,
-    })
+    response.json(buildHealthResponse())
   })
+
+  app.get('/healthz', (_request: Request, response: Response<HealthResponse>) => {
+    response.json(buildHealthResponse())
+  })
+
+  app.get(
+    '/readyz',
+    (
+      _request: Request,
+      response: Response<HealthResponse | ErrorResponse>,
+    ) => {
+      try {
+        tenantRegistry.checkHealth()
+        response.json(buildHealthResponse())
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error'
+        response.status(503).json({
+          error: 'Tenant registry unavailable',
+          details: errorMessage,
+        })
+      }
+    },
+  )
+
+  app.get(
+    '/ready',
+    (
+      _request: Request,
+      response: Response<HealthResponse | ErrorResponse>,
+    ) => {
+      try {
+        tenantRegistry.checkHealth()
+        response.json(buildHealthResponse())
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Unknown error'
+        response.status(503).json({
+          error: 'Tenant registry unavailable',
+          details: errorMessage,
+        })
+      }
+    },
+  )
 
   app.get(
     tenantRoutePrefix,

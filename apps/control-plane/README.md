@@ -70,6 +70,12 @@ Every state change is logged with:
 ### Health
 
 - `GET /health` — Health check
+- `GET /healthz` — Kubernetes liveness probe
+- `GET /readyz` — Kubernetes readiness probe
+- `GET /ready` — Short readiness alias for cluster-internal callers
+- `GET /healthz` — Kubernetes liveness probe
+- `GET /readyz` — Kubernetes readiness probe
+- `GET /ready` — Short readiness alias for cluster-internal callers
 
 ### Tenant Management
 
@@ -131,3 +137,25 @@ This skeleton is ready to drive:
 - Issue #54: Provisioning (creates K8s resources, updates registry)
 - Issue #55: Rolling updates (orchestrates upgrades, tracks state)
 - Issue #40: Backup/restore (manages backup metadata, coordinates restore)
+
+## Deployment Artifacts
+
+Issue `#43` now carries the committed in-cluster packaging lane for this service:
+
+- `docker/control-plane/Dockerfile` — production image for the internal control plane
+- `platform/control-plane/overlays/k3d` — local k3d manifest overlay
+- `platform/control-plane/overlays/hosted-reference` — hosted-cluster reference overlay
+
+These artifacts keep the control plane internal-only while preserving the locked
+same-origin tenant model through `TENANT_BASE_DOMAIN` + `TENANT_PUBLIC_SCHEME`.
+
+## Deployment Artifacts
+
+Issue `#43` now carries the committed in-cluster packaging lane for this service:
+
+- `docker/control-plane/Dockerfile` — production image for the internal control plane
+- `platform/control-plane/overlays/k3d` — local k3d manifest overlay
+- `platform/control-plane/overlays/hosted-reference` — hosted-cluster reference overlay
+
+These artifacts keep the control plane internal-only while preserving the locked
+same-origin tenant model through `TENANT_BASE_DOMAIN` + `TENANT_PUBLIC_SCHEME`.

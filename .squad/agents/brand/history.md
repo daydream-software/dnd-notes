@@ -171,6 +171,10 @@ Decision document written to `.squad/decisions/inbox/brand-phase0-slice.md`. Rea
 - GitHub Actions workflow pins in this repo stay SHA-pinned with inline release comments; for runtime deprecations, verify the upstream `action.yml` `runs.using` value before bumping the SHA.
 - `.github/workflows/ci.yml` currently runs `actions/checkout`, `actions/setup-node`, `EnricoMi/publish-unit-test-result-action`, and `actions/upload-artifact`; the upload-artifact pin is now `043fb46d1a93c77aae656e7c1c64a875d1fc6a0a` (`# v7.0.1`) to stay on Node 24.
 - Root validation for repo-wide changes remains `npm run lint && npm run test:ci && npm run build`, which matches the CI shape for this monorepo.
+- Issue `#43` can avoid redoing tenant packaging by owning the **control-plane** deployment lane: `docker/control-plane/Dockerfile`, `platform/control-plane/base`, and the `k3d` / `hosted-reference` overlays are the committed artifact set.
+- Keep the daily `k3d:smoke` workflow on a local control-plane process even after committing in-cluster manifests; it stays faster for provisioning/debugging while the new artifacts cover hosted packaging.
+- Control-plane K8s deployment requires cluster-scoped RBAC for `namespaces`, `configmaps`, `secrets`, `services`, `persistentvolumeclaims`, and `deployments` because provisioning spans per-tenant namespaces.
+- Reusable operator entrypoints for this slice: `npm run platform:validate`, `npm run k3d:build-control-plane-image`, and `.github/workflows/deployment-artifacts.yml`.
 
 ## 2026-04-20: Node24 Action Compatibility Update
 
