@@ -298,7 +298,8 @@ test('createSqliteDatabase keeps writable file-backed stores on rollback journal
 
   const seededDatabase = new Database(dbPath)
   try {
-    seededDatabase.pragma('journal_mode = WAL')
+    const seededJournalMode = seededDatabase.pragma('journal_mode = WAL', { simple: true })
+    assert.equal(String(seededJournalMode).toLowerCase(), 'wal')
     seededDatabase.exec(`
       CREATE TABLE notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

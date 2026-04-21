@@ -121,7 +121,14 @@ export function createSqliteDatabase(
 
   if (!options.readonly) {
     if (dbPath !== ':memory:') {
-      database.pragma('journal_mode = DELETE')
+      const journalMode = String(
+        database.pragma('journal_mode = DELETE', { simple: true }) ?? '',
+      ).toLowerCase()
+      if (journalMode !== 'delete') {
+        throw new Error(
+          `Failed to set SQLite journal_mode to DELETE for ${dbPath}; current mode is ${journalMode || 'unknown'}`,
+        )
+      }
     }
     database.pragma('foreign_keys = ON')
   }
