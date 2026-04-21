@@ -120,6 +120,16 @@ export function createSqliteDatabase(
     : new Database(dbPath)
 
   if (!options.readonly) {
+    if (dbPath !== ':memory:') {
+      const journalMode = String(
+        database.pragma('journal_mode = DELETE', { simple: true }) ?? '',
+      ).toLowerCase()
+      if (journalMode !== 'delete') {
+        throw new Error(
+          `Failed to set SQLite journal_mode to DELETE for ${dbPath}; current mode is ${journalMode || 'unknown'}`,
+        )
+      }
+    }
     database.pragma('foreign_keys = ON')
   }
   const transactionExecutor = new AsyncLocalStorage<SqliteTransactionContext>()
