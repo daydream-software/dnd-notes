@@ -429,3 +429,25 @@ This skeleton is ready to drive:
 - When a locked squad decision supersedes an exploratory history note, point the history entry at `.squad/decisions.md` or mark explicitly superseded.
 - Do not leave PR-visible history pointing at stale inbox artifacts or retired endpoint drafts.
 
+
+## 2026-04-21: PR #67 Rollout Strategy Fix
+
+Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreography):
+
+**Problem:** Initial implementation used `maxSurge: 1` / `maxUnavailable: 0`, which could deadlock on multi-node clusters due to RWO PVC multi-attach limits when the surge pod schedules to a different node.
+
+**Solution (following Mikey's lead decision):**
+- Changed Deployment strategy to `maxSurge: 0` / `maxUnavailable: 1` (drain-first replacement)
+- Tightened `waitForTenantReady()` to wait for full rollout completion: checks `observedGeneration >= metadata.generation`, `updatedReplicas === spec.replicas`, `availableReplicas === spec.replicas`, `replicas === spec.replicas`, `unavailableReplicas === 0`, and `Available=True`
+- Updated all docs (control-plane README, RUNTIME.md, root README, squad artifacts) to reflect drain-first rollout with no pod overlap
+- This prevents multi-attach issues while the per-tenant RWO PVC remains mounted
+
+**Files changed:**
+- `apps/control-plane/src/provisioning.ts` — rollout strategy + stricter readiness wait
+- `apps/control-plane/test/provisioning.test.ts` — updated test assertions
+- `apps/control-plane/README.md`, `RUNTIME.md`, `README.md` — operator docs
+- `.squad/skills/postgres-tenant-rolling-update/SKILL.md`, `.squad/agents/data/history.md`, `.squad/qa-brief-issue-55.md`, `.squad/agents/copilot/history.md` — squad artifacts
+
+**Review loop:** Fixed issues through 3 iterations (4 Copilot reviews total), resolving all 13 review threads. Final review clean with no new comments.
+
+**Key learning:** Drain-first replacement (`maxSurge: 0`) is the safe default while RWO PVCs remain in the pod shape. Future zero-downtime rollouts (`maxSurge: 1`) can come once the PVC is removed or becomes RWX.
