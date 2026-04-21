@@ -8,21 +8,28 @@
 
 ## Core Context
 
-Chunk initialized as Tester for the initial project squad.
+Chunk is the QA/Tester for the squad, responsible for regression coverage, gate validation, and identifying high-risk parity gaps.
+
+**Historical Milestones (2026-04-11 to 2026-04-20):**
+- Initialized as tester on 2026-04-11
+- Validated SQLite startup fix regression coverage (2026-04-12)
+- Approved campaign share-link reveal slice (2026-04-12)
+- Approved Issue #27 session-browsing backend and frontend slices (2026-04-12)
+- Contributed to membership consolidation QA gates; identified guest-token post-claim backdoor and helped Data fix it (2026-04-13 to 2026-04-14)
+- Session-browser state regression caught: state machine must isolate auth bootstrap from load-workspace callbacks (2026-04-13)
+- Identified Issue #27 shadowing bug (sessions route after note ID route) and decoding trap (2026-04-13)
+- Led Phase 0 QA review; identified 5 critical deployment-artifact checkers for Brand/Data (2026-04-20)
+- Diagnosed and helped resolve npm test infrastructure issue with root install (2026-04-20)
+- Published comprehensive QA brief for Issue #58 (Postgres adapter) with 7 critical test cases and isolation/pool/schema decision points (2026-04-18)
+
+**Key Pattern:** Find parity gaps early (SQLite ↔ Postgres), gate on measurable regression coverage, propagate learnings to future issues.
+
+## Recent Updates (Last 5)
 
 
-## Core Context
-
-*History summarized on 2026-04-18T22:58:15.109090 — old entries moved to archive. Keeping last 10 team updates and all learnings.*
 
 
-## Recent Updates (Last 10)
 
-📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
-📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
-📌 Team update (2026-04-12T13:32:51Z): Validated regression coverage for SQLite startup fix—confirmed legacy-schema bootstrap path now covered in tests; full test/build/lint pass — decided by Data, Chunk
-📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
-📌 Team update (2026-04-12T17:35:41Z): Issue #27 backend revision approved; frontend UI slice approved; both ready to merge; session browsing thin slice complete (two-step flow, numeric sort, no redesign) — decided by Chunk (reviewer), Stef (implementer)
 
 ## Learnings
 
@@ -60,120 +67,26 @@ Chunk initialized as Tester for the initial project squad.
 - Epic #42 Phase 0 review gate: repo evidence is strong enough to approve when `Dockerfile`, `README.md`, `RUNTIME.md`, `apps/api/src/note-store*.ts`, `apps/control-plane/src/provisioning.ts`, `platform/control-plane/**`, and `scripts/k3d/**` all line up with green validation (`npm run lint && npm run test && npm run build && npm run platform:validate`) plus recent green GitHub Actions runs for `ci.yml`, `k3d-smoke.yml`, and `deployment-artifacts.yml`.
 - The remaining false-green trap for Phase 0 is smoke depth, not missing wiring: `scripts/k3d/smoke.sh` proves live tenant provisioning and `/ready` against in-cluster Postgres wiring, but it still does not create/read a real note against that provisioned tenant, so future platform gates should call that out explicitly.
 📌 Team update (2026-04-20T13:31:33Z): npm-test-diagnosis complete — Chunk confirmed no code-level test failures; Brand fixed missing root npm install; all workspace tests now pass — Chunk, Brand
+- **Legacy Schema Compatibility:** `apps/api/src/note-store.ts` owns SQLite bootstrap; backward-compatible schema changes need in-place startup upgrades not `CREATE TABLE IF NOT EXISTS` alone. Regression coverage lives in `apps/api/test/app.test.ts`.
 
-*227 older learning items archived.*
+- **Share-Link QA Coverage:** Root validation is `npm run lint && npm run test && npm run build`. Reveal endpoint returns `{ token, url }`, list responses stay metadata-only. Legacy hash-only links need regeneration guidance.
 
+- **User-Facing Limitation:** Only share links created after plaintext token storage can be revealed; older links must be revoked and recreated.
 
-📌 Team update (2026-04-19T22:50:29Z): Issue #58 decisions locked by Mikey. QA gate conditional blocker resolved. Ready for Data implementation phase with 7 done signals + concurrency test cases. Re-review against checklist at merge time. — Scribe
+- **Issue #20 QA Hotspots:** (1) Note attribution resolves via live `campaign_memberships` joins; guest-upgrade must keep same membership row/id. (2) Authenticated access still owner-only unless explicitly claimed. (3) Guest token stays valid backdoor after claim unless rotated. Root validation: `npm run lint && npm run test && npm run build` (all pass).
 
-## Issue #43 QA Review (2026-04-21)
+- **Issue #27 QA Traps:** (1) Route shadowing: Express matches `/api/notes/:noteId` before `/api/notes/sessions`, so `GET /api/notes/sessions` is shadowed. (2) URI decoding: Extra `decodeURIComponent()` breaks valid names like `50% done`. (3) Scoping mismatch: new session endpoints use `resolveOwnedCampaign()` while note access uses linked-membership scoping.
 
-**Scope:** Deployment artifacts for Kubernetes + Postgres per-tenant, same-origin default. Brand implementing platform slice in parallel.
+- **Issue #23 QA Gates:** Membership consolidation is owner-scoped and campaign-scoped. Attribution-only consolidation is correct and safe when `npm run lint && npm run test && npm run build` pass.
 
-**Current State:**
-- Dockerfile: Multi-stage build (base → deps → build → runtime); serves web + API on 3000; uses appuser non-root; SQLite fallback at `/app/data`.
-- RUNTIME.md: Comprehensive environment contract; `/ready` and `/healthz` probes documented; graceful shutdown at SIGTERM; `SERVE_WEB=true` enables same-origin.
-- CI (ci.yml): Lint → test → build pipeline; consolidated test reporting; `npm run lint && npm test && npm run build`.
-- k3d smoke (k3d-smoke.yml): Pinned k3s v1.35.3; builds tenant image; validates provisioning + readiness.
-- k3d bootstrap/build scripts: Cluster setup, ingress-nginx, platform Postgres (postgres:17.9), Keycloak seeding.
-- postgres.yaml: Platform Postgres with `pg_isready` readiness probe; Secret (dev-only creds); PVC 5Gi.
-- Same-origin enforcement: `SERVE_WEB=true` default in container; `PUBLIC_WEB_URL` controls share-link generation; no CORS splitting unless intentional.
-- Postgres adapter: Issue #58 Postgres bridge complete (NoteStore adapter with SQLite fallback).
+- **Session-Browser State Regression:** State machine must isolate auth bootstrap from load-workspace callbacks. Clicking `All notes`, `Browse by session`, or `New note` re-runs bootstrap if state is in dependency chain, flashing loader and overwriting draft state.
 
-**Highest-Risk Gaps (5 critical checkers):**
-1. **Manifest/Runtime Mismatch** — Worktree artifacts don't include full Kubernetes manifests for tenant provisioning (Deployment, Service, ConfigMap, Secret, PVC patterns).
-2. **Workflow Drift** — k3d-smoke.yml checks only readiness; does not validate actual note create/read/update/delete against Postgres or shared-link flows.
-3. **Postgres Env Wiring** — RUNTIME.md documents pool config but no explicit test that `DATABASE_URL` is correctly threaded through control-plane provisioning and tenant environment.
-4. **SPA Fallback Safety** — `apps/api/src/app.ts` has SPA fallback but no explicit regression test that `GET /assets/missing.js`, `POST /missing-route`, or cross-origin XHR don't return index.html.
-5. **Same-Origin Default Enforcement** — Dockerfile + RUNTIME.md assume `SERVE_WEB=true` for production, but no validation that `ALLOWED_ORIGINS` defaults don't accidentally split origins in same-origin deployments.
+- **Issue #58 Postgres Adapter — High-Risk Gaps:** (1) Transaction semantics under failure; (2) connection pooling resilience; (3) schema idempotence; (4) ACID isolation level mismatch (Postgres DEFAULT vs. SQLite SERIALIZABLE); (5) query result type coercion; (6) graceful shutdown. Conditional blocker: isolation level and pool defaults must be decided before implementation. Comprehensive QA brief at `.squad/qa-brief-issue-58.md`.
 
-**Conditional Blocker:**
-> **Before Brand approval:** Manifest slices must prove:
-> - Tenant Deployment/Service/ConfigMap/Secret templates exist and match control-plane provisioning contract.
-> - Full end-to-end smoke includes authenticated note workflow (create + read) against Postgres.
-> - `DATABASE_URL` injection verified in pod environment and working via health check.
+- **Issue #43 Phase 0 QA Review — 5 Critical Checkers:** (1) Manifest/runtime mismatch — full K8s manifests for tenant provisioning missing. (2) Workflow drift — k3d-smoke validates only readiness, not actual CRUD. (3) Postgres env wiring — DATABASE_URL not explicitly tested end-to-end. (4) SPA fallback safety — no regression test for missing routes or XHR. (5) Same-origin default enforcement — no validation that ALLOWED_ORIGINS doesn't accidentally split origins.
 
-**Learnings:**
-- Worktree contains the platform k3d loop (bootstrap + smoke) but **not** the tenant Deployment/Service/ConfigMap/Secret manifests that control-plane will apply.
-- Same-origin pattern is locked in; CORS allowlists only relevant for intentional split-origin layouts (explicitly deferred).
-- SPA fallback logic exists in code but no edge-case regression coverage yet.
-- All 47 tests pass locally and in CI; no code-level test failures found.
+- **npm Test Infrastructure Issue (2026-04-20):** Confirmed no code-level test failures; Brand fixed root `npm install`; all workspace tests now pass cleanly (`npm test` exit 0).
 
+- **Phase 0 Validation Evidence:** Green when Dockerfile, RUNTIME.md, note-store adapters, control-plane provisioning, platform scripts, and GitHub Actions all align with passing validation (`npm run lint && npm run test && npm run build && npm run platform:validate`).
 
-**Key Files for Brand Implementation:**
-- `apps/control-plane/src/provisioning.ts` — TenantInfrastructureManager applies Namespace, ConfigMap, Secret, PVC, Service, Deployment; calls `applyTenantResources()`.
-- `Dockerfile` — Multi-stage build complete; SERVE_WEB=true default; port 3000; SQLite fallback `/app/data`; non-root appuser.
-- `RUNTIME.md` — Comprehensive env contract; `/ready` + `/readyz` probes; graceful shutdown on SIGTERM; Postgres pool defaults.
-- `platform/k3d/postgres.yaml` — Platform Postgres template (read-only; not customizable by Brand).
-- `scripts/k3d/bootstrap.sh` + `build-tenant-image.sh` — Cluster setup, image build/import (read-only; finalized).
-- `.github/workflows/k3d-smoke.yml` — Smoke lane; Brand enhances with full note workflow (create/read/update against Postgres).
-
-**Brand Implementation Scope:**
-1. Create tenant Deployment manifest template (pod spec, `DATABASE_URL` injection, readiness/liveness probes).
-2. Create tenant Service manifest (ClusterIP, port 3000, selector).
-3. Create tenant ConfigMap (public config like `PUBLIC_WEB_URL`, `SITE_ADMIN_EMAILS`).
-4. Create tenant Secret (sensitive env like `DATABASE_URL`).
-5. Create tenant PVC template (mount at `/app/data` for SQLite fallback).
-6. Enhance k3d smoke lane to create a note, read it back, verify Postgres backend (end-to-end validation).
-7. Verify `DATABASE_URL` injection works; readiness probes return 503 when DB is down.
-
-**SPA Fallback Safety — No Action Needed:**
-- Guards are present: `request.accepts('html')` + `extname(path) === ''` prevent index.html for XHR/file requests.
-- Regression test exists: `core-workflows.test.ts` 'SERVE_WEB fallback only serves HTML navigation requests' validates all edge cases.
-
-Adapter **Postgres No Action Needed:** 
-- Issue #58 Postgres bridge complete; NoteStore supports both SQLite and Postgres via `DATABASE_URL`.
-- Pool drains cleanly on shutdown.
-- Admin backup/restore endpoints work with both backends.
-
-**Decision Context — Already Locked:**
-- Same-origin default finalized (Dockerfile + RUNTIME.md enforce `SERVE_WEB=true`).
-- Kubernetes version pinned to k3s v1.35.3 (kept consistent between local k3d and CI).
-- Postgres 17.9 pinned for platform (development-only; never for production).
-
-
-## 2026-04-21: Orchestration — Issue #43 QA Checklist Merged
-
-1. Tenant Kubernetes manifests required
-2. End-to-end Postgres smoke test required (note create/read path)
-3. DATABASE_URL injection verification required
-
-Chunk's decision merged by Scribe as part of orchestration completion. Brand's PR #66 now blocks on these three checklist items.
-
-## 2026-04-21: PR #66 Review Closure — All 7 Comments Addressed
-
-**Status:** ✅ SHIP-SAFE
-
-Brand's PR #66 (feat(platform): add deployment artifacts for #43) received 7 Copilot review comments on 2026-04-21. FFMikha addressed all 7 with commit f9e4966. Chunk verified resolution:
-
-1. **Readiness handler extraction** (`/readyz` + `/ready`) — shared `readinessHandler` function extracted; both routes reuse same logic; 503 error response when tenant registry unavailable confirmed.
-2. **Workflow Node.js pinning** — SHA-pinned `actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444` (v5.0.0) added before npm steps; `.nvmrc` pinned to `v22.21.1` (consistent with repo standard).
-3. **Deployment image tag reproducibility** — base `deployment.yaml` uses tagless image `ghcr.io/daydream-software/dnd-notes-control-plane`; k3d overlay keeps local `:latest` pin; hosted-reference overlay injects explicit placeholder tag via Kustomize `images` strategy.
-4. **Pod security context (PVC write permissions)** — pod-level `securityContext` added with `fsGroup: 10001` and `fsGroupChangePolicy: OnRootMismatch`; non-root appuser can now write SQLite DB to `/app/data` PVC mount without init container.
-5. **k3d Secret credentials (security hardening)** — all committed Secret values replaced with placeholders (`replace-with-local-*`); k3d overlay now documents `kubectl create secret ... | kubectl apply -f -` workflow in `platform/control-plane/README.md`.
-6. **README health endpoint duplication** — duplicate `/healthz`, `/readyz`, `/ready` bullets removed from `apps/control-plane/README.md`; now single canonical endpoint list.
-7. **README Deployment Artifacts section duplication** — duplicate "Deployment Artifacts" section removed from `apps/control-plane/README.md`; now single source of truth.
-
-**Validation Run (worktree squad/43-deployment-artifacts @ f9e4966):**
-- ✅ `npm run lint` — all workspaces pass (web, api, control-plane)
-- ✅ `npm test` — 52 tests pass, 0 failures (all suites including control-plane app + registry integration tests)
-- ✅ `docker build --file docker/control-plane/Dockerfile` — control-plane image builds successfully
-- ✅ Worktree clean, no uncommitted changes, branch up-to-date with origin
-
-**Risk Assessment:**
-- No unresolved review threads remain (all 7 marked resolved + collapsed in GitHub API)
-- Code changes are minimal and surgical — only extracting duplicate logic, adding security context, and hardening secrets
-- No regressions: existing test coverage (52 tests including readiness probes, registry schema migration, subdomain reservation) all pass
-- Manifest changes follow Kubernetes best practices (tagless base, overlayable image pins, non-root with fsGroup for PVC safety)
-
-**Recommendation:** Ship-safe. All Copilot review feedback is addressed with working code, passing tests, and clean builds. PR #66 is ready to merge once other team gates clear (e.g., Brand's implementation of tenants manifest templates, end-to-end smoke test enhancements — both already tracked in issue #43 QA checklist).
-
-   - Scope: YES (all four Phase 0 slices landed: #52, #58, #63, #43)
-   - Gate: NOT YET (missing stateless proof, deferred k3s/stateful rehearsal, open #55)
-   - QA verdict: Practical YES with yellow risk (k3d smoke doesn't test full tenant CRUD yet)
-   - Control-plane artifacts: Image + Kustomize artifacts committed, tagged approach locked
-   - Decided by: Mikey (Lead), Chunk (Tester), Brand (Platform)
-
-## 2026-04-21T16:43:21Z — Phase 0 Gate Review Complete
-
-
+- **False-Green Trap:** k3d-smoke proves tenant provisioning + /ready probes but does NOT create/read actual notes, so smoke depth is shallow. Future gates should call this out explicitly.
