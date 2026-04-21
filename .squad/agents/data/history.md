@@ -10,19 +10,11 @@
 
 Data initialized as Backend Dev for the initial project squad.
 
+*History summarized on 2026-04-21T16:43:21Z — old detailed entries (April 12–18) archived. Keeping recent team updates and all learnings.*
 
-## Core Context
-
-*History summarized on 2026-04-18T22:58:15.115955 — old entries moved to archive. Keeping last 10 team updates and all learnings.*
+## Recent Updates
 
 
-## Recent Updates (Last 10)
-
-📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
-📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
-📌 Team update (2026-04-12T13:32:51Z): Fixed merged PR runtime regression—added in-place SQLite schema upgrade for note attribution columns, preserving local dev data; regression coverage validates legacy-schema bootstrap path — decided by Data, Chunk
-📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
-📌 Team update (2026-04-12T17:35:41Z): Issue #27 session browsing backend revision approved by Chunk; all four critical regressions fixed; endpoints ship-ready for frontend session-browsing UI work — decided by Data (implementer), Chunk (reviewer)
 
 ## Learnings
 
@@ -388,4 +380,52 @@ This skeleton is ready to drive:
 📌 Team update (2026-04-19T22:50:29Z): Issue #58 architecture decisions locked by Mikey. Three decisions ready: SERIALIZABLE isolation, conservative pool defaults, DATABASE_URL fallback rule. Chunk's QA gate confirms done signals. Proceed with implementation in worktree. — Scribe
 ## 2026-04-21T16:43:21Z — PR #67 Phase 0 Gate Review Complete
 
+**Backend Architecture & Database:**
+- `apps/api/src/note-store.ts` owns SQLite schema bootstrap; compatibility fixes for local dev databases should run there before prepared note queries are created.
+- The default dev database lives at `apps/api/data/dnd-notes.sqlite`; prefer in-place startup upgrades over asking developers to reset data.
+- Backend verification: `npm run lint --workspace apps/api`, `npm test --workspace apps/api`, `npm run build --workspace apps/api`, with `npm run dev` confirming the shared dev startup path.
+- Regression coverage for membership consolidation and migration updates live in `apps/api/test/app.test.ts`, covering guest-to-guest counts plus explicit confirmation before role-changing moves.
+
+**API Contracts:**
+- Share links persist only `token_hash` in `apps/api/src/note-store.ts`, while owner list payloads expose metadata only. `POST /api/campaigns/:campaignId/share-links` is the lone place returning the raw token/url.
+- Share-link reveal contract lives in `apps/api/src/app.ts` at `GET /api/campaigns/:campaignId/share-links/:shareLinkId`, returns only `{ token, url }` on success, leaves `GET /api/campaigns/:campaignId/share-links` metadata-only.
+- Session-browsing auth should mirror `/api/notes`: keep `GET /api/notes/sessions*` in `apps/api/src/app.ts` behind `resolveAccessibleCampaign()` for collaborator access, not `resolveOwnedCampaign()`.
+- Issue #33 backend lives in `apps/api/src/app.ts` as `GET /api/notes/activity`, reusing `resolveAccessibleCampaign()`.
+- Recent activity payload is intentionally latest-state only: derive one `created` or `edited` event per note from `createdAt`/`updatedAt`, pair with collaborator summaries from note attribution.
+- Shared membership claims should rotate `campaign_memberships.guest_token_id` in `apps/api/src/note-store.ts` when attaching `user_id`; frontend must persist the replacement token for persistent browser sessions.
+
+**Note & Link Management:**
+- Express already decodes `request.params.sessionId`; frontend callers should use `encodeURIComponent(sessionName)` once.
+- Issue #30 note-to-note links: `linkedNoteIds` validated in schemas (20-link limit), stored as JSON array in `notes.linked_notes_json`, with cross-campaign and non-existent note blocking.
+- `getBacklinks()` method and `GET /api/notes/:noteId/backlinks` surface backlinks scoped to same campaign; all three note SELECT queries include `linked_notes_json` column.
+- Link error handling wraps createNote/updateNote to return 400 for validation failures rather than 500; legacy database migration adds column with safe default.
+- Issue #26: note bodies remain stored as plain text; web app interprets as Markdown so old notes stay readable without migration.
+- Shared note rendering lives in `apps/web/src/note-formatting.tsx`, uses `react-markdown` + `remark-gfm`, reused by both `apps/web/src/App.tsx` and `apps/web/src/SharedCampaignRoute.tsx`.
+- Rich-formatting regression coverage in `apps/web/src/note-formatting.test.tsx`, app wiring in `apps/web/src/App.test.tsx`.
+
+**Control-Plane Architecture:**
+- Parse `process.env.PORT` string to number with range check (prevents named-pipe misinterpretation).
+- Enable SQLite FK pragma on initialization (ensures CASCADE works).
+- Wrap tenant state update + audit log insert in single transaction (prevents broken audit trail).
+- Check tenant existence before update, return 404 not 500 (correct HTTP contract).
+- Enforce DNS-label rules via regex for slug validation (no leading/trailing hyphens).
+- Control-plane auth middleware should drain unauthorized request bodies before returning 401.
+- Control-plane shutdown should bound `server.close()` with a hard timeout; keep-alive sockets can otherwise block SIGINT/SIGTERM exit.
+- Locked issue #53 management routes live under `/internal/tenants*`; keep service code, tests, and README aligned to that internal-only contract.
+- Control-plane state audit rows should read `current_state` inside the same write transaction used for the update; `reason` should be omitted or non-empty.
+
+**Database Adapter & Postgres Integration:**
+- Issue #58 moved `apps/api/src/note-store.ts` behind an async statement wrapper in `apps/api/src/note-store-database.ts` so API can await the same `prepare/get/all/run` flow on SQLite and Postgres.
+- API selects Postgres whenever `DATABASE_URL` is set, otherwise falls back to SQLite via `NOTES_DB_PATH`.
+- Postgres pool tuning: `NOTES_DB_POOL_MIN`, `NOTES_DB_POOL_MAX`, `NOTES_DB_IDLE_TIMEOUT_MS`, `NOTES_DB_CONNECTION_TIMEOUT_MS`, `NOTES_DB_STATEMENT_TIMEOUT_MS`.
+- Admin backup/restore keeps SQLite-compatible snapshot format even for Postgres-backed tenants: `backupDatabase()` exports `.sqlite` snapshot, `restoreNoteStoreFromBackup()` can import into Postgres.
+- Regression coverage for adapter slice lives in `apps/api/test/postgres-adapter.test.ts`, existing API suite validates SQLite fallback path.
+- Monorepo workspace addition requires updating root `package.json` workspaces array and adding convenience dev scripts.
+- Control-plane port 3001 chosen to avoid conflict with tenant API (3000).
+- When SQLite datetime() creates identical timestamps in rapid succession, use `ORDER BY id DESC` instead of `ORDER BY created_at DESC` for deterministic ordering.
+- In-memory SQLite databases (`:memory:`) require proper cleanup in test `afterEach` hooks to prevent state leakage.
+
+**Decision & Documentation Practices:**
+- When a locked squad decision supersedes an exploratory history note, point the history entry at `.squad/decisions.md` or mark explicitly superseded.
+- Do not leave PR-visible history pointing at stale inbox artifacts or retired endpoint drafts.
 
