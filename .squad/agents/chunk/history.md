@@ -128,3 +128,32 @@ Adapter **Postgres No Action Needed:**
 3. DATABASE_URL injection verification required
 
 Chunk's decision merged by Scribe as part of orchestration completion. Brand's PR #66 now blocks on these three checklist items.
+
+## 2026-04-21: PR #66 Review Closure — All 7 Comments Addressed
+
+**Status:** ✅ SHIP-SAFE
+
+Brand's PR #66 (feat(platform): add deployment artifacts for #43) received 7 Copilot review comments on 2026-04-21. FFMikha addressed all 7 with commit f9e4966. Chunk verified resolution:
+
+1. **Readiness handler extraction** (`/readyz` + `/ready`) — shared `readinessHandler` function extracted; both routes reuse same logic; 503 error response when tenant registry unavailable confirmed.
+2. **Workflow Node.js pinning** — SHA-pinned `actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444` (v5.0.0) added before npm steps; `.nvmrc` pinned to `v22.21.1` (consistent with repo standard).
+3. **Deployment image tag reproducibility** — base `deployment.yaml` uses tagless image `ghcr.io/daydream-software/dnd-notes-control-plane`; k3d overlay keeps local `:latest` pin; hosted-reference overlay injects explicit placeholder tag via Kustomize `images` strategy.
+4. **Pod security context (PVC write permissions)** — pod-level `securityContext` added with `fsGroup: 10001` and `fsGroupChangePolicy: OnRootMismatch`; non-root appuser can now write SQLite DB to `/app/data` PVC mount without init container.
+5. **k3d Secret credentials (security hardening)** — all committed Secret values replaced with placeholders (`replace-with-local-*`); k3d overlay now documents `kubectl create secret ... | kubectl apply -f -` workflow in `platform/control-plane/README.md`.
+6. **README health endpoint duplication** — duplicate `/healthz`, `/readyz`, `/ready` bullets removed from `apps/control-plane/README.md`; now single canonical endpoint list.
+7. **README Deployment Artifacts section duplication** — duplicate "Deployment Artifacts" section removed from `apps/control-plane/README.md`; now single source of truth.
+
+**Validation Run (worktree squad/43-deployment-artifacts @ f9e4966):**
+- ✅ `npm run lint` — all workspaces pass (web, api, control-plane)
+- ✅ `npm test` — 52 tests pass, 0 failures (all suites including control-plane app + registry integration tests)
+- ✅ `docker build --file docker/control-plane/Dockerfile` — control-plane image builds successfully
+- ✅ Worktree clean, no uncommitted changes, branch up-to-date with origin
+
+**Risk Assessment:**
+- No unresolved review threads remain (all 7 marked resolved + collapsed in GitHub API)
+- Code changes are minimal and surgical — only extracting duplicate logic, adding security context, and hardening secrets
+- No regressions: existing test coverage (52 tests including readiness probes, registry schema migration, subdomain reservation) all pass
+- Manifest changes follow Kubernetes best practices (tagless base, overlayable image pins, non-root with fsGroup for PVC safety)
+
+**Recommendation:** Ship-safe. All Copilot review feedback is addressed with working code, passing tests, and clean builds. PR #66 is ready to merge once other team gates clear (e.g., Brand's implementation of tenants manifest templates, end-to-end smoke test enhancements — both already tracked in issue #43 QA checklist).
+
