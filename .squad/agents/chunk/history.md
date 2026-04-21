@@ -54,3 +54,77 @@ Chunk initialized as Tester for the initial project squad.
 
 
 📌 Team update (2026-04-19T22:50:29Z): Issue #58 decisions locked by Mikey. QA gate conditional blocker resolved. Ready for Data implementation phase with 7 done signals + concurrency test cases. Re-review against checklist at merge time. — Scribe
+
+## Issue #43 QA Review (2026-04-21)
+
+**Scope:** Deployment artifacts for Kubernetes + Postgres per-tenant, same-origin default. Brand implementing platform slice in parallel.
+
+**Current State:**
+- Dockerfile: Multi-stage build (base → deps → build → runtime); serves web + API on 3000; uses appuser non-root; SQLite fallback at `/app/data`.
+- RUNTIME.md: Comprehensive environment contract; `/ready` and `/healthz` probes documented; graceful shutdown at SIGTERM; `SERVE_WEB=true` enables same-origin.
+- CI (ci.yml): Lint → test → build pipeline; consolidated test reporting; `npm run lint && npm test && npm run build`.
+- k3d smoke (k3d-smoke.yml): Pinned k3s v1.35.3; builds tenant image; validates provisioning + readiness.
+- k3d bootstrap/build scripts: Cluster setup, ingress-nginx, platform Postgres (postgres:17.9), Keycloak seeding.
+- postgres.yaml: Platform Postgres with `pg_isready` readiness probe; Secret (dev-only creds); PVC 5Gi.
+- Same-origin enforcement: `SERVE_WEB=true` default in container; `PUBLIC_WEB_URL` controls share-link generation; no CORS splitting unless intentional.
+- Postgres adapter: Issue #58 Postgres bridge complete (NoteStore adapter with SQLite fallback).
+
+**Highest-Risk Gaps (5 critical checkers):**
+1. **Manifest/Runtime Mismatch** — Worktree artifacts don't include full Kubernetes manifests for tenant provisioning (Deployment, Service, ConfigMap, Secret, PVC patterns).
+2. **Workflow Drift** — k3d-smoke.yml checks only readiness; does not validate actual note create/read/update/delete against Postgres or shared-link flows.
+3. **Postgres Env Wiring** — RUNTIME.md documents pool config but no explicit test that `DATABASE_URL` is correctly threaded through control-plane provisioning and tenant environment.
+4. **SPA Fallback Safety** — `apps/api/src/app.ts` has SPA fallback but no explicit regression test that `GET /assets/missing.js`, `POST /missing-route`, or cross-origin XHR don't return index.html.
+5. **Same-Origin Default Enforcement** — Dockerfile + RUNTIME.md assume `SERVE_WEB=true` for production, but no validation that `ALLOWED_ORIGINS` defaults don't accidentally split origins in same-origin deployments.
+
+**Conditional Blocker:**
+> **Before Brand approval:** Manifest slices must prove:
+> - Tenant Deployment/Service/ConfigMap/Secret templates exist and match control-plane provisioning contract.
+> - Full end-to-end smoke includes authenticated note workflow (create + read) against Postgres.
+> - `DATABASE_URL` injection verified in pod environment and working via health check.
+
+**Learnings:**
+- Worktree contains the platform k3d loop (bootstrap + smoke) but **not** the tenant Deployment/Service/ConfigMap/Secret manifests that control-plane will apply.
+- Same-origin pattern is locked in; CORS allowlists only relevant for intentional split-origin layouts (explicitly deferred).
+- SPA fallback logic exists in code but no edge-case regression coverage yet.
+- All 47 tests pass locally and in CI; no code-level test failures found.
+
+
+**Key Files for Brand Implementation:**
+- `apps/control-plane/src/provisioning.ts` — TenantInfrastructureManager applies Namespace, ConfigMap, Secret, PVC, Service, Deployment; calls `applyTenantResources()`.
+- `Dockerfile` — Multi-stage build complete; SERVE_WEB=true default; port 3000; SQLite fallback `/app/data`; non-root appuser.
+- `RUNTIME.md` — Comprehensive env contract; `/ready` + `/readyz` probes; graceful shutdown on SIGTERM; Postgres pool defaults.
+- `platform/k3d/postgres.yaml` — Platform Postgres template (read-only; not customizable by Brand).
+- `scripts/k3d/bootstrap.sh` + `build-tenant-image.sh` — Cluster setup, image build/import (read-only; finalized).
+- `.github/workflows/k3d-smoke.yml` — Smoke lane; Brand enhances with full note workflow (create/read/update against Postgres).
+
+**Brand Implementation Scope:**
+1. Create tenant Deployment manifest template (pod spec, `DATABASE_URL` injection, readiness/liveness probes).
+2. Create tenant Service manifest (ClusterIP, port 3000, selector).
+3. Create tenant ConfigMap (public config like `PUBLIC_WEB_URL`, `SITE_ADMIN_EMAILS`).
+4. Create tenant Secret (sensitive env like `DATABASE_URL`).
+5. Create tenant PVC template (mount at `/app/data` for SQLite fallback).
+6. Enhance k3d smoke lane to create a note, read it back, verify Postgres backend (end-to-end validation).
+7. Verify `DATABASE_URL` injection works; readiness probes return 503 when DB is down.
+
+**SPA Fallback Safety — No Action Needed:**
+- Guards are present: `request.accepts('html')` + `extname(path) === ''` prevent index.html for XHR/file requests.
+- Regression test exists: `core-workflows.test.ts` 'SERVE_WEB fallback only serves HTML navigation requests' validates all edge cases.
+
+Adapter **Postgres No Action Needed:** 
+- Issue #58 Postgres bridge complete; NoteStore supports both SQLite and Postgres via `DATABASE_URL`.
+- Pool drains cleanly on shutdown.
+- Admin backup/restore endpoints work with both backends.
+
+**Decision Context — Already Locked:**
+- Same-origin default finalized (Dockerfile + RUNTIME.md enforce `SERVE_WEB=true`).
+- Kubernetes version pinned to k3s v1.35.3 (kept consistent between local k3d and CI).
+- Postgres 17.9 pinned for platform (development-only; never for production).
+
+
+## 2026-04-21: Orchestration — Issue #43 QA Checklist Merged
+
+1. Tenant Kubernetes manifests required
+2. End-to-end Postgres smoke test required (note create/read path)
+3. DATABASE_URL injection verification required
+
+Chunk's decision merged by Scribe as part of orchestration completion. Brand's PR #66 now blocks on these three checklist items.
