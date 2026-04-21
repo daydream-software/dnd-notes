@@ -51,9 +51,10 @@ Each tenant record includes:
 - `createdAt`: Tenant creation timestamp
 - `updatedAt`: Last modification timestamp
 
-The live provisioning slice also creates a per-tenant Postgres database, but the
-registry keeps `storageReference` focused on the Kubernetes storage handle so the
-PVC lifecycle stays explicit in tenant metadata.
+The live provisioning slice also creates a per-tenant Postgres database plus a
+tenant-scoped runtime role/secret for newly provisioned tenants, but the
+registry keeps `storageReference` focused on the Kubernetes storage handle so
+the PVC lifecycle stays explicit in tenant metadata.
 
 ### State Transitions
 
@@ -92,7 +93,8 @@ with a version override:
 
 1. `POST /internal/tenants/:tenantId/provision` with `{"triggeredBy":"...","version":"x.y.z"}`.
 2. If the tenant is already `ready`, the control plane records `upgrading`,
-   reapplies the tenant manifests, and updates the Deployment image tag.
+   reapplies the tenant manifests, and updates the Deployment image tag while
+   preserving any existing tenant runtime secret.
 3. Kubernetes performs a single-replica drain-first rollout (`RollingUpdate`,
    `maxSurge: 0`, `maxUnavailable: 1`) with `minReadySeconds: 5` and
    `terminationGracePeriodSeconds: 30`. The old pod is terminated before the new
@@ -104,8 +106,11 @@ with a version override:
    moves the tenant back to `ready`.
 
 This path assumes tenant note traffic is Postgres-backed via `DATABASE_URL`.
-The `/app/data` PVC remains mounted but causes no multi-attach contention since
-the rollout strategy prevents pod overlap.
+New tenants receive least-privilege runtime credentials after the control plane
+pre-initializes the note-store schema; already-deployed tenants that still use a
+shared runtime Postgres user remain on that credential until an explicit
+migration. The `/app/data` PVC remains mounted but causes no multi-attach
+contention since the rollout strategy prevents pod overlap.
 
 **Future:** Once the PVC is removed from the normal pod shape, the rollout
 strategy can switch to `maxSurge: 1` / `maxUnavailable: 0` for zero-downtime
@@ -127,6 +132,15 @@ Environment variables:
 - `PORT` — HTTP port (default: 3001)
 - `DATABASE_PATH` — SQLite database path (default: `data/control-plane.sqlite`; relative paths resolve from the app root)
 - `CONTROL_PLANE_ADMIN_TOKEN` — Required bearer token for `/internal` routes
+- `CONTROL_PLANE_ENABLE_PROVISIONING` — enables live Kubernetes/Postgres provisioning
+- `TENANT_BASE_DOMAIN` — base domain for generated tenant hosts
+- `TENANT_IMAGE_REPOSITORY` — tenant image repository used in generated Deployments
+- `TENANT_DATABASE_ADMIN_URL` — admin Postgres URL used to create/drop tenant databases, roles, and bootstrap schema
+- `TENANT_DATABASE_RUNTIME_URL` — optional runtime URL template; host/port/SSL options come from here, but user/password/database are replaced with tenant-scoped values for new tenants
+- `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret for tenant Deployments
+- `TENANT_PUBLIC_SCHEME` — tenant public URL scheme (`https` by default)
+- `TENANT_APP_PORT` — tenant container port (`3000` by default)
+- `TENANT_READY_TIMEOUT_MS` — rollout readiness timeout for tenant Deployments
 - `NODE_ENV` — Environment mode (development, production)
 
 ## Development

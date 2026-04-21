@@ -487,3 +487,7 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 
 ---
 
+- Issue #69 keeps `TENANT_DATABASE_RUNTIME_URL` as a runtime URL template only in `apps/control-plane/src/provisioning.ts`; newly provisioned tenants get a generated Postgres role/password, while already-provisioned tenants keep their existing runtime secret until an explicit migration.
+- Least-privilege hosted startup now splits bootstrap from runtime in `apps/control-plane/src/tenant-database-bootstrap.ts` and `apps/api/src/note-store-bootstrap.ts`: the control plane pre-initializes schema/privileges, and the API verifies the schema instead of attempting DDL when the Postgres runtime user lacks `CREATE`.
+- Safe tenant teardown for this slice lives in `apps/control-plane/src/provisioning.ts`: deprovisioning terminates tenant sessions, drops the tenant database, and drops the deterministic tenant runtime role, with regressions in `apps/control-plane/test/provisioning.test.ts`.
+- Validation for the least-privilege Postgres slice is `npm run lint --workspace apps/control-plane`, `npm run test --workspace apps/control-plane -- --runInBand`, `npm run build --workspace apps/control-plane`, `npm run lint --workspace apps/api`, `npm run test --workspace apps/api -- --runInBand`, `npm run build --workspace apps/api`, and `npm run platform:validate`.
