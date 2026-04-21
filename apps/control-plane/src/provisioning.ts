@@ -425,7 +425,7 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
     if (
       options.requireExistingRuntimeConnectionString &&
       !existingRuntimeIdentity &&
-      options.existingRuntimeConnectionString == null
+      !hasRuntimeConnectionString(options.existingRuntimeConnectionString)
     ) {
       throw new Error(
         `Tenant ${tenant.id} is already provisioned but its runtime database secret is missing; explicit credential migration is required before reprovisioning.`,
@@ -970,14 +970,12 @@ function resolveExistingTenantRuntimeIdentity(params: {
   expectedRoleName: string
   runtimeDatabaseUrl: string
 }): TenantRuntimeIdentity | null {
-  if (
-    !params.existingRuntimeConnectionString ||
-    params.existingRuntimeConnectionString.trim() === ''
-  ) {
+  if (!hasRuntimeConnectionString(params.existingRuntimeConnectionString)) {
     return null
   }
 
-  const existingConnectionString = new URL(params.existingRuntimeConnectionString)
+  const existingRuntimeConnectionString = params.existingRuntimeConnectionString
+  const existingConnectionString = new URL(existingRuntimeConnectionString)
   const username = decodeURIComponent(existingConnectionString.username)
   const password = decodeURIComponent(existingConnectionString.password)
 
@@ -993,7 +991,7 @@ function resolveExistingTenantRuntimeIdentity(params: {
   return {
     mode: 'legacy',
     runtimeConnectionString: buildTenantDatabaseConnectionString(
-      params.existingRuntimeConnectionString,
+      existingRuntimeConnectionString,
       params.databaseName,
     ),
   }
@@ -1019,6 +1017,10 @@ export function buildTenantDatabaseConnectionString(
   }
 
   return connectionString.toString()
+}
+
+function hasRuntimeConnectionString(connectionString?: string | null): connectionString is string {
+  return connectionString != null && connectionString.trim() !== ''
 }
 
 export function buildTenantResourceNames(params: {

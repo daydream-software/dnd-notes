@@ -970,6 +970,22 @@ describe('PostgresTenantDatabaseManager', () => {
     )
   })
 
+  it('fails existing-tenant reprovisioning when the runtime secret is blank', async () => {
+    const harness = createPostgresManagerHarness()
+
+    await assert.rejects(
+      harness.manager.ensureTenantDatabase(
+        createTenantRecord({ subdomain: 't-existing123456', currentState: 'ready' }),
+        't-existing123456',
+        {
+          existingRuntimeConnectionString: '   ',
+          requireExistingRuntimeConnectionString: true,
+        },
+      ),
+      /runtime database secret is missing/,
+    )
+  })
+
   it('drops tenant sessions, the database, and the dedicated runtime role on deprovision', async () => {
     const harness = createPostgresManagerHarness()
     harness.databases.add('tenant_tenant_demo_t_existing123456')

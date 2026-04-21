@@ -200,6 +200,33 @@ async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
   }
 }
 
+async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
+  if (database.kind !== 'postgres') {
+    return
+  }
+
+  const ownerEmailIndex = await database
+    .prepare<{ indexdef: string }>(`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname = ?
+    `)
+    .get('idx_owner_accounts_email_lower')
+
+  const indexDefinition = ownerEmailIndex?.indexdef ?? ''
+  const hasOwnerEmailUniquenessIndex =
+    /\bcreate unique index\b/i.test(indexDefinition) &&
+    /\bon\b.*owner_accounts\b/i.test(indexDefinition) &&
+    /lower\s*\(.*email/i.test(indexDefinition)
+
+  if (!hasOwnerEmailUniquenessIndex) {
+    throw new Error(
+      'Postgres note store requires the idx_owner_accounts_email_lower unique index for least-privilege runtime credentials.',
+    )
+  }
+}
+
 async function ensureNotesAttributionColumns(database: NoteStoreDatabase) {
   if (database.kind !== 'sqlite') {
     return
@@ -341,6 +368,7 @@ async function ensureOwnerEmailUniqueness(
   await database.prepare(`UPDATE owner_accounts SET email = LOWER(email) WHERE email != LOWER(email)`).run()
 
   if (!options.allowSchemaChanges) {
+    await ensureRequiredPostgresIndexes(database)
     return
   }
 

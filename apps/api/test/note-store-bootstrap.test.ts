@@ -13,6 +13,9 @@ const requiredPostgresTables = [
   'note_references',
 ] as const
 
+const ownerEmailIndexDefinition =
+  'CREATE UNIQUE INDEX idx_owner_accounts_email_lower ON public.owner_accounts USING btree (lower((email)::text))'
+
 class FakePostgresDatabase implements NoteStoreDatabase {
   readonly kind = 'postgres' as const
   readonly executedSql: string[] = []
@@ -23,6 +26,7 @@ class FakePostgresDatabase implements NoteStoreDatabase {
     private readonly options: {
       allowSchemaChanges: boolean
       ownerEmails?: string[]
+      ownerEmailIndexDefinition?: string | null
       tableNames?: readonly string[]
     },
   ) {}
@@ -39,6 +43,19 @@ class FakePostgresDatabase implements NoteStoreDatabase {
 
           if (this.options.tableNames?.includes(tableName)) {
             return { table_name: tableName }
+          }
+
+          return undefined
+        }
+
+        if (sql.includes('FROM pg_indexes')) {
+          const indexName = String(params[0] ?? '')
+
+          if (
+            indexName === 'idx_owner_accounts_email_lower' &&
+            this.options.ownerEmailIndexDefinition
+          ) {
+            return { indexdef: this.options.ownerEmailIndexDefinition }
           }
 
           return undefined
@@ -86,6 +103,7 @@ test('least-privilege postgres runtime skips schema DDL after control-plane boot
   const database = new FakePostgresDatabase({
     allowSchemaChanges: false,
     ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
     tableNames: requiredPostgresTables,
   })
 
@@ -105,6 +123,20 @@ test('least-privilege postgres runtime fails fast when the pre-initialized schem
   await assert.rejects(
     initializeNoteStoreDatabase(database, new Set()),
     /missing tables: note_references/,
+  )
+  assert.deepEqual(database.executedSql, [])
+})
+
+test('least-privilege postgres runtime fails fast when the owner email uniqueness index is missing', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /idx_owner_accounts_email_lower unique index/,
   )
   assert.deepEqual(database.executedSql, [])
 })
