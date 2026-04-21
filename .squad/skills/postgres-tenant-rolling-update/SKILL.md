@@ -15,8 +15,10 @@ Postgres-backed deployment.
 ## Pattern
 
 1. Reuse an existing control-plane or provisioning endpoint to apply the new
-   tenant image/version, and validate any version override as an explicit
-   non-empty string before treating the request as a rollout.
+   tenant image/version, and normalize any version override with `trim()` before
+   comparing or persisting it. Reject blank or image-tag-unsafe values up front
+   so rollout requests cannot record a bogus version or build an invalid image
+   reference.
 2. Make the Deployment strategy explicit: single replica, `RollingUpdate`,
    `maxSurge: 0`, `maxUnavailable: 1`, plus a small `minReadySeconds`. This
    drain-first replacement prevents pod overlap and avoids multi-attach issues
