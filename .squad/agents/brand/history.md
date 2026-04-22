@@ -22,7 +22,7 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Phase 2 Platform Readiness Assessment (2026-04-21):** Conducted full audit of #56 (Keycloak OIDC) and #69 (per-tenant Postgres roles) platform prerequisites. Identified 8 critical areas: Keycloak bootstrap (partial, needs control-plane integration), database secret wiring (CRITICAL GAP: all tenants share one runtime URL, must split to per-tenant role + secret), local dev experience (k3d works, docs missing), CI coverage (smoke test gaps for auth/privileges), K8s manifests (RBAC ready, network policy not documented), secrets strategy (defer Sealed Secrets to Phase 2+), rollout dependencies (#69 independent of #56 after foundational work), and documentation gaps. Produced 8-item readiness list with 3-4 PR decomposition for #69 work.
 
-
+- **Issue #76 Keycloak Runtime Auth Platform Lane (2026-04-22):** Owned platform/config side of runtime Keycloak auth integration. Updated k3d Keycloak realm to seed tenant-app and control-plane service-account clients with test users (owner@example.com, site-admin@example.com). Wired Keycloak environment variables across control-plane overlays (k3d and hosted-reference) with AUTH_MODE switch (local|keycloak) and per-environment ConfigMap/Secret placeholders. Updated RUNTIME.md with Keycloak Runtime Authentication section (env vars, auth flows, modes). Created comprehensive docs/KEYCLOAK_RUNTIME_AUTH.md guide covering architecture, configuration, local testing, hosted setup, troubleshooting. Updated platform/k3d/README.md with seeded client credentials and k3d test flow validation. Updated platform/control-plane/README.md with admin auth modes (static vs Keycloak service-account) and k3d/hosted setup instructions. Preserved backward compat: AUTH_MODE=local remains default, guest/share-link flows anonymous. All platform manifests validated (platform:validate passed). Committed as commit da15a38 on squad/76 branch.
 
 ## Learnings
 
@@ -51,6 +51,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 - **Deployment Artifacts Delivered (Phase 0):** Dockerfile (multi-stage: base → deps → build → runtime, non-root appuser, SQLite fallback), RUNTIME.md (env contract, probes, graceful shutdown, same-origin), CI yaml (lint → test → build pipeline), k3d smoke (k3s v1.35.3, tenant image build, provisioning validation), k3d bootstrap scripts, postgres.yaml (5Gi PVC, pg_isready probe, dev-only secrets).
 
 - **False-Green Trap in k3d-smoke:** Validates tenant provisioning + /ready probes but does NOT create/read actual notes. Smoke depth is shallow; future gates should call this out explicitly.
+
+- **Keycloak Runtime Auth Config Strategy (Issue #76):** Adopt sealed-in-manifest approach for k3d Keycloak clients + secrets (checked-in realm JSON with dev-only credentials). Control-plane overlays carry AuthMode enum (local|keycloak) with per-environment ConfigMap/Secret patches. Tenants receive per-pod KEYCLOAK_* env vars injected by control-plane during provisioning (not in base Secret). Backward compat: AUTH_MODE=local continues as default (no breaking changes); old session tokens work until re-login. Guest/share-link flows bypass auth entirely (local+anonymous regardless of mode). Phase 2 can migrate to Keycloak-backed owner-account auto-creation or explicit seeding; Phase 1 assumes pre-seeded owner_accounts with keycloak_sub values.
 
 ---
 
