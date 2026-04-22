@@ -10,17 +10,7 @@
 
 Chunk is the QA/Tester for the squad, responsible for regression coverage, gate validation, and identifying high-risk parity gaps.
 
-**Historical Milestones (2026-04-11 to 2026-04-20):**
-- Initialized as tester on 2026-04-11
-- Validated SQLite startup fix regression coverage (2026-04-12)
-- Approved campaign share-link reveal slice (2026-04-12)
-- Approved Issue #27 session-browsing backend and frontend slices (2026-04-12)
-- Contributed to membership consolidation QA gates; identified guest-token post-claim backdoor and helped Data fix it (2026-04-13 to 2026-04-14)
-- Session-browser state regression caught: state machine must isolate auth bootstrap from load-workspace callbacks (2026-04-13)
-- Identified Issue #27 shadowing bug (sessions route after note ID route) and decoding trap (2026-04-13)
-- Led Phase 0 QA review; identified 5 critical deployment-artifact checkers for Brand/Data (2026-04-20)
-- Diagnosed and helped resolve npm test infrastructure issue with root install (2026-04-20)
-- Published comprehensive QA brief for Issue #58 (Postgres adapter) with 7 critical test cases and isolation/pool/schema decision points (2026-04-18)
+**Early milestones (2026-04-11 to 2026-04-20, archived from history):** Initialized on 2026-04-11; validated SQLite regression, approved share-link/session-browsing slices, caught guest-token backdoor and state-machine isolation gaps, identified route shadowing + decoding traps, led Phase 0 QA (5 critical checkers), resolved npm test infrastructure.
 
 **Key Pattern:** Find parity gaps early (SQLite ↔ Postgres), gate on measurable regression coverage, propagate learnings to future issues.
 

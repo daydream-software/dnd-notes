@@ -10,6 +10,10 @@
 
 Data initialized as Backend Dev for the initial project squad.
 
+**Major milestones (archived from history April 12–18):** Issue #76 Keycloak integration; Issue #75 PR review hardening; Issue #74 auth-provider abstraction; Issue #73 control-plane health gates; Issue #72 Postgres least-privilege prep; Issue #71 per-tenant credential provisioning; Issue #70 restore safety orchestration; Issues #69, #56, #58 completed (per-tenant Postgres creds, auth-seam, Postgres adapter); Phase 2 sequencing roadmap established (Issue #40 blocker for #56/#69).
+
+**Operational focus:** Contract stability, auth-provider abstraction, per-tenant credential flows, control-plane audit/safety gates, migration orchestration.
+
 *History summarized on 2026-04-21T16:43:21Z — old detailed entries (April 12–18) archived. Keeping recent team updates and all learnings.*
 
 ## Recent Updates
