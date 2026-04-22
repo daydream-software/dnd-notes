@@ -4900,3 +4900,139 @@ Start with `#69` by changing provisioning to mint a tenant-specific Postgres rol
 - If hosted restore orchestration needs `/_control/maintenance` or proactive client notifications in the first slice, track that as a follow-up instead of hiding it inside `#40`.
 
 
+
+---
+
+### 2026-04-21: Issue #56 Auth Seam Implementation (Phase 2 Prep)
+
+**Decided by:** Data (Backend Dev)
+**Status:** Implemented (prep-only)
+**Related:** Epic #42 Decision 9, Issue #56
+
+## Decision
+
+Implement auth-provider abstraction boundaries without full Keycloak OIDC.
+
+## Changes
+
+**Schema:**
+- Added nullable `owner_accounts.keycloak_sub TEXT`
+- SQLite migration logic added to `ensureOwnerKeycloakSubColumn()` with a separate unique partial index on non-null `keycloak_sub`
+- Column added to all owner account SELECT queries and row mappers
+
+**Types:**
+- `OwnerAccount.keycloakSub: string | null` field added
+- `AuthenticatedUser` interface defined: `{ userId, email, isSiteAdmin }`
+- `AdminAccountSummary` extends `OwnerAccount` (inherits keycloakSub)
+
+**Auth Seam:**
+- `requireAuthenticatedAccount()` documented as future delegation point
+- Current behavior: local session token lookup (LocalAuthStrategy)
+- Future: check `AUTH_PROVIDER` env var, delegate to `KeycloakAuthStrategy`
+- Both strategies will produce `AuthenticatedUser` contract
+- Authorization (`campaign_memberships`, `is_site_admin`) stays local
+
+**Control Plane:**
+- `createAdminAuthMiddleware()` documented as extension point
+- Current: static bearer token validation
+- Future: OR validate admin-realm JWT from Keycloak
+
+**Local Auth Routes:**
+- `/api/auth/register`, `/api/auth/login`, `/api/auth/logout` marked as Phase 2a local path
+- These routes coexist with OIDC in Phase 2a, removed in Phase 2b cutover
+
+## What Was NOT Implemented
+
+- No JWT validation logic
+- No Keycloak client/realm configuration
+- No auto-provisioning or email matching
+- No `AUTH_PROVIDER` env var support
+- No actual `LocalAuthStrategy` / `KeycloakAuthStrategy` classes
+
+Full implementation deferred to follow-up work per Epic #42 Decision 9 coexistence → cutover model.
+
+## Validation
+
+- API tests: 96/96 pass
+- Control-plane tests: 63/63 pass
+- Both workspaces build cleanly
+- Commit: e69b93d
+
+## Rationale
+
+Epic #42 locked the auth migration shape. This implements the schema and seam prep required before full OIDC can proceed. Keeps the current change minimal and explicit — no speculative provider behavior, just the boundaries.
+
+## Follow-Up
+
+Next implementer will:
+1. Add Keycloak JWT validation library
+2. Implement `KeycloakAuthStrategy` (validate token, extract sub, lookup via `keycloak_sub`)
+3. Implement `LocalAuthStrategy` (current session lookup, extracted)
+4. Add `AUTH_PROVIDER` env var check in `requireAuthenticatedAccount()`
+5. Implement auto-provisioning on first login (email match, link existing user)
+6. Add control-plane admin-realm JWT validation path
+
+---
+
+### 2026-04-21: Postgres Identifier Truncation with Hash Suffix
+
+**Decided by:** Data (Backend Dev)
+**Type:** Backend Safety
+**Context:** PR #72 follow-up review fixes
+
+## Decision
+
+When tenant-specific Postgres database or role identifiers exceed PostgreSQL's 63-character limit:
+
+1. Do not rely on plain string slicing.
+2. Keep a readable prefix, then append a short deterministic hash suffix.
+3. Apply the same rule to both database names and runtime role names.
+4. Never include raw `DATABASE_URL` input values in malformed-secret errors.
+
+## Rationale
+
+Plain truncation can collapse two long-but-distinct tenant subdomains onto the same database or role name, which is a correctness and isolation failure. Error messages that reflect malformed connection strings can also leak tenant credentials into logs or API responses. The hash-suffix pattern keeps identifiers stable and unique while the redacted error pattern preserves actionable failures without exposing secrets.
+
+## Applies To
+
+Control-plane provisioning and any future code that derives tenant-scoped PostgreSQL identifiers or reports malformed connection secrets.
+
+---
+
+### 2026-04-21: SQLite WAL Default (Issue #39)
+
+**Decided by:** Data (Backend Dev)
+**Status:** Decided
+**Issue:** #39
+
+## Decision
+
+Keep file-backed SQLite note stores on rollback-journal mode (`journal_mode=DELETE`) by default; do not adopt WAL as the default path.
+
+## Why
+
+Hosted production now targets Postgres. The remaining SQLite responsibilities are local fallback, backup export, and restore import, all of which are simpler and more predictable when they operate on one `.sqlite` file without WAL checkpoint or sidecar handling.
+
+## Implications
+
+Admin backup and restore continue to assume a single SQLite snapshot file. If we ever want WAL later, we should revisit restore orchestration, sidecar handling, and concurrency testing as an explicit follow-up instead of inheriting it accidentally.
+
+---
+
+### 2026-04-21: Issue #57 Fleet Status Surface
+
+**Decided by:** Copilot (Coding Agent)
+**Status:** Decided
+**Issue:** #57
+
+## Decision
+
+The first shipped slice of `#57` is an authenticated, read-only control-plane endpoint at `GET /internal/fleet/status`, not a standalone UI. It returns control-plane health, dependency status, fleet summary counts, and per-tenant status details including lifted backup metadata fields when they already exist in JSON.
+
+## Why
+
+The repo already has an internal control-plane API surface, while issue `#68` owns the richer operator portal. Shipping the fleet-status contract first gives operators one canonical source of truth, keeps the slice thin, and creates a stable data source for both a later internal dashboard and any future redacted public status page.
+
+## Implications
+
+`backupMetadata` remains opaque in storage; the status surface only lifts known fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`, `lastRestoreDrillStatus`, and `location` when present. Future UI work should consume this contract instead of inventing a parallel status aggregation path.

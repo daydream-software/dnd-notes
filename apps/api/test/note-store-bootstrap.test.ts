@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { initializeNoteStoreDatabase } from '../src/note-store-bootstrap.js'
+import { createSqliteDatabase } from '../src/note-store-database.js'
 import type { NoteStoreDatabase } from '../src/note-store-database.js'
 
 const requiredPostgresTables = [
@@ -27,6 +28,9 @@ class FakePostgresDatabase implements NoteStoreDatabase {
       allowSchemaChanges: boolean
       ownerEmails?: string[]
       ownerEmailIndexDefinition?: string | null
+      ownerKeycloakSubIndexDefinition?: string | null
+      ownerAccountColumns?: readonly string[]
+      ownerAccountUniqueColumns?: readonly string[]
       privilegeCheckError?: Error
       tableNames?: readonly string[]
     },
@@ -63,7 +67,38 @@ class FakePostgresDatabase implements NoteStoreDatabase {
             return { indexdef: this.options.ownerEmailIndexDefinition }
           }
 
+          if (
+            indexName === 'idx_owner_accounts_keycloak_sub' &&
+            this.options.ownerKeycloakSubIndexDefinition
+          ) {
+            return { indexdef: this.options.ownerKeycloakSubIndexDefinition }
+          }
+
           return undefined
+        }
+
+        if (sql.includes('FROM information_schema.columns')) {
+          return this.options.ownerAccountColumns?.includes('keycloak_sub')
+            ? { column_name: 'keycloak_sub' }
+            : undefined
+        }
+
+        if (sql.includes('FROM information_schema.table_constraints')) {
+          const uniqueColumns = this.options.ownerAccountUniqueColumns ?? []
+          const includesKeycloakSub = uniqueColumns.includes('keycloak_sub')
+          const requiresStandaloneKeycloakSub =
+            sql.includes('HAVING COUNT(*) = 1') &&
+            sql.includes("MIN(kcu.column_name) = 'keycloak_sub'") &&
+            sql.includes("MAX(kcu.column_name) = 'keycloak_sub'")
+
+          if (!includesKeycloakSub) {
+            return undefined
+          }
+
+          return !requiresStandaloneKeycloakSub ||
+            (uniqueColumns.length === 1 && uniqueColumns[0] === 'keycloak_sub')
+            ? { constraint_name: 'owner_accounts_keycloak_sub_key' }
+            : undefined
         }
 
         throw new Error(`Unexpected get SQL in test double: ${sql}`)
@@ -109,6 +144,8 @@ test('least-privilege postgres runtime skips schema DDL after control-plane boot
     allowSchemaChanges: false,
     ownerEmails: ['Admin@Example.com'],
     ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerAccountUniqueColumns: ['keycloak_sub'],
     tableNames: requiredPostgresTables,
   })
 
@@ -117,6 +154,55 @@ test('least-privilege postgres runtime skips schema DDL after control-plane boot
   assert.deepEqual(database.executedSql, [])
   assert.equal(database.loweredEmails, true)
   assert.deepEqual(database.promotedEmails, ['admin@example.com'])
+})
+
+test('least-privilege postgres runtime accepts a unique keycloak_sub index', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerKeycloakSubIndexDefinition:
+      'CREATE UNIQUE INDEX idx_owner_accounts_keycloak_sub ON public.owner_accounts USING btree (keycloak_sub) WHERE (keycloak_sub IS NOT NULL)',
+    tableNames: requiredPostgresTables,
+  })
+
+  await initializeNoteStoreDatabase(database, new Set(['admin@example.com']))
+
+  assert.deepEqual(database.executedSql, [])
+})
+
+test('least-privilege postgres runtime rejects composite keycloak_sub unique constraints', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerAccountUniqueColumns: ['keycloak_sub', 'tenant_id'],
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /unique owner_accounts\.keycloak_sub enforcement/,
+  )
+})
+
+test('least-privilege postgres runtime rejects composite keycloak_sub unique indexes', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerKeycloakSubIndexDefinition:
+      'CREATE UNIQUE INDEX idx_owner_accounts_keycloak_sub ON public.owner_accounts USING btree (keycloak_sub, tenant_id) WHERE (keycloak_sub IS NOT NULL)',
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /unique owner_accounts\.keycloak_sub enforcement/,
+  )
 })
 
 test('least-privilege postgres runtime fails fast when the pre-initialized schema is incomplete', async () => {
@@ -136,12 +222,45 @@ test('least-privilege postgres runtime fails fast when the owner email uniquenes
   const database = new FakePostgresDatabase({
     allowSchemaChanges: false,
     ownerEmails: ['Admin@Example.com'],
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerAccountUniqueColumns: ['keycloak_sub'],
     tableNames: requiredPostgresTables,
   })
 
   await assert.rejects(
     initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
     /idx_owner_accounts_email_lower unique index/,
+  )
+  assert.deepEqual(database.executedSql, [])
+})
+
+test('least-privilege postgres runtime fails fast when owner_accounts.keycloak_sub is missing', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /owner_accounts\.keycloak_sub column/,
+  )
+  assert.deepEqual(database.executedSql, [])
+})
+
+test('least-privilege postgres runtime fails fast when owner_accounts.keycloak_sub is not unique', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /unique owner_accounts\.keycloak_sub enforcement/,
   )
   assert.deepEqual(database.executedSql, [])
 })
@@ -157,5 +276,102 @@ test('pg-mem style privilege lookup failures fall back to schema bootstrap', asy
 
   await initializeNoteStoreDatabase(database, new Set())
 
-  assert.equal(database.executedSql.length, 2)
+  assert.equal(database.executedSql.length, 4)
+  assert.match(database.executedSql[1] ?? '', /ADD COLUMN IF NOT EXISTS keycloak_sub TEXT/)
+  assert.match(
+    database.executedSql[2] ?? '',
+    /CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub/i,
+  )
+})
+
+test('sqlite migration adds keycloak_sub with a separate unique index', async () => {
+  const database = createSqliteDatabase(':memory:')
+
+  try {
+    await database.exec(`
+      CREATE TABLE owner_accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `)
+
+    await initializeNoteStoreDatabase(database, new Set())
+
+    const ownerColumns = (await database
+      .prepare<{ name: string }>(`
+        PRAGMA table_info("owner_accounts")
+      `)
+      .all()) as Array<{ name: string }>
+    assert.equal(
+      ownerColumns.some((column) => column.name === 'keycloak_sub'),
+      true,
+    )
+
+    const indexRow = await database
+      .prepare<{ sql: string | null }>(`
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'index' AND name = 'idx_owner_accounts_keycloak_sub'
+      `)
+      .get()
+    assert.ok(indexRow?.sql)
+    assert.match(indexRow.sql, /CREATE UNIQUE INDEX/i)
+    assert.match(indexRow.sql, /WHERE keycloak_sub IS NOT NULL/i)
+
+    await database
+      .prepare(`
+        INSERT INTO owner_accounts (
+          id,
+          email,
+          display_name,
+          password_hash,
+          is_site_admin,
+          keycloak_sub,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `)
+      .run(
+        'owner-1',
+        'owner1@example.com',
+        'Owner One',
+        'hash',
+        0,
+        'kc-123',
+        '2026-04-21T00:00:00.000Z',
+        '2026-04-21T00:00:00.000Z',
+      )
+
+    await assert.rejects(
+      database
+        .prepare(`
+          INSERT INTO owner_accounts (
+            id,
+            email,
+            display_name,
+            password_hash,
+            is_site_admin,
+            keycloak_sub,
+            created_at,
+            updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `)
+        .run(
+          'owner-2',
+          'owner2@example.com',
+          'Owner Two',
+          'hash',
+          0,
+          'kc-123',
+          '2026-04-21T00:00:00.000Z',
+          '2026-04-21T00:00:00.000Z',
+        ),
+    )
+  } finally {
+    await database.close()
+  }
 })
