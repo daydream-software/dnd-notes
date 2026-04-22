@@ -415,6 +415,9 @@ describe('TenantRegistry', () => {
 
       tenantRegistry.deletePortalSessionByTokenHash('hashed-token')
       assert.equal(tenantRegistry.getPortalSessionByTokenHash('hashed-token'), null)
+
+      tenantRegistry.deletePortalAccount(account.id)
+      assert.equal(tenantRegistry.getPortalAccount(account.id), null)
     } finally {
       tenantRegistry.close()
     }

@@ -526,6 +526,19 @@ export class TenantRegistry {
     return createAccountTransaction()
   }
 
+  deletePortalAccount(accountId: string): void {
+    const result = this.db
+      .prepare(
+        `DELETE FROM portal_accounts
+         WHERE id = ?`,
+      )
+      .run(accountId)
+
+    if (result.changes === 0) {
+      throw new Error(`Portal account ${accountId} not found`)
+    }
+  }
+
   getPortalAccount(accountId: string): PortalAccount | null {
     const row = this.db
       .prepare(

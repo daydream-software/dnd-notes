@@ -130,6 +130,7 @@ interface CreateAppOptions {
   adminToken?: string
   adminAuth?: ControlPlaneAdminAuth
   tenantProvisioningService?: TenantProvisioningPort
+  trustProxy?: boolean | number
   portalAuthMode?: 'local' | 'keycloak'
   portalDefaultTenantVersion?: string
   tenantBaseDomain?: string
@@ -283,6 +284,10 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
 
 function buildRolloutFailureDetails(tenantId: string) {
   return `Rolling update failed for tenant ${tenantId}. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.`
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : 'Unknown error'
 }
 
 function readRateLimitClientId(request: Request) {
@@ -439,12 +444,14 @@ export function createApp({
   adminToken,
   adminAuth = createControlPlaneAdminAuth({ mode: 'static' }),
   tenantProvisioningService,
+  trustProxy = false,
   portalAuthMode = 'local',
   portalDefaultTenantVersion = appVersion,
   tenantBaseDomain,
   tenantPublicScheme = 'https',
 }: CreateAppOptions): Express {
   const app = express()
+  app.set('trust proxy', trustProxy)
   const portalJsonParser = express.json({ limit: '16kb' })
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
   let nextRateLimitBucketSweepAt = 0
@@ -655,6 +662,40 @@ export function createApp({
     })
     return false
   }
+  const rollbackPortalTenant = async (params: {
+    tenantId: string
+    ownerId: string
+    reason: string
+  }) => {
+    const existingTenant = tenantRegistry.getTenant(params.tenantId)
+
+    if (!existingTenant) {
+      return
+    }
+
+    let deprovisionError: Error | null = null
+
+    if (tenantProvisioningService) {
+      try {
+        await tenantProvisioningService.deprovisionTenant({
+          tenantId: params.tenantId,
+          triggeredBy: `portal:${params.ownerId}`,
+          reason: params.reason,
+        })
+      } catch (error) {
+        deprovisionError =
+          error instanceof Error ? error : new Error(getErrorMessage(error))
+      }
+    }
+
+    if (tenantRegistry.getTenant(params.tenantId)) {
+      tenantRegistry.deleteTenant(params.tenantId)
+    }
+
+    if (deprovisionError) {
+      throw deprovisionError
+    }
+  }
   const provisionPortalTenant = async (params: {
     ownerId: string
     ownerEmail: string
@@ -698,7 +739,19 @@ export function createApp({
 
       return summary
     } catch (error) {
-      tenantRegistry.deleteTenant(tenant.id)
+      try {
+        await rollbackPortalTenant({
+          tenantId: tenant.id,
+          ownerId,
+          reason: `Portal rollback after failed tenant provisioning (${planTier}, ${paymentProvider})`,
+        })
+      } catch (cleanupError) {
+        throw new Error(
+          `${getErrorMessage(error)}; cleanup failed: ${getErrorMessage(cleanupError)}`,
+          { cause: cleanupError },
+        )
+      }
+
       throw error
     }
   }
@@ -732,7 +785,19 @@ export function createApp({
         }),
       }
     } catch (error) {
-      tenantRegistry.deleteTenant(tenantSummary.tenant.id)
+      try {
+        await rollbackPortalTenant({
+          tenantId: tenantSummary.tenant.id,
+          ownerId: account.id,
+          reason: 'Portal rollback after failed account update',
+        })
+      } catch (cleanupError) {
+        throw new Error(
+          `${getErrorMessage(error)}; cleanup failed: ${getErrorMessage(cleanupError)}`,
+          { cause: cleanupError },
+        )
+      }
+
       throw error
     }
   }
@@ -808,6 +873,8 @@ export function createApp({
       const normalizedBillingEmail =
         parseResult.data.billingEmail?.trim() ?? normalizedEmail
 
+      let createdAccount: PortalAccount | null = null
+
       try {
         const existingAccount = tenantRegistry.getPortalAccountByEmail(normalizedEmail)
         if (existingAccount) {
@@ -819,34 +886,41 @@ export function createApp({
           return
         }
 
-        const accountId = randomUUID()
-        const tenantSummary = await provisionPortalTenant({
-          ownerId: accountId,
-          ownerEmail: normalizedEmail,
+        createdAccount = tenantRegistry.createPortalAccount({
+          id: randomUUID(),
+          email: normalizedEmail,
+          displayName: parseResult.data.displayName,
+          passwordHash: await createPortalPasswordHash(parseResult.data.password),
+          billingEmail: normalizedBillingEmail,
+          billingProvider: parseResult.data.paymentProvider,
+        })
+
+        const { account } = await createPortalTenant({
+          account: createdAccount,
           tenantName: parseResult.data.tenantName,
           tenantSlug: parseResult.data.tenantSlug,
           planTier: parseResult.data.planTier,
           paymentProvider: parseResult.data.paymentProvider,
+          billingEmail: normalizedBillingEmail,
         })
 
-        try {
-          const account = tenantRegistry.createPortalAccount({
-            id: accountId,
-            email: normalizedEmail,
-            displayName: parseResult.data.displayName,
-            passwordHash: await createPortalPasswordHash(parseResult.data.password),
-            billingEmail: normalizedBillingEmail,
-            billingProvider: parseResult.data.paymentProvider,
-          })
-
-          response.status(201).json(buildPortalSessionResponse(account))
-        } catch (error) {
-          tenantRegistry.deleteTenant(tenantSummary.tenant.id)
-          throw error
-        }
+        response.status(201).json(buildPortalSessionResponse(account))
       } catch (error) {
-        if (isSqliteConstraintError(error) || error instanceof Error) {
-          const errorMessage = error.message
+        let effectiveError = error
+
+        if (createdAccount) {
+          try {
+            tenantRegistry.deletePortalAccount(createdAccount.id)
+          } catch (accountCleanupError) {
+            effectiveError = new Error(
+              `${getErrorMessage(error)}; account cleanup failed: ${getErrorMessage(accountCleanupError)}`,
+              { cause: accountCleanupError },
+            )
+          }
+        }
+
+        if (isSqliteConstraintError(effectiveError) || effectiveError instanceof Error) {
+          const errorMessage = effectiveError.message
           const conflictStatus = errorMessage.includes('already exists') ? 409 : 500
           response.status(conflictStatus).json({
             error:

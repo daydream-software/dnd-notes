@@ -257,6 +257,114 @@ describe('Control Plane API', () => {
       )
     })
 
+    it('rolls back portal signup resources when provisioning fails after partial setup', async () => {
+      let deprovisionRequest:
+        | {
+            tenantId: string
+            triggeredBy: string
+            reason?: string
+          }
+        | undefined
+
+      tenantProvisioningService = {
+        async provisionTenant(request) {
+          tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
+          tenantRegistry.updateTenantStorageReference(
+            request.tenantId,
+            'dnd-notes-data-t-misty-harbor',
+          )
+          throw new Error('synthetic infrastructure failure')
+        },
+        async deprovisionTenant(request) {
+          deprovisionRequest = request
+          tenantRegistry.updateTenantStorageReference(request.tenantId, null)
+          tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
+          tenantRegistry.updateTenantState(
+            request.tenantId,
+            'deprovisioned',
+            request.triggeredBy,
+            request.reason,
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            deprovisioned: true,
+          }
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(500)
+
+      assert.strictEqual(response.body.error, 'Failed to complete portal signup')
+      assert.strictEqual(
+        tenantRegistry.getPortalAccountByEmail('owner@example.com'),
+        null,
+      )
+      assert.strictEqual(tenantRegistry.getTenantBySlug('misty-harbor'), null)
+      assert.ok(deprovisionRequest)
+      assert.match(deprovisionRequest.triggeredBy, /^portal:/)
+      assert.strictEqual(
+        deprovisionRequest.reason,
+        'Portal rollback after failed tenant provisioning (guild, stripe)',
+      )
+    })
+
+    it('deletes the portal account even when signup rollback deprovisioning fails', async () => {
+      tenantProvisioningService = {
+        async provisionTenant(request) {
+          tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
+          tenantRegistry.updateTenantStorageReference(
+            request.tenantId,
+            'dnd-notes-data-t-misty-harbor',
+          )
+          throw new Error('synthetic infrastructure failure')
+        },
+        async deprovisionTenant() {
+          throw new Error('synthetic deprovision failure')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(500)
+
+      assert.strictEqual(response.body.error, 'Failed to complete portal signup')
+      assert.match(response.body.details, /cleanup failed: synthetic deprovision failure/)
+      assert.strictEqual(
+        tenantRegistry.getPortalAccountByEmail('owner@example.com'),
+        null,
+      )
+      assert.strictEqual(tenantRegistry.getTenantBySlug('misty-harbor'), null)
+    })
+
     it('restores an owner-scoped dashboard, creates another tenant, and logs out', async () => {
       const signupResponse = await request(app)
         .post('/portal/signup')
@@ -394,6 +502,139 @@ describe('Control Plane API', () => {
         null,
       )
       assert.strictEqual(tenantRegistry.listTenantsByOwnerId(ownerAccount.id).length, 1)
+    })
+
+    it('deprovisions portal tenant resources when account updates fail after provisioning succeeds', async () => {
+      let deprovisionRequest:
+        | {
+            tenantId: string
+            triggeredBy: string
+            reason?: string
+          }
+        | undefined
+
+      tenantProvisioningService = {
+        async provisionTenant(request) {
+          tenantRegistry.updateTenantSubdomain(
+            request.tenantId,
+            `t-${request.tenantId.slice(-8)}`,
+          )
+          tenantRegistry.updateTenantStorageReference(
+            request.tenantId,
+            `dnd-notes-data-${request.tenantId.slice(-8)}`,
+          )
+          tenantRegistry.updateTenantDesiredState(request.tenantId, 'ready')
+          tenantRegistry.updateTenantState(
+            request.tenantId,
+            'ready',
+            request.triggeredBy,
+            request.reason,
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            resources: {
+              namespace: `tenant-${request.tenantId.slice(-8)}`,
+              deploymentName: 'dnd-notes',
+              serviceName: 'dnd-notes',
+              pvcName: `dnd-notes-data-${request.tenantId.slice(-8)}`,
+              configMapName: 'dnd-notes-runtime',
+              secretName: 'dnd-notes-runtime-secret',
+              hostname: `${request.tenantId.slice(-8)}.dnd-notes.test`,
+              databaseName: 'tenant_db',
+              image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+            },
+          }
+        },
+        async deprovisionTenant(request) {
+          deprovisionRequest = request
+          tenantRegistry.updateTenantStorageReference(request.tenantId, null)
+          tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
+          tenantRegistry.updateTenantState(
+            request.tenantId,
+            'deprovisioned',
+            request.triggeredBy,
+            request.reason,
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            deprovisioned: true,
+          }
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const signupResponse = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'manual-review',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'adventurer',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const sessionToken = signupResponse.body.token as string
+      const ownerAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      assert.ok(ownerAccount)
+
+      const originalUpdatePortalAccount = tenantRegistry.updatePortalAccount.bind(
+        tenantRegistry,
+      )
+      tenantRegistry.updatePortalAccount = () => {
+        throw new Error('Simulated portal account update failure')
+      }
+
+      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+        .send({
+          tenantName: 'Emberfall',
+          tenantSlug: 'emberfall',
+          planTier: 'guild',
+          paymentProvider: 'square',
+        })
+        .expect(500)
+
+      tenantRegistry.updatePortalAccount = originalUpdatePortalAccount
+
+      assert.strictEqual(response.body.error, 'Failed to create portal tenant')
+      assert.strictEqual(tenantRegistry.getTenantBySlug('emberfall'), null)
+      assert.ok(deprovisionRequest)
+      assert.match(deprovisionRequest.triggeredBy, /^portal:/)
+      assert.strictEqual(
+        deprovisionRequest.reason,
+        'Portal rollback after failed account update',
+      )
+      assert.strictEqual(tenantRegistry.listTenantsByOwnerId(ownerAccount.id).length, 1)
+    })
+
+    it('uses forwarded client IPs for portal rate limiting when trust proxy is enabled', async () => {
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        trustProxy: true,
+      })
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app)
+          .post('/portal/signup')
+          .set('X-Forwarded-For', '203.0.113.10')
+          .send({})
+          .expect(400)
+      }
+
+      await request(app)
+        .post('/portal/signup')
+        .set('X-Forwarded-For', '198.51.100.24')
+        .send({})
+        .expect(400)
     })
 
     it('rejects local portal login with the wrong password', async () => {
