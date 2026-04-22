@@ -202,6 +202,10 @@ describe('customer portal', () => {
         return createJsonResponse({ error: 'unexpected restore request' }, 500)
       }
 
+      if (path === '/portal-api/portal/logout' && method === 'POST') {
+        return createJsonResponse({ signedOut: true })
+      }
+
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
@@ -265,6 +269,13 @@ describe('customer portal', () => {
     expect(screen.queryByText('Failed to restore the customer portal session.')).toBeNull()
     expect(sessionStorage.getItem(storedTokenKey)).toBe('portal-session-token')
     expect(dashboardFetchCount).toBe(0)
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(await screen.findByRole('button', { name: 'Restore dashboard' })).toBeTruthy()
+    expect(
+      (screen.getAllByLabelText('Password')[1] as HTMLInputElement).value,
+    ).toBe('')
   })
 
   it('creates an additional tenant from the customer dashboard', async () => {

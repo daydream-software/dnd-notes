@@ -238,6 +238,7 @@ export default function App() {
     setSessionToken(response.token)
     setDashboard(response.dashboard)
     setHydratedSessionToken(response.token)
+    setLoginPassword('')
     setCreateTenantDraft((currentDraft) => ({
       ...currentDraft,
       billingEmail: response.dashboard.account.billingEmail ?? '',

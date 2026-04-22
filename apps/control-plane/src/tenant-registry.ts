@@ -35,6 +35,7 @@ export class TenantRegistry {
 
     if (currentSchemaVersion === 0) {
       this.ensureSubdomainIndex()
+      this.ensureTenantIndexes()
       this.ensurePortalIndexes()
       this.setSchemaMetadata(
         'tenant_state_signature',
@@ -59,6 +60,7 @@ export class TenantRegistry {
     }
 
     this.ensureSubdomainIndex()
+    this.ensureTenantIndexes()
     this.ensurePortalIndexes()
 
     const storedStateSignature = this.getSchemaMetadata('tenant_state_signature')
@@ -137,6 +139,22 @@ export class TenantRegistry {
     `)
   }
 
+  private getTenantColumnNames(): string[] {
+    return (this.db.prepare(`PRAGMA table_info(tenants)`).all() as Array<{ name: string }>).map(
+      (column) => column.name,
+    )
+  }
+
+  private ensureTenantDashboardColumns(columnNames = this.getTenantColumnNames()): void {
+    if (!columnNames.includes('display_name')) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN display_name TEXT`)
+    }
+
+    if (!columnNames.includes('plan_tier')) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN plan_tier TEXT`)
+    }
+  }
+
   private migrateFromV1ToV5(): void {
     const columnNames = this.db
       .prepare(`PRAGMA table_info(tenants)`)
@@ -156,19 +174,7 @@ export class TenantRegistry {
       this.db.exec(`ALTER TABLE tenants ADD COLUMN initial_admin_email TEXT`)
     }
 
-    const hasDisplayNameColumn = columnNames.some(
-      (column) => column.name === 'display_name',
-    )
-
-    if (!hasDisplayNameColumn) {
-      this.db.exec(`ALTER TABLE tenants ADD COLUMN display_name TEXT`)
-    }
-
-    const hasPlanTierColumn = columnNames.some((column) => column.name === 'plan_tier')
-
-    if (!hasPlanTierColumn) {
-      this.db.exec(`ALTER TABLE tenants ADD COLUMN plan_tier TEXT`)
-    }
+    this.ensureTenantDashboardColumns(columnNames.map((column) => column.name))
 
     this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
   }
@@ -186,46 +192,20 @@ export class TenantRegistry {
       this.db.exec(`ALTER TABLE tenants ADD COLUMN initial_admin_email TEXT`)
     }
 
-    const hasDisplayNameColumn = columnNames.some(
-      (column) => column.name === 'display_name',
-    )
-
-    if (!hasDisplayNameColumn) {
-      this.db.exec(`ALTER TABLE tenants ADD COLUMN display_name TEXT`)
-    }
-
-    const hasPlanTierColumn = columnNames.some((column) => column.name === 'plan_tier')
-
-    if (!hasPlanTierColumn) {
-      this.db.exec(`ALTER TABLE tenants ADD COLUMN plan_tier TEXT`)
-    }
+    this.ensureTenantDashboardColumns(columnNames.map((column) => column.name))
 
     this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
   }
 
   private migrateFromV3ToV5(): void {
-    const columnNames = this.db
-      .prepare(`PRAGMA table_info(tenants)`)
-      .all() as Array<{ name: string }>
-
-    const hasDisplayNameColumn = columnNames.some(
-      (column) => column.name === 'display_name',
-    )
-
-    if (!hasDisplayNameColumn) {
-      this.db.exec(`ALTER TABLE tenants ADD COLUMN display_name TEXT`)
-    }
-
-    const hasPlanTierColumn = columnNames.some((column) => column.name === 'plan_tier')
-
-    if (!hasPlanTierColumn) {
-      this.db.exec(`ALTER TABLE tenants ADD COLUMN plan_tier TEXT`)
-    }
+    this.ensureTenantDashboardColumns()
 
     this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
   }
 
   private migrateFromV4ToV5(): void {
+    this.ensureTenantDashboardColumns()
+
     const portalAccountColumns = this.db
       .prepare(`PRAGMA table_info(portal_accounts)`)
       .all() as Array<{ name: string }>
@@ -246,6 +226,13 @@ export class TenantRegistry {
       CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_subdomain
       ON tenants(subdomain)
       WHERE subdomain IS NOT NULL;
+    `)
+  }
+
+  private ensureTenantIndexes(): void {
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_tenants_owner_id
+      ON tenants(owner_id);
     `)
   }
 

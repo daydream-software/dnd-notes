@@ -279,7 +279,7 @@ describe('TenantRegistry', () => {
     }
   })
 
-  it('migrates a v4 registry database to v5 by adding portal account password hashes', async () => {
+  it('migrates a v4 registry database to v5 by backfilling tenant dashboard columns and portal password hashes', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
     const databasePath = join(directory, 'registry.sqlite')
     const rawDb = new Database(databasePath)
@@ -345,15 +345,24 @@ describe('TenantRegistry', () => {
     try {
       const tenantRegistry = new TenantRegistry(databasePath)
       const migratedDb = new Database(databasePath, { readonly: true })
+      const tenantColumns = migratedDb
+        .prepare(`PRAGMA table_info(tenants)`)
+        .all() as Array<{ name: string }>
       const portalAccountColumns = migratedDb
         .prepare(`PRAGMA table_info(portal_accounts)`)
+        .all() as Array<{ name: string }>
+      const tenantIndexes = migratedDb
+        .prepare(`PRAGMA index_list(tenants)`)
         .all() as Array<{ name: string }>
       migratedDb.close()
       tenantRegistry.close()
 
+      assert.ok(tenantColumns.some((column) => column.name === 'display_name'))
+      assert.ok(tenantColumns.some((column) => column.name === 'plan_tier'))
       assert.ok(
         portalAccountColumns.some((column) => column.name === 'password_hash'),
       )
+      assert.ok(tenantIndexes.some((index) => index.name === 'idx_tenants_owner_id'))
     } finally {
       await rm(directory, { recursive: true, force: true })
     }
@@ -442,6 +451,31 @@ describe('TenantRegistry', () => {
 
       assert.ok(index)
       assert.match(index.sql, /datetime\(expires_at\)/)
+    } finally {
+      tenantRegistry.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('creates an owner index for owner-scoped tenant lookups', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const tenantRegistry = new TenantRegistry(databasePath)
+
+    try {
+      const db = new Database(databasePath, { readonly: true })
+      const index = db
+        .prepare(
+          `SELECT sql
+           FROM sqlite_master
+           WHERE type = 'index'
+             AND name = 'idx_tenants_owner_id'`,
+        )
+        .get() as { sql: string } | undefined
+      db.close()
+
+      assert.ok(index)
+      assert.match(index.sql, /ON tenants\(owner_id\)/)
     } finally {
       tenantRegistry.close()
       await rm(directory, { recursive: true, force: true })
