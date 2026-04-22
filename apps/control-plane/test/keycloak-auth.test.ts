@@ -39,6 +39,7 @@ describe('Control Plane Keycloak auth', () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
     const app = createKeycloakApp()
     const token = keycloak.issueToken({
+      audience: 'account',
       clientId,
       roles: ['control-plane-workforce'],
     })
@@ -68,6 +69,7 @@ describe('Control Plane Keycloak auth', () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
     const app = createKeycloakApp()
     const token = keycloak.issueToken({
+      azp: 'different-client',
       clientId: 'different-client',
       audience: 'different-client',
     })

@@ -64,6 +64,7 @@ test('tenant routes accept Keycloak JWTs and keep share-link guest flows local',
   t.after(cleanup)
 
   const ownerToken = keycloak.issueToken({
+    audience: 'account',
     clientId: keycloakClientId,
     subject: 'tenant-owner-sub',
     email: 'owner@example.com',
@@ -105,6 +106,7 @@ test('tenant routes accept Keycloak JWTs and keep share-link guest flows local',
   assert.equal(typeof guestJoinResponse.body.guestToken, 'string')
 
   const collaboratorToken = keycloak.issueToken({
+    audience: 'account',
     clientId: keycloakClientId,
     subject: 'tenant-collaborator-sub',
     email: 'ally@example.com',

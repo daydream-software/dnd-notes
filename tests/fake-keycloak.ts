@@ -3,6 +3,7 @@ import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 
 interface FakeKeycloakTokenOptions {
   audience?: string | string[]
+  azp?: string
   clientId: string
   email?: string
   expiresInSeconds?: number
@@ -80,6 +81,7 @@ export async function startFakeKeycloakServer(realm = 'dnd-notes-test') {
     },
     issueToken({
       audience,
+      azp,
       clientId,
       email = 'owner@example.com',
       expiresInSeconds = 300,
@@ -98,8 +100,8 @@ export async function startFakeKeycloakServer(realm = 'dnd-notes-test') {
       const payload = {
         iss: tokenIssuer,
         sub: subject,
-        aud: audience ?? [clientId, 'account'],
-        azp: clientId,
+        aud: audience ?? 'account',
+        azp: azp ?? clientId,
         email,
         exp: now + expiresInSeconds,
         iat: now,

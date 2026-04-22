@@ -84,10 +84,12 @@ function matchesClient(claims: JwtClaims, clientId: string) {
       : Array.isArray(claims.aud)
         ? claims.aud.includes(clientId)
         : false
-  const authorizedPartyMatches =
-    claims.azp === undefined ? true : claims.azp === clientId
 
-  return audienceMatches && authorizedPartyMatches
+  if (claims.azp !== undefined) {
+    return claims.azp === clientId
+  }
+
+  return audienceMatches
 }
 
 async function readSigningKey(jwksUrl: string, keyId: string) {
