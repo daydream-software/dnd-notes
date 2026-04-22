@@ -1552,6 +1552,27 @@ export async function createNoteStore(
     },
   )
 
+  const resolveOwnerEmailForKeycloakIdentity = async (
+    owner: OwnerAccountRow,
+    normalizedEmail: string,
+  ) => {
+    const currentEmail = normalizeEmailAddress(owner.email)
+
+    if (currentEmail === normalizedEmail) {
+      return currentEmail
+    }
+
+    const existing = (await selectOwnerAccountByEmail.get(normalizedEmail)) as
+      | OwnerAccountRow
+      | undefined
+
+    if (existing && existing.id !== owner.id) {
+      return currentEmail
+    }
+
+    return normalizedEmail
+  }
+
   const findOrCreateOwnerByKeycloakIdentityTransaction = database.transaction(
     async (identity: KeycloakOwnerIdentity) => {
       const normalizedEmail = normalizeEmailAddress(identity.email)
@@ -1561,16 +1582,21 @@ export async function createNoteStore(
 
       if (byKeycloakSub) {
         const updatedAt = new Date().toISOString()
+        const persistedEmail = await resolveOwnerEmailForKeycloakIdentity(
+          byKeycloakSub,
+          normalizedEmail,
+        )
         const updatedOwner = {
           ...mapOwnerAccountRow(byKeycloakSub),
+          email: persistedEmail,
           displayName: identity.displayName,
-          isSiteAdmin: configuredSiteAdminEmails.has(normalizedEmail),
+          isSiteAdmin: configuredSiteAdminEmails.has(persistedEmail),
           updatedAt,
         }
 
         await updateOwnerKeycloakIdentity.run({
           id: updatedOwner.id,
-          email: normalizedEmail,
+          email: updatedOwner.email,
           display_name: updatedOwner.displayName,
           is_site_admin: updatedOwner.isSiteAdmin ? 1 : 0,
           keycloak_sub: identity.keycloakSub,

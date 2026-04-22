@@ -51,6 +51,78 @@ test('tenant runtime auth accepts Keycloak bearer tokens and links owner account
   assert.equal(campaignsResponse.body.campaigns[0].id, defaultCampaignId)
 })
 
+test('tenant runtime auth preserves the linked owner when a Keycloak email change collides locally', async (t) => {
+  const keycloak = await startFakeKeycloakServer()
+  t.after(() => keycloak.close())
+
+  const subject = 'tenant-owner-subject'
+  const claimedEmail = 'site-admin@example.com'
+  const { app, cleanup, noteStore } = await createTestApp({
+    runtimeAuth: createKeycloakRuntimeAuth(keycloak.baseUrl, keycloak.issuer),
+    siteAdminEmails: [claimedEmail],
+  })
+  t.after(cleanup)
+
+  const initialToken = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: 'owner@example.com',
+    subject,
+    userName: 'Owner Example',
+  })
+  const initialSessionResponse = await withAuth(request(app), initialToken).get('/api/auth/session')
+  assert.equal(initialSessionResponse.status, 200)
+
+  const collidingOwner = await noteStore.createOwnerAccount({
+    displayName: 'Local Site Admin',
+    email: claimedEmail,
+    password: 'moonlit-secret',
+  })
+  assert.ok(collidingOwner)
+  assert.equal(collidingOwner.isSiteAdmin, true)
+
+  const changedEmailToken = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: claimedEmail,
+    subject,
+    userName: 'Renamed Owner',
+  })
+  const changedEmailAuth = withAuth(request(app), changedEmailToken)
+
+  const [sessionResponse, campaignsResponse, adminResponse] = await Promise.all([
+    changedEmailAuth.get('/api/auth/session'),
+    changedEmailAuth.get('/api/campaigns'),
+    changedEmailAuth.get('/api/admin/accounts'),
+  ])
+
+  assert.equal(sessionResponse.status, 200)
+  assert.equal(sessionResponse.body.owner.id, initialSessionResponse.body.owner.id)
+  assert.equal(sessionResponse.body.owner.email, 'owner@example.com')
+  assert.equal(sessionResponse.body.owner.displayName, 'Renamed Owner')
+  assert.equal(sessionResponse.body.owner.isSiteAdmin, false)
+  assert.equal(sessionResponse.body.owner.keycloakSub, subject)
+
+  assert.equal(campaignsResponse.status, 200)
+  assert.equal(campaignsResponse.body.campaigns.length, 1)
+  assert.equal(campaignsResponse.body.campaigns[0].id, defaultCampaignId)
+
+  assert.equal(adminResponse.status, 403)
+  assert.equal(adminResponse.body.error, 'Site-admin access is required.')
+
+  const ownerAccounts = await noteStore.listOwnerAccounts()
+  const linkedOwner = ownerAccounts.find((owner) => owner.id === sessionResponse.body.owner.id)
+  assert.ok(linkedOwner)
+  assert.equal(linkedOwner.email, 'owner@example.com')
+  assert.equal(linkedOwner.displayName, 'Renamed Owner')
+  assert.equal(linkedOwner.isSiteAdmin, false)
+  assert.equal(linkedOwner.keycloakSub, subject)
+
+  const localSiteAdmin = ownerAccounts.find((owner) => owner.id === collidingOwner.id)
+  assert.ok(localSiteAdmin)
+  assert.equal(localSiteAdmin.email, claimedEmail)
+  assert.equal(localSiteAdmin.isSiteAdmin, true)
+  assert.equal(localSiteAdmin.keycloakSub, null)
+})
+
 test('tenant runtime auth rejects wrong-client, expired, and local-auth requests when Keycloak mode is enabled', async (t) => {
   const keycloak = await startFakeKeycloakServer()
   t.after(() => keycloak.close())

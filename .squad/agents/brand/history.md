@@ -54,6 +54,7 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Keycloak Runtime Auth Config Strategy (Issue #76):** Adopt sealed-in-manifest approach for k3d Keycloak clients + secrets (checked-in realm JSON with dev-only credentials). Control-plane overlays carry AuthMode enum (local|keycloak) with per-environment ConfigMap/Secret patches. Tenants receive per-pod KEYCLOAK_* env vars injected by control-plane during provisioning (not in base Secret). Backward compat: AUTH_MODE=local continues as default (no breaking changes); old session tokens work until re-login. Guest/share-link flows bypass auth entirely (local+anonymous regardless of mode). Phase 2 can migrate to Keycloak-backed owner-account auto-creation or explicit seeding; Phase 1 assumes pre-seeded owner_accounts with keycloak_sub values.
 
----
+- **Keycloak Email-Collision Reconciliation:** If a subject-linked Keycloak owner later presents an email already held by another local account, keep the linked account’s persisted email and derived admin flag instead of clobbering the unique column. Regression should prove the bearer-token flow still reaches tenant campaigns while owner-only admin routes stay denied unless the local row itself is privileged.
 
+---
 
