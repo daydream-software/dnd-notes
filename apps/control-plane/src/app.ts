@@ -7,6 +7,7 @@ import {
   type ControlPlaneAdminAuth,
 } from './keycloak-auth.js'
 import {
+  TenantProvisioningConflictError,
   TenantProvisioningValidationError,
   type TenantProvisioningPort,
 } from './provisioning.js'
@@ -112,6 +113,7 @@ const createTenantSchema = z.object({
   id: z.string().min(1),
   slug: z.string().min(1).max(63).regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/),
   ownerId: z.string().min(1),
+  initialAdminEmail: z.string().trim().email().optional(),
   version: z.string().min(1),
 })
 
@@ -181,6 +183,10 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
   }
 
   return { error: 'Tenant already exists' }
+}
+
+function buildRolloutFailureDetails(tenantId: string) {
+  return `Rolling update failed for tenant ${tenantId}. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.`
 }
 
 function createAdminAuthMiddleware(
@@ -400,7 +406,7 @@ export function createApp({
         return
       }
 
-      const { id, slug, ownerId, version } = parseResult.data
+      const { id, slug, ownerId, initialAdminEmail, version } = parseResult.data
 
       const existingTenant = tenantRegistry.getTenant(id)
       if (existingTenant) {
@@ -419,6 +425,7 @@ export function createApp({
           id,
           slug,
           ownerId,
+          initialAdminEmail,
           version,
         })
         response.status(201).json({ tenant })
@@ -678,6 +685,11 @@ export function createApp({
         return
       }
 
+      const requestedProvisionVersion = parseResult.data.version?.trim()
+      const isRolloutRequest =
+        requestedProvisionVersion !== undefined &&
+        requestedProvisionVersion !== existingTenant.version
+
       try {
         const provisioningResult = await tenantProvisioningService.provisionTenant({
           tenantId,
@@ -689,8 +701,27 @@ export function createApp({
       } catch (error) {
         if (error instanceof TenantProvisioningValidationError) {
           response.status(400).json({
+            code: error.code,
             error: 'Invalid tenant provisioning request',
             details: error.message,
+          })
+          return
+        }
+
+        if (error instanceof TenantProvisioningConflictError) {
+          response.status(409).json({
+            code: error.code,
+            error: 'Tenant rolling update conflict',
+            details: error.message,
+          })
+          return
+        }
+
+        if (isRolloutRequest) {
+          response.status(500).json({
+            code: 'tenant_rollout_failed',
+            error: 'Tenant rolling update failed',
+            details: buildRolloutFailureDetails(tenantId),
           })
           return
         }

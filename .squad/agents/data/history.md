@@ -6,13 +6,31 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:05:32Z)
 
-Data initialized as Backend Dev for the initial project squad.
+**Early Foundation (2026-04-11–2026-04-13):** Data initialized as Backend Dev. Established SQLite note schema with campaign/membership/session/note tables, guest-token sharing, and ownership model. Built issue #23 membership consolidation backend (preview/apply on note attribution). Completed issue #27 session-browsing backend with auth fixes for collaborators and URL decoding safety. Approved for merge after Chunk's rejection cycle.
+
+**Linking & Activity (2026-04-13–2026-04-15):** Completed issue #30 note-to-note links backend (20-link limit, JSON storage, backlinks endpoint). Built issue #33 recent-activity read contract (campaign-scoped, latest-state only, no audit table). Established rich-note formatting via react-markdown + remark-gfm in frontend. All backend slices focused on metadata-light, query-efficient SQLite patterns.
+
+**Database Adapter & Postgres Migration (2026-04-15–2026-04-18):** Issue #58 abstracted note-store behind async adapter to support both SQLite (dev default) and Postgres (via DATABASE_URL env var). Built pool tuning contracts and statement timeouts. Backup/restore kept SQLite-compatible snapshot format for recovery across both backends.
+
+**Control-Plane & Tenant Lifecycle (2026-04-18–2026-04-22):** Completed issue #42 control-plane thin REST layer for tenant create/state transitions. Built tenant provisioning service with rollout guardrails and typed-failure responses (400 unsupported_target_version, 409 tenant_rollout_in_progress/disallowed, 500 tenant_rollout_failed). Issue #68 extended provisioning contract with optional initialAdminEmail metadata. All control-plane changes kept single-write routes (/internal/tenants*) with explicit HTTP status mapping and operator guidance instead of raw exception text.
+
+**Cross-Team Patterns:** Share-link metadata-only listing with owner-only reveal API. Membership guest-token rotation on consolidation. Session/note queries behind resolveAccessibleCampaign() for collaborator access. Shared-membership email-collision handling (keep linked account's persisted email). Tenant Deployment single-replica RollingUpdate with drain-first (maxSurge:0, maxUnavailable:1) + minReadySeconds:5 + gracefulShutdown:30s.
+
+**Major milestones (archived from history April 12–18):** Issue #76 Keycloak integration; Issue #75 PR review hardening; Issue #74 auth-provider abstraction; Issue #73 control-plane health gates; Issue #72 Postgres least-privilege prep; Issue #71 per-tenant credential provisioning; Issue #70 restore safety orchestration; Issues #69, #56, #58 completed (per-tenant Postgres creds, auth-seam, Postgres adapter); Phase 2 sequencing roadmap established (Issue #40 blocker for #56/#69).
+
+**Operational focus:** Contract stability, auth-provider abstraction, per-tenant credential flows, control-plane audit/safety gates, migration orchestration.
 
 *History summarized on 2026-04-21T16:43:21Z — old detailed entries (April 12–18) archived. Keeping recent team updates and all learnings.*
 
 ## Recent Updates
+
+📌 Issue #68 rollout-failure hardening completed (2026-04-22T17:38:00Z): Versioned `POST /internal/tenants/:tenantId/provision` now returns stable rollout failures for ready-tenant rolling updates — `400 unsupported_target_version` for same-version/no-op targets, `409 tenant_rollout_in_progress` / `tenant_rollout_disallowed` for concurrent or non-ready requests, and `500 tenant_rollout_failed` with operator guidance instead of raw backend text. First-time provisioning keeps the older generic 500 shape. Focused control-plane tests and operator-portal validation passed. Shared worktree was dirty with unrelated #68 changes, so no code commit was created. Orchestration log at `.squad/orchestration-log/2026-04-22T17:38:00Z-data.md`. Session log at `.squad/log/2026-04-22T17:38:00Z-issue68-rollout-failure-hardening.md`. Decision merged to `.squad/decisions.md`. — Data (Agent)
+
+📌 Issue #68 contract slice completed (2026-04-22T17:17:21Z): Added optional `initialAdminEmail` field to control-plane tenant contract. Changes: `POST /internal/tenants` now accepts/persists field, `GET /internal/fleet/status` and detail reads surface it, operator portal updated to capture/display in create flow. Field is metadata-only; provisioning does not yet create admin accounts. Custom-domain inputs deferred per product—opaque subdomains still used until DNS/TLS ownership defined. All lint/test/build passing (control-plane + operator-portal). Orchestration log at `.squad/orchestration-log/2026-04-22T17:17:21Z-data.md`. Session log at `.squad/log/2026-04-22T17:17:21Z-issue68-contract-batch.md`. Decision merged to `.squad/decisions.md`. Next: Stef taking portal lifecycle actions on stable contract. — Data (Agent)
+
+📌 Team update (2026-04-22T17:31:44Z): Issue #68 rolling-update lifecycle action QA review complete. Chunk approved rolling-update slice with focused regression lock on ready-only guardrail in OperatorPortal.actions.test.tsx. Portal validation passing (lint/test/build). Follow-up: Data owns hardening control-plane failure paths for unsupported versions, concurrent rollouts, and clearer operator-facing rollout errors. — Scribe
 
 📌 Issue #69 delivered (2026-04-21T19:55:31Z): Per-tenant Postgres credentials fully implemented — new tenants get dedicated roles + tenant-scoped DATABASE_URL, control-plane pre-seeds schema before first pod start, safe deprovision cleanup in place; existing tenants stay on shared creds until explicit migration. Session log at `.squad/log/20260421-195544-issue-69-delivery.md`. Validation: lint/test/build passed for control-plane + api, platform:validate passed. — Data (Agent)
 
@@ -22,6 +40,7 @@ Data initialized as Backend Dev for the initial project squad.
 
 📌 Issue #56 auth-seam prep completed (2026-04-21T22:45:02Z): Delivered Phase 2 auth-provider abstraction boundaries. Added `owner_accounts.keycloak_sub` column (nullable, unique), introduced `AuthenticatedUser` shared contract, documented `requireAuthenticatedAccount()` and `createAdminAuthMiddleware()` as future delegation points, kept local auth fully functional, marked `/api/auth/*` routes as Phase 2a coexist/2b cutover. No speculative provider code. All tests pass (96/96 api, 63/63 control-plane), lint/build clean. Commit `e69b93d` on `squad/56-integrate-keycloak-oidc`. Ready for follow-up OIDC implementation per Epic #42 Decision 9. — Data (Agent)
 
+📌 Team update (2026-04-22T17:27:18Z): Issue #68 rolling-update lifecycle action completed by Stef. Reuses POST /internal/tenants/:tenantId/provision with version override, exposed only for ready tenants. Decision merged: control-plane contract is canonical; portal does not invent endpoints. Follow-ups: Data extends contract for domain/admin inputs; Chunk verifies regression coverage. Portal lint/build/test passing. — Scribe
 
 ## Learnings
 
@@ -72,6 +91,13 @@ Data initialized as Backend Dev for the initial project squad.
 - `TenantProvisioningService.provisionTenant()` must trim version overrides before comparing/persisting them and reject non–image-tag-safe values; the HTTP provision route should surface those validation failures as 400s instead of masking them as 500s.
 - Control-plane reprovision errors in `apps/control-plane/src/provisioning.ts` must not echo raw tenant `DATABASE_URL` values; include tenant context and guidance, but never reflect credentials back into logs or HTTP error details.
 - When Postgres tenant database/role identifiers in `apps/control-plane/src/provisioning.ts` would exceed the 63-character limit, truncate with a stable hash suffix instead of plain slicing so long subdomains cannot collide; regressions live in `apps/control-plane/test/provisioning.test.ts`.
+
+- Issue #68 contract slice: `apps/control-plane/src/tenant-registry.ts` now persists optional `initialAdminEmail` metadata on tenant records, and `apps/control-plane/src/app.ts` validates/surfaces it on `POST /internal/tenants` plus fleet/detail reads.
+- Operator-portal follow-through for that contract lives in `apps/operator-portal/src/ProvisionTenantPanel.tsx`, `apps/operator-portal/src/OperatorPortal.tsx`, and `apps/operator-portal/src/types.ts`; the field is captured and displayed, but the UI copy explicitly says it does not bootstrap the tenant admin account yet.
+- Custom-domain inputs remain intentionally deferred for #68 because control-plane provisioning still assigns opaque subdomains from `TENANT_BASE_DOMAIN`; do not fake a domain field before Brand owns the DNS/TLS/ingress slice.
+- Issue #68 rollout hardening lives in `apps/control-plane/src/provisioning.ts` and `apps/control-plane/src/app.ts`: versioned `POST /internal/tenants/:tenantId/provision` now distinguishes `400 unsupported_target_version`, `409 tenant_rollout_in_progress` / `tenant_rollout_disallowed`, and `500 tenant_rollout_failed` with operator guidance instead of generic backend text.
+- Keep the route contract explicit but thin: let `TenantProvisioningService.provisionTenant()` classify ready-only rollout guardrails, and let the HTTP layer in `apps/control-plane/src/app.ts` translate those typed failures into stable status/code/detail responses while leaving first-time provisioning errors on the older generic shape.
+- Regression coverage for this slice lives in `apps/control-plane/test/provisioning.test.ts` (service-side rollout guards) and `apps/control-plane/test/app.test.ts` (HTTP status/code/detail mapping); `apps/control-plane/README.md` documents the operator-facing failure codes.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
@@ -584,4 +610,3 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 **Outcome:** PR #72 is unblocked and ready for CI clearance and merge.
 
 📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
-

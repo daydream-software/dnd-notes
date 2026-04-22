@@ -1,9 +1,9 @@
 # Current Focus
 
-- **Updated:** 2026-04-22T15:04:16Z
-- **Active slice:** PR #77 review follow-up — resolve Copilot review comments on runtime Keycloak integration for #76.
-- **Execution status:** Three open Copilot review threads identified across platform, backend, and frontend surfaces; fixes are being routed in parallel with QA coverage updates.
-- **Primary next slice:** Close the three review threads on `squad/76-complete-runtime-keycloak-auth-integration` without regressing the green validation/smoke lanes.
-- **Parallel tracks:** Brand handles `scripts/k3d/smoke.sh` Bash compatibility; Data hardens typed 409 conflict handling in API auth reconciliation; Stef fixes Keycloak login null-client UX; Chunk adds/adjusts regression coverage for each.
-- **QA gates:** Preserve green API, control-plane, web, manifest validation, and k3d smoke evidence after the review fixes land.
-- **Reviewer process:** Copilot remains the gate for this PR; resolve threads, rerun affected validation, then re-request review if needed.
+- **Updated:** 2026-04-22T19:48:00Z
+- **Active slice:** PR #78 final review follow-up for issue #68 — land the shared base-path helper refactor, push the branch, and close the last Copilot thread.
+- **Execution status:** The final review comment is fixed locally on `squad/68-operator-control-portal`: operator-portal Vite/runtime config now share a single `normalizeBasePath()` helper in `apps/operator-portal/src/base-path.ts`, with focused tests covering blank input, `/`, and trailing-slash trimming. Chunk approved the refactor after operator-portal and full-repo validation stayed green.
+- **Primary next slice:** Commit the final config-refactor batch, push it to PR #78, reply to the last review comment, and resolve the remaining thread.
+- **Parallel tracks:** Brand handled the base-path utility extraction, Chunk reviewed and approved the refactor, Scribe logged the round, and Copilot is finishing the push/reply/resolve steps.
+- **QA gates:** Keep the refactor behavior-preserving, avoid widening it beyond the shared helper extraction, and leave the worktree clean once the final PR thread is closed.
+- **Forward-looking note:** User wants the operator portal folded into the future `k3d:smoke` lane so tenant provisioning can be exercised through the operator-facing API/UI path instead of manifests.

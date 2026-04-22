@@ -1,6 +1,6 @@
 # Brand — Platform Dev
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestration, deployment artifacts, and platform-layer integrations.
 
@@ -64,6 +64,16 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 📌 Team update (2026-04-22T15:44:09Z): PR #77 JSON payload follow-up complete. Brand replaced manual tenant-create payload construction with Node JSON.stringify in scripts/k3d/smoke.sh; Chunk added regression coverage in apps/control-plane/test/k3d-smoke-payload.test.ts validating emitted JSON before live smoke run; all gates green (lint/test/build/platform:validate). Two decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:44:09Z-pr77-json-fix.md`. — Scribe
 
+- **PR Hygiene for Runtime Squad Artifacts:** `.squad/log/` and `.squad/orchestration-log/` are runtime-state paths already ignored in `.gitignore`, so if a branch accidentally tracks one of those files, fix the PR by deleting only the stray log artifacts and leave durable tracked coordination files alone. Current example: PR #78 cleanup removed `.squad/log/2026-04-22T17:38:00Z-issue68-rollout-failure-hardening.md` and `.squad/orchestration-log/2026-04-22T17:38:00Z-data.md` while preserving `.squad/identity/now.md` and inbox directives.
+
+- **CI Duplicate-Check Triage:** `.github/workflows/ci.yml` runs `npm run test:ci`, publishes JUnit via EnricoMi as a separate `Test Results` check, then fails the `validate` job if any suite failed. On PR #78, red `validate` + red `Test Results` mapped to one underlying control-plane test (`apps/control-plane/test/provisioning.test.ts` namespace-deletion wait) rather than two independent failures. When the head commit only touches docs and the prior branch SHA was green, treat this pattern as a flaky/timing-sensitive repo test first, not an Actions outage. Key files: `.github/workflows/ci.yml`, `scripts/run-ci-tests.mjs`, `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
+
+- **Operator Portal Unexpected POST Mocks:** In `apps/operator-portal/src/OperatorPortal.actions.test.tsx`, any fetch mock branch that records a write request expected not to happen should still return an explicit error `Response` (500 is fine) after pushing the request. That keeps accidental calls diagnosable as HTTP failures instead of letting `fetch()` resolve to `undefined` and crash later with ambiguous property-access errors.
+
+- **CI-Safe Namespace Polling Tests:** For control-plane deletion tests that model repeated namespace reads before a terminal 404, keep the fake countdown/assertions and widen the explicit timeout budget instead of rewriting production polling. The current stable shape is `namespaceReadCountdown = 2`, `readyPollIntervalMs = 1`, and `deleteTimeoutMs = 200` in `apps/control-plane/test/provisioning.test.ts`, which preserves the namespace-termination intent while absorbing CI scheduler variance. Key files: `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
+
+- **Shared Operator Portal Base-Path Normalization:** Keep `VITE_OPERATOR_API_BASE_PATH` normalization in `apps/operator-portal/src/base-path.ts` and reuse it from both `apps/operator-portal/vite.config.ts` and `apps/operator-portal/src/config.ts`. A focused regression in `apps/operator-portal/src/base-path.test.ts` should lock the blank/root/trailing-slash cases so the dev proxy and runtime config cannot drift.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.
@@ -74,3 +84,41 @@ Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decis
 
 
 
+- **Issue #68 first slice:** Use a dedicated `apps/operator-portal/` Vite workspace for the operator UI instead of mixing platform controls into the tenant app. Keep browser API traffic same-origin through `/operator-api` (Vite dev proxy locally, reverse proxy in deployment) and keep the first slice read-only on top of `GET /internal/fleet/status`. Key files: `apps/operator-portal/src/OperatorPortal.tsx`, `apps/operator-portal/src/control-plane-api.ts`, `apps/operator-portal/vite.config.ts`, `apps/operator-portal/.env.example`.
+
+---
+
+## Issue #68 First Operator Portal Slice (2026-04-22T16:51:23Z)
+
+Executed first slice of #68 operator portal feature:
+- Built dedicated `apps/operator-portal/` Vite workspace for operator UI (not mixed into tenant app)
+- Implemented Keycloak-gated operator authentication using existing `dnd-notes-control-plane` client
+- Wired read-only fleet dashboard backed by `GET /internal/fleet/status` control-plane contract
+- Configured same-origin `/operator-api` transport (Vite dev proxy locally, reverse proxy in deployment)
+- Added comprehensive tests for auth flow and fleet status integration
+- Documented operator portal architecture and deployment strategy
+
+**Key decision locked:** Brand/issue68-first-slice.md (Scribe merged to decisions.md)
+
+**Status:** Ready for merge. Follow-up slices (provision/deprovision, lifecycle actions) can build on this scaffold.
+
+## PR #78 CI Diagnosis (2026-04-22T18:59:00Z)
+
+Diagnosed two red checks on PR #78 (CI/validate + Test Results) as a single underlying timing-sensitive test failure in new code. The test `waits for namespace termination before finishing tenant deletion` in `apps/control-plane/test/provisioning.test.ts:1600` was **added in commit bc2cd94** (HEAD of PR #78) and times out at 50ms deadline on CI.
+
+**Exact Error:** 
+```
+Tenant namespace tenant-t-opaque123456 did not terminate within 50ms
+  at KubernetesTenantInfrastructureManager.deleteTenantResources (provisioning.ts:792)
+```
+
+**Mechanics:** FakeKubernetesClient is seeded with `namespaceReadCountdown = 2`, so reads return success twice then throw 404 on the third attempt. The test deadline is only 50ms with 1ms poll intervals—this assumes 3 reads + 2 sleeps completes in 50ms. On slow CI runners, async overhead causes this to exceed budget and fail.
+
+**Classification:** NEW flaky test (not pre-existing)—introduced by the new namespace termination validation logic added in PR #78. The test validates the correct behavior but is under-resourced for CI variance.
+
+**Fix Path (Priority):** 
+1. **Recommended:** Increase test timeout from 50ms to 200ms (line 1614) — explicit, safe, 4x margin, preserves test intent
+2. **Alternative:** Increase poll interval from 1ms to 5ms (line 1613) — also valid, reduces iteration count
+3. Avoid: Logic rewrites; risks masking real async bugs
+
+The 200ms fix keeps the test validating K8s namespace polling + async termination semantics while eliminating CI timing variance.

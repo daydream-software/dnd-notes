@@ -6,18 +6,16 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Stef initialized as Frontend Dev for the initial project squad.
-
-
-## Core Context
 
 *History summarized on 2026-04-18T22:58:15.116987 — old entries moved to archive. Keeping last 10 team updates and all learnings.*
 
 
 ## Recent Updates (Last 10)
 
+📌 Team update (2026-04-22T17:17:21Z): Issue #68 control-plane contract expanded with optional `initialAdminEmail` field — persisted on tenant record, surfaced in fleet/detail reads, operator portal updated to capture/display on create flow. Field is metadata-only; provisioning does not yet create accounts. Custom-domain inputs deferred per product roadmap. All validation passing. Stef to own next portal lifecycle actions on stable contract. — Data (Backend Dev)
 📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
 📌 Team initialized on 2026-04-11 with Mikey, Stef, Data, Chunk, Brand, Scribe, and Ralph.
 📌 Team update (2026-04-12T14:38:40Z): Campaign share links stay as reusable single links with owner-only on-demand reveal; listings stay metadata-only and legacy hash-only links must be revoked/recreated to become revealable again — decided by FFMikha (via Copilot), Mikey, Data, Stef, Chunk
@@ -68,4 +66,32 @@ Stef initialized as Frontend Dev for the initial project squad.
 - Keep the runtime split clean: `/api/auth/config` still comes from `apps/web/src/api.ts`, the browser Keycloak wrapper stays in `apps/web/src/keycloak-client.ts`, and App-level UX fallbacks belong in `App.tsx` rather than in API helpers.
 
 📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
+📌 Team update (2026-04-22T17:04:09Z): Issue #68 operator portal UX slice completed by Stef. Tenant provisioning flows as reviewed two-step control-plane composition (create → provision with operator reason). Deprovisioning requires reason + typed-slug confirmation. Decision merged: control-plane contract is canonical; portal does not invent endpoints. Follow-ups: Data extends contract for domain/admin inputs; Chunk verifies regression coverage. Session log: `.squad/log/2026-04-22T17:04:09Z-issue68-ux-batch.md`. Orchestration log: `.squad/orchestration-log/2026-04-22T17:04:09Z-stef.md`. — Scribe
 
+
+### Issue #68 operator portal UX (2026-04-22)
+
+- `apps/operator-portal/src/OperatorPortal.tsx` now treats the portal as a thin control surface: read state still comes from `GET /internal/fleet/status`, while success/error messaging stays global and action-specific state is pushed into small provisioning/deprovision components.
+- Provisioning lives in `apps/operator-portal/src/ProvisionTenantPanel.tsx` as a reviewed two-step flow that creates the tenant record first, then calls the existing provision route with an explicit operator reason; the form autofills tenant ID from slug and suggests the most common fleet version to keep setup friction low.
+- Deprovisioning lives in `apps/operator-portal/src/TenantDeprovisionDialog.tsx` and requires both a reason and typed-slug confirmation so destructive work is explicit before the browser sends the real control-plane request.
+- Portal write helpers now live in `apps/operator-portal/src/control-plane-api.ts`, and focused lifecycle regressions live in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` so `App.test.tsx` can stay closer to shell/auth smoke coverage.
+- **Decision locked (2026-04-22)**: Portal provisioning flow stays a two-step control-plane composition (create + provision with operator reason). Deprovision requires reason + typed-slug confirmation. Portal does not invent write endpoints; uses existing control-plane contract. Follow-up: Data extends contract for additional inputs (domains, admin email) before portal asks for those fields.
+
+### Issue #68 rolling update UX (2026-04-22)
+
+- The next safe lifecycle action in `apps/operator-portal` is a rolling update, not a generic reprovision: the portal should only expose it for tenants already in `ready`, because the control-plane contract explicitly documents version-override upgrades on `POST /internal/tenants/:tenantId/provision`.
+- `apps/operator-portal/src/TenantUpgradeDialog.tsx` keeps the write path thin by reusing `provisionTenant()` with a required operator reason and a typed target-version confirmation, so rollout intent is explicit without adding a second browser-only state machine.
+- Focused lifecycle coverage for the upgrade flow belongs in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`; keep `App.test.tsx` limited to auth/shell smoke.
+- **Rolled out (2026-04-22):** TenantUpgradeDialog component + portal lifecycle menu wired. Portal lint/build/test all passing. Regression coverage in OperatorPortal.actions.test.tsx. Chunk to own QA/reviewer pass on rolling-update action next.
+
+### PR #78 operator-portal README wording (2026-04-22)
+
+- `apps/operator-portal/README.md` intro must not describe the portal as read-only anymore. It needs to say the current surface both reads fleet status and triggers real lifecycle writes through the existing control-plane contract: create + provision, deprovision, and rolling updates for ready tenants.
+
+### PR #78 operator-portal review follow-up (2026-04-22)
+
+- Keep the stale-review regression in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`: open the provision dialog, refresh fleet state, and assert the confirm button locks when `dependencies.tenantProvisioning.status` flips to `disabled`.
+- For readable Vitest lifecycle output, prefer `it.each` tuple rows with the scenario label as the first element in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` instead of relying on object-row titles.
+- Operator portal Keycloak restore should mirror the main web app’s defensive token parsing: in `apps/operator-portal/src/keycloak-client.ts`, require stored `accessToken` and `refreshToken` to be strings, drop non-string `idToken`, and clear the localStorage entry before returning `null` when the payload is malformed.
+- Logged-out cleanup in `apps/operator-portal/src/OperatorPortal.tsx` belongs in `clearSession()`, not scattered across callers: clear auth token, fleet data, notice/error banners, loading state, and open lifecycle dialogs so the sign-in screen never inherits stale session UI.
+- Focused regressions for this auth/session lane now live in `apps/operator-portal/src/keycloak-client.test.ts` (storage validation) and `apps/operator-portal/src/App.test.tsx` (logout/session-clear UI reset).

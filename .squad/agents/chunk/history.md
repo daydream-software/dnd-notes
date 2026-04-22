@@ -6,32 +6,37 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Chunk is the QA/Tester for the squad, responsible for regression coverage, gate validation, and identifying high-risk parity gaps.
 
-**Historical Milestones (2026-04-11 to 2026-04-20):**
-- Initialized as tester on 2026-04-11
-- Validated SQLite startup fix regression coverage (2026-04-12)
-- Approved campaign share-link reveal slice (2026-04-12)
-- Approved Issue #27 session-browsing backend and frontend slices (2026-04-12)
-- Contributed to membership consolidation QA gates; identified guest-token post-claim backdoor and helped Data fix it (2026-04-13 to 2026-04-14)
-- Session-browser state regression caught: state machine must isolate auth bootstrap from load-workspace callbacks (2026-04-13)
-- Identified Issue #27 shadowing bug (sessions route after note ID route) and decoding trap (2026-04-13)
-- Led Phase 0 QA review; identified 5 critical deployment-artifact checkers for Brand/Data (2026-04-20)
-- Diagnosed and helped resolve npm test infrastructure issue with root install (2026-04-20)
-- Published comprehensive QA brief for Issue #58 (Postgres adapter) with 7 critical test cases and isolation/pool/schema decision points (2026-04-18)
+**Early milestones (2026-04-11 to 2026-04-20, archived from history):** Initialized on 2026-04-11; validated SQLite regression, approved share-link/session-browsing slices, caught guest-token backdoor and state-machine isolation gaps, identified route shadowing + decoding traps, led Phase 0 QA (5 critical checkers), resolved npm test infrastructure.
 
 **Key Pattern:** Find parity gaps early (SQLite ↔ Postgres), gate on measurable regression coverage, propagate learnings to future issues.
 
 ## Recent Updates (Last 5)
 
+📌 Team update (2026-04-22T17:38:00Z): Issue #68 rollout-failure hardening landed locally by Data. Ready-tenant rolling updates now return stable control-plane responses: `400 unsupported_target_version` for same-version/no-op targets, `409 tenant_rollout_in_progress` / `tenant_rollout_disallowed` for concurrent or non-ready requests, and `500 tenant_rollout_failed` with operator guidance instead of raw backend text. Focused control-plane tests and operator-portal validation passed. Shared worktree stayed dirty, so no code commit was cut. Next: Chunk QA should validate operator-facing failure copy + regression coverage before batching. — Scribe
 
+📌 Team update (2026-04-22T17:27:18Z): Issue #68 rolling-update lifecycle action completed by Stef. Reuses POST /internal/tenants/:tenantId/provision with version override, exposed only for ready tenants, requires operator reason + typed target-version confirmation. Focused regression in OperatorPortal.actions.test.tsx. Portal lint/build/test passing. Next: Chunk owns QA/reviewer pass on rolling-update action. — Scribe
 
+📌 Issue #68 rolling-update lifecycle action QA review (2026-04-22T17:31:44Z): Chunk approved rolling-update slice. Verified ready-only guardrail, audit visibility, operator-facing confirmation flow. Added focused regression lock in OperatorPortal.actions.test.tsx. Portal validation passing (lint/test/build). Ready for merge. Orchestration log at `.squad/orchestration-log/2026-04-22T17:31:44Z-chunk.md`. Session log at `.squad/log/2026-04-22T17:31:44Z-issue68-lifecycle-review.md`. — Chunk (QA/Tester)
 
 
 
 ## Learnings
+
+### PR #78 auth cleanup + CI-safe polling QA review (2026-04-22)
+- `apps/operator-portal/src/keycloak-client.ts` should normalize restored Keycloak token blobs by requiring string `accessToken`/`refreshToken`, treating `idToken` as optional, and clearing malformed localStorage immediately so bootstrap falls back to a clean signed-out state.
+- `apps/operator-portal/src/keycloak-client.test.ts` is the focused regression layer for malformed token storage; keep app-shell auth tests (`apps/operator-portal/src/App.test.tsx`) focused on visible UX resets like stale error cleanup after `clearSession()`.
+- `apps/operator-portal/src/OperatorPortal.tsx` should treat `clearSession()` as a full logged-out reset: clear stored tokens, active fleet/loading state, inline errors/notices, and any open lifecycle-dialog targets so the sign-in shell never inherits stale operator state.
+- `apps/control-plane/test/provisioning.test.ts` should keep namespace-termination polling assertions intact while using a modest explicit timeout budget (currently `deleteTimeoutMs: 200` with `readyPollIntervalMs: 1`) so CI scheduler jitter does not become part of the contract.
+- Focused validation for this review slice passed from the repo root with `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal && npm run lint --workspace apps/control-plane && npm run test:control-plane && npm run build --workspace apps/control-plane`.
+
+### PR #78 follow-up QA review (2026-04-22)
+- `apps/operator-portal/src/OperatorPortal.actions.test.tsx` should keep recording unexpected create/provision POST payloads, but each unexpected mock branch must return an explicit `500` JSON response so accidental writes fail as actionable HTTP errors instead of `undefined` crashes.
+- `.squad/agents/stef/history.md` should keep a single `## Core Context` heading after summarization; duplicate headings are cleanup-only and safe to delete.
+- Focused validation for this operator-portal lane is `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal` from the repo root.
 
 ### Phase 2 QA Gate (2026-04-22)
 - **Critical discovery:** #40 (Restore Safety) is a blocker for both #56 (OIDC) and #69 (Per-Tenant Roles). Execution order is not optional.
@@ -110,3 +115,55 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 - **PR #77 JSON payload gate (2026-04-22):** the cheapest high-signal regression for `scripts/k3d/smoke.sh` is to execute `build_tenant_create_payload()` directly and `JSON.parse` its output in `apps/control-plane/test/k3d-smoke-payload.test.ts`; that catches bad escaping before a full k3d boot. After the script change lands, the follow-up manual proof is still `npm run k3d:smoke`, because only the live lane confirms the control-plane accepts the tenant-create payload end to end.
 
 📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
+
+### Issue #68 QA lane prep (2026-04-22)
+- The highest-signal first slice for the operator portal is an auth-gated, read-heavy shell on top of the existing control-plane contract: `GET /internal/fleet/status` for fleet state plus tenant reads for drill-in. Avoid shipping portal-local write paths before the UI can show clear side-effect copy and post-action transition evidence.
+- Added control-plane regressions in `apps/control-plane/test/keycloak-auth.test.ts` so the future portal's primary read surface (`/internal/fleet/status`) and a representative write route (`/internal/tenants/:tenantId/provision`) both stay locked behind admin/workforce Keycloak roles.
+- Extended `apps/control-plane/test/app.test.ts` so fleet status, provision, and deprovision coverage now preserve `latestTransition.triggeredBy` and `reason`, giving the portal a stable audit trail for operator side-effect clarity.
+- Reuse `apps/web/src/SiteAdminPanel.tsx` and `apps/web/src/App.site-admin.test.tsx` as the local precedent for destructive-action warning copy and confirmation-driven UX.
+
+---
+
+## Issue #68 First Operator Portal QA Gate (2026-04-22T16:51:23Z)
+
+Established QA gate for #68 operator portal first slice:
+- Defined auth-gated, read-heavy control surface acceptance criteria
+- Added tests for operator auth on fleet reads and representative write routes
+- Validated audit trail visibility for write operations (`triggeredBy`, `reason` fields)
+- Extended regressions for fleet status and provision/deprovision side effects
+- Confirmed all lint, test, build gates pass
+
+**Key decision locked:** Chunk/issue68-qa.md (Scribe merged to decisions.md)
+
+**Gate pattern:** Any write action must (1) call existing control-plane endpoint, (2) surface side effect clearly, (3) show audit trail afterward.
+
+**Status:** QA gate established and validated. Ready for merge.
+
+### Issue #68 Rolling-Update QA Pass (2026-04-22T17:30:00Z)
+- `apps/operator-portal/src/TenantUpgradeDialog.tsx` keeps the rolling-update path honest by requiring a different target version, a non-empty operator reason, and typed target-version confirmation before it reuses `POST /internal/tenants/:tenantId/provision`.
+- `apps/operator-portal/src/OperatorPortal.tsx` only exposes `Roll to new version` for tenants in `ready`, and `apps/operator-portal/src/OperatorPortal.actions.test.tsx` now locks that ready-only visibility alongside the successful rollout/audit-refresh path.
+- Focused regression placement still matches the frontend testing pattern: `apps/operator-portal/src/App.test.tsx` stays smoke-sized while lifecycle behavior lives in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`.
+- Verified portal gate with `cd apps/operator-portal && npm test && npm run lint && npm run build` — all green.
+- Highest remaining risk: unsupported target versions, concurrent upgrade attempts, or control-plane-side rollout failures will surface only whatever error text the backend returns, so deeper failure-mode confidence still depends on control-plane coverage.
+
+### PR #78 review-fix batch QA (2026-04-22T18:00Z follow-up)
+- The safe review scope for this batch is tiny: confirm the two ignored runtime artifacts under `.squad/log/` and `.squad/orchestration-log/` are only present as deletions, confirm no new additions/modifications under ignored runtime paths remain in the diff, and verify the README wording against existing portal behavior instead of re-reviewing the full feature.
+- `apps/operator-portal/README.md` is now accurate because the live portal already supports tenant creation + provisioning (`apps/operator-portal/src/ProvisionTenantPanel.tsx`), tenant deprovision (`apps/operator-portal/src/TenantDeprovisionDialog.tsx`), and ready-only rolling updates (`apps/operator-portal/src/TenantUpgradeDialog.tsx`, gated in `apps/operator-portal/src/OperatorPortal.tsx`).
+- The highest-signal targeted regression for that README claim is `cd apps/operator-portal && npm test -- src/OperatorPortal.actions.test.tsx`; it proves provision, deprovision, ready-only rollout visibility, successful roll-forward, and rollout failure guidance without rerunning the whole repo.
+
+### PR #78 operator-portal reviewer-fix pass (2026-04-22T18:56Z)
+- `apps/operator-portal/src/ProvisionTenantPanel.tsx` now re-checks `disabledReason` inside `handleConfirm`, mirrors the fresh disable reason inside the open confirmation dialog, and disables the final `Create and provision tenant` button so a review dialog cannot go stale after fleet refresh.
+- `apps/operator-portal/src/OperatorPortal.actions.test.tsx` now refreshes fleet state while the provisioning dialog is open and proves the confirm CTA locks before any create/provision requests fire when the provisioning lane flips disabled.
+- The same focused action suite now gives rollout failure cases readable Vitest names by passing the scenario label positionally in `it.each(...)`, so CI output shows human labels instead of stringified row objects.
+- Verified with `npm run lint --workspace apps/operator-portal && npm run build --workspace apps/operator-portal && npm run test --workspace apps/operator-portal -- src/OperatorPortal.actions.test.tsx`.
+
+### PR #78 base-path utility review (2026-04-22T19:55Z)
+- The base-path follow-up is low-risk when `apps/operator-portal/src/base-path.ts` stays a pure string helper and both `apps/operator-portal/src/config.ts` and `apps/operator-portal/vite.config.ts` import it instead of carrying copy-pasted normalization logic.
+- `apps/operator-portal/src/base-path.test.ts` is the right regression seam: keep coverage on blank input fallback, `/` passthrough, and whitespace/trailing-slash trimming so runtime and Vite proxy config cannot silently diverge later.
+- Reviewer proof for this slice is `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal`; I also re-ran the full repo `npm run lint && npm test && npm run build` and it stayed green with the shared utility wired in.
+
+### PR #78 initialAdminEmail contract-alignment QA (2026-04-22T20:05Z)
+- `apps/control-plane/src/app.ts` and `apps/control-plane/src/tenant-registry.ts` already treat `POST /internal/tenants.initialAdminEmail` as optional, so `apps/operator-portal/src/types.ts` should mirror that optionality instead of forcing a stricter client contract.
+- Keep the portal create flow behavior-preserving by typing the request object explicitly in `apps/operator-portal/src/ProvisionTenantPanel.tsx` while still sending the reviewed `initialAdminEmail` value the UI requires today.
+- The fetch-mock seams in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` should model the optional request field too and coalesce missing request email values back to `null` on mocked tenant responses, matching the control-plane tenant shape.
+- QA proof for this follow-up: baseline + post-fix `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal`.

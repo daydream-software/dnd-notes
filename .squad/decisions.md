@@ -5317,3 +5317,215 @@ Post-merge Scribe work (decision consolidation, session logs written *after* PR 
 - Subsequent feature branches start from clean, synced main
 - Contributors can safely delete merged branches without fear
 - Parallel development remains unaffected (only deletes current-branch's merged refs)
+
+---
+
+### 2026-04-22: Brand — Issue #68 First Operator Portal Workspace Architecture
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-22  
+**Issue:** #68
+
+## Context
+
+Issue #68 needs a thin, mergeable operator portal slice that proves browser auth and fleet visibility against the real control-plane without inventing a second write path.
+
+## Decision
+
+1. Ship the first UI slice as a dedicated workspace, `apps/operator-portal/`, instead of folding platform administration into the tenant notes SPA.
+2. Keep browser-to-control-plane traffic same-origin on `/operator-api/*`:
+   - Local development uses the Vite dev proxy in `apps/operator-portal/vite.config.ts`.
+   - Deployed environments should reverse-proxy `/operator-api/*` to the control-plane service instead of opening a new CORS surface.
+3. Use the existing public Keycloak client accepted by the control-plane (`dnd-notes-control-plane`) against the workforce/admin realm for operator login.
+4. Keep the first slice read-only: the portal consumes `GET /internal/fleet/status` only. Future create/provision/deprovision UI must call the existing `/internal/tenants`, `/internal/tenants/:tenantId/provision`, and `/internal/tenants/:tenantId/deprovision` endpoints directly. *(This intent was superseded by issue #68, which implements full create/provision/deprovision/rolling-update control surface in the same operator-portal workspace.)*
+
+## Why
+
+- This lands an end-to-end portal slice quickly without entangling tenant UX with platform operations.
+- Same-origin `/operator-api` keeps local and hosted setup boring, avoids a new CORS contract, and matches the repo's broader same-origin deployment preference.
+- Read-only first keeps the auth + fleet-status contract stable before higher-risk write controls land.
+
+## Consequences
+
+- Operators now have a real Keycloak-gated dashboard path for fleet visibility.
+- Follow-up slices can add provisioning and lifecycle actions in the same workspace without renegotiating auth or transport.
+- Deployment docs should treat `/operator-api` as part of the operator portal ingress contract.
+
+---
+
+### 2026-04-22: Chunk — Issue #68 First-Slice QA Gate (Auth-Gated Read-Heavy Control Surface)
+
+**Decided by:** Chunk (Tester)  
+**Date:** 2026-04-22  
+**Issue:** #68
+
+## Context
+
+The first operator control portal slice must balance speed with safety. The existing control-plane already provides a stable fleet-status contract; the portal is the frontend layer on top.
+
+## Decision
+
+Treat the first operator control portal slice as an **auth-gated, read-heavy control surface** that consumes the existing control-plane contract (`GET /internal/fleet/status` plus tenant registry reads) before shipping live operator write controls.
+
+Any write action that lands in the first implementation wave must satisfy all three gates:
+1. It calls the existing control-plane write endpoint instead of inventing a portal-local mutation path;
+2. The UI states the operational side effect clearly before execution;
+3. The resulting side effect is visible afterward through transition/audit data (`latestTransition` or `/internal/tenants/:tenantId/transitions`) including `triggeredBy` and `reason`.
+
+## Why
+
+- Fleet status is already the thin, canonical source of truth for operator visibility.
+- Starting read-heavy keeps the portal slice thin while auth, provisioning, restore, and maintenance flows are still settling.
+- Prevents false-safe UI where buttons exist before the operator can see who triggered an action or why the fleet changed state.
+
+## Consequences
+
+- Brand can move fast on the shell if the first slice focuses on auth gate + fleet read contract.
+- Provision/deprovision buttons are acceptable only when they reuse `/internal/tenants/:tenantId/{provision,deprovision}` and surface explicit danger/impact copy.
+- QA will block any write-first slice that hides side effects, skips audit trail visibility, or duplicates control-plane state in the frontend.
+
+### 2026-04-22: Stef — Issue #68 operator portal UX provisioning flow
+
+**Decided by:** Stef (Frontend Dev)  
+**Date:** 2026-04-22  
+**Type:** Architecture & Portal Flow
+
+## Decision
+
+For the next mergeable operator-portal slice, tenant provisioning stays a reviewed two-step browser flow on the **existing** control-plane contract:
+
+1. `POST /internal/tenants` creates the tenant record with `id`, `slug`, `ownerId`, and `version`.
+2. `POST /internal/tenants/:tenantId/provision` immediately follows with a **required operator reason** and `triggeredBy` sourced from Keycloak token claims when available (fallback: `operator-portal`).
+3. `POST /internal/tenants/:tenantId/deprovision` requires both a reason and typed-slug confirmation in the portal UX before the destructive call is sent.
+
+## Why
+
+- The control-plane already exposes create/provision/deprovision routes, so the portal should compose them instead of inventing portal-only write endpoints.
+- Requiring an operator reason on both provision and deprovision keeps the latest transition copy useful immediately after the action lands.
+- The issue body mentions richer inputs like custom domains and initial admin email, but the current backend contract does not support those yet. The portal should not fake those fields until Data/Brand extend the control-plane API.
+
+## Follow-up
+
+- Data should extend the control-plane contract before the portal asks for initial admin email or domain-level inputs.
+- Chunk should keep focused regression coverage on the two-step create→provision path and typed destructive confirmation.
+
+### 2026-04-22: Data — Issue #68 contract slice
+
+**Decided by:** Data (Backend Dev)
+**Date:** 2026-04-22
+**Type:** Operator portal / control-plane contract
+
+## Decision
+
+For the next mergeable #68 backend slice:
+
+1. `POST /internal/tenants` accepts an optional `initialAdminEmail` and persists it on the tenant record.
+2. Tenant reads and `GET /internal/fleet/status` surface that field unchanged so the operator portal can confirm what was recorded.
+3. The field is metadata only in this slice. Provisioning does **not** create or reconcile the tenant-local admin account yet.
+4. Custom-domain inputs stay out of the contract for now. Provisioning still assigns opaque subdomains under `TENANT_BASE_DOMAIN` until DNS/TLS choreography has a real backend owner.
+
+## Why
+
+- The portal needed a stable place to capture the initial admin handoff without inventing a second write path or pretending bootstrap automation already exists.
+- Persisting the email in the control-plane registry keeps the contract explicit and auditable.
+- Accepting custom-domain input now would mislead operators because the control plane cannot honor or validate it yet.
+
+## Consequences
+
+- Portal provisioning can now collect `initialAdminEmail` and keep using the existing create → provision route chain.
+- Future tenant-bootstrap work can consume registry metadata instead of adding another ad hoc operator input path.
+- A later custom-domain slice should be routed to Brand once ingress/DNS/TLS ownership is defined.
+### 2026-04-22: Stef — Issue #68 rolling update portal action
+
+**Decided by:** Stef (Frontend Dev)  
+**Date:** 2026-04-22  
+**Type:** Portal UX / lifecycle action
+
+## Decision
+
+For the next mergeable #68 portal slice, the additional lifecycle action should be **rolling update only**:
+
+1. The portal reuses `POST /internal/tenants/:tenantId/provision` with a `version` override instead of inventing a separate upgrade endpoint.
+2. The UI exposes the action only for tenants currently in `ready`, where the control-plane contract already documents the drain-first rolling-update behavior.
+3. The confirmation UX requires an operator reason plus re-entering the target version before the browser sends the request.
+
+## Why
+
+- This is the cleanest lifecycle contract already documented and tested in the control plane.
+- Restricting the button to `ready` tenants keeps the portal honest about what is a supported rolling update versus a murkier reprovision/recovery flow.
+- Re-entering the target version makes the rollout intent explicit without making operators jump through the same destructive safeguards as deprovision.
+
+## Consequences
+
+- The portal stays thin and keeps using the same `/operator-api` write path family.
+- Failed or half-provisioned tenants still need a backend-owned decision before the UI exposes retry/recovery affordances.
+- Chunk should keep the upgrade regression focused in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`, while future custom-domain work still waits on Brand.
+
+### 2026-04-22: Data — Issue #68 rollout failure hardening
+
+**Decided by:** Data (Backend Dev)
+**Date:** 2026-04-22
+**Type:** Control-plane rollout contract hardening
+
+## Context
+
+The operator portal already reuses `POST /internal/tenants/:tenantId/provision` for ready-tenant rolling updates. QA flagged that unsupported targets, concurrent rollouts, and mid-flight rollout failures were still surfacing as generic backend text.
+
+## Decision
+
+Keep the existing provision endpoint as the single control-plane write path, but make versioned rollout failures explicit and stable:
+
+1. `TenantProvisioningService.provisionTenant()` owns ready-tenant rollout guardrails and classifies them as typed failures:
+   - `unsupported_target_version` for same-version or no-op targets
+   - `tenant_rollout_in_progress` for concurrent rollouts
+   - `tenant_rollout_disallowed` for non-ready rollout attempts
+2. `apps/control-plane/src/app.ts` translates those typed rollout failures into a stable HTTP contract for versioned provision requests:
+   - `400 unsupported_target_version`
+   - `409 tenant_rollout_in_progress`
+   - `409 tenant_rollout_disallowed`
+   - `500 tenant_rollout_failed` with operator guidance instead of raw backend text when a rollout breaks mid-flight
+3. First-time provisioning keeps the older generic `500` failure shape; this slice hardens only ready-tenant rolling updates.
+
+## Why
+
+- Operators need errors that tell them what to do next, not raw control-plane exception text.
+- The browser constrains the happy path, but scripts and future callers still hit the canonical provision route directly, so the backend must defend it.
+- Limiting the new contract to versioned rollout requests keeps the slice mergeable without broadening initial-provisioning behavior.
+
+## Consequences
+
+- The operator portal and future automation can key off stable `400`/`409`/`500` rollout codes instead of parsing free-form strings.
+- Chunk's next QA pass can focus on operator-facing failure copy and regression coverage against the explicit contract.
+- Recovery/retry UX can build on these typed failures later without introducing a second rollout endpoint.
+
+### 2026-04-22T18:00:47Z: User directive — k3d:smoke integration
+**By:** FFMikha (via Copilot)
+**What:** The operator portal should be included in `k3d:smoke` so the local k3d rehearsal can configure a tenant through the API/UI path instead of relying on manifests.
+**Why:** User request — captured for team memory
+
+### 2026-04-22: Scope k3d smoke + live overrides as one thin slice
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-22  
+**Status:** Applied via GitHub issue #79
+
+## Decision
+
+Create one Brand-owned child issue under epic #42 that combines:
+
+1. a full-stack k3d smoke workflow; and
+2. one proven component-level live override workflow (`tenant-api` local while `tenant-web` stays on k3d).
+
+Do not split these into separate backlog items yet.
+
+## Rationale
+
+- #63 already covered the baseline k3d bootstrap, so the remaining gap is a missing developer-validation contract rather than raw cluster setup.
+- Full-stack smoke without a live-override story leaves daily iteration slow.
+- A live-override spike without the smoke lane risks inventing a dev-only path that drifts away from the real operator/tenant flow.
+- The operator portal direction from #68 belongs in the smoke path as the preferred future trigger, but the k3d workflow should not block on #68 being finished first.
+
+## Consequences
+
+- #79 is labeled `go:needs-research` because the live-override shape must be proven and unsupported cases documented with evidence.
+- Brand owns the issue because the primary work is platform glue: k3d orchestration, traffic redirection, and workflow scripting/docs.
+- The smoke lane should use the highest-level operator surface available at implementation time (portal if ready, otherwise control-plane API), and should not settle on a raw-manifest-only happy path.
