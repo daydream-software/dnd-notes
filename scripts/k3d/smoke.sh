@@ -151,6 +151,22 @@ get_json_array_length() {
   '
 }
 
+build_tenant_create_payload() {
+  local tenant_id="$1"
+  local tenant_slug="$2"
+  local tenant_image_tag="$3"
+
+  node -e '
+    const [tenantId, tenantSlug, tenantImageTag] = process.argv.slice(1)
+    process.stdout.write(JSON.stringify({
+      id: tenantId,
+      slug: tenantSlug,
+      ownerId: "smoke-owner",
+      version: tenantImageTag,
+    }))
+  ' "$tenant_id" "$tenant_slug" "$tenant_image_tag"
+}
+
 get_keycloak_access_token() {
   local base_url="$1"
   local realm="$2"
@@ -290,7 +306,7 @@ curl -fsS \
   -X POST \
   -H "Authorization: Bearer ${control_plane_bearer_token}" \
   -H 'Content-Type: application/json' \
-  -d "$(printf '{\"id\":\"%s\",\"slug\":\"%s\",\"ownerId\":\"smoke-owner\",\"version\":\"%s\"}' "${tenant_id}" "${tenant_slug}" "${TENANT_IMAGE_TAG}")" \
+  -d "$(build_tenant_create_payload "${tenant_id}" "${tenant_slug}" "${TENANT_IMAGE_TAG}")" \
   "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants" \
   >"${WORK_DIR}/tenant-create.json"
 
