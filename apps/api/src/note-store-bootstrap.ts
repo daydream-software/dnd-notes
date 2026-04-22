@@ -268,7 +268,10 @@ async function ensureRequiredPostgresOwnerAccountKeycloakSub(
       WHERE tc.table_schema = current_schema()
         AND tc.table_name = 'owner_accounts'
         AND tc.constraint_type = 'UNIQUE'
-        AND kcu.column_name = 'keycloak_sub'
+      GROUP BY tc.constraint_name
+      HAVING COUNT(*) = 1
+         AND MIN(kcu.column_name) = 'keycloak_sub'
+         AND MAX(kcu.column_name) = 'keycloak_sub'
       LIMIT 1
     `)
     .get()
@@ -286,7 +289,7 @@ async function ensureRequiredPostgresOwnerAccountKeycloakSub(
   const hasKeycloakSubUniqueIndex =
     /\bcreate unique index\b/i.test(indexDefinition) &&
     /\bon\b.*owner_accounts\b/i.test(indexDefinition) &&
-    /\bkeycloak_sub\b/i.test(indexDefinition)
+    /\(\s*"?(?:public\.)?keycloak_sub"?\s*\)/i.test(indexDefinition)
 
   if (!keycloakSubUniqueConstraint && !hasKeycloakSubUniqueIndex) {
     throw new Error(
