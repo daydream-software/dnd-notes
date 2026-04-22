@@ -3,6 +3,7 @@ import type { Server } from 'node:http'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp } from './app.js'
+import { createControlPlaneAdminAuth } from './keycloak-auth.js'
 import {
   createLiveTenantProvisioningService,
   type TenantProvisioningPort,
@@ -34,9 +35,25 @@ const DATABASE_PATH = rawDatabasePath
     : path.resolve(__dirname, '..', rawDatabasePath)
   : path.join(__dirname, '../data/control-plane.sqlite')
 
+const CONTROL_PLANE_AUTH_MODE =
+  process.env.CONTROL_PLANE_AUTH_MODE === 'keycloak' ? 'keycloak' : 'static'
 const ADMIN_TOKEN = process.env.CONTROL_PLANE_ADMIN_TOKEN
 const ENABLE_TENANT_PROVISIONING =
   process.env.CONTROL_PLANE_ENABLE_PROVISIONING === 'true'
+const CONTROL_PLANE_KEYCLOAK_URL = process.env.CONTROL_PLANE_KEYCLOAK_URL
+const CONTROL_PLANE_KEYCLOAK_REALM = process.env.CONTROL_PLANE_KEYCLOAK_REALM
+const CONTROL_PLANE_KEYCLOAK_CLIENT_ID =
+  process.env.CONTROL_PLANE_KEYCLOAK_CLIENT_ID
+const CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES =
+  process.env.CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES
+    ?.split(',')
+    .map((role) => role.trim())
+    .filter((role) => role.length > 0) ?? []
+const TENANT_AUTH_MODE =
+  process.env.TENANT_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
+const TENANT_KEYCLOAK_URL = process.env.TENANT_KEYCLOAK_URL
+const TENANT_KEYCLOAK_REALM = process.env.TENANT_KEYCLOAK_REALM
+const TENANT_KEYCLOAK_CLIENT_ID = process.env.TENANT_KEYCLOAK_CLIENT_ID
 const TENANT_BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN
 const TENANT_IMAGE_REPOSITORY = process.env.TENANT_IMAGE_REPOSITORY
 const TENANT_DATABASE_ADMIN_URL = process.env.TENANT_DATABASE_ADMIN_URL
@@ -45,9 +62,28 @@ const TENANT_IMAGE_PULL_SECRET = process.env.TENANT_IMAGE_PULL_SECRET
 const TENANT_PUBLIC_SCHEME =
   process.env.TENANT_PUBLIC_SCHEME === 'http' ? 'http' : 'https'
 
-if (!ADMIN_TOKEN) {
+if (CONTROL_PLANE_AUTH_MODE === 'static' && !ADMIN_TOKEN) {
   throw new Error('CONTROL_PLANE_ADMIN_TOKEN is required')
 }
+
+if (
+  CONTROL_PLANE_AUTH_MODE === 'keycloak' &&
+  (!CONTROL_PLANE_KEYCLOAK_URL ||
+    !CONTROL_PLANE_KEYCLOAK_REALM ||
+    !CONTROL_PLANE_KEYCLOAK_CLIENT_ID)
+) {
+  throw new Error(
+    'CONTROL_PLANE_AUTH_MODE=keycloak requires CONTROL_PLANE_KEYCLOAK_URL, CONTROL_PLANE_KEYCLOAK_REALM, and CONTROL_PLANE_KEYCLOAK_CLIENT_ID.',
+  )
+}
+
+const adminAuth = createControlPlaneAdminAuth({
+  mode: CONTROL_PLANE_AUTH_MODE,
+  keycloakUrl: CONTROL_PLANE_KEYCLOAK_URL,
+  keycloakRealm: CONTROL_PLANE_KEYCLOAK_REALM,
+  clientId: CONTROL_PLANE_KEYCLOAK_CLIENT_ID,
+  requiredRoles: CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES,
+})
 
 function parsePortSetting(
   name: string,
@@ -113,6 +149,15 @@ if (ENABLE_TENANT_PROVISIONING) {
     )
   }
 
+  if (
+    TENANT_AUTH_MODE === 'keycloak' &&
+    (!TENANT_KEYCLOAK_URL || !TENANT_KEYCLOAK_REALM || !TENANT_KEYCLOAK_CLIENT_ID)
+  ) {
+    throw new Error(
+      'Provisioning with TENANT_AUTH_MODE=keycloak requires TENANT_KEYCLOAK_URL, TENANT_KEYCLOAK_REALM, and TENANT_KEYCLOAK_CLIENT_ID.',
+    )
+  }
+
   const tenantAppPort = parsePortSetting(
     'TENANT_APP_PORT',
     process.env.TENANT_APP_PORT,
@@ -130,6 +175,15 @@ if (ENABLE_TENANT_PROVISIONING) {
     imageRepository: TENANT_IMAGE_REPOSITORY,
     databaseAdminUrl: TENANT_DATABASE_ADMIN_URL,
     databaseRuntimeUrl: TENANT_DATABASE_RUNTIME_URL,
+    tenantRuntimeAuth:
+      TENANT_AUTH_MODE === 'keycloak'
+        ? {
+            mode: 'keycloak',
+            keycloakUrl: TENANT_KEYCLOAK_URL,
+            keycloakRealm: TENANT_KEYCLOAK_REALM,
+            keycloakClientId: TENANT_KEYCLOAK_CLIENT_ID,
+          }
+        : { mode: 'local' },
     imagePullSecretName: TENANT_IMAGE_PULL_SECRET,
     publicScheme: TENANT_PUBLIC_SCHEME,
     tenantPort: tenantAppPort,
@@ -140,6 +194,7 @@ if (ENABLE_TENANT_PROVISIONING) {
 const app = createApp({
   tenantRegistry,
   adminToken: ADMIN_TOKEN,
+  adminAuth,
   tenantProvisioningService,
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000

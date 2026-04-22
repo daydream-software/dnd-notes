@@ -33,6 +33,24 @@ data:
           ]
         },
         {
+          "username": "ops@example.com",
+          "email": "ops@example.com",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Ops",
+          "lastName": "User",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "password",
+              "temporary": false
+            }
+          ],
+          "clientRoles": {
+            "dnd-notes-control-plane": ["control-plane-workforce"]
+          }
+        },
+        {
           "username": "site-admin@example.com",
           "email": "site-admin@example.com",
           "enabled": true,
@@ -47,7 +65,7 @@ data:
             }
           ],
           "clientRoles": {
-            "dnd-notes-control-plane": ["admin"]
+            "dnd-notes-control-plane": ["control-plane-admin", "control-plane-workforce"]
           }
         }
       ],
@@ -55,35 +73,37 @@ data:
         {
           "clientId": "dnd-notes-tenant-app",
           "enabled": true,
-          "publicClient": false,
+          "publicClient": true,
           "standardFlowEnabled": true,
-          "bearerOnlyClient": false,
+          "bearerOnly": false,
           "implicitFlowEnabled": false,
           "directAccessGrantsEnabled": true,
           "redirectUris": [
-            "http://tenant-*.127.0.0.1.nip.io:8080/*",
-            "http://tenant-*.127.0.0.1.nip.io:8080",
+            "http://*.127.0.0.1.nip.io/*",
             "http://localhost:5173/*",
             "http://localhost:3000/*"
           ],
-          "secret": "dnd-notes-tenant-app-secret-k3d-dev-only",
-          "attributes": {
-            "client.secret.rotated.on": "2025-04-01T00:00:00.000Z"
-          }
+          "webOrigins": [
+            "http://*.127.0.0.1.nip.io",
+            "http://localhost:5173",
+            "http://localhost:3000"
+          ]
         },
         {
           "clientId": "dnd-notes-control-plane",
           "enabled": true,
-          "publicClient": false,
+          "publicClient": true,
           "standardFlowEnabled": false,
-          "bearerOnlyClient": false,
+          "bearerOnly": false,
           "implicitFlowEnabled": false,
-          "serviceAccountsEnabled": true,
-          "secret": "dnd-notes-control-plane-secret-k3d-dev-only",
+          "directAccessGrantsEnabled": true,
           "roles": {
             "client": [
               {
-                "name": "admin"
+                "name": "control-plane-admin"
+              },
+              {
+                "name": "control-plane-workforce"
               }
             ]
           }

@@ -118,6 +118,7 @@ interface TenantProvisioningServiceOptions {
   tenantRegistry: TenantRegistry
   infrastructureManager: TenantInfrastructureManager
   databaseManager: TenantDatabaseManager
+  tenantRuntimeAuth?: TenantRuntimeAuthConfig
   baseDomain: string
   imageRepository: string
   imagePullSecretName?: string
@@ -130,6 +131,7 @@ interface BuildTenantInfrastructureBundleOptions {
   tenant: Tenant
   subdomain: string
   database: TenantDatabase
+  tenantRuntimeAuth?: TenantRuntimeAuthConfig
   baseDomain: string
   imageRepository: string
   imagePullSecretName?: string
@@ -142,6 +144,13 @@ export class TenantProvisioningValidationError extends Error {
     super(message)
     this.name = 'TenantProvisioningValidationError'
   }
+}
+
+interface TenantRuntimeAuthConfig {
+  mode: 'local' | 'keycloak'
+  keycloakClientId?: string
+  keycloakRealm?: string
+  keycloakUrl?: string
 }
 
 function normalizeTenantVersionOverride(version?: string): string | undefined {
@@ -170,6 +179,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly tenantRegistry: TenantRegistry
   private readonly infrastructureManager: TenantInfrastructureManager
   private readonly databaseManager: TenantDatabaseManager
+  private readonly tenantRuntimeAuth: TenantRuntimeAuthConfig
   private readonly baseDomain: string
   private readonly imageRepository: string
   private readonly imagePullSecretName?: string
@@ -181,6 +191,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.tenantRegistry = options.tenantRegistry
     this.infrastructureManager = options.infrastructureManager
     this.databaseManager = options.databaseManager
+    this.tenantRuntimeAuth = options.tenantRuntimeAuth ?? { mode: 'local' }
     this.baseDomain = options.baseDomain
     this.imageRepository = options.imageRepository
     this.imagePullSecretName = options.imagePullSecretName
@@ -263,6 +274,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         tenant: this.getExistingTenant(refreshedTenant.id),
         subdomain,
         database,
+        tenantRuntimeAuth: this.tenantRuntimeAuth,
         baseDomain: this.baseDomain,
         imageRepository: this.imageRepository,
         imagePullSecretName: this.imagePullSecretName,
@@ -735,6 +747,7 @@ export function createLiveTenantProvisioningService(params: {
   imageRepository: string
   databaseAdminUrl: string
   databaseRuntimeUrl?: string
+  tenantRuntimeAuth?: TenantRuntimeAuthConfig
   imagePullSecretName?: string
   publicScheme?: 'http' | 'https'
   tenantPort?: number
@@ -747,6 +760,7 @@ export function createLiveTenantProvisioningService(params: {
       params.databaseAdminUrl,
       params.databaseRuntimeUrl,
     ),
+    tenantRuntimeAuth: params.tenantRuntimeAuth,
     baseDomain: params.baseDomain,
     imageRepository: params.imageRepository,
     imagePullSecretName: params.imagePullSecretName,
@@ -768,6 +782,35 @@ export function buildTenantInfrastructureBundle(
   const runtimeUrl = `${options.publicScheme}://${resources.hostname}`
   const namespaceLabels = buildTenantLabels(options.tenant, options.subdomain)
 
+  const configMapData: Record<string, string> = {
+    PORT: String(options.tenantPort),
+    SERVE_WEB: 'true',
+    PUBLIC_WEB_URL: runtimeUrl,
+    ALLOWED_ORIGINS: runtimeUrl,
+    NOTES_DB_PATH: `${defaultTenantStorageMountPath}/dnd-notes.sqlite`,
+  }
+  const secretData: Record<string, string> = {
+    DATABASE_URL: encodeSecretValue(options.database.runtimeConnectionString),
+  }
+
+  if (options.tenantRuntimeAuth?.mode === 'keycloak') {
+    if (
+      !options.tenantRuntimeAuth.keycloakUrl ||
+      !options.tenantRuntimeAuth.keycloakRealm ||
+      !options.tenantRuntimeAuth.keycloakClientId
+    ) {
+      throw new TenantProvisioningValidationError(
+        'Keycloak tenant runtime auth requires KEYCLOAK_URL, KEYCLOAK_REALM, and KEYCLOAK_TENANT_CLIENT_ID.',
+      )
+    }
+
+    configMapData.AUTH_MODE = 'keycloak'
+    configMapData.KEYCLOAK_URL = options.tenantRuntimeAuth.keycloakUrl
+    configMapData.KEYCLOAK_REALM = options.tenantRuntimeAuth.keycloakRealm
+    configMapData.KEYCLOAK_TENANT_CLIENT_ID =
+      options.tenantRuntimeAuth.keycloakClientId
+  }
+
   return {
     resources,
     namespace: {
@@ -786,13 +829,7 @@ export function buildTenantInfrastructureBundle(
         namespace: resources.namespace,
         labels: namespaceLabels,
       },
-      data: {
-        PORT: String(options.tenantPort),
-        SERVE_WEB: 'true',
-        PUBLIC_WEB_URL: runtimeUrl,
-        ALLOWED_ORIGINS: runtimeUrl,
-        NOTES_DB_PATH: `${defaultTenantStorageMountPath}/dnd-notes.sqlite`,
-      },
+      data: configMapData,
     },
     secret: {
       apiVersion: 'v1',
@@ -803,9 +840,7 @@ export function buildTenantInfrastructureBundle(
         labels: namespaceLabels,
       },
       type: 'Opaque',
-      data: {
-        DATABASE_URL: encodeSecretValue(options.database.runtimeConnectionString),
-      },
+      data: secretData,
     },
     persistentVolumeClaim: {
       apiVersion: 'v1',

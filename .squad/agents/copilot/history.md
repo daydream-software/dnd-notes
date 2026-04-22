@@ -14,6 +14,10 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 📌 Issue #76 picked up (2026-04-22T00:49:24Z): Routing to the `squad:data` lane for runtime Keycloak auth integration across tenant apps and the control-plane. Scope includes tenant JWT validation, control-plane admin JWT validation, Keycloak env/config wiring for k3d + hosted setups, and docs/tests for the runtime flow. This is auth-sensitive work and should receive squad review before merge. — Data (Agent)
 
+📌 Issue #76 approach locked (2026-04-22T01:20:00Z): Chosen implementation shape is explicit runtime config, not build-time magic: tenant apps will expose `/api/auth/config`, validate Keycloak JWTs against configured issuer/JWKS when `AUTH_MODE=keycloak`, reconcile identities onto local `owner_accounts.keycloak_sub`, and keep guest/share-link authorization local. Control-plane auth will mirror that with its own `CONTROL_PLANE_AUTH_MODE=keycloak` workforce/admin JWT path while retaining the static bearer fallback for non-Keycloak environments. — Data (Agent)
+
+📌 Issue #76 implementation validated (2026-04-22T02:05:00Z): API, control-plane, web, and platform validation all passed after the runtime Keycloak slice landed. k3d smoke was updated to exercise live Keycloak tokens for both control-plane and tenant runtime auth, but this environment still blocks the full live rehearsal because the existing `dnd-notes` k3d cluster never becomes API-reachable. — Data (Agent)
+
 
 📌 Issue #69 supported (2026-04-21T19:55:31Z): Data implemented per-tenant Postgres credentials with control-plane schema pre-seeding and safe deprovision cleanup. Copilot co-authored commit 695c0f9 on squad/69-per-tenant-postgres-credentials. Validation passed (lint/test/build/platform:validate). — Data (Agent)
 

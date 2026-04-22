@@ -34,7 +34,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -51,7 +51,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -79,7 +79,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -107,7 +107,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<SessionsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -135,7 +135,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -184,7 +184,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignMembershipsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -214,7 +214,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<MembershipConsolidationResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -335,7 +335,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignShareLinksResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -365,7 +365,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignShareLinkCreateResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -418,7 +418,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<CampaignShareLinkRevealResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -470,7 +470,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
       response: Response<undefined | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return

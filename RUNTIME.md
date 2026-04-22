@@ -60,7 +60,7 @@ None. The application will start with defaults.
 
 ### Keycloak Runtime Authentication
 
-When `AUTH_MODE=keycloak`, tenant apps and the control-plane validate Keycloak JWTs for authenticated requests. Guest/share-link flows remain local and anonymous.
+When `AUTH_MODE=keycloak`, the tenant runtime validates Keycloak JWTs for authenticated requests. Guest/share-link flows remain local and anonymous. The control-plane uses its own prefixed variables (`CONTROL_PLANE_AUTH_MODE`, `CONTROL_PLANE_KEYCLOAK_*`, `TENANT_AUTH_MODE`, `TENANT_KEYCLOAK_*`) to keep admin auth and tenant-runtime injection separate.
 
 - **`AUTH_MODE`** (default: `local`)  
   Authentication provider mode. Options: `local` (legacy email/password + sessions) or `keycloak` (OIDC/JWT).  
@@ -79,17 +79,8 @@ When `AUTH_MODE=keycloak`, tenant apps and the control-plane validate Keycloak J
   Keycloak client ID for tenant app OIDC flows.  
   Example: `dnd-notes-tenant-app`
 
-- **`KEYCLOAK_TENANT_CLIENT_SECRET`** (required in Kubernetes Secret when `AUTH_MODE=keycloak`)  
-  Keycloak client secret for tenant app JWT validation on the backend.  
-  **Security:** Store in Kubernetes Secret, never in ConfigMap or logs.
-
-- **`KEYCLOAK_CONTROL_PLANE_CLIENT_ID`** (required when `AUTH_MODE=keycloak` for control-plane)  
-  Keycloak client ID for control-plane admin API OAuth/service-account flows.  
-  Example: `dnd-notes-control-plane`
-
-- **`KEYCLOAK_CONTROL_PLANE_CLIENT_SECRET`** (required in Kubernetes Secret when `AUTH_MODE=keycloak`)  
-  Keycloak client secret for control-plane admin JWT validation.  
-  **Security:** Store in Kubernetes Secret, never in ConfigMap or logs.
+Tenant runtimes validate JWTs through the realm JWKS endpoint, so they do **not**
+need a tenant client secret in the pod environment.
 
 #### Runtime Auth Flow (Keycloak mode)
 
@@ -97,19 +88,15 @@ When `AUTH_MODE=keycloak`, tenant apps and the control-plane validate Keycloak J
 1. User logs in via Keycloak login form (redirects to tenant origin with auth code)
 2. Tenant app exchanges code for ID token + access token
 3. Frontend stores tokens and sends access token in API request `Authorization: Bearer <token>`
-4. Backend (`requireAuthenticatedAccount`) validates JWT signature using `KEYCLOAK_TENANT_CLIENT_SECRET` and realm public key
+4. Backend (`requireAuthenticatedAccount`) validates JWT signature against the realm JWKS/public key
 5. If valid, extracts user identity (`keycloak_sub`, email) and looks up owner account
 6. Guest/share-link flows bypass auth and remain anonymous (no JWT required)
 
-**Control-plane admin API:**
-1. Admin client obtains bearer token via Keycloak service-account flow using `KEYCLOAK_CONTROL_PLANE_CLIENT_ID` + secret
-2. Control-plane endpoint (`createAdminAuthMiddleware`) validates bearer token signature
-3. If valid and admin/workforce role present, allows operation
-4. If token invalid or role missing, returns 401/403
+**Control-plane admin API:** see `platform/control-plane/README.md` for the prefixed `CONTROL_PLANE_*` and `TENANT_*` environment contract that the control-plane process uses.
 
 #### Local Auth Flow (Legacy mode, `AUTH_MODE=local`)
 
-When `AUTH_MODE=local` or `KEYCLOAK_URL` is unset:
+When `AUTH_MODE=local`:
 - Tenant app login uses traditional `/api/auth/register` and `/api/auth/login` endpoints
 - Session tokens (database-backed) are used instead of JWTs
 - Guest/share-link flows remain unchanged

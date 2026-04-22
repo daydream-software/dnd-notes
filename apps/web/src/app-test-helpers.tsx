@@ -12,6 +12,7 @@ export const owner = {
   email: 'chunk@example.com',
   displayName: 'Chunk the Tester',
   isSiteAdmin: false,
+  keycloakSub: null,
   createdAt: '2026-04-13T00:00:00.000Z',
   updatedAt: '2026-04-13T00:00:00.000Z',
 }
@@ -154,6 +155,10 @@ export function setupAppFetchMock() {
 
     if (path === '/api/auth/register' && method === 'POST') {
       return createJsonResponse({ owner: activeOwner, token: 'smoke-token' }, 201)
+    }
+
+    if (path === '/api/auth/config' && method === 'GET') {
+      return createJsonResponse({ mode: 'local', keycloak: null })
     }
 
     if (path === '/api/auth/session' && method === 'GET') {

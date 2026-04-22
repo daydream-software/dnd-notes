@@ -22,9 +22,9 @@ resources the control plane provisions.
 
 ## Admin Authentication
 
-The control-plane admin API can authenticate in two modes:
+The control-plane admin API can authenticate in two explicit runtime modes:
 
-### Static Token Mode (`AUTH_MODE=local`)
+### Static Token Mode (`CONTROL_PLANE_AUTH_MODE=static`)
 
 Uses `CONTROL_PLANE_ADMIN_TOKEN` from the Secret. The token is a hardcoded bearer token.
 
@@ -33,16 +33,35 @@ curl -H "Authorization: Bearer $CONTROL_PLANE_ADMIN_TOKEN" \
   http://localhost:3101/internal/tenants
 ```
 
-### Keycloak Mode (`AUTH_MODE=keycloak`)
+### Keycloak Mode (`CONTROL_PLANE_AUTH_MODE=keycloak`)
 
-The control-plane obtains a bearer token from Keycloak using the `dnd-notes-control-plane` service-account credentials, then includes it in admin API requests.
+The control-plane validates workforce/admin bearer JWTs from Keycloak.
 
-- **Client ID:** `KEYCLOAK_CONTROL_PLANE_CLIENT_ID` (e.g., `dnd-notes-control-plane`)
-- **Client Secret:** `KEYCLOAK_CONTROL_PLANE_CLIENT_SECRET` (from Kubernetes Secret)
-- **Token endpoint:** `{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/token`
-- **Grant type:** `client_credentials`
+- **Keycloak URL:** `CONTROL_PLANE_KEYCLOAK_URL`
+- **Realm:** `CONTROL_PLANE_KEYCLOAK_REALM`
+- **Client ID:** `CONTROL_PLANE_KEYCLOAK_CLIENT_ID` (for example `dnd-notes-control-plane`)
+- **Accepted roles:** `CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES` (defaults to `control-plane-admin,control-plane-workforce`)
+- **Token endpoint:** `{CONTROL_PLANE_KEYCLOAK_URL}/realms/{CONTROL_PLANE_KEYCLOAK_REALM}/protocol/openid-connect/token`
+- **Local k3d flow:** password grant against seeded dev users for smoke/testing only
 
-The control-plane obtains the token automatically and validates incoming bearer tokens against the public key from Keycloak.
+Example operator token fetch:
+
+```bash
+CONTROL_PLANE_TOKEN="$(curl -fsS \
+  -X POST \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=password' \
+  --data-urlencode 'client_id=dnd-notes-control-plane' \
+  --data-urlencode 'username=site-admin@example.com' \
+  --data-urlencode 'password=password' \
+  http://keycloak.127.0.0.1.nip.io:8080/realms/dnd-notes-dev/protocol/openid-connect/token \
+  | jq -r '.access_token')"
+
+curl -H "Authorization: Bearer ${CONTROL_PLANE_TOKEN}" \
+  http://localhost:3101/internal/tenants
+```
+
+The control-plane service validates incoming bearer tokens against Keycloak JWKS. Tenant runtime provisioning uses the separate `TENANT_AUTH_MODE` / `TENANT_KEYCLOAK_*` variables when it needs to inject Keycloak config into tenant pods.
 
 ## Local k3d rehearsal
 
@@ -55,8 +74,6 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
   --from-literal=CONTROL_PLANE_ADMIN_TOKEN='replace-with-local-token' \
   --from-literal=TENANT_DATABASE_ADMIN_URL='postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres' \
   --from-literal=TENANT_DATABASE_RUNTIME_URL='postgresql://runtime-template:placeholder@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable' \
-  --from-literal=KEYCLOAK_TENANT_CLIENT_SECRET='dnd-notes-tenant-app-secret-k3d-dev-only' \
-  --from-literal=KEYCLOAK_CONTROL_PLANE_CLIENT_SECRET='dnd-notes-control-plane-secret-k3d-dev-only' \
   --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n dnd-notes-platform rollout status deployment/dnd-notes-control-plane
 kubectl -n dnd-notes-platform port-forward svc/dnd-notes-control-plane 3101:3001
@@ -71,10 +88,14 @@ their own generated runtime role, password, and database name in the tenant pod
 Secret.
 
 The k3d overlay ConfigMap automatically sets:
-- `AUTH_MODE=keycloak`
-- `KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
-- `KEYCLOAK_REALM=dnd-notes-dev`
-- `KEYCLOAK_CONTROL_PLANE_CLIENT_ID=dnd-notes-control-plane`
+- `CONTROL_PLANE_AUTH_MODE=keycloak`
+- `CONTROL_PLANE_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-dev`
+- `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
+- `TENANT_AUTH_MODE=keycloak`
+- `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
+- `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
 
 ## Hosted reference overlay
 
@@ -85,15 +106,15 @@ The hosted reference overlay is deliberately boring:
 - placeholder control-plane image tag via Kustomize `images`
 - placeholder admin Postgres URL plus runtime-template URL that operators must replace
 - placeholder bearer token values that must be replaced before apply
-- placeholder Keycloak secrets that must be replaced if `AUTH_MODE=keycloak`
+- placeholder Keycloak URL/realm/client env values for both control-plane and tenant runtime auth
 
 Use it as the starting point for a managed-cluster rollout after image promotion.
 
 For Keycloak integration in hosted environments:
-1. Set `KEYCLOAK_URL` to your managed Keycloak instance (e.g., `https://auth.example.com`)
-2. Create client `dnd-notes-control-plane` in your Keycloak realm with service-account enabled
-3. Update the Secret with the real client secret
-4. Ensure `KEYCLOAK_REALM` matches your realm name (e.g., `dnd-notes-prod`)
+1. Set `CONTROL_PLANE_KEYCLOAK_URL` / `TENANT_KEYCLOAK_URL` to your managed Keycloak instance (for example `https://auth.example.com`)
+2. Configure a workforce/admin client (`dnd-notes-control-plane`) plus a tenant SPA client (`dnd-notes-tenant-app`) with the hosted redirect/web origins you need.
+3. Ensure `CONTROL_PLANE_KEYCLOAK_REALM` / `TENANT_KEYCLOAK_REALM` match the intended workforce and tenant realms.
+4. Keep `CONTROL_PLANE_ADMIN_TOKEN` populated only if you intentionally want the static fallback mode available.
 
 ## Validation
 
@@ -103,4 +124,3 @@ npm run platform:validate
 
 That command renders both overlays via `kubectl kustomize`, which is the same
 manifest validation wired into GitHub Actions.
-

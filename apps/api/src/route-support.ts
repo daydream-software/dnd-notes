@@ -1,4 +1,8 @@
 import type { Request, Response } from 'express'
+import {
+  KeycloakTokenValidationError,
+  type TenantRuntimeAuth,
+} from './keycloak-auth.js'
 import type { NoteStore } from './note-store.js'
 import type {
   ActivityCollaborator,
@@ -49,6 +53,7 @@ export interface AppRouteContext {
   getNoteStore: () => NoteStore
   setNoteStore: (noteStore: NoteStore) => void
   publicWebUrl: string | null
+  runtimeAuth: TenantRuntimeAuth
   restoreNoteStore?: (sourcePath: string) => Promise<NoteStore>
   isRateLimited: (
     request: Request,
@@ -290,15 +295,37 @@ export async function requireAuthenticatedAccount(
   noteStore: NoteStore,
   request: Request,
   response: Response<ErrorResponse>,
+  runtimeAuth: TenantRuntimeAuth,
 ) {
-  // Today this returns the local OwnerAccount for the authenticated owner.
-  // Authorization (campaign_memberships, is_site_admin) remains local, and this
-  // boundary can be narrowed to an AuthenticatedUser shape in a future phase.
   const token = parseAuthorizationToken(request)
 
   if (!token) {
     response.status(401).json({ error: 'Owner authentication is required.' })
     return null
+  }
+
+  if (runtimeAuth.mode === 'keycloak') {
+    try {
+      const identity = await runtimeAuth.authenticateBearerToken(token)
+      return await noteStore.findOrCreateOwnerByKeycloakIdentity(identity)
+    } catch (error) {
+      if (error instanceof KeycloakTokenValidationError) {
+        response.status(error.statusCode).json({ error: error.message })
+        return null
+      }
+
+      if (
+        error instanceof Error &&
+        error.message.includes('already linked to a different Keycloak subject')
+      ) {
+        response.status(409).json({
+          error: 'This owner account is already linked to a different Keycloak identity.',
+        })
+        return null
+      }
+
+      throw error
+    }
   }
 
   const owner = await noteStore.getOwnerBySessionToken(token)
@@ -315,8 +342,14 @@ export async function requireSiteAdmin(
   noteStore: NoteStore,
   request: Request,
   response: Response<ErrorResponse>,
+  runtimeAuth: TenantRuntimeAuth,
 ) {
-  const owner = await requireAuthenticatedAccount(noteStore, request, response)
+  const owner = await requireAuthenticatedAccount(
+    noteStore,
+    request,
+    response,
+    runtimeAuth,
+  )
 
   if (!owner) {
     return null

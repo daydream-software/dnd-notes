@@ -21,10 +21,10 @@ describe('App owner auth and bootstrap', () => {
     cleanupAppTestHarness()
   })
 
-  it('renders owner onboarding before authentication', () => {
+  it('renders owner onboarding before authentication', async () => {
     renderApp()
 
-    expect(screen.getByLabelText('Owner display name')).toBeTruthy()
+    expect(await screen.findByLabelText('Owner display name')).toBeTruthy()
     expect(screen.getByLabelText('Email')).toBeTruthy()
     expect(screen.getByLabelText('Password')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Create owner account' })).toBeTruthy()

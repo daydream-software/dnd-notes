@@ -112,8 +112,8 @@ npm run k3d:smoke
 - `k3d:bootstrap` creates the local cluster shape and deploys ingress-nginx,
   platform Postgres, and seeded Keycloak.
 - `k3d:smoke` builds/imports the tenant image, runs the control plane locally
-  against the live k3d kube context, provisions a tenant, and verifies tenant
-  readiness.
+  against the live k3d kube context, provisions a tenant, and verifies both
+  tenant readiness and the live Keycloak-backed control-plane/tenant auth path.
 
 Issue `#43` also commits the in-cluster control-plane packaging lane without
 changing that fast smoke path:
@@ -229,6 +229,7 @@ Postgres database. Direct admin backup downloads remain `.sqlite` snapshots.
 - `GET /api/admin/overview`
 - `GET /api/admin/backup`
 - `POST /api/admin/restore`
+- `GET /api/auth/config`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
 - `GET /api/auth/session`
@@ -262,10 +263,11 @@ Postgres database. Direct admin backup downloads remain `.sqlite` snapshots.
 - `DELETE /api/shared/:shareToken/notes/:noteId`
 
 All `/api/campaigns`, `/api/overview`, and `/api/notes` routes require an
-`Authorization: Bearer <token>` header from the real-account auth endpoints.
-Any linked campaign membership can open the authenticated workspace, while
-campaign management routes such as settings, memberships, and share links stay
-owner-only.
+`Authorization: Bearer <token>` header. In local mode that token comes from the
+real-account auth endpoints; in Keycloak mode the web app first reads
+`GET /api/auth/config` and then supplies a Keycloak access token instead. Any
+linked campaign membership can open the authenticated workspace, while campaign
+management routes such as settings, memberships, and share links stay owner-only.
 
 ## API Security
 
@@ -287,7 +289,7 @@ The API implements several security hardening measures:
   shared campaigns (e.g., `'self' https://app.roll20.net`), enabling controlled
   embedding while maintaining clickjacking protection everywhere else.
 
-- **Authentication:** Owner routes use Bearer tokens in `Authorization` headers. Guest
+- **Authentication:** Owner routes use Bearer tokens in `Authorization` headers. `GET /api/auth/config` advertises whether the runtime expects local owner sessions or Keycloak JWTs. Guest
   routes use guest tokens in `X-Guest-Token` headers. No cookies are used for auth.
 
 `GET /api/admin/accounts`, `GET /api/admin/overview`, `GET /api/admin/backup`,
@@ -437,7 +439,8 @@ actor.
 ## What works now
 
 - notes persist across API restarts
-- owners can register, sign in, and resume an existing session
+- owners can register, sign in, and resume an existing session in local auth mode
+- tenant runtimes can switch to Keycloak-backed bearer auth without changing local campaign authorization or anonymous share-link behavior
 - owners can create campaigns, edit campaign settings, view memberships, and manage shared links
 - owners can optionally seed a new campaign with starter notes for NPCs, factions, locations, and sessions
 - guests can open a shared campaign route, choose a display name, and re-enter with the saved guest token

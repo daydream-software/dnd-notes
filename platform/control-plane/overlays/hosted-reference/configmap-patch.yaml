@@ -6,10 +6,12 @@ metadata:
 data:
   TENANT_BASE_DOMAIN: tenants.example.com
   TENANT_PUBLIC_SCHEME: https
-  # Keycloak runtime auth configuration (managed/hosted)
-  KEYCLOAK_URL: https://auth.example.com
-  KEYCLOAK_REALM: dnd-notes-prod
-  KEYCLOAK_TENANT_CLIENT_ID: dnd-notes-tenant-app
-  KEYCLOAK_CONTROL_PLANE_CLIENT_ID: dnd-notes-control-plane
-  # Auth mode: local (legacy email/password) or keycloak (OIDC/JWT)
-  AUTH_MODE: keycloak
+  CONTROL_PLANE_AUTH_MODE: keycloak
+  CONTROL_PLANE_KEYCLOAK_URL: https://auth.example.com
+  CONTROL_PLANE_KEYCLOAK_REALM: dnd-notes-workforce
+  CONTROL_PLANE_KEYCLOAK_CLIENT_ID: dnd-notes-control-plane
+  CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES: control-plane-admin,control-plane-workforce
+  TENANT_AUTH_MODE: keycloak
+  TENANT_KEYCLOAK_URL: https://auth.example.com
+  TENANT_KEYCLOAK_REALM: dnd-notes
+  TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app

@@ -64,7 +64,11 @@ class FakeDatabaseManager {
 class FakeInfrastructureManager {
   bundles: Array<{
     resources: TenantProvisioningResources
+    authMode: string | undefined
     deploymentReadinessPath: string | undefined
+    keycloakClientId: string | undefined
+    keycloakRealm: string | undefined
+    keycloakUrl: string | undefined
     deploymentStrategyType: string | undefined
     maxSurge: number | string | undefined
     maxUnavailable: number | string | undefined
@@ -77,6 +81,14 @@ class FakeInfrastructureManager {
 
   async applyTenantResources(bundle: {
     resources: TenantProvisioningResources
+    configMap?: {
+      data?: {
+        AUTH_MODE?: string
+        KEYCLOAK_REALM?: string
+        KEYCLOAK_TENANT_CLIENT_ID?: string
+        KEYCLOAK_URL?: string
+      }
+    }
     secret?: {
       data?: {
         DATABASE_URL?: string
@@ -108,9 +120,13 @@ class FakeInfrastructureManager {
   }) {
     this.bundles.push({
       resources: bundle.resources,
+      authMode: bundle.configMap?.data?.AUTH_MODE,
       deploymentReadinessPath:
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.readinessProbe
           ?.httpGet?.path,
+      keycloakClientId: bundle.configMap?.data?.KEYCLOAK_TENANT_CLIENT_ID,
+      keycloakRealm: bundle.configMap?.data?.KEYCLOAK_REALM,
+      keycloakUrl: bundle.configMap?.data?.KEYCLOAK_URL,
       deploymentStrategyType: bundle.deployment.spec?.strategy?.type,
       maxSurge: bundle.deployment.spec?.strategy?.rollingUpdate?.maxSurge,
       maxUnavailable:
@@ -224,6 +240,58 @@ describe('TenantProvisioningService', () => {
       assert.equal(
         databaseManager.ensureCalls[0]?.requireExistingRuntimeConnectionString,
         false,
+      )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
+  it('injects tenant Keycloak runtime auth settings into provisioned tenant resources', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        tenantRuntimeAuth: {
+          mode: 'keycloak',
+          keycloakUrl: 'https://auth.example.com',
+          keycloakRealm: 'dnd-notes-prod',
+          keycloakClientId: 'dnd-notes-tenant-app',
+        },
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(infrastructureManager.bundles.length, 1)
+      assert.equal(infrastructureManager.bundles[0].authMode, 'keycloak')
+      assert.equal(
+        infrastructureManager.bundles[0].keycloakUrl,
+        'https://auth.example.com',
+      )
+      assert.equal(
+        infrastructureManager.bundles[0].keycloakRealm,
+        'dnd-notes-prod',
+      )
+      assert.equal(
+        infrastructureManager.bundles[0].keycloakClientId,
+        'dnd-notes-tenant-app',
       )
     } finally {
       await provisioningService.close()
