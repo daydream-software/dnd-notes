@@ -5216,3 +5216,61 @@ When Keycloak mode is active but the runtime client is unavailable, keep the exi
 - Frontend Keycloak entry points should explicitly guard missing runtime clients instead of optional-chaining user actions.
 - Regression tests for auth CTAs should assert the user-visible error state whenever a runtime dependency can disappear after bootstrap.
 
+
+---
+
+### 2026-04-22: Brand — JSON payload construction in smoke scripts
+
+## Context
+
+Contributor-facing shell smoke scripts that already depend on Node often need to construct JSON request bodies for API calls. Manual `printf`-style string escaping with shell quoting is brittle and error-prone during code review.
+
+## Decision
+
+For shell smoke scripts that already require Node, generate JSON request bodies with `node -e 'JSON.stringify(...)'` instead of hand-escaped `printf` format strings.
+
+## Why
+
+- Shell-escaped JSON is easy to misread in review and brittle when fields or values evolve.
+- The k3d smoke lane already requires Node, so using `JSON.stringify` adds no new runtime dependency.
+- The resulting payload is unambiguous valid JSON before it reaches `curl`.
+
+## Impact
+
+- Smoke payloads become self-validating through JSON.stringify semantics.
+- Future field/value additions won't require shell-escaping review cycles.
+
+## Initial Use
+
+- `scripts/k3d/smoke.sh` tenant create request body for PR #77 review follow-up.
+
+---
+
+### 2026-04-22: Chunk — QA gate for shell JSON payload fixes
+
+## Context
+
+When shell scripts construct JSON payloads (e.g., Brand's decision above), the automated gates should verify the emitted JSON is valid before live integration testing begins.
+
+## Decision
+
+For shell-script JSON payload fixes, use a two-layer gate:
+1. Focused automated regression that executes the real payload builder and parses the emitted JSON.
+2. Live smoke rerun when the environment can actually boot k3d.
+
+## Why
+
+- The escaping bug in `scripts/k3d/smoke.sh` is cheaper and clearer to catch by validating the exact request body before the cluster spin-up work starts.
+- A direct payload regression prevents false confidence from code review alone, especially when shell quoting looks correct at a glance.
+- The live `k3d:smoke` run still matters afterward because it proves the control-plane API accepts the payload in the real tenant-create path.
+
+## Impact
+
+- Regression coverage for payload construction lives separately from live-environment validation.
+- CI gates can catch malformed JSON immediately without waiting for k3d bootstrap.
+
+## Initial Use
+
+- `apps/control-plane/test/k3d-smoke-payload.test.ts` (new test)
+- `scripts/k3d/smoke.sh` (payload construction with regression gate)
+
