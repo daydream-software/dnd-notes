@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 issue #76 ready for PR handoff (2026-04-22T02:59:10Z): User reran `npm run k3d:smoke` after the final smoke-script JWKS fix and the lane finished green end-to-end (tenant rollout, control-plane Keycloak auth, tenant `/api/auth/session`, tenant `/api/campaigns`). Branch `squad/76-complete-runtime-keycloak-auth-integration` is now review-ready and being pushed for PR creation, with squad review still recommended because the slice is auth-sensitive. — Data (Agent)
+
 📌 k3d smoke launcher wired for tenant JWKS override (2026-04-22T02:47:52Z): The remaining live gap was in `scripts/k3d/smoke.sh` itself: the local control-plane process used for smoke rehearsals was still provisioning tenants without `TENANT_KEYCLOAK_JWKS_URL`. The smoke script now defaults that env to the in-cluster `platform-keycloak` Service and passes it into the local control-plane process, matching the runtime/provisioning changes already landed. — Data (Agent)
 
 📌 k3d tenant JWT validation fixed (2026-04-22T02:28:08Z): The live smoke tenant token was valid, but tenant pods were still trying to fetch JWKS through `http://keycloak.127.0.0.1.nip.io:8080`, which resolves to pod-local loopback in k3d. The runtime now supports a separate `KEYCLOAK_JWKS_URL` override, control-plane provisioning injects `TENANT_KEYCLOAK_JWKS_URL`, and the k3d overlay points tenant pods at the in-cluster `platform-keycloak` Service while keeping the public Keycloak URL for browser auth/config. Also ignored `.k3d-smoke-work/` so preserved smoke artifacts stop showing up as untracked files. — Data (Agent)
