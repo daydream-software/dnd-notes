@@ -5337,7 +5337,7 @@ Issue #68 needs a thin, mergeable operator portal slice that proves browser auth
    - Local development uses the Vite dev proxy in `apps/operator-portal/vite.config.ts`.
    - Deployed environments should reverse-proxy `/operator-api/*` to the control-plane service instead of opening a new CORS surface.
 3. Use the existing public Keycloak client accepted by the control-plane (`dnd-notes-control-plane`) against the workforce/admin realm for operator login.
-4. Keep the first slice read-only: the portal consumes `GET /internal/fleet/status` only. Future create/provision/deprovision UI must call the existing `/internal/tenants`, `/internal/tenants/:tenantId/provision`, and `/internal/tenants/:tenantId/deprovision` endpoints directly.
+4. Keep the first slice read-only: the portal consumes `GET /internal/fleet/status` only. Future create/provision/deprovision UI must call the existing `/internal/tenants`, `/internal/tenants/:tenantId/provision`, and `/internal/tenants/:tenantId/deprovision` endpoints directly. *(This intent was superseded by issue #68, which implements full create/provision/deprovision/rolling-update control surface in the same operator-portal workspace.)*
 
 ## Why
 

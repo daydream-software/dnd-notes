@@ -18,13 +18,6 @@
 
 **Cross-Team Patterns:** Share-link metadata-only listing with owner-only reveal API. Membership guest-token rotation on consolidation. Session/note queries behind resolveAccessibleCampaign() for collaborator access. Shared-membership email-collision handling (keep linked account's persisted email). Tenant Deployment single-replica RollingUpdate with drain-first (maxSurge:0, maxUnavailable:1) + minReadySeconds:5 + gracefulShutdown:30s.
 
----
-
-
-## Core Context
-
-Data initialized as Backend Dev for the initial project squad.
-
 **Major milestones (archived from history April 12–18):** Issue #76 Keycloak integration; Issue #75 PR review hardening; Issue #74 auth-provider abstraction; Issue #73 control-plane health gates; Issue #72 Postgres least-privilege prep; Issue #71 per-tenant credential provisioning; Issue #70 restore safety orchestration; Issues #69, #56, #58 completed (per-tenant Postgres creds, auth-seam, Postgres adapter); Phase 2 sequencing roadmap established (Issue #40 blocker for #56/#69).
 
 **Operational focus:** Contract stability, auth-provider abstraction, per-tenant credential flows, control-plane audit/safety gates, migration orchestration.
