@@ -84,8 +84,19 @@ class FakePostgresDatabase implements NoteStoreDatabase {
         }
 
         if (sql.includes('FROM information_schema.table_constraints')) {
-          return this.options.ownerAccountUniqueColumns?.length === 1 &&
-            this.options.ownerAccountUniqueColumns[0] === 'keycloak_sub'
+          const uniqueColumns = this.options.ownerAccountUniqueColumns ?? []
+          const includesKeycloakSub = uniqueColumns.includes('keycloak_sub')
+          const requiresStandaloneKeycloakSub =
+            sql.includes('HAVING COUNT(*) = 1') &&
+            sql.includes("MIN(kcu.column_name) = 'keycloak_sub'") &&
+            sql.includes("MAX(kcu.column_name) = 'keycloak_sub'")
+
+          if (!includesKeycloakSub) {
+            return undefined
+          }
+
+          return !requiresStandaloneKeycloakSub ||
+            (uniqueColumns.length === 1 && uniqueColumns[0] === 'keycloak_sub')
             ? { constraint_name: 'owner_accounts_keycloak_sub_key' }
             : undefined
         }
