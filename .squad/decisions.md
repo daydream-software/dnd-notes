@@ -5502,3 +5502,30 @@ Keep the existing provision endpoint as the single control-plane write path, but
 **By:** FFMikha (via Copilot)
 **What:** The operator portal should be included in `k3d:smoke` so the local k3d rehearsal can configure a tenant through the API/UI path instead of relying on manifests.
 **Why:** User request — captured for team memory
+
+### 2026-04-22: Scope k3d smoke + live overrides as one thin slice
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-22  
+**Status:** Applied via GitHub issue #79
+
+## Decision
+
+Create one Brand-owned child issue under epic #42 that combines:
+
+1. a full-stack k3d smoke workflow; and
+2. one proven component-level live override workflow (`tenant-api` local while `tenant-web` stays on k3d).
+
+Do not split these into separate backlog items yet.
+
+## Rationale
+
+- #63 already covered the baseline k3d bootstrap, so the remaining gap is a missing developer-validation contract rather than raw cluster setup.
+- Full-stack smoke without a live-override story leaves daily iteration slow.
+- A live-override spike without the smoke lane risks inventing a dev-only path that drifts away from the real operator/tenant flow.
+- The operator portal direction from #68 belongs in the smoke path as the preferred future trigger, but the k3d workflow should not block on #68 being finished first.
+
+## Consequences
+
+- #79 is labeled `go:needs-research` because the live-override shape must be proven and unsupported cases documented with evidence.
+- Brand owns the issue because the primary work is platform glue: k3d orchestration, traffic redirection, and workflow scripting/docs.
+- The smoke lane should use the highest-level operator surface available at implementation time (portal if ready, otherwise control-plane API), and should not settle on a raw-manifest-only happy path.

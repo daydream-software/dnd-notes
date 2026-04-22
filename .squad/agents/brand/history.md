@@ -66,6 +66,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **PR Hygiene for Runtime Squad Artifacts:** `.squad/log/` and `.squad/orchestration-log/` are runtime-state paths already ignored in `.gitignore`, so if a branch accidentally tracks one of those files, fix the PR by deleting only the stray log artifacts and leave durable tracked coordination files alone. Current example: PR #78 cleanup removed `.squad/log/2026-04-22T17:38:00Z-issue68-rollout-failure-hardening.md` and `.squad/orchestration-log/2026-04-22T17:38:00Z-data.md` while preserving `.squad/identity/now.md` and inbox directives.
 
+- **CI Duplicate-Check Triage:** `.github/workflows/ci.yml` runs `npm run test:ci`, publishes JUnit via EnricoMi as a separate `Test Results` check, then fails the `validate` job if any suite failed. On PR #78, red `validate` + red `Test Results` mapped to one underlying control-plane test (`apps/control-plane/test/provisioning.test.ts` namespace-deletion wait) rather than two independent failures. When the head commit only touches docs and the prior branch SHA was green, treat this pattern as a flaky/timing-sensitive repo test first, not an Actions outage. Key files: `.github/workflows/ci.yml`, `scripts/run-ci-tests.mjs`, `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.
@@ -94,3 +96,8 @@ Executed first slice of #68 operator portal feature:
 
 **Status:** Ready for merge. Follow-up slices (provision/deprovision, lifecycle actions) can build on this scaffold.
 
+## PR #78 CI Diagnosis (2026-04-22T18:24:34Z)
+
+Diagnosed two red checks on PR #78 (CI/validate + Test Results) as a single underlying timing-sensitive test failure, not GitHub Actions config issue. The control-plane unit test `waits for namespace termination before finishing tenant deletion` in `apps/control-plane/test/provisioning.test.ts` timed out at 50ms on CI. This is test flakiness exposed by CI variance, not infrastructure issue. Handoff to Data or PR assignee for timeout/async hardening.
+
+ Scribe
