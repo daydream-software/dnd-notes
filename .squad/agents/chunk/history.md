@@ -98,4 +98,4 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 - **Phase 0 Validation Evidence:** Green when Dockerfile, RUNTIME.md, note-store adapters, control-plane provisioning, platform scripts, and GitHub Actions all align with passing validation (`npm run lint && npm run test && npm run build && npm run platform:validate`).
 
 - **False-Green Trap:** k3d-smoke proves tenant provisioning + /ready probes but does NOT create/read actual notes, so smoke depth is shallow. Future gates should call this out explicitly.
-
+- **Issue #76 QA gate (2026-04-22):** Runtime Keycloak coverage now needs three concrete layers to stay honest: (1) API bearer-token validation + owner linkage by `keycloak_sub`, (2) control-plane admin JWT validation plus tenant Keycloak env/secret injection during provisioning, and (3) web/runtime handshake checks around `/api/auth/config` and saved-token restore. Also, fake JWKS test harnesses must use unique `kid` values per run or cross-test key caches can create misleading 401s.

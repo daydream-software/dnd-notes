@@ -69,3 +69,7 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 
 
 ---
+- **Issue #76 reviewer gate — Keycloak subject beats mutable email (2026-04-22):** Runtime Keycloak wiring is structurally sound, but owner reconciliation cannot blindly overwrite `owner_accounts.email` after matching on `keycloak_sub`. In `apps/api/src/note-store.ts`, a Keycloak user who changes their IdP email to one already held by another local owner record currently trips the unique email index and turns a normal sign-in into a 500. For IdP-backed auth, treat `sub` as the durable identity key, treat email as a mutable claim, and handle collisions explicitly with a controlled product error or a no-op email update instead of letting the database decide at request time.
+- **Issue #76 re-review after 88f53dd (2026-04-22):** The rejection is resolved. `findOrCreateOwnerByKeycloakIdentity()` now treats `keycloak_sub` as the durable lookup key and preserves the stored owner email when an IdP email change would collide with another local account, so tenant sign-in no longer falls through to a unique-index 500. Branch validation (`npm run lint && npm run build && npm run test`) is green; the only leftover note is duplicate Keycloak example vars in `apps/api/.env.example`, which is config-doc churn rather than a runtime/auth blocker.
+
+
