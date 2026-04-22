@@ -765,7 +765,8 @@ export function createApp({
   }): Promise<{ tenantSummary: PortalTenantSummary; account: PortalAccount }> => {
     const { account, tenantName, tenantSlug, planTier, paymentProvider, billingEmail } =
       params
-    const normalizedBillingEmail = billingEmail?.trim() ?? account.email
+    const normalizedBillingEmail =
+      billingEmail?.trim() ?? account.billingEmail ?? account.email
     const tenantSummary = await provisionPortalTenant({
       ownerId: account.id,
       ownerEmail: account.email,

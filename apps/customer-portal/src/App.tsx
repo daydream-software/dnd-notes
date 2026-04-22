@@ -118,6 +118,7 @@ export default function App() {
   const [sessionToken, setSessionToken] = useState<string | null>(() =>
     readStoredSessionToken(),
   )
+  const [hydratedSessionToken, setHydratedSessionToken] = useState<string | null>(null)
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(true)
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false)
   const [isSubmittingSignup, setIsSubmittingSignup] = useState(false)
@@ -170,6 +171,12 @@ export default function App() {
   useEffect(() => {
     if (!sessionToken) {
       setDashboard(null)
+      setHydratedSessionToken(null)
+      setIsLoadingDashboard(false)
+      return
+    }
+
+    if (dashboard && hydratedSessionToken === sessionToken) {
       setIsLoadingDashboard(false)
       return
     }
@@ -180,6 +187,7 @@ export default function App() {
     fetchPortalDashboard(sessionToken, abortController.signal)
       .then((response) => {
         setDashboard(response)
+        setHydratedSessionToken(sessionToken)
       })
       .catch((requestError: unknown) => {
         if (abortController.signal.aborted) {
@@ -189,6 +197,7 @@ export default function App() {
         clearSessionToken()
         setSessionToken(null)
         setDashboard(null)
+        setHydratedSessionToken(null)
         setError(
           requestError instanceof Error
             ? requestError.message
@@ -204,7 +213,7 @@ export default function App() {
     return () => {
       abortController.abort()
     }
-  }, [sessionToken])
+  }, [dashboard, hydratedSessionToken, sessionToken])
 
   const activeCatalog = dashboard?.catalog ?? catalog
   const planOptions = activeCatalog?.plans ?? []
@@ -228,6 +237,7 @@ export default function App() {
     persistSessionToken(response.token)
     setSessionToken(response.token)
     setDashboard(response.dashboard)
+    setHydratedSessionToken(response.token)
     setCreateTenantDraft((currentDraft) => ({
       ...currentDraft,
       billingEmail: response.dashboard.account.billingEmail ?? '',
@@ -309,6 +319,7 @@ export default function App() {
     clearSessionToken()
     setSessionToken(null)
     setDashboard(null)
+    setHydratedSessionToken(null)
     setNotice('Signed out of the customer portal.')
   }
 

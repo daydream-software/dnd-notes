@@ -372,6 +372,7 @@ describe('Control Plane API', () => {
           email: 'owner@example.com',
           displayName: 'Alyx',
           password: 'top-secret-passphrase',
+          billingEmail: 'billing@example.com',
           paymentProvider: 'manual-review',
           tenantName: 'Misty Harbor',
           tenantSlug: 'misty-harbor',
@@ -439,11 +440,19 @@ describe('Control Plane API', () => {
         .expect(201)
 
       assert.strictEqual(createTenantResponse.body.tenants.length, 2)
+      assert.strictEqual(
+        createTenantResponse.body.account.billingEmail,
+        'billing@example.com',
+      )
       const emberfallTenant = createTenantResponse.body.tenants.find(
         (tenant: { tenant: { slug: string } }) => tenant.tenant.slug === 'emberfall',
       )
       assert.ok(emberfallTenant)
       assert.strictEqual(emberfallTenant.tenant.planTier, 'guild')
+      assert.strictEqual(
+        tenantRegistry.getPortalAccountByEmail('owner@example.com')?.billingEmail,
+        'billing@example.com',
+      )
 
       await portalAuthedPost('/portal/logout', sessionToken).send({}).expect(200)
       await portalAuthedGet('/portal/me', sessionToken).expect(401)

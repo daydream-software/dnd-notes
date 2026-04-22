@@ -177,6 +177,96 @@ describe('customer portal', () => {
     expect(sessionStorage.getItem(storedTokenKey)).toBe('portal-session-token')
   })
 
+  it('does not re-fetch the dashboard immediately after signup succeeds', async () => {
+    let dashboardFetchCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/signup' && method === 'POST') {
+        return createJsonResponse(
+          {
+            token: 'portal-session-token',
+            dashboard: baseDashboard,
+          },
+          201,
+        )
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        dashboardFetchCount += 1
+        return createJsonResponse({ error: 'unexpected restore request' }, 500)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    const user = userEvent.setup()
+    await screen.findByLabelText('Work email')
+
+    await user.type(screen.getByLabelText('Work email'), 'owner@example.com')
+    await user.type(screen.getByLabelText('Display name'), 'Alyx')
+    await user.type(screen.getAllByLabelText('Password')[0], 'top-secret-passphrase')
+    await user.type(screen.getByLabelText('Tenant name'), 'Misty Harbor')
+    await user.click(screen.getByRole('button', { name: 'Create portal account' }))
+
+    expect(await screen.findByText('Customer dashboard')).toBeTruthy()
+    expect(screen.getByText('Misty Harbor')).toBeTruthy()
+    expect(screen.queryByText('Failed to restore the customer portal session.')).toBeNull()
+    expect(sessionStorage.getItem(storedTokenKey)).toBe('portal-session-token')
+    expect(dashboardFetchCount).toBe(0)
+  })
+
+  it('does not re-fetch the dashboard immediately after login succeeds', async () => {
+    let dashboardFetchCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/login' && method === 'POST') {
+        return createJsonResponse(
+          {
+            token: 'portal-session-token',
+            dashboard: baseDashboard,
+          },
+          200,
+        )
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        dashboardFetchCount += 1
+        return createJsonResponse({ error: 'unexpected restore request' }, 500)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    const user = userEvent.setup()
+    await screen.findByLabelText('Portal email')
+
+    await user.type(screen.getByLabelText('Portal email'), 'owner@example.com')
+    await user.type(screen.getAllByLabelText('Password')[1], 'top-secret-passphrase')
+    await user.click(screen.getByRole('button', { name: 'Restore dashboard' }))
+
+    expect(await screen.findByText('Customer dashboard')).toBeTruthy()
+    expect(screen.getByText('Misty Harbor')).toBeTruthy()
+    expect(screen.queryByText('Failed to restore the customer portal session.')).toBeNull()
+    expect(sessionStorage.getItem(storedTokenKey)).toBe('portal-session-token')
+    expect(dashboardFetchCount).toBe(0)
+  })
+
   it('creates an additional tenant from the customer dashboard', async () => {
     sessionStorage.setItem(storedTokenKey, 'portal-session-token')
 
