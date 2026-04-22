@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
+shopt -s inherit_errexit
 
 ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
@@ -27,6 +28,8 @@ TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 KEEP_TENANT="${KEEP_K3D_SMOKE_TENANT:-false}"
 WORK_DIR="${ROOT}/.k3d-smoke-work"
 previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
+failed_command=""
+failed_line=""
 
 control_plane_pid=""
 postgres_forward_pid=""
@@ -70,6 +73,12 @@ Environment overrides:
   TENANT_KEYCLOAK_PASSWORD
   KEEP_K3D_SMOKE_TENANT=true   Keep the provisioned tenant for debugging
 EOF
+}
+
+record_failure() {
+  local _exit_code="$1"
+  failed_command="${BASH_COMMAND}"
+  failed_line="${BASH_LINENO[0]:-}"
 }
 
 require_tool() {
@@ -179,6 +188,15 @@ cleanup() {
 
   if (( exit_code != 0 )) && [[ -f "${WORK_DIR}/control-plane.log" ]]; then
     echo >&2
+    echo "k3d smoke failed with exit code ${exit_code}." >&2
+    if [[ -n "${failed_command}" ]]; then
+      if [[ -n "${failed_line}" ]]; then
+        echo "Failed command (around line ${failed_line}): ${failed_command}" >&2
+      else
+        echo "Failed command: ${failed_command}" >&2
+      fi
+    fi
+    echo >&2
     echo "Control-plane log (tail):" >&2
     tail -n 200 "${WORK_DIR}/control-plane.log" >&2
   fi
@@ -187,10 +205,17 @@ cleanup() {
     kubectl config use-context "${previous_kube_context}" >/dev/null 2>&1
   fi
 
-  rm -rf "${WORK_DIR}"
+  if (( exit_code == 0 )); then
+    rm -rf "${WORK_DIR}"
+  else
+    echo >&2
+    echo "Preserved k3d smoke logs in ${WORK_DIR}" >&2
+  fi
+
   exit "${exit_code}"
 }
 
+trap 'record_failure $?' ERR
 trap cleanup EXIT
 
 if [[ "${1:-}" == "--help" ]]; then
