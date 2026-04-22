@@ -114,6 +114,13 @@ export interface TenantProvisioningPort {
   close(): Promise<void>
 }
 
+export type TenantProvisioningErrorCode =
+  | 'invalid_target_version'
+  | 'unsupported_target_version'
+  | 'tenant_rollout_in_progress'
+  | 'tenant_rollout_disallowed'
+  | 'tenant_rollout_failed'
+
 interface TenantProvisioningServiceOptions {
   tenantRegistry: TenantRegistry
   infrastructureManager: TenantInfrastructureManager
@@ -140,9 +147,25 @@ interface BuildTenantInfrastructureBundleOptions {
 }
 
 export class TenantProvisioningValidationError extends Error {
-  constructor(message: string) {
+  readonly code: TenantProvisioningErrorCode
+
+  constructor(
+    message: string,
+    code: TenantProvisioningErrorCode = 'invalid_target_version',
+  ) {
     super(message)
     this.name = 'TenantProvisioningValidationError'
+    this.code = code
+  }
+}
+
+export class TenantProvisioningConflictError extends Error {
+  readonly code: TenantProvisioningErrorCode
+
+  constructor(message: string, code: TenantProvisioningErrorCode) {
+    super(message)
+    this.name = 'TenantProvisioningConflictError'
+    this.code = code
   }
 }
 
@@ -209,12 +232,42 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   }): Promise<TenantProvisioningResponse> {
     const tenant = this.getExistingTenant(params.tenantId)
     const requestedVersion = normalizeTenantVersionOverride(params.version)
+    const isExistingRolloutState =
+      tenant.currentState === 'ready' ||
+      tenant.currentState === 'upgrading' ||
+      tenant.currentState === 'maintenance' ||
+      tenant.currentState === 'restoring'
 
     const isVersionRollout =
       requestedVersion !== undefined && requestedVersion !== tenant.version
 
     if (tenant.currentState === 'deprovisioned') {
       throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
+    }
+
+    if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
+      throw new TenantProvisioningConflictError(
+        `Tenant ${tenant.id} already has a rolling update in progress. Wait for it to return to ready before starting another rollout.`,
+        'tenant_rollout_in_progress',
+      )
+    }
+
+    if (isVersionRollout && tenant.currentState !== 'ready') {
+      throw new TenantProvisioningConflictError(
+        `Tenant ${tenant.id} cannot start a rolling update from state ${tenant.currentState}. Rolling updates are only supported for ready tenants.`,
+        'tenant_rollout_disallowed',
+      )
+    }
+
+    if (
+      requestedVersion !== undefined &&
+      requestedVersion === tenant.version &&
+      isExistingRolloutState
+    ) {
+      throw new TenantProvisioningValidationError(
+        `Tenant ${tenant.id} is already running version ${tenant.version}. Choose a different target version for a rolling update.`,
+        'unsupported_target_version',
+      )
     }
 
     if (requestedVersion !== undefined && requestedVersion !== tenant.version) {

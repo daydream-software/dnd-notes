@@ -45,6 +45,7 @@ Each tenant record includes:
 - `id`: Unique tenant identifier
 - `slug`: DNS-safe subdomain slug (lowercase, alphanumeric + hyphens)
 - `ownerId`: Reference to the tenant owner
+- `initialAdminEmail`: Optional operator-supplied email to carry forward into a later tenant bootstrap slice
 - `desiredState`: Target state for orchestration
 - `currentState`: Actual state (observed from K8s API)
 - `version`: Current app version running
@@ -106,6 +107,15 @@ fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`,
 metadata; otherwise it preserves the raw string and reports the parsed fields as
 `null`.
 
+## Operator-portal contract notes (`#68`)
+
+- `POST /internal/tenants` now accepts an optional `initialAdminEmail` and
+  persists it on the tenant record.
+- The field is metadata only for now: it is visible through tenant reads and
+  fleet status, but this slice does **not** create an in-tenant admin account.
+- Custom-domain inputs remain deferred. Provisioning still assigns opaque
+  subdomains under `TENANT_BASE_DOMAIN` until DNS/TLS choreography is designed.
+
 ## Future public status path
 
 Issue `#57` stops at the internal authenticated surface. If we later need a
@@ -152,6 +162,14 @@ updates without drain windows.
   drills or incompatible schema work. The future maintenance endpoints stay
   reserved for that narrower path; ordinary image rollouts should use the
   rolling-update flow above.
+- Versioned `POST /internal/tenants/:tenantId/provision` failures now distinguish
+  the highest-signal operator cases:
+  - `400 unsupported_target_version` when a ready tenant is already on the
+    requested version
+  - `409 tenant_rollout_in_progress` / `tenant_rollout_disallowed` when another
+    rollout is already active or the tenant is not in `ready`
+  - `500 tenant_rollout_failed` with retry guidance instead of raw backend
+    failure text when the rollout itself breaks mid-flight
 
 ## Configuration
 

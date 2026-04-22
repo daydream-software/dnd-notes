@@ -35,12 +35,22 @@ export interface StateTransition {
   createdAt: string
 }
 
-export interface TenantListResponse {
-  tenants: Tenant[]
+export interface CreateTenantRequest {
+  id: string
+  slug: string
+  ownerId: string
+  initialAdminEmail: string
+  version: string
 }
 
 export interface TenantDetailResponse {
   tenant: Tenant
+}
+
+export interface ProvisionTenantRequest {
+  triggeredBy: string
+  reason?: string
+  version?: string
 }
 
 export interface TenantProvisioningResources {
@@ -60,13 +70,14 @@ export interface TenantProvisioningResponse {
   resources: TenantProvisioningResources
 }
 
+export interface DeprovisionTenantRequest {
+  triggeredBy: string
+  reason?: string
+}
+
 export interface TenantDeprovisionResponse {
   tenant: Tenant
   deprovisioned: true
-}
-
-export interface StateTransitionHistoryResponse {
-  transitions: StateTransition[]
 }
 
 export interface FleetDependencyHealth {
@@ -102,7 +113,11 @@ export interface FleetStatusSummary {
 
 export interface FleetStatusResponse {
   generatedAt: string
-  controlPlane: HealthResponse
+  controlPlane: {
+    status: 'healthy'
+    uptime: number
+    version: string
+  }
   dependencies: {
     tenantRegistry: FleetDependencyHealth
     tenantProvisioning: FleetDependencyHealth
@@ -111,14 +126,14 @@ export interface FleetStatusResponse {
   tenants: FleetTenantStatus[]
 }
 
+export interface OperatorKeycloakConfig {
+  url: string
+  realm: string
+  clientId: string
+}
+
 export interface ErrorResponse {
   code?: string
   error: string
-  details?: string
-}
-
-export interface HealthResponse {
-  status: 'healthy'
-  uptime: number
-  version: string
+  details?: string | string[]
 }

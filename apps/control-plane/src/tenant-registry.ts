@@ -6,7 +6,7 @@ import {
 import { tenantStates, type Tenant, type TenantState, type StateTransition } from './types.js'
 
 const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
-const CURRENT_SCHEMA_VERSION = 2
+const CURRENT_SCHEMA_VERSION = 3
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 
 export class TenantRegistry {
@@ -36,7 +36,9 @@ export class TenantRegistry {
     }
 
     if (currentSchemaVersion === 1) {
-      this.migrateFromV1ToV2()
+      this.migrateFromV1ToV3()
+    } else if (currentSchemaVersion === 2) {
+      this.migrateFromV2ToV3()
     } else if (currentSchemaVersion !== CURRENT_SCHEMA_VERSION) {
       throw new Error(
         `Unsupported control-plane schema version ${currentSchemaVersion}`,
@@ -73,6 +75,7 @@ export class TenantRegistry {
         slug TEXT UNIQUE NOT NULL,
         subdomain TEXT,
         owner_id TEXT NOT NULL,
+        initial_admin_email TEXT,
         desired_state TEXT NOT NULL CHECK (desired_state IN (${tenantStateSqlList})),
         current_state TEXT NOT NULL CHECK (current_state IN (${tenantStateSqlList})),
         version TEXT NOT NULL,
@@ -97,7 +100,7 @@ export class TenantRegistry {
     `)
   }
 
-  private migrateFromV1ToV2(): void {
+  private migrateFromV1ToV3(): void {
     const columnNames = this.db
       .prepare(`PRAGMA table_info(tenants)`)
       .all() as Array<{ name: string }>
@@ -108,7 +111,31 @@ export class TenantRegistry {
       this.db.exec(`ALTER TABLE tenants ADD COLUMN subdomain TEXT`)
     }
 
+    const hasInitialAdminEmailColumn = columnNames.some(
+      (column) => column.name === 'initial_admin_email',
+    )
+
+    if (!hasInitialAdminEmailColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN initial_admin_email TEXT`)
+    }
+
     this.ensureSubdomainIndex()
+    this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+  }
+
+  private migrateFromV2ToV3(): void {
+    const columnNames = this.db
+      .prepare(`PRAGMA table_info(tenants)`)
+      .all() as Array<{ name: string }>
+
+    const hasInitialAdminEmailColumn = columnNames.some(
+      (column) => column.name === 'initial_admin_email',
+    )
+
+    if (!hasInitialAdminEmailColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN initial_admin_email TEXT`)
+    }
+
     this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
   }
 
@@ -128,7 +155,7 @@ export class TenantRegistry {
     const rows = this.db
       .prepare(
         `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
-                storage_reference, backup_metadata, created_at, updated_at
+                initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          ORDER BY created_at DESC`,
       )
@@ -141,7 +168,7 @@ export class TenantRegistry {
     const row = this.db
       .prepare(
         `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
-                storage_reference, backup_metadata, created_at, updated_at
+                initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE id = ?`,
       )
@@ -154,7 +181,7 @@ export class TenantRegistry {
     const row = this.db
       .prepare(
         `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
-                storage_reference, backup_metadata, created_at, updated_at
+                initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE slug = ?`,
       )
@@ -167,7 +194,7 @@ export class TenantRegistry {
     const row = this.db
       .prepare(
         `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
-                storage_reference, backup_metadata, created_at, updated_at
+                initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE subdomain = ?`,
       )
@@ -246,17 +273,18 @@ export class TenantRegistry {
     id: string
     slug: string
     ownerId: string
+    initialAdminEmail?: string
     version: string
   }): Tenant {
-    const { id, slug, ownerId, version } = params
+    const { id, slug, ownerId, initialAdminEmail, version } = params
 
     const createTenantTransaction = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO tenants (id, slug, owner_id, desired_state, current_state, version)
-           VALUES (?, ?, ?, 'provisioning', 'provisioning', ?)`,
+          `INSERT INTO tenants (id, slug, owner_id, initial_admin_email, desired_state, current_state, version)
+           VALUES (?, ?, ?, ?, 'provisioning', 'provisioning', ?)`,
         )
-        .run(id, slug, ownerId, version)
+        .run(id, slug, ownerId, initialAdminEmail ?? null, version)
 
       this.recordTransition({
         tenantId: id,
@@ -482,6 +510,7 @@ export class TenantRegistry {
       slug: r.slug,
       subdomain: r.subdomain ?? null,
       ownerId: r.owner_id,
+      initialAdminEmail: r.initial_admin_email ?? null,
       desiredState: r.desired_state as TenantState,
       currentState: r.current_state as TenantState,
       version: r.version,

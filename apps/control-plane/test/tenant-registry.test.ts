@@ -8,7 +8,7 @@ import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 
 describe('TenantRegistry', () => {
-  it('migrates a v1 registry database to v2 by adding the subdomain column and index', async () => {
+  it('migrates a v1 registry database to v3 by adding subdomain and initial-admin columns', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
     const databasePath = join(directory, 'registry.sqlite')
     const rawDb = new Database(databasePath)
@@ -66,7 +66,9 @@ describe('TenantRegistry', () => {
       tenantRegistry.close()
 
       assert.equal(migratedTenant?.subdomain, null)
+      assert.equal(migratedTenant?.initialAdminEmail, null)
       assert.ok(columns.some((column) => column.name === 'subdomain'))
+      assert.ok(columns.some((column) => column.name === 'initial_admin_email'))
       assert.ok(indexes.some((index) => index.name === 'idx_tenants_subdomain'))
     } finally {
       await rm(directory, { recursive: true, force: true })
@@ -104,7 +106,7 @@ describe('TenantRegistry', () => {
     }
   })
 
-  it('recreates the subdomain index when an existing v2 registry is missing it', async () => {
+  it('migrates a v2 registry database by adding initial-admin email and recreating the subdomain index', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
     const databasePath = join(directory, 'registry.sqlite')
     const rawDb = new Database(databasePath)
@@ -149,12 +151,16 @@ describe('TenantRegistry', () => {
     try {
       const tenantRegistry = new TenantRegistry(databasePath)
       const migratedDb = new Database(databasePath, { readonly: true })
+      const columns = migratedDb
+        .prepare(`PRAGMA table_info(tenants)`)
+        .all() as Array<{ name: string }>
       const indexes = migratedDb
         .prepare(`PRAGMA index_list(tenants)`)
         .all() as Array<{ name: string }>
       migratedDb.close()
       tenantRegistry.close()
 
+      assert.ok(columns.some((column) => column.name === 'initial_admin_email'))
       assert.ok(indexes.some((index) => index.name === 'idx_tenants_subdomain'))
     } finally {
       await rm(directory, { recursive: true, force: true })
@@ -268,6 +274,28 @@ describe('TenantRegistry', () => {
       assert.equal(latestTransitions.size, 2)
       assert.equal(latestTransitions.get('tenant-1')?.toState, 'ready')
       assert.equal(latestTransitions.get('tenant-2')?.toState, 'ready')
+    } finally {
+      tenantRegistry.close()
+    }
+  })
+
+  it('persists initial admin email on the tenant record', () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+
+    try {
+      const tenant = tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        initialAdminEmail: 'admin@tenant-one.example',
+        version: '1.0.0',
+      })
+
+      assert.equal(tenant.initialAdminEmail, 'admin@tenant-one.example')
+      assert.equal(
+        tenantRegistry.getTenant('tenant-1')?.initialAdminEmail,
+        'admin@tenant-one.example',
+      )
     } finally {
       tenantRegistry.close()
     }

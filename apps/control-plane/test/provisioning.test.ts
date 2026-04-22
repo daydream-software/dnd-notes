@@ -4,7 +4,9 @@ import { ApiException, type KubernetesObject, type V1Status } from '@kubernetes/
 import {
   KubernetesTenantInfrastructureManager,
   PostgresTenantDatabaseManager,
+  TenantProvisioningConflictError,
   TenantProvisioningService,
+  TenantProvisioningValidationError,
   buildTenantDatabaseConnectionString,
   buildTenantInfrastructureBundle,
   buildTenantResourceNames,
@@ -468,6 +470,172 @@ describe('TenantProvisioningService', () => {
           transition.toState === 'upgrading'),
         false,
       )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
+  it('rejects rolling updates that target the tenant version already in service', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'ready',
+        'control-plane',
+        'Provisioned already',
+      )
+
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+          version: '1.0.0',
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof TenantProvisioningValidationError)
+          assert.equal(error.code, 'unsupported_target_version')
+          assert.match(
+            error.message,
+            /already running version 1.0.0.*different target version/,
+          )
+          return true
+        },
+      )
+
+      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal(infrastructureManager.bundles.length, 0)
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
+  it('rejects concurrent rolling updates when a tenant is already upgrading', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'upgrading',
+        'control-plane',
+        'Rolling update already in flight',
+      )
+
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+          version: '1.1.0',
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof TenantProvisioningConflictError)
+          assert.equal(error.code, 'tenant_rollout_in_progress')
+          assert.match(error.message, /already has a rolling update in progress/)
+          return true
+        },
+      )
+
+      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal(infrastructureManager.bundles.length, 0)
+      assert.equal(
+        tenantRegistry.getStateTransitions('tenant-demo').filter((transition) =>
+          transition.toState === 'upgrading',
+        ).length,
+        1,
+      )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
+  it('rejects rolling updates for tenants that are not ready', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      tenantRegistry.updateTenantDesiredState('tenant-demo', 'maintenance')
+      tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'maintenance',
+        'control-plane',
+        'Database restore rehearsal in progress',
+      )
+
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+          version: '1.1.0',
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof TenantProvisioningConflictError)
+          assert.equal(error.code, 'tenant_rollout_disallowed')
+          assert.match(
+            error.message,
+            /cannot start a rolling update from state maintenance/,
+          )
+          return true
+        },
+      )
+
+      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal(tenantRegistry.getTenant('tenant-demo')?.currentState, 'maintenance')
+      assert.equal(infrastructureManager.bundles.length, 0)
     } finally {
       await provisioningService.close()
       tenantRegistry.close()
