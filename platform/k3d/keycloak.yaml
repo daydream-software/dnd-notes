@@ -45,7 +45,48 @@ data:
               "value": "password",
               "temporary": false
             }
-          ]
+          ],
+          "clientRoles": {
+            "dnd-notes-control-plane": ["admin"]
+          }
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "dnd-notes-tenant-app",
+          "enabled": true,
+          "publicClient": false,
+          "standardFlowEnabled": true,
+          "bearerOnlyClient": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "redirectUris": [
+            "http://tenant-*.127.0.0.1.nip.io:8080/*",
+            "http://tenant-*.127.0.0.1.nip.io:8080",
+            "http://localhost:5173/*",
+            "http://localhost:3000/*"
+          ],
+          "secret": "dnd-notes-tenant-app-secret-k3d-dev-only",
+          "attributes": {
+            "client.secret.rotated.on": "2025-04-01T00:00:00.000Z"
+          }
+        },
+        {
+          "clientId": "dnd-notes-control-plane",
+          "enabled": true,
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "bearerOnlyClient": false,
+          "implicitFlowEnabled": false,
+          "serviceAccountsEnabled": true,
+          "secret": "dnd-notes-control-plane-secret-k3d-dev-only",
+          "roles": {
+            "client": [
+              {
+                "name": "admin"
+              }
+            ]
+          }
         }
       ]
     }

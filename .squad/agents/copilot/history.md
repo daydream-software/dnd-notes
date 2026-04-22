@@ -12,6 +12,9 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Issue #76 picked up (2026-04-22T00:49:24Z): Routing to the `squad:data` lane for runtime Keycloak auth integration across tenant apps and the control-plane. Scope includes tenant JWT validation, control-plane admin JWT validation, Keycloak env/config wiring for k3d + hosted setups, and docs/tests for the runtime flow. This is auth-sensitive work and should receive squad review before merge. — Data (Agent)
+
+
 📌 Issue #69 supported (2026-04-21T19:55:31Z): Data implemented per-tenant Postgres credentials with control-plane schema pre-seeding and safe deprovision cleanup. Copilot co-authored commit 695c0f9 on squad/69-per-tenant-postgres-credentials. Validation passed (lint/test/build/platform:validate). — Data (Agent)
 
 

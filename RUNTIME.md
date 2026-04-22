@@ -58,11 +58,70 @@ None. The application will start with defaults.
   Comma-separated CORS allowlist for cross-origin API access.  
   **Note:** In same-origin container deployments (recommended), this is mostly relevant for local development.
 
+### Keycloak Runtime Authentication
+
+When `AUTH_MODE=keycloak`, tenant apps and the control-plane validate Keycloak JWTs for authenticated requests. Guest/share-link flows remain local and anonymous.
+
+- **`AUTH_MODE`** (default: `local`)  
+  Authentication provider mode. Options: `local` (legacy email/password + sessions) or `keycloak` (OIDC/JWT).  
+  **Note:** When set to `local`, all other `KEYCLOAK_*` variables are ignored and tenant apps use the traditional session-token flow.
+
+- **`KEYCLOAK_URL`** (required when `AUTH_MODE=keycloak`)  
+  Base URL of the Keycloak instance.  
+  Example (k3d): `http://keycloak.127.0.0.1.nip.io:8080`  
+  Example (hosted): `https://auth.example.com`
+
+- **`KEYCLOAK_REALM`** (required when `AUTH_MODE=keycloak`)  
+  Keycloak realm name for tenant users and control-plane admins.  
+  Example: `dnd-notes-dev` (k3d), `dnd-notes-prod` (hosted)
+
+- **`KEYCLOAK_TENANT_CLIENT_ID`** (required when `AUTH_MODE=keycloak` for tenant apps)  
+  Keycloak client ID for tenant app OIDC flows.  
+  Example: `dnd-notes-tenant-app`
+
+- **`KEYCLOAK_TENANT_CLIENT_SECRET`** (required in Kubernetes Secret when `AUTH_MODE=keycloak`)  
+  Keycloak client secret for tenant app JWT validation on the backend.  
+  **Security:** Store in Kubernetes Secret, never in ConfigMap or logs.
+
+- **`KEYCLOAK_CONTROL_PLANE_CLIENT_ID`** (required when `AUTH_MODE=keycloak` for control-plane)  
+  Keycloak client ID for control-plane admin API OAuth/service-account flows.  
+  Example: `dnd-notes-control-plane`
+
+- **`KEYCLOAK_CONTROL_PLANE_CLIENT_SECRET`** (required in Kubernetes Secret when `AUTH_MODE=keycloak`)  
+  Keycloak client secret for control-plane admin JWT validation.  
+  **Security:** Store in Kubernetes Secret, never in ConfigMap or logs.
+
+#### Runtime Auth Flow (Keycloak mode)
+
+**Tenant apps:**
+1. User logs in via Keycloak login form (redirects to tenant origin with auth code)
+2. Tenant app exchanges code for ID token + access token
+3. Frontend stores tokens and sends access token in API request `Authorization: Bearer <token>`
+4. Backend (`requireAuthenticatedAccount`) validates JWT signature using `KEYCLOAK_TENANT_CLIENT_SECRET` and realm public key
+5. If valid, extracts user identity (`keycloak_sub`, email) and looks up owner account
+6. Guest/share-link flows bypass auth and remain anonymous (no JWT required)
+
+**Control-plane admin API:**
+1. Admin client obtains bearer token via Keycloak service-account flow using `KEYCLOAK_CONTROL_PLANE_CLIENT_ID` + secret
+2. Control-plane endpoint (`createAdminAuthMiddleware`) validates bearer token signature
+3. If valid and admin/workforce role present, allows operation
+4. If token invalid or role missing, returns 401/403
+
+#### Local Auth Flow (Legacy mode, `AUTH_MODE=local`)
+
+When `AUTH_MODE=local` or `KEYCLOAK_URL` is unset:
+- Tenant app login uses traditional `/api/auth/register` and `/api/auth/login` endpoints
+- Session tokens (database-backed) are used instead of JWTs
+- Guest/share-link flows remain unchanged
+- Control-plane uses static bearer token from `CONTROL_PLANE_ADMIN_TOKEN` environment variable
+- No Keycloak instance required for local development
+
 ### Container Behavior
 
 - **`SERVE_WEB`** (default: `false`)  
   When `true`, the API server also serves the built web app at `/` for same-origin deployments.  
   **Production containers should set this to `true`.**
+
 
 ## Health Endpoints
 

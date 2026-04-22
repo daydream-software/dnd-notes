@@ -41,18 +41,66 @@ Keycloak now gets that full external URL injected during bootstrap so its own
 redirects keep the mapped host port instead of collapsing back to plain
 `http://keycloak.127.0.0.1.nip.io/`.
 
-Seeded credentials:
+### Keycloak Runtime Auth Setup
 
-| Account | Username | Password |
-| --- | --- | --- |
-| Admin console | `admin` | `admin` |
-| Test realm user | `owner@example.com` | `password` |
-| Test realm site admin | `site-admin@example.com` | `password` |
+The bootstrap now seeds two Keycloak clients for runtime authentication:
+
+| Client | ID | Secret | Purpose |
+| --- | --- | --- | --- |
+| Tenant app | `dnd-notes-tenant-app` | `dnd-notes-tenant-app-secret-k3d-dev-only` | Tenant app OIDC/JWT flows |
+| Control-plane admin | `dnd-notes-control-plane` | `dnd-notes-control-plane-secret-k3d-dev-only` | Control-plane admin API |
+
+Seeded user accounts in the `dnd-notes-dev` realm:
+
+| Account | Username | Password | Role |
+| --- | --- | --- | --- |
+| Admin console | `admin` | `admin` | Keycloak admin |
+| Test realm owner | `owner@example.com` | `password` | Tenant owner |
+| Test realm site admin | `site-admin@example.com` | `password` | Tenant owner + control-plane admin |
 
 These checked-in credentials are **development-only** for the local k3d lane.
 Never reuse them outside this local environment.
 
-The imported realm is `dnd-notes-dev`. This keeps the local auth provider present in the standard k3d loop even though tenant/control-plane OIDC wiring itself still belongs to `#56`.
+#### Testing Keycloak Runtime Auth Locally
+
+1. **Verify Keycloak is running:**
+   ```bash
+   curl -s http://keycloak.127.0.0.1.nip.io:8080/realms/dnd-notes-dev | jq .enabled
+   ```
+   Should return `true`.
+
+2. **Test tenant app Keycloak flow (when control-plane + tenant are running):**
+   - Navigate to your tenant app (e.g., `http://tenant-abc.127.0.0.1.nip.io:8080`)
+   - If `AUTH_MODE=keycloak` is set, click "Log in with Keycloak"
+   - Use `owner@example.com` / `password` to authenticate
+   - The frontend receives ID + access tokens from Keycloak
+   - The backend validates the JWT and looks up the owner account by `keycloak_sub`
+
+3. **Test control-plane admin auth (when control-plane is running):**
+   - The control-plane obtains an admin token using `dnd-notes-control-plane` service-account credentials
+   - Tenant provisioning endpoints require this valid admin JWT
+
+#### Local k3d Control-Plane Setup with Keycloak
+
+Update the control-plane secret after applying the k3d overlay to use the seeded Keycloak secrets:
+
+```bash
+kubectl create secret generic dnd-notes-control-plane-secrets \
+  -n dnd-notes-platform \
+  --from-literal=CONTROL_PLANE_ADMIN_TOKEN='local-admin-token' \
+  --from-literal=TENANT_DATABASE_ADMIN_URL='postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres' \
+  --from-literal=TENANT_DATABASE_RUNTIME_URL='postgresql://runtime-template:placeholder@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable' \
+  --from-literal=KEYCLOAK_TENANT_CLIENT_SECRET='dnd-notes-tenant-app-secret-k3d-dev-only' \
+  --from-literal=KEYCLOAK_CONTROL_PLANE_CLIENT_SECRET='dnd-notes-control-plane-secret-k3d-dev-only' \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+The k3d overlay ConfigMap automatically injects:
+- `KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `KEYCLOAK_REALM=dnd-notes-dev`
+- `KEYCLOAK_TENANT_CLIENT_ID=dnd-notes-tenant-app`
+- `KEYCLOAK_CONTROL_PLANE_CLIENT_ID=dnd-notes-control-plane`
+- `AUTH_MODE=keycloak`
 
 ## What `k3d:smoke` proves
 
@@ -69,6 +117,8 @@ The imported realm is `dnd-notes-dev`. This keeps the local auth provider presen
 The tenant workload itself does **not** use the host port-forward. The smoke lane injects an in-cluster runtime URL that points at `platform-postgres.dnd-notes-platform.svc.cluster.local:5432`, while the local control-plane process keeps using the host-forwarded admin URL to create/drop per-tenant databases.
 
 By default the smoke script deprovisions the tenant during cleanup. Set `KEEP_K3D_SMOKE_TENANT=true` if you want to keep the tenant namespace around for debugging.
+
+**Note:** The smoke lane does not currently exercise the full Keycloak runtime auth flow (JWT login + token validation); that is covered by end-to-end auth tests in the tenant app and control-plane test suites.
 
 ## Why the control plane still runs locally here
 
