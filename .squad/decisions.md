@@ -5408,3 +5408,30 @@ For the next mergeable operator-portal slice, tenant provisioning stays a review
 
 - Data should extend the control-plane contract before the portal asks for initial admin email or domain-level inputs.
 - Chunk should keep focused regression coverage on the two-step create→provision path and typed destructive confirmation.
+
+### 2026-04-22: Data — Issue #68 contract slice
+
+**Decided by:** Data (Backend Dev)  
+**Date:** 2026-04-22  
+**Type:** Operator portal / control-plane contract
+
+## Decision
+
+For the next mergeable #68 backend slice:
+
+1. `POST /internal/tenants` accepts an optional `initialAdminEmail` and persists it on the tenant record.
+2. Tenant reads and `GET /internal/fleet/status` surface that field unchanged so the operator portal can confirm what was recorded.
+3. The field is metadata only in this slice. Provisioning does **not** create or reconcile the tenant-local admin account yet.
+4. Custom-domain inputs stay out of the contract for now. Provisioning still assigns opaque subdomains under `TENANT_BASE_DOMAIN` until DNS/TLS choreography has a real backend owner.
+
+## Why
+
+- The portal needed a stable place to capture the initial admin handoff without inventing a second write path or pretending bootstrap automation already exists.
+- Persisting the email in the control-plane registry keeps the contract explicit and auditable.
+- Accepting custom-domain input now would mislead operators because the control plane cannot honor or validate it yet.
+
+## Consequences
+
+- Portal provisioning can now collect `initialAdminEmail` and keep using the existing create → provision route chain.
+- Future tenant-bootstrap work can consume registry metadata instead of adding another ad hoc operator input path.
+- A later custom-domain slice should be routed to Brand once ingress/DNS/TLS ownership is defined.

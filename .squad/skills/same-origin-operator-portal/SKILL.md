@@ -17,6 +17,8 @@ Use this when the repo already has an internal control-plane API and the team ne
 - Reuse the existing Keycloak workforce/admin client accepted by the control-plane instead of adding a separate auth broker first.
 - Make the first slice read-only (`GET /internal/fleet/status`) and add write controls only after the auth and fleet contract are stable.
 - When write controls land, keep them on the existing control-plane routes: review `POST /internal/tenants` before chaining into `POST /internal/tenants/:tenantId/provision`, and require typed confirmation before `deprovision` leaves the browser.
+- If the portal needs a future bootstrap input before backend automation exists, persist it as explicit control-plane metadata (for example `initialAdminEmail`) and say plainly that the field is recorded only, not enacted yet.
+- Defer custom-domain inputs until the backend really owns DNS/TLS/routing choreography; opaque-subdomain platforms should not pretend a browser form can request a live domain prematurely.
 
 ## Examples
 - `apps/operator-portal/vite.config.ts`

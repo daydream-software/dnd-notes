@@ -105,3 +105,10 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Extended `apps/operator-portal` beyond the read-only dashboard: the portal now provisions tenants via the existing create + provision control-plane routes, requires an operator reason, and reloads fleet state from `/internal/fleet/status` instead of synthesizing local lifecycle updates.
 - Added a destructive deprovision dialog with typed-slug confirmation and reason capture so the portal makes side effects explicit before sending `POST /internal/tenants/:tenantId/deprovision`.
 - Focused operator lifecycle regressions now live in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`; workspace validation passed with `npm run lint --workspace apps/operator-portal && npm run test --workspace apps/operator-portal && npm run build --workspace apps/operator-portal`.
+
+
+## 2026-04-22: Issue #68 control-plane contract slice
+
+- Extended the control-plane tenant contract so `POST /internal/tenants` can persist an optional `initialAdminEmail`, and surfaced it back through tenant reads plus `GET /internal/fleet/status`.
+- Updated the operator portal to send that field on the existing create → provision flow, display it in the fleet read model, and warn that the email is only recorded metadata until a later bootstrap slice lands.
+- Added focused control-plane and operator-portal regressions, updated the relevant READMEs, and re-ran lint/test/build for both workspaces successfully.

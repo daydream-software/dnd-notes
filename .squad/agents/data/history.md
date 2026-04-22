@@ -14,6 +14,8 @@ Data initialized as Backend Dev for the initial project squad.
 
 ## Recent Updates
 
+📌 Issue #68 contract slice completed (2026-04-22T17:17:21Z): Added optional `initialAdminEmail` field to control-plane tenant contract. Changes: `POST /internal/tenants` now accepts/persists field, `GET /internal/fleet/status` and detail reads surface it, operator portal updated to capture/display in create flow. Field is metadata-only; provisioning does not yet create admin accounts. Custom-domain inputs deferred per product—opaque subdomains still used until DNS/TLS ownership defined. All lint/test/build passing (control-plane + operator-portal). Orchestration log at `.squad/orchestration-log/2026-04-22T17:17:21Z-data.md`. Session log at `.squad/log/2026-04-22T17:17:21Z-issue68-contract-batch.md`. Decision merged to `.squad/decisions.md`. Next: Stef taking portal lifecycle actions on stable contract. — Data (Agent)
+
 📌 Issue #69 delivered (2026-04-21T19:55:31Z): Per-tenant Postgres credentials fully implemented — new tenants get dedicated roles + tenant-scoped DATABASE_URL, control-plane pre-seeds schema before first pod start, safe deprovision cleanup in place; existing tenants stay on shared creds until explicit migration. Session log at `.squad/log/20260421-195544-issue-69-delivery.md`. Validation: lint/test/build passed for control-plane + api, platform:validate passed. — Data (Agent)
 
 📌 PR #72 second review wave (2026-04-21T20:14Z): Hardening fixes after first review addressing blank credential guards and index verification. Fixed: (1) blank/whitespace DATABASE_URL values now throw missing-secret error before credential rotation paths run, (2) owner email uniqueness index explicitly verified in least-privilege mode, (3) pre-init schema verification in control-plane provisioning, (4) comprehensive regression coverage added (12 new tests). All 6 review threads resolved. Commit `f85831b`. Session log at `.squad/log/20260421-pr72-second-review-wave.md`. Fresh review requested. — Data (Agent)
@@ -72,6 +74,10 @@ Data initialized as Backend Dev for the initial project squad.
 - `TenantProvisioningService.provisionTenant()` must trim version overrides before comparing/persisting them and reject non–image-tag-safe values; the HTTP provision route should surface those validation failures as 400s instead of masking them as 500s.
 - Control-plane reprovision errors in `apps/control-plane/src/provisioning.ts` must not echo raw tenant `DATABASE_URL` values; include tenant context and guidance, but never reflect credentials back into logs or HTTP error details.
 - When Postgres tenant database/role identifiers in `apps/control-plane/src/provisioning.ts` would exceed the 63-character limit, truncate with a stable hash suffix instead of plain slicing so long subdomains cannot collide; regressions live in `apps/control-plane/test/provisioning.test.ts`.
+
+- Issue #68 contract slice: `apps/control-plane/src/tenant-registry.ts` now persists optional `initialAdminEmail` metadata on tenant records, and `apps/control-plane/src/app.ts` validates/surfaces it on `POST /internal/tenants` plus fleet/detail reads.
+- Operator-portal follow-through for that contract lives in `apps/operator-portal/src/ProvisionTenantPanel.tsx`, `apps/operator-portal/src/OperatorPortal.tsx`, and `apps/operator-portal/src/types.ts`; the field is captured and displayed, but the UI copy explicitly says it does not bootstrap the tenant admin account yet.
+- Custom-domain inputs remain intentionally deferred for #68 because control-plane provisioning still assigns opaque subdomains from `TENANT_BASE_DOMAIN`; do not fake a domain field before Brand owns the DNS/TLS/ingress slice.
 
 ## 2026-04-12: Issue #27 Revision Assignment & Completion
 
