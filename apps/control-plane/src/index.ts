@@ -49,6 +49,15 @@ const CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES =
     ?.split(',')
     .map((role) => role.trim())
     .filter((role) => role.length > 0) ?? []
+const CUSTOMER_PORTAL_AUTH_MODE =
+  process.env.CUSTOMER_PORTAL_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
+const rawCustomerPortalDefaultTenantVersion =
+  process.env.CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION?.trim()
+const CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION =
+  rawCustomerPortalDefaultTenantVersion &&
+  rawCustomerPortalDefaultTenantVersion.length > 0
+    ? rawCustomerPortalDefaultTenantVersion
+    : undefined
 const TENANT_AUTH_MODE =
   process.env.TENANT_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
 const TENANT_KEYCLOAK_URL = process.env.TENANT_KEYCLOAK_URL
@@ -202,6 +211,10 @@ const app = createApp({
   adminToken: ADMIN_TOKEN,
   adminAuth,
   tenantProvisioningService,
+  portalAuthMode: CUSTOMER_PORTAL_AUTH_MODE,
+  portalDefaultTenantVersion: CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION,
+  tenantBaseDomain: TENANT_BASE_DOMAIN,
+  tenantPublicScheme: TENANT_PUBLIC_SCHEME,
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000
 const serverRef: { current?: Server } = {}

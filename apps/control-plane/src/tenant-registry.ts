@@ -3,10 +3,18 @@ import {
   assertGeneratedTenantSubdomain,
   assertPersistedTenantSubdomain,
 } from './tenant-subdomain.js'
-import { tenantStates, type Tenant, type TenantState, type StateTransition } from './types.js'
+import {
+  tenantStates,
+  type PortalAccount,
+  type PortalBillingProvider,
+  type PortalSession,
+  type Tenant,
+  type TenantState,
+  type StateTransition,
+} from './types.js'
 
 const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
-const CURRENT_SCHEMA_VERSION = 3
+const CURRENT_SCHEMA_VERSION = 5
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 
 export class TenantRegistry {
@@ -27,6 +35,7 @@ export class TenantRegistry {
 
     if (currentSchemaVersion === 0) {
       this.ensureSubdomainIndex()
+      this.ensurePortalIndexes()
       this.setSchemaMetadata(
         'tenant_state_signature',
         CURRENT_TENANT_STATE_SIGNATURE,
@@ -36,9 +45,13 @@ export class TenantRegistry {
     }
 
     if (currentSchemaVersion === 1) {
-      this.migrateFromV1ToV3()
+      this.migrateFromV1ToV5()
     } else if (currentSchemaVersion === 2) {
-      this.migrateFromV2ToV3()
+      this.migrateFromV2ToV5()
+    } else if (currentSchemaVersion === 3) {
+      this.migrateFromV3ToV5()
+    } else if (currentSchemaVersion === 4) {
+      this.migrateFromV4ToV5()
     } else if (currentSchemaVersion !== CURRENT_SCHEMA_VERSION) {
       throw new Error(
         `Unsupported control-plane schema version ${currentSchemaVersion}`,
@@ -46,6 +59,7 @@ export class TenantRegistry {
     }
 
     this.ensureSubdomainIndex()
+    this.ensurePortalIndexes()
 
     const storedStateSignature = this.getSchemaMetadata('tenant_state_signature')
     if (!storedStateSignature) {
@@ -75,6 +89,8 @@ export class TenantRegistry {
         slug TEXT UNIQUE NOT NULL,
         subdomain TEXT,
         owner_id TEXT NOT NULL,
+        display_name TEXT,
+        plan_tier TEXT,
         initial_admin_email TEXT,
         desired_state TEXT NOT NULL CHECK (desired_state IN (${tenantStateSqlList})),
         current_state TEXT NOT NULL CHECK (current_state IN (${tenantStateSqlList})),
@@ -97,10 +113,31 @@ export class TenantRegistry {
 
       CREATE INDEX IF NOT EXISTS idx_state_transitions_tenant_id ON state_transitions(tenant_id);
       CREATE INDEX IF NOT EXISTS idx_state_transitions_created_at ON state_transitions(created_at DESC);
+
+      CREATE TABLE IF NOT EXISTS portal_accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        billing_email TEXT,
+        billing_provider TEXT,
+        password_hash TEXT,
+        auth_provider TEXT NOT NULL CHECK (auth_provider IN ('local', 'keycloak')),
+        keycloak_sub TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE IF NOT EXISTS portal_sessions (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES portal_accounts(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `)
   }
 
-  private migrateFromV1ToV3(): void {
+  private migrateFromV1ToV5(): void {
     const columnNames = this.db
       .prepare(`PRAGMA table_info(tenants)`)
       .all() as Array<{ name: string }>
@@ -119,11 +156,24 @@ export class TenantRegistry {
       this.db.exec(`ALTER TABLE tenants ADD COLUMN initial_admin_email TEXT`)
     }
 
-    this.ensureSubdomainIndex()
+    const hasDisplayNameColumn = columnNames.some(
+      (column) => column.name === 'display_name',
+    )
+
+    if (!hasDisplayNameColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN display_name TEXT`)
+    }
+
+    const hasPlanTierColumn = columnNames.some((column) => column.name === 'plan_tier')
+
+    if (!hasPlanTierColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN plan_tier TEXT`)
+    }
+
     this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
   }
 
-  private migrateFromV2ToV3(): void {
+  private migrateFromV2ToV5(): void {
     const columnNames = this.db
       .prepare(`PRAGMA table_info(tenants)`)
       .all() as Array<{ name: string }>
@@ -134,6 +184,58 @@ export class TenantRegistry {
 
     if (!hasInitialAdminEmailColumn) {
       this.db.exec(`ALTER TABLE tenants ADD COLUMN initial_admin_email TEXT`)
+    }
+
+    const hasDisplayNameColumn = columnNames.some(
+      (column) => column.name === 'display_name',
+    )
+
+    if (!hasDisplayNameColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN display_name TEXT`)
+    }
+
+    const hasPlanTierColumn = columnNames.some((column) => column.name === 'plan_tier')
+
+    if (!hasPlanTierColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN plan_tier TEXT`)
+    }
+
+    this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+  }
+
+  private migrateFromV3ToV5(): void {
+    const columnNames = this.db
+      .prepare(`PRAGMA table_info(tenants)`)
+      .all() as Array<{ name: string }>
+
+    const hasDisplayNameColumn = columnNames.some(
+      (column) => column.name === 'display_name',
+    )
+
+    if (!hasDisplayNameColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN display_name TEXT`)
+    }
+
+    const hasPlanTierColumn = columnNames.some((column) => column.name === 'plan_tier')
+
+    if (!hasPlanTierColumn) {
+      this.db.exec(`ALTER TABLE tenants ADD COLUMN plan_tier TEXT`)
+    }
+
+    this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
+  }
+
+  private migrateFromV4ToV5(): void {
+    const portalAccountColumns = this.db
+      .prepare(`PRAGMA table_info(portal_accounts)`)
+      .all() as Array<{ name: string }>
+
+    const hasPasswordHashColumn = portalAccountColumns.some(
+      (column) => column.name === 'password_hash',
+    )
+
+    if (!hasPasswordHashColumn) {
+      this.db.exec(`ALTER TABLE portal_accounts ADD COLUMN password_hash TEXT`)
     }
 
     this.db.pragma(`user_version = ${CURRENT_SCHEMA_VERSION}`)
@@ -147,6 +249,20 @@ export class TenantRegistry {
     `)
   }
 
+  private ensurePortalIndexes(): void {
+    this.db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_accounts_keycloak_sub
+      ON portal_accounts(keycloak_sub)
+      WHERE keycloak_sub IS NOT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_portal_sessions_account_id
+      ON portal_sessions(account_id);
+
+      CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at
+      ON portal_sessions(expires_at);
+    `)
+  }
+
   checkHealth(): void {
     this.db.prepare('SELECT 1').get()
   }
@@ -154,7 +270,7 @@ export class TenantRegistry {
   listTenants(): Tenant[] {
     const rows = this.db
       .prepare(
-        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
+        `SELECT id, slug, subdomain, owner_id, display_name, plan_tier, desired_state, current_state, version,
                 initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          ORDER BY created_at DESC`,
@@ -164,10 +280,24 @@ export class TenantRegistry {
     return rows.map((row: unknown) => this.mapRowToTenant(row))
   }
 
+  listTenantsByOwnerId(ownerId: string): Tenant[] {
+    const rows = this.db
+      .prepare(
+        `SELECT id, slug, subdomain, owner_id, display_name, plan_tier, desired_state, current_state, version,
+                initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
+         FROM tenants
+         WHERE owner_id = ?
+         ORDER BY created_at DESC`,
+      )
+      .all(ownerId)
+
+    return rows.map((row: unknown) => this.mapRowToTenant(row))
+  }
+
   getTenant(tenantId: string): Tenant | null {
     const row = this.db
       .prepare(
-        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
+        `SELECT id, slug, subdomain, owner_id, display_name, plan_tier, desired_state, current_state, version,
                 initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE id = ?`,
@@ -180,7 +310,7 @@ export class TenantRegistry {
   getTenantBySlug(slug: string): Tenant | null {
     const row = this.db
       .prepare(
-        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
+        `SELECT id, slug, subdomain, owner_id, display_name, plan_tier, desired_state, current_state, version,
                 initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE slug = ?`,
@@ -193,7 +323,7 @@ export class TenantRegistry {
   getTenantBySubdomain(subdomain: string): Tenant | null {
     const row = this.db
       .prepare(
-        `SELECT id, slug, subdomain, owner_id, desired_state, current_state, version,
+        `SELECT id, slug, subdomain, owner_id, display_name, plan_tier, desired_state, current_state, version,
                 initial_admin_email, storage_reference, backup_metadata, created_at, updated_at
          FROM tenants
          WHERE subdomain = ?`,
@@ -273,18 +403,38 @@ export class TenantRegistry {
     id: string
     slug: string
     ownerId: string
+    displayName?: string
+    planTier?: string
     initialAdminEmail?: string
     version: string
   }): Tenant {
-    const { id, slug, ownerId, initialAdminEmail, version } = params
+    const { id, slug, ownerId, displayName, planTier, initialAdminEmail, version } = params
 
     const createTenantTransaction = this.db.transaction(() => {
       this.db
         .prepare(
-          `INSERT INTO tenants (id, slug, owner_id, initial_admin_email, desired_state, current_state, version)
-           VALUES (?, ?, ?, ?, 'provisioning', 'provisioning', ?)`,
+          `INSERT INTO tenants (
+             id,
+             slug,
+             owner_id,
+             display_name,
+             plan_tier,
+             initial_admin_email,
+             desired_state,
+             current_state,
+             version
+           )
+           VALUES (?, ?, ?, ?, ?, ?, 'provisioning', 'provisioning', ?)`,
         )
-        .run(id, slug, ownerId, initialAdminEmail ?? null, version)
+        .run(
+          id,
+          slug,
+          ownerId,
+          displayName ?? null,
+          planTier ?? null,
+          initialAdminEmail ?? null,
+          version,
+        )
 
       this.recordTransition({
         tenantId: id,
@@ -303,6 +453,237 @@ export class TenantRegistry {
     })
 
     return createTenantTransaction()
+  }
+
+  deleteTenant(tenantId: string): void {
+    const result = this.db
+      .prepare(
+        `DELETE FROM tenants
+         WHERE id = ?`,
+      )
+      .run(tenantId)
+
+    this.assertTenantUpdated(result, tenantId)
+  }
+
+  createPortalAccount(params: {
+    id: string
+    email: string
+    displayName: string
+    passwordHash?: string | null
+    billingEmail?: string | null
+    billingProvider?: PortalBillingProvider | null
+    authProvider?: 'local' | 'keycloak'
+    keycloakSub?: string | null
+  }): PortalAccount {
+    const {
+      id,
+      email,
+      displayName,
+      passwordHash,
+      billingEmail,
+      billingProvider,
+      authProvider = 'local',
+      keycloakSub,
+    } = params
+
+    const createAccountTransaction = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO portal_accounts (
+             id,
+             email,
+             display_name,
+             billing_email,
+             billing_provider,
+             password_hash,
+             auth_provider,
+             keycloak_sub
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id,
+          email,
+          displayName,
+          billingEmail ?? null,
+          billingProvider ?? null,
+          passwordHash ?? null,
+          authProvider,
+          keycloakSub ?? null,
+        )
+
+      const account = this.getPortalAccount(id)
+      if (!account) {
+        throw new Error('Failed to retrieve created portal account')
+      }
+
+      return account
+    })
+
+    return createAccountTransaction()
+  }
+
+  getPortalAccount(accountId: string): PortalAccount | null {
+    const row = this.db
+      .prepare(
+        `SELECT id,
+                email,
+                display_name,
+                billing_email,
+                billing_provider,
+                password_hash,
+                auth_provider,
+                keycloak_sub,
+                created_at,
+                updated_at
+         FROM portal_accounts
+         WHERE id = ?`,
+      )
+      .get(accountId)
+
+    return row ? this.mapRowToPortalAccount(row) : null
+  }
+
+  getPortalAccountByEmail(email: string): PortalAccount | null {
+    const row = this.db
+      .prepare(
+        `SELECT id,
+                email,
+                display_name,
+                billing_email,
+                billing_provider,
+                password_hash,
+                auth_provider,
+                keycloak_sub,
+                created_at,
+                updated_at
+         FROM portal_accounts
+         WHERE email = ?`,
+      )
+      .get(email)
+
+    return row ? this.mapRowToPortalAccount(row) : null
+  }
+
+  getPortalAccountAuthByEmail(email: string): {
+    account: PortalAccount
+    passwordHash: string | null
+  } | null {
+    const row = this.db
+      .prepare(
+        `SELECT id,
+                email,
+                display_name,
+                billing_email,
+                billing_provider,
+                password_hash,
+                auth_provider,
+                keycloak_sub,
+                created_at,
+                updated_at
+         FROM portal_accounts
+         WHERE email = ?`,
+      )
+      .get(email)
+
+    if (!row) {
+      return null
+    }
+
+    const account = this.mapRowToPortalAccount(row)
+    const authRow = row as Record<string, string | null>
+
+    return {
+      account,
+      passwordHash: authRow.password_hash ?? null,
+    }
+  }
+
+  updatePortalAccount(accountId: string, params: {
+    displayName: string
+    billingEmail?: string | null
+    billingProvider?: PortalBillingProvider | null
+  }): PortalAccount {
+    const result = this.db
+      .prepare(
+        `UPDATE portal_accounts
+         SET display_name = ?,
+             billing_email = ?,
+             billing_provider = ?,
+             updated_at = datetime('now')
+         WHERE id = ?`,
+      )
+      .run(
+        params.displayName,
+        params.billingEmail ?? null,
+        params.billingProvider ?? null,
+        accountId,
+      )
+
+    if (result.changes === 0) {
+      throw new Error(`Portal account ${accountId} not found`)
+    }
+
+    const account = this.getPortalAccount(accountId)
+    if (!account) {
+      throw new Error(`Portal account ${accountId} not found`)
+    }
+
+    return account
+  }
+
+  createPortalSession(params: {
+    id: string
+    accountId: string
+    tokenHash: string
+    expiresAt: string
+  }): PortalSession {
+    const { id, accountId, tokenHash, expiresAt } = params
+
+    this.purgeExpiredPortalSessions()
+
+    const createSessionTransaction = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO portal_sessions (id, account_id, token_hash, expires_at)
+           VALUES (?, ?, ?, ?)`,
+        )
+        .run(id, accountId, tokenHash, expiresAt)
+
+      const session = this.getPortalSessionByTokenHash(tokenHash)
+      if (!session) {
+        throw new Error('Failed to retrieve created portal session')
+      }
+
+      return session
+    })
+
+    return createSessionTransaction()
+  }
+
+  getPortalSessionByTokenHash(tokenHash: string): PortalSession | null {
+    this.purgeExpiredPortalSessions()
+
+    const row = this.db
+      .prepare(
+        `SELECT id, account_id, token_hash, expires_at, created_at
+         FROM portal_sessions
+         WHERE token_hash = ?
+           AND expires_at > datetime('now')`,
+      )
+      .get(tokenHash)
+
+    return row ? this.mapRowToPortalSession(row) : null
+  }
+
+  deletePortalSessionByTokenHash(tokenHash: string): void {
+    this.db
+      .prepare(
+        `DELETE FROM portal_sessions
+         WHERE token_hash = ?`,
+      )
+      .run(tokenHash)
   }
 
   updateTenantState(
@@ -510,6 +891,8 @@ export class TenantRegistry {
       slug: r.slug,
       subdomain: r.subdomain ?? null,
       ownerId: r.owner_id,
+      displayName: r.display_name ?? null,
+      planTier: r.plan_tier ?? null,
       initialAdminEmail: r.initial_admin_email ?? null,
       desiredState: r.desired_state as TenantState,
       currentState: r.current_state as TenantState,
@@ -518,6 +901,32 @@ export class TenantRegistry {
       backupMetadata: r.backup_metadata ?? null,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
+    }
+  }
+
+  private mapRowToPortalAccount(row: unknown): PortalAccount {
+    const r = row as Record<string, string>
+    return {
+      id: r.id,
+      email: r.email,
+      displayName: r.display_name,
+      billingEmail: r.billing_email ?? null,
+      billingProvider: (r.billing_provider as PortalBillingProvider | null) ?? null,
+      authProvider: r.auth_provider as 'local' | 'keycloak',
+      keycloakSub: r.keycloak_sub ?? null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+    }
+  }
+
+  private mapRowToPortalSession(row: unknown): PortalSession {
+    const r = row as Record<string, string>
+    return {
+      id: r.id,
+      accountId: r.account_id,
+      tokenHash: r.token_hash,
+      expiresAt: r.expires_at,
+      createdAt: r.created_at,
     }
   }
 
@@ -536,6 +945,15 @@ export class TenantRegistry {
 
   close(): void {
     this.db.close()
+  }
+
+  private purgeExpiredPortalSessions(): void {
+    this.db
+      .prepare(
+        `DELETE FROM portal_sessions
+         WHERE expires_at <= datetime('now')`,
+      )
+      .run()
   }
 }
 

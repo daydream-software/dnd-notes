@@ -1,4 +1,11 @@
 import { createRequire } from 'node:module'
+import {
+  createHash,
+  randomBytes,
+  randomUUID,
+  scryptSync,
+  timingSafeEqual,
+} from 'node:crypto'
 import express, { type Express, type Request, type Response } from 'express'
 import { z } from 'zod'
 import {
@@ -15,6 +22,13 @@ import type { TenantRegistry } from './tenant-registry.js'
 import { tenantStates } from './types.js'
 import type {
   FleetStatusResponse,
+  PortalAccount,
+  PortalCatalogResponse,
+  PortalDashboardResponse,
+  PortalLogoutResponse,
+  PortalSession,
+  PortalSessionResponse,
+  PortalTenantSummary,
   TenantDeprovisionResponse,
   ErrorResponse,
   HealthResponse,
@@ -23,6 +37,7 @@ import type {
   TenantListResponse,
   TenantProvisioningResponse,
 } from './types.js'
+import { portalBillingProviders } from './types.js'
 
 function createTenantStateCounts() {
   return Object.fromEntries(tenantStates.map((state) => [state, 0])) as Record<
@@ -104,22 +119,55 @@ interface CreateAppOptions {
   adminToken?: string
   adminAuth?: ControlPlaneAdminAuth
   tenantProvisioningService?: TenantProvisioningPort
+  portalAuthMode?: 'local' | 'keycloak'
+  portalDefaultTenantVersion?: string
+  tenantBaseDomain?: string
+  tenantPublicScheme?: 'http' | 'https'
 }
 
 const require = createRequire(import.meta.url)
 const { version: appVersion } = require('../package.json') as { version: string }
 
+const tenantSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const portalSessionLifetimeMs = 30 * 24 * 60 * 60 * 1000
+const internalRoutePrefix = '/internal'
+const tenantRoutePrefix = `${internalRoutePrefix}/tenants`
+const portalRoutePrefix = '/portal'
+const portalPlanCatalog = [
+  {
+    id: 'adventurer',
+    name: 'Adventurer',
+    priceLabel: '$9/mo placeholder',
+    description: 'A focused home for a single campaign and its session notes.',
+    features: ['One tenant instance', 'Core notes workspace', 'Billing integration placeholder'],
+  },
+  {
+    id: 'guild',
+    name: 'Guild',
+    priceLabel: '$29/mo placeholder',
+    description: 'Adds room for multiple groups with future team-management hooks.',
+    features: ['Expanded collaboration headroom', 'Priority onboarding queue', 'Team invites placeholder'],
+  },
+  {
+    id: 'realm',
+    name: 'Realm',
+    priceLabel: 'Contact us placeholder',
+    description: 'For larger communities that want guided rollout and future analytics.',
+    features: ['Dedicated launch planning', 'Usage analytics placeholder', 'White-glove support lane'],
+  },
+] as const
+const portalPlanSchema = z.enum(['adventurer', 'guild', 'realm'])
+
 const createTenantSchema = z.object({
   id: z.string().min(1),
-  slug: z.string().min(1).max(63).regex(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/),
+  slug: z.string().min(1).max(63).regex(tenantSlugPattern),
   ownerId: z.string().min(1),
   initialAdminEmail: z.string().trim().email().optional(),
   version: z.string().min(1),
 })
 
 const tenantStateSchema = z.enum(tenantStates)
-const internalRoutePrefix = '/internal'
-const tenantRoutePrefix = `${internalRoutePrefix}/tenants`
+const portalBillingProviderSchema = z.enum(portalBillingProviders)
 
 const updateStateSchema = z.object({
   state: tenantStateSchema,
@@ -148,6 +196,31 @@ const provisionTenantSchema = z.object({
 const deprovisionTenantSchema = z.object({
   triggeredBy: z.string().min(1),
   reason: z.string().min(1).optional(),
+})
+
+const portalSignupSchema = z.object({
+  email: z.string().trim().email(),
+  displayName: z.string().trim().min(1).max(80),
+  password: z.string().min(10).max(200),
+  billingEmail: z.string().trim().email().optional(),
+  paymentProvider: portalBillingProviderSchema,
+  tenantName: z.string().trim().min(1).max(80),
+  tenantSlug: z.string().min(1).max(63).regex(tenantSlugPattern),
+  planTier: portalPlanSchema,
+  acceptTerms: z.literal(true),
+})
+
+const portalLoginSchema = z.object({
+  email: z.string().trim().email(),
+  password: z.string().min(1).max(200),
+})
+
+const portalCreateTenantSchema = z.object({
+  tenantName: z.string().trim().min(1).max(80),
+  tenantSlug: z.string().min(1).max(63).regex(tenantSlugPattern),
+  planTier: portalPlanSchema,
+  paymentProvider: portalBillingProviderSchema,
+  billingEmail: z.string().trim().email().optional(),
 })
 
 function isSqliteConstraintError(
@@ -187,6 +260,50 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
 
 function buildRolloutFailureDetails(tenantId: string) {
   return `Rolling update failed for tenant ${tenantId}. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.`
+}
+
+function normalizePortalEmail(email: string) {
+  return email.trim().toLowerCase()
+}
+
+function createPortalSessionToken() {
+  return randomBytes(32).toString('hex')
+}
+
+function hashPortalSessionToken(token: string) {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function createPortalPasswordHash(password: string) {
+  const salt = randomBytes(16).toString('hex')
+  const derivedKey = scryptSync(password, salt, 64).toString('hex')
+  return `${salt}:${derivedKey}`
+}
+
+function verifyPortalPassword(password: string, storedHash: string) {
+  const [salt, expectedHex] = storedHash.split(':')
+
+  if (!salt || !expectedHex) {
+    return false
+  }
+
+  const provided = Buffer.from(scryptSync(password, salt, 64))
+  const expected = Buffer.from(expectedHex, 'hex')
+
+  if (provided.length !== expected.length) {
+    return false
+  }
+
+  return timingSafeEqual(provided, expected)
+}
+
+function buildPortalSessionExpiry() {
+  return new Date(Date.now() + portalSessionLifetimeMs).toISOString()
+}
+
+interface PortalAuthenticatedRequest extends Request {
+  portalAccount?: PortalAccount
+  portalSession?: PortalSession
 }
 
 function createAdminAuthMiddleware(
@@ -230,11 +347,52 @@ function createAdminAuthMiddleware(
   }
 }
 
+function createPortalSessionMiddleware(
+  tenantRegistry: TenantRegistry,
+): express.RequestHandler {
+  return (request, response, next) => {
+    const authorizationHeader = request.header('authorization')
+
+    if (!authorizationHeader?.startsWith('Bearer ')) {
+      request.resume()
+      response.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const rawToken = authorizationHeader.slice('Bearer '.length).trim()
+    const tokenHash = hashPortalSessionToken(rawToken)
+    const portalSession = tenantRegistry.getPortalSessionByTokenHash(tokenHash)
+
+    if (!portalSession) {
+      request.resume()
+      response.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const portalAccount = tenantRegistry.getPortalAccount(portalSession.accountId)
+
+    if (!portalAccount) {
+      request.resume()
+      response.status(401).json({ error: 'Unauthorized' })
+      return
+    }
+
+    const portalRequest = request as PortalAuthenticatedRequest
+    portalRequest.portalSession = portalSession
+    portalRequest.portalAccount = portalAccount
+    next()
+  }
+}
+
 export function createApp({
   tenantRegistry,
   adminToken,
   adminAuth = createControlPlaneAdminAuth({ mode: 'static' }),
   tenantProvisioningService,
+  portalAuthMode = 'local',
+  portalDefaultTenantVersion = appVersion,
+  tenantBaseDomain,
+  tenantPublicScheme = 'https',
 }: CreateAppOptions): Express {
   const app = express()
   const buildHealthResponse = (): HealthResponse => ({
@@ -311,6 +469,179 @@ export function createApp({
       tenants,
     }
   }
+  const buildPortalCatalogResponse = (): PortalCatalogResponse => ({
+    authMode: portalAuthMode,
+    defaultTenantVersion: portalDefaultTenantVersion,
+    provisioningConfigured: tenantProvisioningService !== undefined,
+    slugPolicy: {
+      pattern: tenantSlugPattern.source,
+      maxLength: 63,
+      example: 'misty-harbor',
+    },
+    plans: portalPlanCatalog.map((plan) => ({
+      id: plan.id,
+      name: plan.name,
+      priceLabel: plan.priceLabel,
+      description: plan.description,
+      features: [...plan.features],
+    })),
+    placeholders: {
+      billingStatus: 'placeholder',
+      teamInvites: 'coming-soon',
+      usageAnalytics: 'coming-soon',
+    },
+  })
+  const buildPortalAppUrl = (subdomain: string | null) => {
+    if (!subdomain || !tenantBaseDomain) {
+      return null
+    }
+
+    return `${tenantPublicScheme}://${subdomain}.${tenantBaseDomain}`
+  }
+  const buildPortalTenantSummary = (
+    tenantId: string,
+  ): PortalTenantSummary | null => {
+    const latestTransitionsByTenant = tenantRegistry.getLatestStateTransitions()
+    const tenant = tenantRegistry.getTenant(tenantId)
+
+    if (!tenant) {
+      return null
+    }
+
+    return {
+      tenant,
+      latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
+      backup: parseBackupMetadata(tenant.backupMetadata),
+      appUrl: buildPortalAppUrl(tenant.subdomain),
+      settingsPath: `/dashboard/tenants/${tenant.id}`,
+    }
+  }
+  const buildPortalDashboardResponse = (
+    account: PortalAccount,
+  ): PortalDashboardResponse => {
+    const latestTransitionsByTenant = tenantRegistry.getLatestStateTransitions()
+    const tenants = tenantRegistry.listTenantsByOwnerId(account.id).map((tenant) => ({
+      tenant,
+      latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
+      backup: parseBackupMetadata(tenant.backupMetadata),
+      appUrl: buildPortalAppUrl(tenant.subdomain),
+      settingsPath: `/dashboard/tenants/${tenant.id}`,
+    }))
+
+    return {
+      account,
+      catalog: buildPortalCatalogResponse(),
+      tenants,
+    }
+  }
+  const buildPortalSessionResponse = (account: PortalAccount): PortalSessionResponse => {
+    const token = createPortalSessionToken()
+    tenantRegistry.createPortalSession({
+      id: randomUUID(),
+      accountId: account.id,
+      tokenHash: hashPortalSessionToken(token),
+      expiresAt: buildPortalSessionExpiry(),
+    })
+
+    return {
+      token,
+      dashboard: buildPortalDashboardResponse(account),
+    }
+  }
+  const ensurePortalLocalAuthEnabled = (
+    response: Response<ErrorResponse>,
+  ): boolean => {
+    if (portalAuthMode === 'local') {
+      return true
+    }
+
+    response.status(501).json({
+      error:
+        'Portal Keycloak auth is not implemented yet. Use local portal auth for this slice.',
+    })
+    return false
+  }
+  const provisionPortalTenant = async (params: {
+    ownerId: string
+    ownerEmail: string
+    tenantName: string
+    tenantSlug: string
+    planTier: z.infer<typeof portalPlanSchema>
+    paymentProvider: z.infer<typeof portalBillingProviderSchema>
+  }): Promise<PortalTenantSummary> => {
+    const { ownerId, ownerEmail, tenantName, tenantSlug, planTier, paymentProvider } = params
+    const existingSlug = tenantRegistry.getTenantBySlug(tenantSlug)
+
+    if (existingSlug) {
+      throw new Error('Tenant slug already exists')
+    }
+
+    const tenant = tenantRegistry.createTenant({
+      id: `tenant-${randomBytes(8).toString('hex')}`,
+      slug: tenantSlug,
+      ownerId,
+      displayName: tenantName,
+      planTier,
+      initialAdminEmail: ownerEmail,
+      version: portalDefaultTenantVersion,
+    })
+
+    try {
+      if (tenantProvisioningService) {
+        await tenantProvisioningService.provisionTenant({
+          tenantId: tenant.id,
+          triggeredBy: `portal:${ownerId}`,
+          reason: `Portal self-serve (${planTier}, ${paymentProvider})`,
+          version: portalDefaultTenantVersion,
+        })
+      }
+
+      const summary = buildPortalTenantSummary(tenant.id)
+
+      if (!summary) {
+        throw new Error('Failed to build portal tenant summary')
+      }
+
+      return summary
+    } catch (error) {
+      tenantRegistry.deleteTenant(tenant.id)
+      throw error
+    }
+  }
+  const createPortalTenant = async (params: {
+    account: PortalAccount
+    tenantName: string
+    tenantSlug: string
+    planTier: z.infer<typeof portalPlanSchema>
+    paymentProvider: z.infer<typeof portalBillingProviderSchema>
+    billingEmail?: string
+  }): Promise<{ tenantSummary: PortalTenantSummary; account: PortalAccount }> => {
+    const { account, tenantName, tenantSlug, planTier, paymentProvider, billingEmail } =
+      params
+    const normalizedBillingEmail = billingEmail?.trim() ?? account.email
+    const tenantSummary = await provisionPortalTenant({
+      ownerId: account.id,
+      ownerEmail: account.email,
+      tenantName,
+      tenantSlug,
+      planTier,
+      paymentProvider,
+    })
+
+    try {
+      return {
+        tenantSummary,
+        account: tenantRegistry.updatePortalAccount(account.id, {
+          displayName: account.displayName,
+          billingEmail: normalizedBillingEmail,
+          billingProvider: paymentProvider,
+        }),
+      }
+    } catch (error) {
+      tenantRegistry.deleteTenant(tenantSummary.tenant.id)
+      throw error
+    }
+  }
   const readinessHandler = (
     _request: Request,
     response: Response<HealthResponse | ErrorResponse>,
@@ -335,6 +666,7 @@ export function createApp({
   })
   app.use(internalRoutePrefix, createAdminAuthMiddleware(adminToken, adminAuth))
   app.use(internalRoutePrefix, express.json())
+  app.use(portalRoutePrefix, express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json(buildHealthResponse())
@@ -346,6 +678,233 @@ export function createApp({
 
   app.get('/readyz', readinessHandler)
   app.get('/ready', readinessHandler)
+
+  app.get(
+    `${portalRoutePrefix}/catalog`,
+    (_request: Request, response: Response<PortalCatalogResponse>) => {
+      response.json(buildPortalCatalogResponse())
+    },
+  )
+
+  app.post(
+    `${portalRoutePrefix}/signup`,
+    async (
+      request: Request,
+      response: Response<PortalSessionResponse | ErrorResponse>,
+    ) => {
+      if (!ensurePortalLocalAuthEnabled(response)) {
+        return
+      }
+
+      const parseResult = portalSignupSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      const normalizedEmail = normalizePortalEmail(parseResult.data.email)
+      const normalizedBillingEmail =
+        parseResult.data.billingEmail?.trim() ?? normalizedEmail
+
+      try {
+        const existingAccount = tenantRegistry.getPortalAccountByEmail(normalizedEmail)
+        if (existingAccount) {
+          response.status(409).json({
+            error: 'Portal account already exists',
+            details:
+              'An account already exists for that email. Sign in instead of signing up again.',
+          })
+          return
+        }
+
+        const accountId = randomUUID()
+        const tenantSummary = await provisionPortalTenant({
+          ownerId: accountId,
+          ownerEmail: normalizedEmail,
+          tenantName: parseResult.data.tenantName,
+          tenantSlug: parseResult.data.tenantSlug,
+          planTier: parseResult.data.planTier,
+          paymentProvider: parseResult.data.paymentProvider,
+        })
+
+        try {
+          const account = tenantRegistry.createPortalAccount({
+            id: accountId,
+            email: normalizedEmail,
+            displayName: parseResult.data.displayName,
+            passwordHash: createPortalPasswordHash(parseResult.data.password),
+            billingEmail: normalizedBillingEmail,
+            billingProvider: parseResult.data.paymentProvider,
+          })
+
+          response.status(201).json(buildPortalSessionResponse(account))
+        } catch (error) {
+          tenantRegistry.deleteTenant(tenantSummary.tenant.id)
+          throw error
+        }
+      } catch (error) {
+        if (isSqliteConstraintError(error) || error instanceof Error) {
+          const errorMessage = error.message
+          const conflictStatus = errorMessage.includes('already exists') ? 409 : 500
+          response.status(conflictStatus).json({
+            error:
+              conflictStatus === 409
+                ? 'Portal signup conflict'
+                : 'Failed to complete portal signup',
+            details: errorMessage,
+          })
+          return
+        }
+
+        response.status(500).json({ error: 'Failed to complete portal signup' })
+      }
+    },
+  )
+
+  app.post(
+    `${portalRoutePrefix}/login`,
+    (
+      request: Request,
+      response: Response<PortalSessionResponse | ErrorResponse>,
+    ) => {
+      if (!ensurePortalLocalAuthEnabled(response)) {
+        return
+      }
+
+      const parseResult = portalLoginSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      const normalizedEmail = normalizePortalEmail(parseResult.data.email)
+      const authRecord = tenantRegistry.getPortalAccountAuthByEmail(normalizedEmail)
+
+      if (
+        !authRecord ||
+        authRecord.account.authProvider !== 'local' ||
+        !authRecord.passwordHash ||
+        !verifyPortalPassword(parseResult.data.password, authRecord.passwordHash)
+      ) {
+        response.status(401).json({
+          error: 'Unauthorized',
+          details: 'Email or password is incorrect.',
+        })
+        return
+      }
+
+      response.json(buildPortalSessionResponse(authRecord.account))
+    },
+  )
+
+  app.get(
+    `${portalRoutePrefix}/me`,
+    createPortalSessionMiddleware(tenantRegistry),
+    (
+      request: Request,
+      response: Response<PortalDashboardResponse | ErrorResponse>,
+    ) => {
+      const portalRequest = request as PortalAuthenticatedRequest
+      const portalAccount = portalRequest.portalAccount
+
+      if (!portalAccount) {
+        response.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      response.json(buildPortalDashboardResponse(portalAccount))
+    },
+  )
+
+  app.post(
+    `${portalRoutePrefix}/me/tenants`,
+    createPortalSessionMiddleware(tenantRegistry),
+    async (
+      request: Request,
+      response: Response<PortalDashboardResponse | ErrorResponse>,
+    ) => {
+      const portalRequest = request as PortalAuthenticatedRequest
+      const portalAccount = portalRequest.portalAccount
+
+      if (!portalAccount) {
+        response.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      const parseResult = portalCreateTenantSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      try {
+        await createPortalTenant({
+          account: portalAccount,
+          tenantName: parseResult.data.tenantName,
+          tenantSlug: parseResult.data.tenantSlug,
+          planTier: parseResult.data.planTier,
+          paymentProvider: parseResult.data.paymentProvider,
+          billingEmail: parseResult.data.billingEmail,
+        })
+
+        const refreshedAccount = tenantRegistry.getPortalAccount(portalAccount.id)
+
+        if (!refreshedAccount) {
+          response.status(500).json({ error: 'Portal account not found' })
+          return
+        }
+
+        response.status(201).json(buildPortalDashboardResponse(refreshedAccount))
+      } catch (error) {
+        if (isSqliteConstraintError(error) || error instanceof Error) {
+          const errorMessage = error.message
+          const conflictStatus = errorMessage.includes('already exists') ? 409 : 500
+          response.status(conflictStatus).json({
+            error:
+              conflictStatus === 409
+                ? 'Portal tenant conflict'
+                : 'Failed to create portal tenant',
+            details: errorMessage,
+          })
+          return
+        }
+
+        response.status(500).json({ error: 'Failed to create portal tenant' })
+      }
+    },
+  )
+
+  app.post(
+    `${portalRoutePrefix}/logout`,
+    createPortalSessionMiddleware(tenantRegistry),
+    (
+      request: Request,
+      response: Response<PortalLogoutResponse | ErrorResponse>,
+    ) => {
+      const portalRequest = request as PortalAuthenticatedRequest
+      const portalSession = portalRequest.portalSession
+
+      if (!portalSession) {
+        response.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      tenantRegistry.deletePortalSessionByTokenHash(portalSession.tokenHash)
+      response.json({ signedOut: true })
+    },
+  )
 
   app.get(
     '/internal/fleet/status',

@@ -37,45 +37,6 @@ export interface StateTransition {
   createdAt: string
 }
 
-export interface TenantListResponse {
-  tenants: Tenant[]
-}
-
-export interface TenantDetailResponse {
-  tenant: Tenant
-}
-
-export interface TenantProvisioningResources {
-  namespace: string
-  deploymentName: string
-  serviceName: string
-  pvcName: string
-  configMapName: string
-  secretName: string
-  hostname: string
-  databaseName: string
-  image: string
-}
-
-export interface TenantProvisioningResponse {
-  tenant: Tenant
-  resources: TenantProvisioningResources
-}
-
-export interface TenantDeprovisionResponse {
-  tenant: Tenant
-  deprovisioned: true
-}
-
-export interface StateTransitionHistoryResponse {
-  transitions: StateTransition[]
-}
-
-export interface FleetDependencyHealth {
-  status: 'healthy' | 'disabled'
-  details?: string
-}
-
 export interface FleetTenantBackupStatus {
   rawMetadata: string | null
   location: string | null
@@ -83,58 +44,6 @@ export interface FleetTenantBackupStatus {
   lastBackupStatus: string | null
   lastRestoreDrillAt: string | null
   lastRestoreDrillStatus: string | null
-}
-
-export interface FleetTenantStatus {
-  tenant: Tenant
-  health: 'healthy' | 'attention'
-  backup: FleetTenantBackupStatus
-  latestTransition: StateTransition | null
-}
-
-export interface FleetStatusSummary {
-  totalTenants: number
-  tenantsByCurrentState: Record<TenantState, number>
-  tenantsByDesiredState: Record<TenantState, number>
-  tenantsByVersion: Record<string, number>
-  tenantsWithBackupMetadata: number
-  tenantsMissingBackupMetadata: number
-  tenantsNeedingAttention: number
-}
-
-export interface FleetStatusResponse {
-  generatedAt: string
-  controlPlane: HealthResponse
-  dependencies: {
-    tenantRegistry: FleetDependencyHealth
-    tenantProvisioning: FleetDependencyHealth
-  }
-  summary: FleetStatusSummary
-  tenants: FleetTenantStatus[]
-}
-
-export const portalBillingProviders = ['stripe', 'square', 'manual-review'] as const
-
-export type PortalBillingProvider = (typeof portalBillingProviders)[number]
-
-export interface PortalAccount {
-  id: string
-  email: string
-  displayName: string
-  billingEmail: string | null
-  billingProvider: PortalBillingProvider | null
-  authProvider: 'local' | 'keycloak'
-  keycloakSub: string | null
-  createdAt: string
-  updatedAt: string
-}
-
-export interface PortalSession {
-  id: string
-  accountId: string
-  tokenHash: string
-  expiresAt: string
-  createdAt: string
 }
 
 export interface PortalPlan {
@@ -162,6 +71,18 @@ export interface PortalCatalogResponse {
   }
 }
 
+export interface PortalAccount {
+  id: string
+  email: string
+  displayName: string
+  billingEmail: string | null
+  billingProvider: 'stripe' | 'square' | 'manual-review' | null
+  authProvider: 'local' | 'keycloak'
+  keycloakSub: string | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface PortalTenantSummary {
   tenant: Tenant
   latestTransition: StateTransition | null
@@ -186,24 +107,24 @@ export interface PortalSignupRequest {
   displayName: string
   password: string
   billingEmail?: string
-  paymentProvider: PortalBillingProvider
+  paymentProvider: 'stripe' | 'square' | 'manual-review'
   tenantName: string
   tenantSlug: string
   planTier: string
   acceptTerms: true
 }
 
-export interface PortalLoginRequest {
-  email: string
-  password: string
-}
-
 export interface PortalCreateTenantRequest {
   tenantName: string
   tenantSlug: string
   planTier: string
-  paymentProvider: PortalBillingProvider
+  paymentProvider: 'stripe' | 'square' | 'manual-review'
   billingEmail?: string
+}
+
+export interface PortalLoginRequest {
+  email: string
+  password: string
 }
 
 export interface PortalLogoutResponse {
@@ -213,11 +134,5 @@ export interface PortalLogoutResponse {
 export interface ErrorResponse {
   code?: string
   error: string
-  details?: string
-}
-
-export interface HealthResponse {
-  status: 'healthy'
-  uptime: number
-  version: string
+  details?: string | string[]
 }
