@@ -161,3 +161,9 @@ Established QA gate for #68 operator portal first slice:
 - The base-path follow-up is low-risk when `apps/operator-portal/src/base-path.ts` stays a pure string helper and both `apps/operator-portal/src/config.ts` and `apps/operator-portal/vite.config.ts` import it instead of carrying copy-pasted normalization logic.
 - `apps/operator-portal/src/base-path.test.ts` is the right regression seam: keep coverage on blank input fallback, `/` passthrough, and whitespace/trailing-slash trimming so runtime and Vite proxy config cannot silently diverge later.
 - Reviewer proof for this slice is `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal`; I also re-ran the full repo `npm run lint && npm test && npm run build` and it stayed green with the shared utility wired in.
+
+### PR #78 initialAdminEmail contract-alignment QA (2026-04-22T20:05Z)
+- `apps/control-plane/src/app.ts` and `apps/control-plane/src/tenant-registry.ts` already treat `POST /internal/tenants.initialAdminEmail` as optional, so `apps/operator-portal/src/types.ts` should mirror that optionality instead of forcing a stricter client contract.
+- Keep the portal create flow behavior-preserving by typing the request object explicitly in `apps/operator-portal/src/ProvisionTenantPanel.tsx` while still sending the reviewed `initialAdminEmail` value the UI requires today.
+- The fetch-mock seams in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` should model the optional request field too and coalesce missing request email values back to `null` on mocked tenant responses, matching the control-plane tenant shape.
+- QA proof for this follow-up: baseline + post-fix `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal`.

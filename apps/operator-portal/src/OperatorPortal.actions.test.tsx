@@ -224,7 +224,7 @@ describe('operator portal lifecycle actions', () => {
     const createRequests: Array<{
       id: string
       ownerId: string
-      initialAdminEmail: string
+      initialAdminEmail?: string
       slug: string
       version: string
     }> = []
@@ -261,7 +261,7 @@ describe('operator portal lifecycle actions', () => {
         const request = readMockJsonBody<{
           id: string
           ownerId: string
-          initialAdminEmail: string
+          initialAdminEmail?: string
           slug: string
           version: string
         }>(init)
@@ -278,7 +278,7 @@ describe('operator portal lifecycle actions', () => {
               slug: request.slug,
               subdomain: null,
               ownerId: request.ownerId,
-              initialAdminEmail: request.initialAdminEmail,
+              initialAdminEmail: request.initialAdminEmail ?? null,
               desiredState: 'provisioning',
               currentState: 'provisioning',
               version: request.version,
@@ -408,7 +408,7 @@ describe('operator portal lifecycle actions', () => {
     const createRequests: Array<{
       id: string
       ownerId: string
-      initialAdminEmail: string
+      initialAdminEmail?: string
       slug: string
       version: string
     }> = []
@@ -441,7 +441,7 @@ describe('operator portal lifecycle actions', () => {
         const request = readMockJsonBody<{
           id: string
           ownerId: string
-          initialAdminEmail: string
+          initialAdminEmail?: string
           slug: string
           version: string
         }>(init)

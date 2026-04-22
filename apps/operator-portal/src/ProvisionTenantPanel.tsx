@@ -16,6 +16,7 @@ import {
 } from '@mui/material'
 import { useEffect, useMemo, useState } from 'react'
 import { createTenant, provisionTenant } from './control-plane-api'
+import type { CreateTenantRequest } from './types'
 
 interface ProvisionTenantPanelProps {
   actor: string
@@ -155,13 +156,17 @@ export default function ProvisionTenantPanel({
     let tenantCreated = false
 
     try {
-      const createdTenant = await createTenant(authToken, {
+      const createTenantRequest = {
         id: normalizedDraft.id,
         slug: normalizedDraft.slug,
         ownerId: normalizedDraft.ownerId,
-        initialAdminEmail: normalizedDraft.initialAdminEmail,
+        ...(normalizedDraft.initialAdminEmail
+          ? { initialAdminEmail: normalizedDraft.initialAdminEmail }
+          : {}),
         version: normalizedDraft.version,
-      })
+      } satisfies CreateTenantRequest
+
+      const createdTenant = await createTenant(authToken, createTenantRequest)
       tenantCreated = true
 
       const provisioningResult = await provisionTenant(authToken, createdTenant.tenant.id, {

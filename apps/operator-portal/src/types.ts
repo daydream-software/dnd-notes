@@ -39,7 +39,7 @@ export interface CreateTenantRequest {
   id: string
   slug: string
   ownerId: string
-  initialAdminEmail: string
+  initialAdminEmail?: string
   version: string
 }
 
