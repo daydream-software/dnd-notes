@@ -33,6 +33,24 @@ data:
           ]
         },
         {
+          "username": "ops@example.com",
+          "email": "ops@example.com",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Ops",
+          "lastName": "User",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "password",
+              "temporary": false
+            }
+          ],
+          "clientRoles": {
+            "dnd-notes-control-plane": ["control-plane-workforce"]
+          }
+        },
+        {
           "username": "site-admin@example.com",
           "email": "site-admin@example.com",
           "enabled": true,
@@ -45,9 +63,56 @@ data:
               "value": "password",
               "temporary": false
             }
+          ],
+          "clientRoles": {
+            "dnd-notes-control-plane": ["control-plane-admin", "control-plane-workforce"]
+          }
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "dnd-notes-tenant-app",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "redirectUris": [
+            "http://*.127.0.0.1.nip.io/*",
+            "http://localhost:5173/*",
+            "http://localhost:3000/*"
+          ],
+          "webOrigins": [
+            "http://*.127.0.0.1.nip.io",
+            "http://localhost:5173",
+            "http://localhost:3000"
+          ]
+        },
+        {
+          "clientId": "dnd-notes-control-plane",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": false,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true
+        }
+      ],
+      "roles": {
+        "client": {
+          "dnd-notes-control-plane": [
+            {
+              "name": "control-plane-admin",
+              "clientRole": true
+            },
+            {
+              "name": "control-plane-workforce",
+              "clientRole": true
+            }
           ]
         }
-      ]
+      }
     }
 ---
 apiVersion: v1

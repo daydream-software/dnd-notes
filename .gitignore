@@ -15,6 +15,7 @@ dist/
 coverage/
 reports/
 npm-debug.log*
+.k3d-smoke-work/
 
 # Local environment files
 .env

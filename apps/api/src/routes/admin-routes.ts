@@ -24,7 +24,12 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
       response: Response<AdminAccountsResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(
+        noteStore,
+        request,
+        response,
+        context.runtimeAuth,
+      )
 
       if (!siteAdmin) {
         return
@@ -41,7 +46,12 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
       response: Response<AdminOverviewResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(
+        noteStore,
+        request,
+        response,
+        context.runtimeAuth,
+      )
 
       if (!siteAdmin) {
         return
@@ -58,7 +68,12 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
       response: Response<ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(
+        noteStore,
+        request,
+        response,
+        context.runtimeAuth,
+      )
 
       if (!siteAdmin) {
         return
@@ -127,7 +142,12 @@ export function registerAdminRoutes(app: Express, context: AppRouteContext) {
       response: Response<AdminRestoreResponse | ErrorResponse>,
     ) => {
       let noteStore = context.getNoteStore()
-      const siteAdmin = await requireSiteAdmin(noteStore, request, response)
+      const siteAdmin = await requireSiteAdmin(
+        noteStore,
+        request,
+        response,
+        context.runtimeAuth,
+      )
 
       if (!siteAdmin) {
         return

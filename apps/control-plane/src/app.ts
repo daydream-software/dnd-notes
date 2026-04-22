@@ -2,6 +2,11 @@ import { createRequire } from 'node:module'
 import express, { type Express, type Request, type Response } from 'express'
 import { z } from 'zod'
 import {
+  ControlPlaneAuthError,
+  createControlPlaneAdminAuth,
+  type ControlPlaneAdminAuth,
+} from './keycloak-auth.js'
+import {
   TenantProvisioningValidationError,
   type TenantProvisioningPort,
 } from './provisioning.js'
@@ -95,7 +100,8 @@ function hasBackupMetadata(rawMetadata: string | null) {
 
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
-  adminToken: string
+  adminToken?: string
+  adminAuth?: ControlPlaneAdminAuth
   tenantProvisioningService?: TenantProvisioningPort
 }
 
@@ -177,27 +183,51 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
   return { error: 'Tenant already exists' }
 }
 
-function createAdminAuthMiddleware(adminToken: string): express.RequestHandler {
-  // Control-plane auth seam: Currently validates static bearer token.
-  // In Phase 2a, this can be extended to support admin-realm JWT validation:
-  // - Check if token matches static adminToken (current behavior)
-  // - OR validate JWT from Keycloak admin realm, extract admin claims
-  // Authorization remains control-plane-local (admin token grants full access).
-  return (request, response, next) => {
+function createAdminAuthMiddleware(
+  adminToken: string | undefined,
+  adminAuth: ControlPlaneAdminAuth,
+): express.RequestHandler {
+  return async (request, response, next) => {
     const authorizationHeader = request.header('authorization')
-    if (authorizationHeader !== `Bearer ${adminToken}`) {
+
+    if (!authorizationHeader?.startsWith('Bearer ')) {
       request.resume()
       response.status(401).json({ error: 'Unauthorized' })
       return
     }
 
-    next()
+    const token = authorizationHeader.slice('Bearer '.length).trim()
+
+    if (adminAuth.mode === 'static') {
+      if (!adminToken || token !== adminToken) {
+        request.resume()
+        response.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      next()
+      return
+    }
+
+    try {
+      await adminAuth.authorizeBearerToken(token)
+      next()
+    } catch (error) {
+      if (error instanceof ControlPlaneAuthError) {
+        request.resume()
+        response.status(error.statusCode).json({ error: error.message })
+        return
+      }
+
+      next(error)
+    }
   }
 }
 
 export function createApp({
   tenantRegistry,
   adminToken,
+  adminAuth = createControlPlaneAdminAuth({ mode: 'static' }),
   tenantProvisioningService,
 }: CreateAppOptions): Express {
   const app = express()
@@ -297,7 +327,7 @@ export function createApp({
     response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
     next()
   })
-  app.use(internalRoutePrefix, createAdminAuthMiddleware(adminToken))
+  app.use(internalRoutePrefix, createAdminAuthMiddleware(adminToken, adminAuth))
   app.use(internalRoutePrefix, express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {

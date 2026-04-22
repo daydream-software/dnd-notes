@@ -128,7 +128,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
       applySharedLinkPolicy(response, shared.shareLink.frameAncestors)
 
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return

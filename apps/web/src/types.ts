@@ -65,8 +65,20 @@ export interface OwnerAccount {
   email: string
   displayName: string
   isSiteAdmin: boolean
+  keycloakSub?: string | null
   createdAt: string
   updatedAt: string
+}
+
+export interface AuthConfigResponse {
+  mode: 'local' | 'keycloak'
+  keycloak:
+    | {
+        url: string
+        realm: string
+        clientId: string
+      }
+    | null
 }
 
 export interface OwnerRegistrationInput {

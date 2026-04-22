@@ -11,7 +11,9 @@ The control-plane service maintains the tenant registry and exposes internal API
 - Managing storage references and backup metadata
 
 This service is **cluster-internal only** and not exposed to end users.
-All `/internal` routes require a bearer token from `CONTROL_PLANE_ADMIN_TOKEN`.
+All `/internal` routes require a bearer token. In static mode that is
+`CONTROL_PLANE_ADMIN_TOKEN`; in Keycloak mode it must be a JWT from the
+configured workforce/admin Keycloak client and realm.
 
 ## Tenant Lifecycle States
 
@@ -157,8 +159,17 @@ Environment variables:
 
 - `PORT` — HTTP port (default: 3001)
 - `DATABASE_PATH` — SQLite database path (default: `data/control-plane.sqlite`; relative paths resolve from the app root)
-- `CONTROL_PLANE_ADMIN_TOKEN` — Required bearer token for `/internal` routes
+- `CONTROL_PLANE_AUTH_MODE` — `static` (default) or `keycloak`
+- `CONTROL_PLANE_ADMIN_TOKEN` — required bearer token for `/internal` routes when `CONTROL_PLANE_AUTH_MODE=static`
+- `CONTROL_PLANE_KEYCLOAK_URL` — Keycloak base URL for workforce/admin JWT validation
+- `CONTROL_PLANE_KEYCLOAK_REALM` — workforce/admin realm used for `/internal` JWT validation
+- `CONTROL_PLANE_KEYCLOAK_CLIENT_ID` — Keycloak client ID accepted for `/internal` JWTs
+- `CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES` — comma-separated allowed workforce/admin roles (defaults to `control-plane-admin,control-plane-workforce`)
 - `CONTROL_PLANE_ENABLE_PROVISIONING` — enables live Kubernetes/Postgres provisioning
+- `TENANT_AUTH_MODE` — `local` (default) or `keycloak` for provisioned tenant pods
+- `TENANT_KEYCLOAK_URL` — Keycloak base URL injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
+- `TENANT_KEYCLOAK_REALM` — tenant realm injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
+- `TENANT_KEYCLOAK_CLIENT_ID` — tenant web client ID injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
 - `TENANT_BASE_DOMAIN` — base domain for generated tenant hosts
 - `TENANT_IMAGE_REPOSITORY` — tenant image repository used in generated Deployments
 - `TENANT_DATABASE_ADMIN_URL` — admin Postgres URL used to create/drop tenant databases, roles, and bootstrap schema

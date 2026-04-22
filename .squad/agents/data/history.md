@@ -25,6 +25,11 @@ Data initialized as Backend Dev for the initial project squad.
 
 ## Learnings
 
+- Issue #76 runtime Keycloak path keeps identity and authorization separate: `apps/api/src/keycloak-auth.ts` validates JWTs, while `apps/api/src/note-store.ts` reconciles `keycloak_sub` onto local `owner_accounts` and the existing `campaign_memberships` model still owns tenant authorization.
+- Keycloak owner-link conflicts should cross the `apps/api/src/note-store.ts` → `apps/api/src/route-support.ts` boundary as an explicit `OwnerKeycloakLinkConflictError`, not a parsed message string; regressions for the 409 mapping live in `apps/api/test/keycloak-runtime-auth.test.ts`.
+- The tenant web app must learn auth mode at runtime, not build time: `GET /api/auth/config` in `apps/api/src/routes/auth-routes.ts` plus `apps/web/src/keycloak-client.ts` let one built tenant image run in `AUTH_MODE=local` or `AUTH_MODE=keycloak` without per-tenant Vite rebuilds.
+- Control-plane runtime auth now uses explicit prefixed envs: `CONTROL_PLANE_AUTH_MODE`, `CONTROL_PLANE_KEYCLOAK_*`, and `TENANT_AUTH_MODE` / `TENANT_KEYCLOAK_*` in `apps/control-plane/src/index.ts`, `apps/control-plane/src/keycloak-auth.ts`, and `apps/control-plane/src/provisioning.ts`.
+- Reusable auth-regression pattern: `tests/fake-keycloak.ts` issues RSA-signed Keycloak-style tokens against a lightweight JWKS server, and focused coverage now lives in `apps/api/test/keycloak-auth.test.ts`, `apps/api/test/keycloak-runtime-auth.test.ts`, `apps/control-plane/test/keycloak-auth.test.ts`, and `apps/web/src/App.keycloak-auth.test.tsx`.
 - Phase 2 backend/security sequencing: start with per-tenant Postgres credentials before OIDC or restore orchestration, because `apps/control-plane/src/provisioning.ts` still injects one shared `DATABASE_URL` into every tenant secret and `apps/control-plane/src/index.ts` still accepts the shared `TENANT_DATABASE_RUNTIME_URL` model.
 - Least-privilege runtime roles are not a drop-in swap today: `apps/api/src/note-store-bootstrap.ts` still runs schema DDL on startup for Postgres, so a runtime role limited to CONNECT/USAGE/DML will fail unless the control plane pre-seeds the tenant database schema (or a separate migrator credential path exists) before the pod starts.
 - Key file path for #69: control-plane credential flow lives in `apps/control-plane/src/provisioning.ts`, startup env parsing in `apps/control-plane/src/index.ts`, tenant credential manifests in `platform/control-plane/base/secret.yaml` plus overlay patches, and operator docs in `README.md`, `RUNTIME.md`, and `apps/control-plane/README.md`.
@@ -577,3 +582,6 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 **Commit:** b7badaa
 
 **Outcome:** PR #72 is unblocked and ready for CI clearance and merge.
+
+📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
+

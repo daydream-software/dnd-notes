@@ -12,6 +12,25 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 issue #76 ready for PR handoff (2026-04-22T02:59:10Z): User reran `npm run k3d:smoke` after the final smoke-script JWKS fix and the lane finished green end-to-end (tenant rollout, control-plane Keycloak auth, tenant `/api/auth/session`, tenant `/api/campaigns`). Branch `squad/76-complete-runtime-keycloak-auth-integration` is now review-ready and being pushed for PR creation, with squad review still recommended because the slice is auth-sensitive. — Data (Agent)
+
+📌 k3d smoke launcher wired for tenant JWKS override (2026-04-22T02:47:52Z): The remaining live gap was in `scripts/k3d/smoke.sh` itself: the local control-plane process used for smoke rehearsals was still provisioning tenants without `TENANT_KEYCLOAK_JWKS_URL`. The smoke script now defaults that env to the in-cluster `platform-keycloak` Service and passes it into the local control-plane process, matching the runtime/provisioning changes already landed. — Data (Agent)
+
+📌 k3d tenant JWT validation fixed (2026-04-22T02:28:08Z): The live smoke tenant token was valid, but tenant pods were still trying to fetch JWKS through `http://keycloak.127.0.0.1.nip.io:8080`, which resolves to pod-local loopback in k3d. The runtime now supports a separate `KEYCLOAK_JWKS_URL` override, control-plane provisioning injects `TENANT_KEYCLOAK_JWKS_URL`, and the k3d overlay points tenant pods at the in-cluster `platform-keycloak` Service while keeping the public Keycloak URL for browser auth/config. Also ignored `.k3d-smoke-work/` so preserved smoke artifacts stop showing up as untracked files. — Data (Agent)
+
+📌 k3d smoke 401 traced to Keycloak `azp` handling (2026-04-22T02:15:07Z): The control-plane smoke token was valid but carried the common Keycloak direct-grant shape (`azp=dnd-notes-control-plane`, audience not equal to the client). The API and control-plane JWT validators now treat `azp` as the authoritative client binding when present, while fallbacking to `aud` when it is absent. Fake Keycloak defaults/tests were updated to exercise the `aud=account` path so the smoke-only regression is covered in automated tests. — Data (Agent)
+
+📌 k3d smoke failure handling tightened (2026-04-22T02:05:26Z): `scripts/k3d/smoke.sh` now enables `inherit_errexit`, records the failing command via an `ERR` trap, preserves `.k3d-smoke-work` on failure, and prints the preserved log path plus the failed command alongside the control-plane log tail. This keeps non-zero smoke failures loud and debuggable instead of cleaning away the evidence. — Data (Agent)
+
+📌 Issue #76 k3d follow-up fixed (2026-04-22T01:56:16Z): Local `k3d:smoke` exposed that the seeded Keycloak realm declared client roles under `clients[].roles`, which Keycloak 26 rejects during import. The fix moved control-plane roles to `roles.client["dnd-notes-control-plane"]` in `platform/k3d/keycloak.yaml` and extended `scripts/platform/validate-manifests.sh` to parse the embedded realm JSON so `npm run platform:validate` now catches this regression before smoke runs. — Data (Agent)
+
+📌 Issue #76 picked up (2026-04-22T00:49:24Z): Routing to the `squad:data` lane for runtime Keycloak auth integration across tenant apps and the control-plane. Scope includes tenant JWT validation, control-plane admin JWT validation, Keycloak env/config wiring for k3d + hosted setups, and docs/tests for the runtime flow. This is auth-sensitive work and should receive squad review before merge. — Data (Agent)
+
+📌 Issue #76 approach locked (2026-04-22T01:20:00Z): Chosen implementation shape is explicit runtime config, not build-time magic: tenant apps will expose `/api/auth/config`, validate Keycloak JWTs against configured issuer/JWKS when `AUTH_MODE=keycloak`, reconcile identities onto local `owner_accounts.keycloak_sub`, and keep guest/share-link authorization local. Control-plane auth will mirror that with its own `CONTROL_PLANE_AUTH_MODE=keycloak` workforce/admin JWT path while retaining the static bearer fallback for non-Keycloak environments. — Data (Agent)
+
+📌 Issue #76 implementation validated (2026-04-22T02:05:00Z): API, control-plane, web, and platform validation all passed after the runtime Keycloak slice landed. k3d smoke was updated to exercise live Keycloak tokens for both control-plane and tenant runtime auth, but this environment still blocks the full live rehearsal because the existing `dnd-notes` k3d cluster never becomes API-reachable. — Data (Agent)
+
+
 📌 Issue #69 supported (2026-04-21T19:55:31Z): Data implemented per-tenant Postgres credentials with control-plane schema pre-seeding and safe deprovision cleanup. Copilot co-authored commit 695c0f9 on squad/69-per-tenant-postgres-credentials. Validation passed (lint/test/build/platform:validate). — Data (Agent)
 
 
@@ -59,3 +78,19 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - The final review round tightened the least-privilege guarantee further: composite unique constraints or indexes that merely include `keycloak_sub` are now rejected, so only uniqueness on `keycloak_sub` alone passes bootstrap validation. I also synced the stale `.squad/decisions.md` wording to the implemented partial-index shape and removed an empty dangling header from `.squad/agents/data/history.md`.
 - One more follow-up review pointed out that the `FakePostgresDatabase` stub was still too idealized for `information_schema.table_constraints`. The stub now mirrors the current production SQL more closely, so composite-key cases only pass when the query itself truly asks for standalone `keycloak_sub` uniqueness. Focused `apps/api` test/build passed again.
 - Another review round then exposed the real gap: the production `ensureRequiredPostgresOwnerAccountKeycloakSub()` hardening had remained uncommitted locally. The branch now carries the standalone-column `GROUP BY/HAVING` constraint check and the stricter single-column `idx_owner_accounts_keycloak_sub` regex, matching the regression coverage that was already passing locally.
+
+## 2026-04-22: Issue #76 auth collision follow-up
+
+- Fixed the remaining tenant runtime Keycloak reconciliation edge in `apps/api/src/note-store.ts`: when an existing `keycloak_sub` logs in with a new IdP email that already belongs to another local owner row, the API now keeps the linked row’s persisted email/admin state instead of crashing on the unique-email constraint.
+- Added a runtime-auth regression in `apps/api/test/keycloak-runtime-auth.test.ts` that proves the linked owner still reaches campaigns while `/api/admin/accounts` stays forbidden during the collision, so tenant-local authorization boundaries remain anchored to the local row.
+- Cleaned the duplicate `AUTH_MODE` entry in `apps/api/.env.example` and re-ran `npm run lint --workspace apps/api && npm run test --workspace apps/api && npm run build --workspace apps/api`.
+
+## 2026-04-22: PR #77 backend review follow-up
+
+- Replaced the brittle `/api/auth/session` 409 mapping in `apps/api/src/route-support.ts` with a typed `OwnerKeycloakLinkConflictError` exported from `apps/api/src/note-store.ts`, so route behavior no longer depends on parsing `Error.message`.
+- Added runtime-auth regressions in `apps/api/test/keycloak-runtime-auth.test.ts` for both the real conflicting-subject 409 path and a synthetic typed-conflict case with an arbitrary message, proving the HTTP mapping stays stable across refactors.
+
+## 2026-04-22: PR #77 frontend review follow-up
+
+- `apps/web/src/App.tsx` no longer silently optional-chains the Keycloak login CTA. In Keycloak mode, a missing `keycloakClientRef.current` now throws a user-facing inline auth error telling the user to reload and try again.
+- `apps/web/src/App.keycloak-auth.test.tsx` now covers the missing-client path by rejecting Keycloak init during bootstrap, then asserting the sign-in CTA surfaces the inline error instead of no-oping.

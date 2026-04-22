@@ -11,6 +11,16 @@ data:
   PORT: "3001"
   DATABASE_PATH: /app/data/control-plane.sqlite
   CONTROL_PLANE_ENABLE_PROVISIONING: "true"
+  CONTROL_PLANE_AUTH_MODE: static
+  CONTROL_PLANE_KEYCLOAK_URL: https://auth.example.com
+  CONTROL_PLANE_KEYCLOAK_REALM: dnd-notes-workforce
+  CONTROL_PLANE_KEYCLOAK_CLIENT_ID: dnd-notes-control-plane
+  CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES: control-plane-admin,control-plane-workforce
+  TENANT_AUTH_MODE: local
+  TENANT_KEYCLOAK_URL: https://auth.example.com
+  TENANT_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes/protocol/openid-connect/certs
+  TENANT_KEYCLOAK_REALM: dnd-notes
+  TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app
   TENANT_BASE_DOMAIN: replace-me.example.com
   TENANT_IMAGE_REPOSITORY: ghcr.io/daydream-software/dnd-notes
   TENANT_PUBLIC_SCHEME: https

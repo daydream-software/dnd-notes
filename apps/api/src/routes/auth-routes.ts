@@ -1,5 +1,6 @@
 import type { Express, Request, Response } from 'express'
 import type {
+  AuthConfigResponse,
   AuthSessionResponse,
   CurrentOwnerResponse,
   ErrorResponse,
@@ -17,9 +18,13 @@ import {
 } from '../validation.js'
 
 export function registerAuthRoutes(app: Express, context: AppRouteContext) {
-  // Phase 2a local auth: These routes implement email/password authentication.
-  // In Phase 2a coexistence mode, these will coexist with Keycloak OIDC.
-  // In Phase 2b cutover, these routes will be removed.
+  app.get(
+    '/api/auth/config',
+    (_request: Request, response: Response<AuthConfigResponse>) => {
+      response.json(context.runtimeAuth.authConfig)
+    },
+  )
+
   app.post(
     '/api/auth/register',
     async (
@@ -27,6 +32,13 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
       if (context.isRateLimited(request, response, 'auth-register', registerRateLimitPolicy)) {
+        return
+      }
+
+      if (context.runtimeAuth.mode === 'keycloak') {
+        response.status(404).json({
+          error: 'Local auth routes are disabled when Keycloak auth is enabled.',
+        })
         return
       }
 
@@ -62,6 +74,13 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
       if (context.isRateLimited(request, response, 'auth-login', loginRateLimitPolicy)) {
+        return
+      }
+
+      if (context.runtimeAuth.mode === 'keycloak') {
+        response.status(404).json({
+          error: 'Local auth routes are disabled when Keycloak auth is enabled.',
+        })
         return
       }
 
@@ -101,6 +120,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
         context.getNoteStore(),
         request,
         response,
+        context.runtimeAuth,
       )
 
       if (!owner) {
@@ -117,6 +137,11 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
       request: Request,
       response: Response<undefined | ErrorResponse>,
     ) => {
+      if (context.runtimeAuth.mode === 'keycloak') {
+        response.status(204).send()
+        return
+      }
+
       const token = parseAuthorizationToken(request)
 
       if (!token) {
