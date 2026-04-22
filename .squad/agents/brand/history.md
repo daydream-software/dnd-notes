@@ -60,6 +60,9 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Smoke Script Bash Portability:** `scripts/k3d/smoke.sh` now treats `inherit_errexit` as a Bash 4.4+ enhancement, not a hard requirement. Guard Bash-only safety upgrades with explicit `BASH_VERSINFO` checks so macOS's stock Bash 3.2 can still run contributor-facing smoke/help flows while newer shells keep the stricter behavior.
 
----
+- **Shell JSON Payloads in Smoke Lanes:** In contributor-facing shell smoke scripts that already require Node, build JSON request bodies with `JSON.stringify(...)` rather than hand-escaped `printf` strings. This keeps curl payloads valid when values change and avoids review churn around shell quoting. Current example: `scripts/k3d/smoke.sh` tenant create payload.
 
+📌 Team update (2026-04-22T15:44:09Z): PR #77 JSON payload follow-up complete. Brand replaced manual tenant-create payload construction with Node JSON.stringify in scripts/k3d/smoke.sh; Chunk added regression coverage in apps/control-plane/test/k3d-smoke-payload.test.ts validating emitted JSON before live smoke run; all gates green (lint/test/build/platform:validate). Two decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:44:09Z-pr77-json-fix.md`. — Scribe
+
+---
 
