@@ -6,7 +6,7 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Chunk is the QA/Tester for the squad, responsible for regression coverage, gate validation, and identifying high-risk parity gaps.
 

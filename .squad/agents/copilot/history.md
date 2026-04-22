@@ -6,7 +6,7 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Copilot enabled as autonomous coding agent for squad via auto-assignment to squad:copilot issues.
 

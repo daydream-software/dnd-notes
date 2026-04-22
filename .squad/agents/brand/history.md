@@ -1,6 +1,6 @@
 # Brand — Platform Dev
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestration, deployment artifacts, and platform-layer integrations.
 
