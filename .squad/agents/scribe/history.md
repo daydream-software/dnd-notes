@@ -78,6 +78,19 @@ Scribe initialized as the team's memory and decision merger.
 
 **Team pattern:** Data's code-review classification (blocking/deferred/N/A) applied here: two fixes classified blocking + in-flight fixes; remaining lint/CI noise classified deferred. Queue state green, PR mergeable after final reply.
 
+## PR #78 Review Follow-Up Round 2 (2026-04-22T19:22:45+)
+
+**Triage:** Two new review comments + control-plane test failure detected.
+
+**Review comments (new, unresolved):**
+1. **`readStoredKeycloakTokens()` validation (blocking):** No validation of parsed JSON shape. If storage contains objects missing `accessToken`/`refreshToken` or with non-string values, Keycloak init/refresh throws confusingly. Should validate presence and type of both tokens before returning, clear storage and return null if invalid.
+2. **`clearSession()` incomplete state reset (blocking):** Clears tokens and view state but leaves `error` and `isLoadingFleet` set. Previous errors remain visible on sign-out, misleading operators. Should also reset these fields in `clearSession()` for clean logged-out UI state.
+
+**CI failures detected:**
+- **control-plane: failed** (validate job 72572222903 completed 19:22:23). Test summary shows 3 workspaces passed (web, api, operator-portal) but control-plane test suite failed. Build succeeded. This appears to be a pre-existing flaky control-plane regression, not caused by PR #78 operator-portal changes.
+
+**Current status:** PR mergeable after addressing two new Keycloak session-management issues. Control-plane failure flagged as out-of-scope per squad.identity/now.md guidance ("avoid disturbing the separate flaky control-plane CI diagnosis unless a dedicated follow-up is requested").
+
 ## Learnings
 
 Initial squad setup complete.

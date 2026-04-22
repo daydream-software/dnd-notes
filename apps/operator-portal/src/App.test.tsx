@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createJsonResponse, readMockRequest } from './test-helpers'
@@ -245,5 +245,59 @@ describe('operator portal', () => {
     ).toBe(true)
     expect(screen.getByText('Provisioning lane')).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Provision tenant' })).toBeTruthy()
+  })
+
+  it('clears stale error UI when the operator session is cleared', async () => {
+    localStorage.setItem(
+      storedTokensKey,
+      JSON.stringify({
+        accessToken: 'operator-access-token',
+        refreshToken: 'operator-refresh-token',
+      }),
+    )
+    initMock.mockResolvedValue({
+      accessToken: 'operator-access-token',
+      refreshToken: 'operator-refresh-token',
+    })
+    refreshMock.mockResolvedValue({
+      accessToken: 'operator-access-token',
+      refreshToken: 'operator-refresh-token',
+    })
+    logoutMock.mockResolvedValue()
+
+    let fleetStatusRequests = 0
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        fleetStatusRequests += 1
+
+        if (fleetStatusRequests === 1) {
+          return createJsonResponse(fleetStatus)
+        }
+
+        return createJsonResponse({ error: 'Fleet refresh failed' }, 500)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    const user = userEvent.setup()
+    expect(await screen.findByText('Fleet tenants')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Refresh fleet' }))
+
+    expect(await screen.findByText('Fleet refresh failed')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(
+      await screen.findByRole('button', { name: 'Continue with Keycloak' }),
+    ).toBeTruthy()
+    await waitFor(() => {
+      expect(screen.queryByText('Fleet refresh failed')).toBeNull()
+    })
   })
 })

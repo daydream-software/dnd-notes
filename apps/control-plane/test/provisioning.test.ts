@@ -1611,7 +1611,7 @@ describe('KubernetesTenantInfrastructureManager', () => {
     const manager = new KubernetesTenantInfrastructureManager({
       client,
       readyPollIntervalMs: 1,
-      deleteTimeoutMs: 50,
+      deleteTimeoutMs: 200,
     })
 
     await manager.deleteTenantResources({

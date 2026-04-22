@@ -92,3 +92,6 @@ Stef initialized as Frontend Dev for the initial project squad.
 
 - Keep the stale-review regression in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`: open the provision dialog, refresh fleet state, and assert the confirm button locks when `dependencies.tenantProvisioning.status` flips to `disabled`.
 - For readable Vitest lifecycle output, prefer `it.each` tuple rows with the scenario label as the first element in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` instead of relying on object-row titles.
+- Operator portal Keycloak restore should mirror the main web app’s defensive token parsing: in `apps/operator-portal/src/keycloak-client.ts`, require stored `accessToken` and `refreshToken` to be strings, drop non-string `idToken`, and clear the localStorage entry before returning `null` when the payload is malformed.
+- Logged-out cleanup in `apps/operator-portal/src/OperatorPortal.tsx` belongs in `clearSession()`, not scattered across callers: clear auth token, fleet data, notice/error banners, loading state, and open lifecycle dialogs so the sign-in screen never inherits stale session UI.
+- Focused regressions for this auth/session lane now live in `apps/operator-portal/src/keycloak-client.test.ts` (storage validation) and `apps/operator-portal/src/App.test.tsx` (logout/session-clear UI reset).

@@ -37,9 +37,23 @@ export function readStoredKeycloakTokens(): StoredKeycloakTokens | null {
   }
 
   try {
-    return JSON.parse(storedTokens) as StoredKeycloakTokens
+    const parsed = JSON.parse(storedTokens) as Partial<StoredKeycloakTokens>
+
+    if (
+      typeof parsed.accessToken !== 'string' ||
+      typeof parsed.refreshToken !== 'string'
+    ) {
+      clearStoredKeycloakTokens()
+      return null
+    }
+
+    return {
+      accessToken: parsed.accessToken,
+      refreshToken: parsed.refreshToken,
+      ...(typeof parsed.idToken === 'string' ? { idToken: parsed.idToken } : {}),
+    }
   } catch {
-    localStorage.removeItem(keycloakTokenStorageKey)
+    clearStoredKeycloakTokens()
     return null
   }
 }

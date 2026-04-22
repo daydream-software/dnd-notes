@@ -191,6 +191,8 @@ export default function OperatorPortal() {
     keycloakClientRef.current?.clear()
     setAuthToken(null)
     setFleetStatus(null)
+    setIsLoadingFleet(false)
+    setError(null)
     setNotice(null)
     setDeprovisionTarget(null)
     setUpgradeTarget(null)

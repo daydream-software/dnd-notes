@@ -26,6 +26,13 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 
 ## Learnings
 
+### PR #78 auth cleanup + CI-safe polling QA review (2026-04-22)
+- `apps/operator-portal/src/keycloak-client.ts` should normalize restored Keycloak token blobs by requiring string `accessToken`/`refreshToken`, treating `idToken` as optional, and clearing malformed localStorage immediately so bootstrap falls back to a clean signed-out state.
+- `apps/operator-portal/src/keycloak-client.test.ts` is the focused regression layer for malformed token storage; keep app-shell auth tests (`apps/operator-portal/src/App.test.tsx`) focused on visible UX resets like stale error cleanup after `clearSession()`.
+- `apps/operator-portal/src/OperatorPortal.tsx` should treat `clearSession()` as a full logged-out reset: clear stored tokens, active fleet/loading state, inline errors/notices, and any open lifecycle-dialog targets so the sign-in shell never inherits stale operator state.
+- `apps/control-plane/test/provisioning.test.ts` should keep namespace-termination polling assertions intact while using a modest explicit timeout budget (currently `deleteTimeoutMs: 200` with `readyPollIntervalMs: 1`) so CI scheduler jitter does not become part of the contract.
+- Focused validation for this review slice passed from the repo root with `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal && npm run lint --workspace apps/control-plane && npm run test:control-plane && npm run build --workspace apps/control-plane`.
+
 ### PR #78 follow-up QA review (2026-04-22)
 - `apps/operator-portal/src/OperatorPortal.actions.test.tsx` should keep recording unexpected create/provision POST payloads, but each unexpected mock branch must return an explicit `500` JSON response so accidental writes fail as actionable HTTP errors instead of `undefined` crashes.
 - `.squad/agents/stef/history.md` should keep a single `## Core Context` heading after summarization; duplicate headings are cleanup-only and safe to delete.

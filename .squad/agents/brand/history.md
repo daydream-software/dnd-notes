@@ -70,6 +70,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Operator Portal Unexpected POST Mocks:** In `apps/operator-portal/src/OperatorPortal.actions.test.tsx`, any fetch mock branch that records a write request expected not to happen should still return an explicit error `Response` (500 is fine) after pushing the request. That keeps accidental calls diagnosable as HTTP failures instead of letting `fetch()` resolve to `undefined` and crash later with ambiguous property-access errors.
 
+- **CI-Safe Namespace Polling Tests:** For control-plane deletion tests that model repeated namespace reads before a terminal 404, keep the fake countdown/assertions and widen the explicit timeout budget instead of rewriting production polling. The current stable shape is `namespaceReadCountdown = 2`, `readyPollIntervalMs = 1`, and `deleteTimeoutMs = 200` in `apps/control-plane/test/provisioning.test.ts`, which preserves the namespace-termination intent while absorbing CI scheduler variance. Key files: `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.
@@ -98,8 +100,23 @@ Executed first slice of #68 operator portal feature:
 
 **Status:** Ready for merge. Follow-up slices (provision/deprovision, lifecycle actions) can build on this scaffold.
 
-## PR #78 CI Diagnosis (2026-04-22T18:24:34Z)
+## PR #78 CI Diagnosis (2026-04-22T18:59:00Z)
 
-Diagnosed two red checks on PR #78 (CI/validate + Test Results) as a single underlying timing-sensitive test failure, not GitHub Actions config issue. The control-plane unit test `waits for namespace termination before finishing tenant deletion` in `apps/control-plane/test/provisioning.test.ts` timed out at 50ms on CI. This is test flakiness exposed by CI variance, not infrastructure issue. Handoff to Data or PR assignee for timeout/async hardening.
+Diagnosed two red checks on PR #78 (CI/validate + Test Results) as a single underlying timing-sensitive test failure in new code. The test `waits for namespace termination before finishing tenant deletion` in `apps/control-plane/test/provisioning.test.ts:1600` was **added in commit bc2cd94** (HEAD of PR #78) and times out at 50ms deadline on CI.
 
- Scribe
+**Exact Error:** 
+```
+Tenant namespace tenant-t-opaque123456 did not terminate within 50ms
+  at KubernetesTenantInfrastructureManager.deleteTenantResources (provisioning.ts:792)
+```
+
+**Mechanics:** FakeKubernetesClient is seeded with `namespaceReadCountdown = 2`, so reads return success twice then throw 404 on the third attempt. The test deadline is only 50ms with 1ms poll intervals—this assumes 3 reads + 2 sleeps completes in 50ms. On slow CI runners, async overhead causes this to exceed budget and fail.
+
+**Classification:** NEW flaky test (not pre-existing)—introduced by the new namespace termination validation logic added in PR #78. The test validates the correct behavior but is under-resourced for CI variance.
+
+**Fix Path (Priority):** 
+1. **Recommended:** Increase test timeout from 50ms to 200ms (line 1614) — explicit, safe, 4x margin, preserves test intent
+2. **Alternative:** Increase poll interval from 1ms to 5ms (line 1613) — also valid, reduces iteration count
+3. Avoid: Logic rewrites; risks masking real async bugs
+
+The 200ms fix keeps the test validating K8s namespace polling + async termination semantics while eliminating CI timing variance.
