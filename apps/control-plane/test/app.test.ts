@@ -231,6 +231,143 @@ describe('Control Plane API', () => {
     })
   })
 
+  describe('GET /internal/fleet/status', () => {
+    it('returns a fleet summary with tenant health, backup details, and dependencies', async () => {
+      tenantRegistry.createTenant({
+        id: 'tenant-ready',
+        slug: 'tenant-ready',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantDesiredState('tenant-ready', 'ready')
+      tenantRegistry.updateTenantStorageReference('tenant-ready', 'pvc-tenant-ready')
+      tenantRegistry.updateTenantState(
+        'tenant-ready',
+        'ready',
+        'test-suite',
+        'Provisioned in test',
+      )
+      tenantRegistry.updateTenantBackupMetadata(
+        'tenant-ready',
+        JSON.stringify({
+          lastBackup: '2026-04-18T22:00:00Z',
+          lastBackupStatus: 'succeeded',
+          lastRestoreDrillAt: '2026-04-19T06:00:00Z',
+          lastRestoreDrillStatus: 'passed',
+          location: 'blob://backups/tenant-ready',
+        }),
+      )
+
+      tenantRegistry.createTenant({
+        id: 'tenant-failed',
+        slug: 'tenant-failed',
+        ownerId: 'owner-2',
+        version: '2.0.0',
+      })
+      tenantRegistry.updateTenantDesiredState('tenant-failed', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-failed',
+        'failed',
+        'test-suite',
+        'Synthetic failure in test',
+      )
+
+      const response = await authedGet('/internal/fleet/status').expect(200)
+
+      assert.strictEqual(response.body.controlPlane.status, 'healthy')
+      assert.strictEqual(response.body.controlPlane.version, appVersion)
+      assert.strictEqual(response.body.dependencies.tenantRegistry.status, 'healthy')
+      assert.strictEqual(response.body.dependencies.tenantProvisioning.status, 'disabled')
+      assert.strictEqual(response.body.summary.totalTenants, 2)
+      assert.strictEqual(response.body.summary.tenantsByCurrentState.ready, 1)
+      assert.strictEqual(response.body.summary.tenantsByCurrentState.failed, 1)
+      assert.strictEqual(response.body.summary.tenantsByDesiredState.ready, 2)
+      assert.strictEqual(response.body.summary.tenantsByVersion['1.0.0'], 1)
+      assert.strictEqual(response.body.summary.tenantsByVersion['2.0.0'], 1)
+      assert.strictEqual(response.body.summary.tenantsWithBackupMetadata, 1)
+      assert.strictEqual(response.body.summary.tenantsMissingBackupMetadata, 1)
+      assert.strictEqual(response.body.summary.tenantsNeedingAttention, 1)
+
+      const readyTenant = response.body.tenants.find(
+        (tenant: { tenant: { id: string } }) => tenant.tenant.id === 'tenant-ready',
+      )
+      assert.ok(readyTenant)
+      assert.strictEqual(readyTenant.health, 'healthy')
+      assert.strictEqual(readyTenant.backup.lastBackupAt, '2026-04-18T22:00:00Z')
+      assert.strictEqual(readyTenant.backup.lastBackupStatus, 'succeeded')
+      assert.strictEqual(
+        readyTenant.backup.lastRestoreDrillAt,
+        '2026-04-19T06:00:00Z',
+      )
+      assert.strictEqual(readyTenant.backup.lastRestoreDrillStatus, 'passed')
+      assert.strictEqual(
+        readyTenant.backup.location,
+        'blob://backups/tenant-ready',
+      )
+      assert.strictEqual(readyTenant.latestTransition.toState, 'ready')
+
+      const failedTenant = response.body.tenants.find(
+        (tenant: { tenant: { id: string } }) => tenant.tenant.id === 'tenant-failed',
+      )
+      assert.ok(failedTenant)
+      assert.strictEqual(failedTenant.health, 'attention')
+      assert.strictEqual(failedTenant.backup.rawMetadata, null)
+      assert.strictEqual(failedTenant.latestTransition.toState, 'failed')
+    })
+
+    it('keeps opaque backup metadata when it is not parseable JSON', async () => {
+      tenantRegistry.createTenant({
+        id: 'tenant-opaque',
+        slug: 'tenant-opaque',
+        ownerId: 'owner-3',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantBackupMetadata('tenant-opaque', 'not-json')
+
+      const response = await authedGet('/internal/fleet/status').expect(200)
+      const tenant = response.body.tenants.find(
+        (entry: { tenant: { id: string } }) => entry.tenant.id === 'tenant-opaque',
+      )
+
+      assert.ok(tenant)
+      assert.strictEqual(tenant.backup.rawMetadata, 'not-json')
+      assert.strictEqual(tenant.backup.lastBackupAt, null)
+      assert.strictEqual(tenant.backup.lastBackupStatus, null)
+      assert.strictEqual(tenant.backup.lastRestoreDrillAt, null)
+      assert.strictEqual(tenant.backup.lastRestoreDrillStatus, null)
+      assert.strictEqual(tenant.backup.location, null)
+    })
+
+    it('treats blank backup metadata as missing and needing attention', async () => {
+      tenantRegistry.createTenant({
+        id: 'tenant-blank',
+        slug: 'tenant-blank',
+        ownerId: 'owner-4',
+        version: '1.0.0',
+      })
+      tenantRegistry.updateTenantDesiredState('tenant-blank', 'ready')
+      tenantRegistry.updateTenantState(
+        'tenant-blank',
+        'ready',
+        'test-suite',
+        'Provisioned in test',
+      )
+      tenantRegistry.updateTenantBackupMetadata('tenant-blank', '   ')
+
+      const response = await authedGet('/internal/fleet/status').expect(200)
+      const tenant = response.body.tenants.find(
+        (entry: { tenant: { id: string } }) => entry.tenant.id === 'tenant-blank',
+      )
+
+      assert.ok(tenant)
+      assert.strictEqual(tenant.health, 'attention')
+      assert.strictEqual(tenant.backup.rawMetadata, null)
+      assert.strictEqual(response.body.summary.tenantsWithBackupMetadata, 0)
+      assert.strictEqual(response.body.summary.tenantsMissingBackupMetadata, 1)
+      assert.strictEqual(response.body.summary.tenantsNeedingAttention, 1)
+    })
+  })
+
   describe('GET /internal/tenants/:tenantId', () => {
     it('returns tenant details', async () => {
       await authedPost(tenantsPath).send({

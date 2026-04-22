@@ -397,6 +397,36 @@ export class TenantRegistry {
     return rows.map((row: unknown) => this.mapRowToStateTransition(row))
   }
 
+  getLatestStateTransitions(): Map<string, StateTransition> {
+    const rows = this.db
+      .prepare(
+        `SELECT state_transitions.id,
+                state_transitions.tenant_id,
+                state_transitions.from_state,
+                state_transitions.to_state,
+                state_transitions.triggered_by,
+                state_transitions.reason,
+                state_transitions.created_at
+         FROM state_transitions
+         INNER JOIN (
+           SELECT tenant_id, MAX(id) AS latest_id
+           FROM state_transitions
+           GROUP BY tenant_id
+         ) latest_transition
+           ON latest_transition.tenant_id = state_transitions.tenant_id
+          AND latest_transition.latest_id = state_transitions.id
+         ORDER BY state_transitions.id DESC`,
+      )
+      .all()
+
+    return new Map(
+      rows.map((row: unknown) => {
+        const transition = this.mapRowToStateTransition(row)
+        return [transition.tenantId, transition] as const
+      }),
+    )
+  }
+
   private recordTransition(params: {
     tenantId: string
     fromState: TenantState

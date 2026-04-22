@@ -291,6 +291,9 @@ export async function requireAuthenticatedAccount(
   request: Request,
   response: Response<ErrorResponse>,
 ) {
+  // Today this returns the local OwnerAccount for the authenticated owner.
+  // Authorization (campaign_memberships, is_site_admin) remains local, and this
+  // boundary can be narrowed to an AuthenticatedUser shape in a future phase.
   const token = parseAuthorizationToken(request)
 
   if (!token) {

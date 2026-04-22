@@ -68,6 +68,48 @@ export interface StateTransitionHistoryResponse {
   transitions: StateTransition[]
 }
 
+export interface FleetDependencyHealth {
+  status: 'healthy' | 'disabled'
+  details?: string
+}
+
+export interface FleetTenantBackupStatus {
+  rawMetadata: string | null
+  location: string | null
+  lastBackupAt: string | null
+  lastBackupStatus: string | null
+  lastRestoreDrillAt: string | null
+  lastRestoreDrillStatus: string | null
+}
+
+export interface FleetTenantStatus {
+  tenant: Tenant
+  health: 'healthy' | 'attention'
+  backup: FleetTenantBackupStatus
+  latestTransition: StateTransition | null
+}
+
+export interface FleetStatusSummary {
+  totalTenants: number
+  tenantsByCurrentState: Record<TenantState, number>
+  tenantsByDesiredState: Record<TenantState, number>
+  tenantsByVersion: Record<string, number>
+  tenantsWithBackupMetadata: number
+  tenantsMissingBackupMetadata: number
+  tenantsNeedingAttention: number
+}
+
+export interface FleetStatusResponse {
+  generatedAt: string
+  controlPlane: HealthResponse
+  dependencies: {
+    tenantRegistry: FleetDependencyHealth
+    tenantProvisioning: FleetDependencyHealth
+  }
+  summary: FleetStatusSummary
+  tenants: FleetTenantStatus[]
+}
+
 export interface ErrorResponse {
   error: string
   details?: string

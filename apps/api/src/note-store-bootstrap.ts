@@ -20,6 +20,7 @@ const noteStoreSchemaSql = `
     display_name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
     is_site_admin INTEGER NOT NULL DEFAULT 0,
+    keycloak_sub TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -234,6 +235,69 @@ async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
   }
 }
 
+async function ensureRequiredPostgresOwnerAccountKeycloakSub(
+  database: NoteStoreDatabase,
+) {
+  if (database.kind !== 'postgres') {
+    return
+  }
+
+  const keycloakSubColumn = await database
+    .prepare<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'owner_accounts'
+        AND column_name = 'keycloak_sub'
+    `)
+    .get()
+
+  if (!keycloakSubColumn) {
+    throw new Error(
+      'Postgres note store requires the owner_accounts.keycloak_sub column for least-privilege runtime credentials.',
+    )
+  }
+
+  const keycloakSubUniqueConstraint = await database
+    .prepare<{ constraint_name: string }>(`
+      SELECT tc.constraint_name
+      FROM information_schema.table_constraints tc
+      INNER JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name
+       AND kcu.table_schema = tc.table_schema
+      WHERE tc.table_schema = current_schema()
+        AND tc.table_name = 'owner_accounts'
+        AND tc.constraint_type = 'UNIQUE'
+      GROUP BY tc.constraint_name
+      HAVING COUNT(*) = 1
+         AND MIN(kcu.column_name) = 'keycloak_sub'
+         AND MAX(kcu.column_name) = 'keycloak_sub'
+      LIMIT 1
+    `)
+    .get()
+
+  const keycloakSubUniqueIndex = await database
+    .prepare<{ indexdef: string }>(`
+      SELECT indexdef
+      FROM pg_indexes
+      WHERE schemaname = current_schema()
+        AND indexname = ?
+    `)
+    .get('idx_owner_accounts_keycloak_sub')
+
+  const indexDefinition = keycloakSubUniqueIndex?.indexdef ?? ''
+  const hasKeycloakSubUniqueIndex =
+    /\bcreate unique index\b/i.test(indexDefinition) &&
+    /\bon\b.*owner_accounts\b/i.test(indexDefinition) &&
+    /\(\s*"?(?:public\.)?keycloak_sub"?\s*\)/i.test(indexDefinition)
+
+  if (!keycloakSubUniqueConstraint && !hasKeycloakSubUniqueIndex) {
+    throw new Error(
+      'Postgres note store requires unique owner_accounts.keycloak_sub enforcement for least-privilege runtime credentials.',
+    )
+  }
+}
+
 async function ensureNotesAttributionColumns(database: NoteStoreDatabase) {
   if (database.kind !== 'sqlite') {
     return
@@ -289,6 +353,51 @@ async function ensureOwnerSiteAdminColumn(database: NoteStoreDatabase) {
         ADD COLUMN is_site_admin INTEGER NOT NULL DEFAULT 0
       `)
     }
+  })
+
+  await transaction()
+}
+
+async function ensureOwnerKeycloakSubColumn(
+  database: NoteStoreDatabase,
+  options: { allowSchemaChanges: boolean },
+) {
+  if (database.kind === 'postgres') {
+    if (!options.allowSchemaChanges) {
+      return
+    }
+
+    await database.exec(`
+      ALTER TABLE owner_accounts
+      ADD COLUMN IF NOT EXISTS keycloak_sub TEXT
+    `)
+    await database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+      ON owner_accounts(keycloak_sub)
+      WHERE keycloak_sub IS NOT NULL
+    `)
+    return
+  }
+
+  const transaction = database.transaction(async () => {
+    if (!(await tableExists(database, 'owner_accounts'))) {
+      return
+    }
+
+    const ownerColumns = await listTableColumns(database, 'owner_accounts')
+
+    if (!ownerColumns.has('keycloak_sub')) {
+      await database.exec(`
+        ALTER TABLE owner_accounts
+        ADD COLUMN keycloak_sub TEXT
+      `)
+    }
+
+    await database.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+      ON owner_accounts(keycloak_sub)
+      WHERE keycloak_sub IS NOT NULL
+    `)
   })
 
   await transaction()
@@ -399,9 +508,11 @@ export async function initializeNoteStoreDatabase(
     await database.exec(noteStoreSchemaSql)
   } else {
     await ensureRequiredPostgresTables(database)
+    await ensureRequiredPostgresOwnerAccountKeycloakSub(database)
   }
 
   await ensureOwnerSiteAdminColumn(database)
+  await ensureOwnerKeycloakSubColumn(database, { allowSchemaChanges })
   await ensureNotesAttributionColumns(database)
   await ensureShareLinkRevealTokens(database)
   await ensureOwnerEmailUniqueness(database, { allowSchemaChanges })

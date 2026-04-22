@@ -86,6 +86,32 @@ Every state change is logged with:
 - `PATCH /internal/tenants/:tenantId/backup` — Update backup metadata
 - `GET /internal/tenants/:tenantId/transitions` — Get state transition history
 
+### Fleet status surface (`#57`)
+
+- `GET /internal/fleet/status` — Read-only fleet summary for operators
+
+The fleet-status response is meant to be the first internal observability surface,
+not the full operator portal. It includes:
+
+- control-plane health (`status`, `uptime`, `version`)
+- key dependency state (tenant registry plus whether tenant provisioning is enabled)
+- fleet summary counts by tenant state and version
+- per-tenant status details, including current/desired state, latest recorded transition, and lifted backup fields when `backupMetadata` already contains parseable JSON
+
+`backupMetadata` remains opaque in storage. The status endpoint only lifts known
+fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`,
+`lastRestoreDrillStatus`, and `location` when they already exist in JSON
+metadata; otherwise it preserves the raw string and reports the parsed fields as
+`null`.
+
+## Future public status path
+
+Issue `#57` stops at the internal authenticated surface. If we later need a
+customer-facing `status.example.com`, the intended path is to publish a redacted,
+read-only view derived from the same control-plane contract instead of creating a
+separate scrape-only status pipeline. Issue `#68` remains the richer operator
+portal and control surface.
+
 ## Postgres-backed rolling updates (`#55`)
 
 The first supported tenant upgrade path reuses the existing provisioning route
