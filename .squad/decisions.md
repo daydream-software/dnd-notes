@@ -5274,3 +5274,46 @@ For shell-script JSON payload fixes, use a two-layer gate:
 - `apps/control-plane/test/k3d-smoke-payload.test.ts` (new test)
 - `scripts/k3d/smoke.sh` (payload construction with regression gate)
 
+
+### 2026-04-22: Brand — Post-Merge Cleanup Pattern (PR #77)
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-22T16:25:00Z  
+**Type:** Development Process
+
+## Context
+
+After PR #77 merged and initial Scribe work (decision consolidation, session logs) landed on main, local development repo required cleanup to stay in sync and prepare for next feature work.
+
+## Decision
+
+Post-merge cleanup follows a non-destructive pattern:
+
+1. **Delete confirmed merged branches** only (safe delete with `-d` flag)
+2. **Prune remote tracking refs** to remove stale origin references
+3. **Preserve all unmerged local work** (feature branches, worktrees) to avoid surprises
+
+## Actions Taken (PR #77 Cleanup)
+
+1. Confirmed merge: PR #77 closed and merged at commit b893ea6 (squad/76-complete-runtime-keycloak-auth-integration → main)
+2. Switched to main and pulled: local main now in sync with origin/main
+3. Deleted merged feature branch: `squad/76-complete-runtime-keycloak-auth-integration` removed safely
+4. Pruned stale remotes: 5 remote tracking refs pruned (39, 55, 57, 69, 76)
+5. Preserved active work: 3 worktrees (55, 56, 69) and 10 unmerged local branches left intact
+
+## Why
+
+- Allows parallel feature work to continue uninterrupted during merge
+- Keeps local repo in sync with origin without losing in-flight development
+- Reduces merge conflicts and ref confusion
+- Safe to run repeatedly; only operates on confirmed-merged branches
+
+## Pattern Insight: Orphaned Commits
+
+Post-merge Scribe work (decision consolidation, session logs written *after* PR closes) must push to origin *before* cleanup runs, or be recovered via cherry-pick afterward. Recommend implementing pre-merge hook to block local-only commits on main, or explicit Scribe push step after log consolidation.
+
+## Impact
+
+- Subsequent feature branches start from clean, synced main
+- Contributors can safely delete merged branches without fear
+- Parallel development remains unaffected (only deletes current-branch's merged refs)
