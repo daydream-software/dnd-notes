@@ -56,7 +56,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Keycloak Email-Collision Reconciliation:** If a subject-linked Keycloak owner later presents an email already held by another local account, keep the linked account’s persisted email and derived admin flag instead of clobbering the unique column. Regression should prove the bearer-token flow still reaches tenant campaigns while owner-only admin routes stay denied unless the local row itself is privileged.
 
----
+- **Smoke Script Bash Portability:** `scripts/k3d/smoke.sh` now treats `inherit_errexit` as a Bash 4.4+ enhancement, not a hard requirement. Guard Bash-only safety upgrades with explicit `BASH_VERSINFO` checks so macOS's stock Bash 3.2 can still run contributor-facing smoke/help flows while newer shells keep the stricter behavior.
 
+---
 
 
