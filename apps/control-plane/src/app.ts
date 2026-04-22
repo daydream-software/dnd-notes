@@ -643,6 +643,7 @@ export function createApp({
     }
 
     if (existingBucket.count >= policy.maxRequests) {
+      request.resume()
       response.set(
         'Retry-After',
         Math.max(1, Math.ceil((existingBucket.resetAt - now) / 1000)).toString(),

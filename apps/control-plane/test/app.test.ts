@@ -687,11 +687,13 @@ describe('Control Plane API', () => {
     })
 
     it('rate limits portal signup before parsing request bodies', async () => {
+      const agent = request.agent(app)
+
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        await request(app).post('/portal/signup').send({}).expect(400)
+        await agent.post('/portal/signup').send({}).expect(400)
       }
 
-      const response = await request(app)
+      const response = await agent
         .post('/portal/signup')
         .set('Content-Type', 'application/json')
         .send('{"broken":')
@@ -701,6 +703,8 @@ describe('Control Plane API', () => {
         response.body.error,
         'Too many portal signup attempts. Please wait before trying again.',
       )
+
+      await agent.get('/health').expect(200)
     })
 
     it('rate limits repeated portal login attempts', async () => {
@@ -744,7 +748,9 @@ describe('Control Plane API', () => {
     })
 
     it('rate limits portal login before parsing request bodies', async () => {
-      await request(app)
+      const agent = request.agent(app)
+
+      await agent
         .post('/portal/signup')
         .send({
           email: 'owner@example.com',
@@ -759,7 +765,7 @@ describe('Control Plane API', () => {
         .expect(201)
 
       for (let attempt = 0; attempt < 5; attempt += 1) {
-        await request(app)
+        await agent
           .post('/portal/login')
           .send({
             email: 'owner@example.com',
@@ -768,7 +774,7 @@ describe('Control Plane API', () => {
           .expect(401)
       }
 
-      const response = await request(app)
+      const response = await agent
         .post('/portal/login')
         .set('Content-Type', 'application/json')
         .send('{"broken":')
@@ -778,6 +784,8 @@ describe('Control Plane API', () => {
         response.body.error,
         'Too many portal login attempts. Please wait before trying again.',
       )
+
+      await agent.get('/health').expect(200)
     })
   })
 
