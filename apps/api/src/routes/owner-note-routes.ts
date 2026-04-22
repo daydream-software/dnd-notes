@@ -30,7 +30,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NotesOverview | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -64,7 +64,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -92,7 +92,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NoteActivityResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -139,7 +139,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
     '/api/notes/sessions',
     async (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -167,7 +167,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -226,7 +226,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -256,7 +256,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -287,7 +287,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NotesResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -319,7 +319,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<NoteResponse | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return
@@ -387,7 +387,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
       response: Response<undefined | ErrorResponse>,
     ) => {
       const noteStore = context.getNoteStore()
-      const owner = await requireAuthenticatedAccount(noteStore, request, response)
+      const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
 
       if (!owner) {
         return

@@ -58,11 +58,64 @@ None. The application will start with defaults.
   Comma-separated CORS allowlist for cross-origin API access.  
   **Note:** In same-origin container deployments (recommended), this is mostly relevant for local development.
 
+### Keycloak Runtime Authentication
+
+When `AUTH_MODE=keycloak`, the tenant runtime validates Keycloak JWTs for authenticated requests. Guest/share-link flows remain local and anonymous. The control-plane uses its own prefixed variables (`CONTROL_PLANE_AUTH_MODE`, `CONTROL_PLANE_KEYCLOAK_*`, `TENANT_AUTH_MODE`, `TENANT_KEYCLOAK_*`) to keep admin auth and tenant-runtime injection separate.
+
+- **`AUTH_MODE`** (default: `local`)  
+  Authentication provider mode. Options: `local` (legacy email/password + sessions) or `keycloak` (OIDC/JWT).  
+  **Note:** When set to `local`, all other `KEYCLOAK_*` variables are ignored and tenant apps use the traditional session-token flow.
+
+- **`KEYCLOAK_URL`** (required when `AUTH_MODE=keycloak`)  
+  Base URL of the Keycloak instance.  
+  Example (k3d): `http://keycloak.127.0.0.1.nip.io:8080`  
+  Example (hosted): `https://auth.example.com`
+
+- **`KEYCLOAK_JWKS_URL`** (optional when `AUTH_MODE=keycloak`)  
+  Server-side override for the JWKS endpoint used to validate bearer tokens. Leave it unset when the runtime can reach `{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs` directly.  
+  Example (k3d tenant pod): `http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
+
+- **`KEYCLOAK_REALM`** (required when `AUTH_MODE=keycloak`)  
+  Keycloak realm name for tenant users and control-plane admins.  
+  Example: `dnd-notes-dev` (k3d), `dnd-notes-prod` (hosted)
+
+- **`KEYCLOAK_TENANT_CLIENT_ID`** (required when `AUTH_MODE=keycloak` for tenant apps)  
+  Keycloak client ID for tenant app OIDC flows.  
+  Example: `dnd-notes-tenant-app`
+
+Tenant runtimes validate JWTs through the realm JWKS endpoint, so they do **not**
+need a tenant client secret in the pod environment. In local k3d, the browser-facing
+Keycloak URL resolves to `127.0.0.1`, which is not reachable from inside tenant pods,
+so tenant workloads should use `KEYCLOAK_JWKS_URL` to point at the in-cluster
+`platform-keycloak` Service while keeping `KEYCLOAK_URL` on the public issuer/origin.
+
+#### Runtime Auth Flow (Keycloak mode)
+
+**Tenant apps:**
+1. User logs in via Keycloak login form (redirects to tenant origin with auth code)
+2. Tenant app exchanges code for ID token + access token
+3. Frontend stores tokens and sends access token in API request `Authorization: Bearer <token>`
+4. Backend (`requireAuthenticatedAccount`) validates JWT signature against the realm JWKS/public key
+5. If valid, extracts user identity (`keycloak_sub`, email) and looks up owner account
+6. Guest/share-link flows bypass auth and remain anonymous (no JWT required)
+
+**Control-plane admin API:** see `platform/control-plane/README.md` for the prefixed `CONTROL_PLANE_*` and `TENANT_*` environment contract that the control-plane process uses.
+
+#### Local Auth Flow (Legacy mode, `AUTH_MODE=local`)
+
+When `AUTH_MODE=local`:
+- Tenant app login uses traditional `/api/auth/register` and `/api/auth/login` endpoints
+- Session tokens (database-backed) are used instead of JWTs
+- Guest/share-link flows remain unchanged
+- Control-plane uses static bearer token from `CONTROL_PLANE_ADMIN_TOKEN` environment variable
+- No Keycloak instance required for local development
+
 ### Container Behavior
 
 - **`SERVE_WEB`** (default: `false`)  
   When `true`, the API server also serves the built web app at `/` for same-origin deployments.  
   **Production containers should set this to `true`.**
+
 
 ## Health Endpoints
 

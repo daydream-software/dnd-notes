@@ -2,6 +2,10 @@ import cors from 'cors'
 import express, { type Express, type Request, type Response } from 'express'
 import { fileURLToPath } from 'node:url'
 import { dirname, extname, join } from 'node:path'
+import {
+  createTenantRuntimeAuth,
+  type TenantRuntimeAuth,
+} from './keycloak-auth.js'
 import type { NoteStore } from './note-store.js'
 import { registerAdminRoutes } from './routes/admin-routes.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
@@ -22,6 +26,7 @@ interface CreateAppOptions {
   noteStore: NoteStore
   publicWebUrl?: string
   allowedOrigins?: string
+  runtimeAuth?: TenantRuntimeAuth
   restoreNoteStore?: (sourcePath: string) => Promise<NoteStore>
   isShuttingDown?: () => boolean
   serveWeb?: boolean
@@ -36,6 +41,7 @@ export function createApp({
   noteStore: initialNoteStore,
   publicWebUrl: configuredPublicWebUrl,
   allowedOrigins: configuredAllowedOrigins,
+  runtimeAuth = createTenantRuntimeAuth({ mode: 'local' }),
   restoreNoteStore,
   isShuttingDown = () => false,
   serveWeb = false,
@@ -95,6 +101,7 @@ export function createApp({
       noteStore = restoredNoteStore
     },
     publicWebUrl,
+    runtimeAuth,
     restoreNoteStore,
     isRateLimited,
   }

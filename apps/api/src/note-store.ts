@@ -48,6 +48,7 @@ import type {
   CampaignShareLinkInput,
   CampaignMembership,
   CampaignMembershipRole,
+  KeycloakOwnerIdentity,
   MembershipConsolidationSummary,
   CampaignSummary,
   Note,
@@ -182,6 +183,19 @@ export interface CreateNoteStoreOptions {
 }
 
 export class InvalidBackupDatabaseError extends Error {}
+export const ownerKeycloakLinkConflictCode = 'OWNER_KEYCLOAK_LINK_CONFLICT'
+
+export class OwnerKeycloakLinkConflictError extends Error {
+  readonly code = ownerKeycloakLinkConflictCode
+
+  constructor(
+    readonly ownerId: string,
+    message = 'This owner account is already linked to a different Keycloak identity.',
+  ) {
+    super(message)
+    this.name = 'OwnerKeycloakLinkConflictError'
+  }
+}
 
 const requiredBackupTables = [
   'owner_accounts',
@@ -542,6 +556,9 @@ export interface NoteStore {
   createOwnerAccount(input: OwnerRegistrationInput): Promise<OwnerAccount | null>
   authenticateOwner(email: string, password: string): Promise<OwnerAccount | null>
   getOwnerBySessionToken(token: string): Promise<OwnerAccount | null>
+  findOrCreateOwnerByKeycloakIdentity(
+    identity: KeycloakOwnerIdentity,
+  ): Promise<OwnerAccount>
   listOwnerAccounts(): Promise<AdminAccountSummary[]>
   createOwnerSession(ownerUserId: string): Promise<string>
   deleteOwnerSession(token: string): Promise<void>
@@ -1195,6 +1212,20 @@ export async function createNoteStore(
     WHERE LOWER(email) = LOWER(?)
   `)
 
+  const selectOwnerAccountByKeycloakSub = database.prepare(`
+    SELECT
+      id,
+      email,
+      display_name,
+      password_hash,
+      is_site_admin,
+      keycloak_sub,
+      created_at,
+      updated_at
+    FROM owner_accounts
+    WHERE keycloak_sub = ?
+  `)
+
   const selectAdminAccounts = database.prepare(`
     SELECT
       owner_accounts.id,
@@ -1286,6 +1317,17 @@ export async function createNoteStore(
   const deleteExpiredOwnerSessions = database.prepare(`
     DELETE FROM owner_sessions
     WHERE expires_at <= ?
+  `)
+
+  const updateOwnerKeycloakIdentity = database.prepare(`
+    UPDATE owner_accounts
+    SET
+      email = @email,
+      display_name = @display_name,
+      is_site_admin = @is_site_admin,
+      keycloak_sub = @keycloak_sub,
+      updated_at = @updated_at
+    WHERE id = @id
   `)
 
   const selectActiveShareLinksByCampaignId = database.prepare(`
@@ -1520,6 +1562,121 @@ export async function createNoteStore(
       })
 
       return owner
+    },
+  )
+
+  const resolveOwnerEmailForKeycloakIdentity = async (
+    owner: OwnerAccountRow,
+    normalizedEmail: string,
+  ) => {
+    const currentEmail = normalizeEmailAddress(owner.email)
+
+    if (currentEmail === normalizedEmail) {
+      return currentEmail
+    }
+
+    const existing = (await selectOwnerAccountByEmail.get(normalizedEmail)) as
+      | OwnerAccountRow
+      | undefined
+
+    if (existing && existing.id !== owner.id) {
+      return currentEmail
+    }
+
+    return normalizedEmail
+  }
+
+  const findOrCreateOwnerByKeycloakIdentityTransaction = database.transaction(
+    async (identity: KeycloakOwnerIdentity) => {
+      const normalizedEmail = normalizeEmailAddress(identity.email)
+      const byKeycloakSub = (await selectOwnerAccountByKeycloakSub.get(
+        identity.keycloakSub,
+      )) as OwnerAccountRow | undefined
+
+      if (byKeycloakSub) {
+        const updatedAt = new Date().toISOString()
+        const persistedEmail = await resolveOwnerEmailForKeycloakIdentity(
+          byKeycloakSub,
+          normalizedEmail,
+        )
+        const updatedOwner = {
+          ...mapOwnerAccountRow(byKeycloakSub),
+          email: persistedEmail,
+          displayName: identity.displayName,
+          isSiteAdmin: configuredSiteAdminEmails.has(persistedEmail),
+          updatedAt,
+        }
+
+        await updateOwnerKeycloakIdentity.run({
+          id: updatedOwner.id,
+          email: updatedOwner.email,
+          display_name: updatedOwner.displayName,
+          is_site_admin: updatedOwner.isSiteAdmin ? 1 : 0,
+          keycloak_sub: identity.keycloakSub,
+          updated_at: updatedOwner.updatedAt,
+        })
+
+        return updatedOwner
+      }
+
+      const byEmail = (await selectOwnerAccountByEmail.get(normalizedEmail)) as
+        | OwnerAccountRow
+        | undefined
+
+      if (byEmail) {
+        if (
+          byEmail.keycloak_sub !== null &&
+          byEmail.keycloak_sub !== identity.keycloakSub
+        ) {
+          throw new OwnerKeycloakLinkConflictError(byEmail.id)
+        }
+
+        const updatedAt = new Date().toISOString()
+        const updatedOwner = {
+          ...mapOwnerAccountRow(byEmail),
+          displayName: identity.displayName,
+          isSiteAdmin: configuredSiteAdminEmails.has(normalizedEmail),
+          keycloakSub: identity.keycloakSub,
+          updatedAt,
+        }
+
+        await updateOwnerKeycloakIdentity.run({
+          id: updatedOwner.id,
+          email: normalizedEmail,
+          display_name: updatedOwner.displayName,
+          is_site_admin: updatedOwner.isSiteAdmin ? 1 : 0,
+          keycloak_sub: updatedOwner.keycloakSub,
+          updated_at: updatedOwner.updatedAt,
+        })
+
+        return updatedOwner
+      }
+
+      const createdOwner = await createOwnerAccountTransaction({
+        displayName: identity.displayName,
+        email: normalizedEmail,
+        password: randomBytes(32).toString('hex'),
+      })
+
+      if (!createdOwner) {
+        throw new Error(`Owner account "${normalizedEmail}" could not be created.`)
+      }
+
+      const updatedAt = new Date().toISOString()
+      await updateOwnerKeycloakIdentity.run({
+        id: createdOwner.id,
+        email: normalizedEmail,
+        display_name: createdOwner.displayName,
+        is_site_admin: createdOwner.isSiteAdmin ? 1 : 0,
+        keycloak_sub: identity.keycloakSub,
+        updated_at: updatedAt,
+      })
+
+      return {
+        ...createdOwner,
+        keycloakSub: identity.keycloakSub,
+        updatedAt,
+      }
     },
   )
 
@@ -2300,6 +2457,9 @@ export async function createNoteStore(
       )) as OwnerAccountRow | undefined
 
       return row ? mapOwnerAccountRow(row) : null
+    },
+    async findOrCreateOwnerByKeycloakIdentity(identity) {
+      return findOrCreateOwnerByKeycloakIdentityTransaction(identity)
     },
     async listOwnerAccounts() {
       const rows = (await selectAdminAccounts.all()) as AdminAccountSummaryRow[]

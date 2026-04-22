@@ -46,6 +46,7 @@ import {
   createCampaignShareLink,
   createNote,
   downloadAdminBackup,
+  fetchAuthConfig,
   fetchAdminAccounts,
   createSharedNote,
   deleteNote,
@@ -75,6 +76,12 @@ import {
   updateSharedNote,
 } from './api'
 import {
+  createRuntimeKeycloakClient,
+  isKeycloakAuthConfig,
+  type RuntimeKeycloakClient,
+  type StoredKeycloakTokens,
+} from './keycloak-client'
+import {
   blankCampaignTemplateId,
   blankNoteTemplateId,
   campaignStarterTemplates,
@@ -94,6 +101,7 @@ import { extractInlineNoteReferences } from './note-references'
 import type {
   ActivityCollaborator,
   AdminAccountSummary,
+  AuthConfigResponse,
   AdminOverview,
   CampaignInput,
   CampaignMembership,
@@ -181,7 +189,10 @@ type NoteBrowseMode = 'notes' | 'sessions' | 'activity'
 type NarrowWorkspacePanel = 'browse' | 'editor'
 
 const authTokenStorageKey = 'dnd-notes:owner-auth-token'
+const keycloakTokensStorageKey = 'dnd-notes:keycloak-auth-tokens'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
+const missingKeycloakClientErrorMessage =
+  'Keycloak sign-in is not ready yet. Reload and try again.'
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
 const recentActivityLimit = 20
 const defaultNotesPaneDescription =
@@ -190,6 +201,42 @@ const defaultNotesPaneDescription =
 function getShareTokenFromPath(pathname: string) {
   const match = pathname.match(/^\/share\/([^/]+)\/?$/)
   return match ? decodeURIComponent(match[1]) : null
+}
+
+function readStoredKeycloakTokens(): StoredKeycloakTokens | null {
+  const rawTokens = localStorage.getItem(keycloakTokensStorageKey)
+
+  if (!rawTokens) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(rawTokens) as Partial<StoredKeycloakTokens>
+
+    if (
+      typeof parsed.accessToken !== 'string' ||
+      typeof parsed.refreshToken !== 'string'
+    ) {
+      return null
+    }
+
+    return {
+      accessToken: parsed.accessToken,
+      refreshToken: parsed.refreshToken,
+      ...(typeof parsed.idToken === 'string' ? { idToken: parsed.idToken } : {}),
+    }
+  } catch {
+    return null
+  }
+}
+
+function persistKeycloakTokens(tokens: StoredKeycloakTokens) {
+  localStorage.setItem(keycloakTokensStorageKey, JSON.stringify(tokens))
+  localStorage.setItem(authTokenStorageKey, tokens.accessToken)
+}
+
+function clearStoredKeycloakTokens() {
+  localStorage.removeItem(keycloakTokensStorageKey)
 }
 
 function createEmptyDraft(): NoteDraft {
@@ -674,7 +721,9 @@ function App() {
   })
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
-  const [isBootstrapping, setIsBootstrapping] = useState(true)
+  const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null)
+  const [isAuthReady, setIsAuthReady] = useState(false)
+  const [isSharedReady, setIsSharedReady] = useState(!isSharedMode)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false)
   const [isLoadingSessionNotes, setIsLoadingSessionNotes] = useState(false)
   const [isLoadingActivity, setIsLoadingActivity] = useState(false)
@@ -735,6 +784,8 @@ function App() {
   const sessionRequestIdRef = useRef(0)
   const activityAbortControllerRef = useRef<AbortController | null>(null)
   const sessionAbortControllerRef = useRef<AbortController | null>(null)
+  const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
+  const isBootstrapping = !isAuthReady || !isSharedReady
 
   useEffect(() => {
     noteBrowseModeRef.current = noteBrowseMode
@@ -1153,7 +1204,10 @@ function App() {
 
   const clearSession = useCallback(() => {
     localStorage.removeItem(authTokenStorageKey)
+    clearStoredKeycloakTokens()
     localStorage.removeItem(selectedCampaignStorageKey)
+    keycloakClientRef.current?.clear()
+    keycloakClientRef.current = null
     resetSessionBrowserState()
     resetActivityState()
     setAuthToken(null)
@@ -1511,21 +1565,60 @@ function App() {
   )
 
   useEffect(() => {
-    if (isSharedMode) {
-      return
-    }
-
-    const storedToken = localStorage.getItem(authTokenStorageKey)
-
-    if (!storedToken) {
-      setIsBootstrapping(false)
-      return
-    }
-
     let cancelled = false
 
-    const bootstrap = async () => {
+    const bootstrapAuth = async () => {
       try {
+        const nextAuthConfig = await fetchAuthConfig()
+
+        if (cancelled) {
+          return
+        }
+
+        setAuthConfig(nextAuthConfig)
+
+        if (isKeycloakAuthConfig(nextAuthConfig)) {
+          const keycloakClient = createRuntimeKeycloakClient(nextAuthConfig.keycloak)
+          keycloakClientRef.current = keycloakClient
+          const tokens = await keycloakClient.init(readStoredKeycloakTokens())
+
+          if (cancelled) {
+            return
+          }
+
+          if (!tokens) {
+            clearStoredKeycloakTokens()
+            localStorage.removeItem(authTokenStorageKey)
+            setAuthToken(null)
+            setOwner(null)
+            return
+          }
+
+          persistKeycloakTokens(tokens)
+          const session = await fetchOwnerSession(tokens.accessToken)
+
+          if (cancelled) {
+            return
+          }
+
+          setAuthToken(tokens.accessToken)
+          setOwner(session.owner)
+
+          if (!isSharedMode) {
+            await loadCampaigns(tokens.accessToken)
+          }
+
+          return
+        }
+
+        const storedToken = localStorage.getItem(authTokenStorageKey)
+
+        if (!storedToken) {
+          setAuthToken(null)
+          setOwner(null)
+          return
+        }
+
         const session = await fetchOwnerSession(storedToken)
 
         if (cancelled) {
@@ -1534,24 +1627,67 @@ function App() {
 
         setAuthToken(storedToken)
         setOwner(session.owner)
-        await loadCampaigns(storedToken)
-      } catch {
+
+        if (!isSharedMode) {
+          await loadCampaigns(storedToken)
+        }
+      } catch (bootstrapError) {
         if (!cancelled) {
           clearSession()
+          if (bootstrapError instanceof Error) {
+            setError(bootstrapError.message)
+          }
         }
       } finally {
         if (!cancelled) {
-          setIsBootstrapping(false)
+          setIsAuthReady(true)
         }
       }
     }
 
-    void bootstrap()
+    void bootstrapAuth()
 
     return () => {
       cancelled = true
     }
   }, [clearSession, isSharedMode, loadCampaigns])
+
+  useEffect(() => {
+    if (!isKeycloakAuthConfig(authConfig) || !authToken || !keycloakClientRef.current) {
+      return
+    }
+
+    let cancelled = false
+    const refreshInterval = window.setInterval(() => {
+      void keycloakClientRef.current
+        ?.refresh(30)
+        .then((tokens) => {
+          if (cancelled) {
+            return
+          }
+
+          persistKeycloakTokens(tokens)
+          setAuthToken(tokens.accessToken)
+        })
+        .catch((refreshError) => {
+          if (cancelled) {
+            return
+          }
+
+          clearSession()
+          setError(
+            refreshError instanceof Error
+              ? refreshError.message
+              : 'Keycloak session expired. Sign in again.',
+          )
+        })
+    }, 15_000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(refreshInterval)
+    }
+  }, [authConfig, authToken, clearSession])
 
   useEffect(() => {
     if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
@@ -1662,7 +1798,7 @@ function App() {
         }
       } finally {
         if (!cancelled) {
-          setIsBootstrapping(false)
+          setIsSharedReady(true)
         }
       }
     }
@@ -2071,6 +2207,37 @@ function App() {
     setIsLinkingAccount(true)
 
     try {
+      if (isKeycloakAuthConfig(authConfig)) {
+        if (!authToken) {
+          const keycloakClient = keycloakClientRef.current
+
+          if (!keycloakClient) {
+            throw new Error(missingKeycloakClientErrorMessage)
+          }
+
+          await keycloakClient.login(window.location.href)
+          return
+        }
+
+        const claimedMembership = await claimSharedMembership(
+          shareToken,
+          authToken,
+          guestToken,
+        )
+
+        if (claimedMembership.guestToken) {
+          localStorage.setItem(guestStorageKey, claimedMembership.guestToken)
+          setGuestToken(claimedMembership.guestToken)
+        }
+
+        localStorage.setItem(selectedCampaignStorageKey, claimedMembership.membership.campaignId)
+        setSharedMembership(claimedMembership.membership)
+        setAccountNotice(
+          owner ? `Linked to ${owner.displayName}.` : 'Linked this guest membership.',
+        )
+        return
+      }
+
       const session = isRegisterMode
         ? await registerOwner(registerDraft)
         : await loginOwner(loginDraft)
@@ -2271,6 +2438,17 @@ function App() {
     setIsSubmittingAuth(true)
 
     try {
+      if (isKeycloakAuthConfig(authConfig)) {
+        const keycloakClient = keycloakClientRef.current
+
+        if (!keycloakClient) {
+          throw new Error(missingKeycloakClientErrorMessage)
+        }
+
+        await keycloakClient.login(window.location.href)
+        return
+      }
+
       if (isRegisterMode) {
         const session = await registerOwner(registerDraft)
         await completeAuthentication(session.token, session.owner)
@@ -2286,11 +2464,22 @@ function App() {
       )
     } finally {
       setIsSubmittingAuth(false)
-      setIsBootstrapping(false)
+      setIsAuthReady(true)
     }
   }
 
   const handleLogout = async () => {
+    const keycloakClient = keycloakClientRef.current
+
+    if (isKeycloakAuthConfig(authConfig) && keycloakClient) {
+      clearSession()
+      setShowSplitNoteWorkspace(false)
+      setIsQuickCaptureOpen(false)
+      setError(null)
+      await keycloakClient.logout(`${window.location.origin}/`)
+      return
+    }
+
     if (isSharedMode) {
       const storedAuthToken = localStorage.getItem(authTokenStorageKey)
 
@@ -2708,6 +2897,8 @@ function App() {
     })
   }
 
+  const isKeycloakMode = isKeycloakAuthConfig(authConfig)
+
   if (isBootstrapping) {
     return (
       <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
@@ -2797,11 +2988,16 @@ function App() {
                       Campaign owner access
                     </Typography>
                     <Typography variant="h3" sx={{ mt: 1 }}>
-                      {isRegisterMode ? 'Create your owner account' : 'Sign in to your campaigns'}
+                      {isKeycloakMode
+                        ? 'Sign in with Keycloak'
+                        : isRegisterMode
+                          ? 'Create your owner account'
+                          : 'Sign in to your campaigns'}
                     </Typography>
                     <Typography color="text.secondary" sx={{ mt: 2 }}>
-                      Finish setting up campaigns, manage campaign details, and keep note
-                      workflows scoped to the right table.
+                      {isKeycloakMode
+                        ? 'Use the configured Keycloak realm for tenant access. Campaign authorization still stays local to this tenant.'
+                        : 'Finish setting up campaigns, manage campaign details, and keep note workflows scoped to the right table.'}
                     </Typography>
                   </Box>
 
@@ -2811,7 +3007,7 @@ function App() {
                     </Alert>
                   ) : null}
 
-                  {isRegisterMode ? (
+                  {!isKeycloakMode && isRegisterMode ? (
                     <TextField
                       label="Owner display name"
                       value={registerDraft.displayName}
@@ -2824,45 +3020,49 @@ function App() {
                     />
                   ) : null}
 
-                  <TextField
-                    label="Email"
-                    type="email"
-                    value={isRegisterMode ? registerDraft.email : loginDraft.email}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (isRegisterMode) {
-                        setRegisterDraft((currentDraft) => ({
-                          ...currentDraft,
-                          email: value,
-                        }))
-                      } else {
-                        setLoginDraft((currentDraft) => ({
-                          ...currentDraft,
-                          email: value,
-                        }))
-                      }
-                    }}
-                  />
+                  {!isKeycloakMode ? (
+                    <>
+                      <TextField
+                        label="Email"
+                        type="email"
+                        value={isRegisterMode ? registerDraft.email : loginDraft.email}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          if (isRegisterMode) {
+                            setRegisterDraft((currentDraft) => ({
+                              ...currentDraft,
+                              email: value,
+                            }))
+                          } else {
+                            setLoginDraft((currentDraft) => ({
+                              ...currentDraft,
+                              email: value,
+                            }))
+                          }
+                        }}
+                      />
 
-                  <TextField
-                    label="Password"
-                    type="password"
-                    value={isRegisterMode ? registerDraft.password : loginDraft.password}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (isRegisterMode) {
-                        setRegisterDraft((currentDraft) => ({
-                          ...currentDraft,
-                          password: value,
-                        }))
-                      } else {
-                        setLoginDraft((currentDraft) => ({
-                          ...currentDraft,
-                          password: value,
-                        }))
-                      }
-                    }}
-                  />
+                      <TextField
+                        label="Password"
+                        type="password"
+                        value={isRegisterMode ? registerDraft.password : loginDraft.password}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          if (isRegisterMode) {
+                            setRegisterDraft((currentDraft) => ({
+                              ...currentDraft,
+                              password: value,
+                            }))
+                          } else {
+                            setLoginDraft((currentDraft) => ({
+                              ...currentDraft,
+                              password: value,
+                            }))
+                          }
+                        }}
+                      />
+                    </>
+                  ) : null}
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                     <Button
@@ -2871,24 +3071,30 @@ function App() {
                       disabled={isSubmittingAuth}
                     >
                       {isSubmittingAuth
-                        ? isRegisterMode
-                          ? 'Creating account...'
-                          : 'Signing in...'
-                        : isRegisterMode
-                          ? 'Create owner account'
-                          : 'Sign in'}
+                        ? isKeycloakMode
+                          ? 'Redirecting to Keycloak...'
+                          : isRegisterMode
+                            ? 'Creating account...'
+                            : 'Signing in...'
+                        : isKeycloakMode
+                          ? 'Continue with Keycloak'
+                          : isRegisterMode
+                            ? 'Create owner account'
+                            : 'Sign in'}
                     </Button>
-                    <Button
-                      variant="text"
-                      onClick={() => {
-                        setError(null)
-                        setIsRegisterMode((current) => !current)
-                      }}
-                    >
-                      {isRegisterMode
-                        ? 'Already have an account? Sign in'
-                        : 'Need an account? Create one'}
-                    </Button>
+                    {!isKeycloakMode ? (
+                      <Button
+                        variant="text"
+                        onClick={() => {
+                          setError(null)
+                          setIsRegisterMode((current) => !current)
+                        }}
+                      >
+                        {isRegisterMode
+                          ? 'Already have an account? Sign in'
+                          : 'Need an account? Create one'}
+                      </Button>
+                    ) : null}
                   </Stack>
                 </Stack>
               </CardContent>
@@ -3139,9 +3345,9 @@ function App() {
                   <Box>
                     <Typography variant="h5">Link this guest membership</Typography>
                     <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                      Create or connect a real account without changing the membership that
-                      already owns your shared note history. For this first release, the claim
-                      must happen from the same browser that joined the campaign.
+                      {isKeycloakMode
+                        ? 'Use Keycloak to attach this guest history to a real tenant account. The claim still has to happen from the same browser session that joined the campaign.'
+                        : 'Create or connect a real account without changing the membership that already owns your shared note history. For this first release, the claim must happen from the same browser that joined the campaign.'}
                     </Typography>
                   </Box>
 
@@ -3151,7 +3357,7 @@ function App() {
                     </Alert>
                   ) : null}
 
-                  {isRegisterMode ? (
+                  {!isKeycloakMode && isRegisterMode ? (
                     <TextField
                       label="Account display name"
                       value={registerDraft.displayName}
@@ -3164,56 +3370,77 @@ function App() {
                     />
                   ) : null}
 
-                  <TextField
-                    label="Email"
-                    type="email"
-                    value={isRegisterMode ? registerDraft.email : loginDraft.email}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (isRegisterMode) {
-                        setRegisterDraft((currentDraft) => ({ ...currentDraft, email: value }))
-                      } else {
-                        setLoginDraft((currentDraft) => ({ ...currentDraft, email: value }))
-                      }
-                    }}
-                  />
+                  {!isKeycloakMode ? (
+                    <>
+                      <TextField
+                        label="Email"
+                        type="email"
+                        value={isRegisterMode ? registerDraft.email : loginDraft.email}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          if (isRegisterMode) {
+                            setRegisterDraft((currentDraft) => ({
+                              ...currentDraft,
+                              email: value,
+                            }))
+                          } else {
+                            setLoginDraft((currentDraft) => ({ ...currentDraft, email: value }))
+                          }
+                        }}
+                      />
 
-                  <TextField
-                    label="Password"
-                    type="password"
-                    value={isRegisterMode ? registerDraft.password : loginDraft.password}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (isRegisterMode) {
-                        setRegisterDraft((currentDraft) => ({ ...currentDraft, password: value }))
-                      } else {
-                        setLoginDraft((currentDraft) => ({ ...currentDraft, password: value }))
-                      }
-                    }}
-                  />
+                      <TextField
+                        label="Password"
+                        type="password"
+                        value={isRegisterMode ? registerDraft.password : loginDraft.password}
+                        onChange={(event) => {
+                          const value = event.target.value
+                          if (isRegisterMode) {
+                            setRegisterDraft((currentDraft) => ({
+                              ...currentDraft,
+                              password: value,
+                            }))
+                          } else {
+                            setLoginDraft((currentDraft) => ({
+                              ...currentDraft,
+                              password: value,
+                            }))
+                          }
+                        }}
+                      />
+                    </>
+                  ) : null}
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                     <Button variant="contained" onClick={handleLinkSharedMembership} disabled={isLinkingAccount}>
                       {isLinkingAccount
-                        ? isRegisterMode
-                          ? 'Creating and linking...'
-                          : 'Linking account...'
-                        : isRegisterMode
-                          ? 'Create and link account'
-                          : 'Sign in and link account'}
+                        ? isKeycloakMode
+                          ? 'Redirecting to Keycloak...'
+                          : isRegisterMode
+                            ? 'Creating and linking...'
+                            : 'Linking account...'
+                        : isKeycloakMode
+                          ? authToken
+                            ? 'Link this guest membership'
+                            : 'Sign in with Keycloak to link'
+                          : isRegisterMode
+                            ? 'Create and link account'
+                            : 'Sign in and link account'}
                     </Button>
-                    <Button
-                      variant="text"
-                      onClick={() => {
-                        setAccountNotice(null)
-                        setError(null)
-                        setIsRegisterMode((current) => !current)
-                      }}
-                    >
-                      {isRegisterMode
-                        ? 'Already have an account? Sign in'
-                        : 'Need an account? Create one'}
-                    </Button>
+                    {!isKeycloakMode ? (
+                      <Button
+                        variant="text"
+                        onClick={() => {
+                          setAccountNotice(null)
+                          setError(null)
+                          setIsRegisterMode((current) => !current)
+                        }}
+                      >
+                        {isRegisterMode
+                          ? 'Already have an account? Sign in'
+                          : 'Need an account? Create one'}
+                      </Button>
+                    ) : null}
                   </Stack>
                 </Stack>
               </CardContent>

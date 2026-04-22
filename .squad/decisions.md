@@ -5036,3 +5036,183 @@ The repo already has an internal control-plane API surface, while issue `#68` ow
 ## Implications
 
 `backupMetadata` remains opaque in storage; the status surface only lifts known fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`, `lastRestoreDrillStatus`, and `location` when present. Future UI work should consume this contract instead of inventing a parallel status aggregation path.
+
+---
+
+### 2026-04-22: Keycloak runtime env split
+
+**Decided by:** Copilot (Coding Agent)  
+**Date:** 2026-04-22  
+**Type:** Architecture & Configuration  
+**Related issue:** #76
+
+## Context
+
+Issue #76 runtime auth QA uncovered a wiring mismatch between control-plane code and platform manifests/examples. The control plane has to do two different jobs at once: authenticate its own `/internal` surface and also provision tenant pods with tenant-facing Keycloak config.
+
+## Decision
+
+Use **separate prefixed env families** for control-plane admin auth versus tenant runtime auth injection:
+
+- **control-plane admin API:** `CONTROL_PLANE_AUTH_MODE`, `CONTROL_PLANE_KEYCLOAK_URL`, `CONTROL_PLANE_KEYCLOAK_REALM`, `CONTROL_PLANE_KEYCLOAK_CLIENT_ID`, `CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES` (optional)
+- **tenant runtime injection from control plane:** `TENANT_AUTH_MODE`, `TENANT_KEYCLOAK_URL`, `TENANT_KEYCLOAK_REALM`, `TENANT_KEYCLOAK_CLIENT_ID`
+- **tenant app container itself:** `AUTH_MODE`, `KEYCLOAK_URL`, `KEYCLOAK_REALM`, `KEYCLOAK_TENANT_CLIENT_ID` (discovered at runtime via `GET /api/auth/config`)
+
+## Why
+
+Reusing one unprefixed env set for both control-plane admin auth and tenant provisioning created review noise and manifest drift. Separate prefixed env families make it obvious which settings secure the control plane versus what gets passed through to tenants. Avoids hidden collisions between workforce/admin auth and tenant auth injection.
+
+## Consequences
+
+- Tenant runtime JWT validation only needs Keycloak JWKS/public keys; tenant pods do not need a tenant client secret just to verify bearer tokens.
+- Runtime `/api/auth/config` keeps the same tenant image deployable across environments and tenants while preserving same-origin serving.
+- Guest/share-link flows remain local and anonymous regardless of Keycloak mode.
+- Tenant authorization still lives in each tenant database (`campaign_memberships`), while Keycloak establishes identity only.
+
+---
+
+### 2026-04-22: Runtime Keycloak contract for tenant + control-plane auth
+
+**Decided by:** Copilot (Coding Agent), Brand (Platform Dev)  
+**Date:** 2026-04-22  
+**Type:** Architecture & Contract  
+**Related issue:** #76
+
+## Decision
+
+Use an explicit runtime auth contract instead of build-time or secret-heavy coupling:
+
+1. **Tenant auth mode switch:** Tenant pods switch with `AUTH_MODE=local|keycloak`.
+2. **Tenant runtime requirements:** When tenant pods run in Keycloak mode, they require only `KEYCLOAK_URL`, `KEYCLOAK_REALM`, and `KEYCLOAK_TENANT_CLIENT_ID`.
+3. **Tenant config discovery:** The tenant web app discovers auth mode through `GET /api/auth/config` at runtime, so one built image can serve local and hosted tenants without a per-tenant Vite rebuild.
+4. **Control-plane admin auth:** Uses its own prefixed contract: `CONTROL_PLANE_AUTH_MODE`, `CONTROL_PLANE_KEYCLOAK_URL`, `CONTROL_PLANE_KEYCLOAK_REALM`, `CONTROL_PLANE_KEYCLOAK_CLIENT_ID`, optional `CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES`.
+5. **Tenant Keycloak config injected by control plane:** Uses prefixed envs: `TENANT_AUTH_MODE`, `TENANT_KEYCLOAK_URL`, `TENANT_KEYCLOAK_REALM`, `TENANT_KEYCLOAK_CLIENT_ID`.
+
+## Why
+
+- **JWT validation simplicity:** Tenant runtime JWT validation only needs Keycloak JWKS/public keys; the tenant pod does not need a tenant client secret just to verify bearer tokens.
+- **Image portability:** Runtime `/api/auth/config` keeps the same tenant image deployable across environments and tenants while preserving same-origin serving.
+- **Collision avoidance:** Prefixing control-plane envs avoids hidden collisions between workforce/admin auth and tenant auth injection.
+
+## Consequences
+
+- Guest/share-link flows remain local and anonymous regardless of Keycloak mode.
+- Tenant authorization still lives in each tenant database (`campaign_memberships`), while Keycloak establishes identity only.
+- Local k3d and hosted overlays should document the prefixed env contract rather than old shared `AUTH_MODE` + control-plane client secret language.
+
+---
+
+### 2026-04-22: Keycloak owner reconciliation — email collision handling (consolidated)
+
+**Decided by:** Mikey (Lead), Brand (Platform Dev)  
+**Date:** 2026-04-22  
+**Type:** Bug Fix & Architecture  
+**Related issue:** #76
+
+## Context
+
+Reviewing issue #76 found the runtime Keycloak owner reconciliation path in `apps/api/src/note-store.ts` still treats Keycloak email as safe to overwrite after matching an existing owner by `keycloak_sub`. This creates a critical bug: when a Keycloak user changes their IdP email to one already held by another local owner account, the sign-in request hits a unique index violation and returns 500 instead of a controlled error.
+
+## Decision
+
+When runtime Keycloak auth reconciles an existing local owner by `keycloak_sub`, that subject remains the primary identity key. The app must not blindly overwrite the local unique `owner_accounts.email` field with the IdP email if that email is already claimed by another owner row.
+
+**Implementation shape:**
+- Keep `keycloak_sub` as the durable reconciliation key.
+- On email change, preflight or catch local uniqueness conflicts.
+- Convert collisions into a controlled product outcome (explicit 409/problem response or deliberately preserve the existing local email) instead of an uncaught database error.
+- Add regression test for "same subject, changed email, collides with another local owner".
+
+## Why
+
+- **Mutable vs durable identity:** Email is mutable profile data at the IdP; `sub` is the durable identifier. `keycloak_sub` is the stable identity key; email is mutable profile data.
+- **Silent data loss risk:** Blindly replacing a unique local email can crash auth with a uniqueness violation and turn a routine Keycloak profile change into a 500 during sign-in.
+- **Privilege boundary protection:** Deriving admin access from the colliding claimed email would cross tenant-local authorization boundaries.
+
+## Consequences
+
+- Bearer-token auth keeps working for the linked owner after an IdP email change.
+- Campaign ownership and membership stay attached to the original local owner row.
+- Site-admin access does not jump across accounts just because an IdP email now matches a privileged local address.
+- Regression tests ensure collision handling remains explicit across auth refactors.
+
+---
+
+### 2026-04-22: Brand — PR #77 Bash compatibility
+
+## Decision
+
+Contributor-facing repo scripts may keep Bash-specific safety features, but any Bash 4.4+ only shell options must be gated with an explicit `BASH_VERSINFO` check instead of being enabled unconditionally.
+
+## Why
+
+`scripts/k3d/smoke.sh` is part of the normal local platform loop and should still start in older-but-common environments, especially macOS's stock `/usr/bin/bash` 3.2. An explicit version guard preserves stricter behavior on newer Bash versions without turning the script into a hard failure on machines that have not upgraded Bash.
+
+---
+
+### 2026-04-22: Data — PR #77 typed Keycloak conflict handling
+
+## Decision
+
+Keycloak owner-link conflicts crossing from `apps/api/src/note-store.ts` into `apps/api/src/route-support.ts` should use an exported typed error (`OwnerKeycloakLinkConflictError`) instead of asking the route layer to infer HTTP 409 from a substring in `Error.message`.
+
+## Why
+
+The review issue on PR #77 was a contract problem, not just a wording problem: message matching makes a harmless refactor silently change a controlled 409 into a 500. A typed conflict keeps the persistence boundary explicit, preserves current reconciliation behavior for the same-sub email-collision case, and gives tests a stable thing to assert even when the human-readable message changes.
+
+---
+
+### 2026-04-22: PR #77 regression gate — automated where it counts, manual where shell infra stops
+
+**Decided by:** Chunk (Tester)  
+**Date:** 2026-04-22
+
+## Context
+
+PR #77 picked up three Copilot review threads across platform, backend, and frontend code. The API and web concerns have stable local test harnesses, but the k3d smoke script still runs as a live shell/infrastructure path with no existing automated compatibility lane for older Bash.
+
+## Decision
+
+For this review cycle:
+
+1. Lock the API Keycloak identity-conflict fix with automated regression coverage in `apps/api/test/keycloak-runtime-auth.test.ts`.
+2. Lock the web Keycloak missing-client UX fix with automated regression coverage in `apps/web/src/App.keycloak-auth.test.tsx`.
+3. Treat `scripts/k3d/smoke.sh` older-Bash compatibility as a **manual QA gate** until the repo gains a real shell-script regression harness.
+
+## Why
+
+- The API and web bugs are deterministic and cheap to exercise in CI.
+- The shell comment is about startup compatibility in Bash 3.2-style environments, which current repo tooling does not emulate.
+- A focused manual check on an older Bash shell catches the actual user-facing failure (`invalid shell option name`) without inventing brittle fake coverage.
+
+## Impact
+
+Reviewers should expect green automated evidence for the API/web fixes and one explicit manual smoke note for the shell thread. If future work adds shell-test infrastructure, this manual gate should be replaced with an automated regression.
+
+---
+
+### 2026-04-22: PR #77 Keycloak missing-client UX
+
+**Decided by:** Stef (Frontend Dev)  
+**Date:** 2026-04-22  
+**Type:** Frontend auth UX
+
+## Context
+
+The owner auth screen can still render in Keycloak mode after bootstrap has cleared `keycloakClientRef.current` (for example after runtime init fails). The prior submit path used optional chaining on `login()`, so the button could appear live while doing nothing.
+
+## Decision
+
+When Keycloak mode is active but the runtime client is unavailable, keep the existing owner-auth screen and surface the failure through the inline `error` alert with explicit reload/retry copy. Do not leave the CTA as a silent no-op.
+
+## Why
+
+- Reuses the app's existing auth error surface instead of inventing a second failure UI.
+- Keeps the flow low-friction: users learn what went wrong without extra clicks or hidden states.
+- Makes future regressions obvious in both the UI and targeted tests.
+
+## Impact
+
+- Frontend Keycloak entry points should explicitly guard missing runtime clients instead of optional-chaining user actions.
+- Regression tests for auth CTAs should assert the user-visible error state whenever a runtime dependency can disappear after bootstrap.
+

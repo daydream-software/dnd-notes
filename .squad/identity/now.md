@@ -1,10 +1,9 @@
 # Current Focus
 
-- **Updated:** 2026-04-21T19:37:42Z
-- **Active slice:** Phase 2 execution kickoff — #69 (per-tenant Postgres roles) as first thin slice
-- **Execution status:** Phase 2a sequencing finalized (Mikey). Orchestration: Chunk QA gates, Brand platform readiness, Data backend plan all merged. Four agent orchestration logs written.
-- **Primary next slice:** Issue #69 (Data) — per-tenant Postgres roles and least-privilege runtime credentials; thin safe slice that pre-initializes schema, mints tenant-scoped role + password, records audit metadata.
-- **Parallel tracks:** Issue #56 (Brand) — Keycloak OIDC control-plane integration (Phase 2b); Issue #40 (Chunk) — restore safety + maintenance signaling (Phase 2c). All three issues proceed in sequence after #69 unblocks #56 and #40.
-- **QA gates:** Chunk scaffolding 13 regression test files as Phase 2a baseline; each issue gates on own test suite.
-- **Open phase 2 tasks:** #40 (restore safety), #56 (Keycloak OIDC), #69 (per-tenant DB roles).
-- **Reviewer process:** Copilot gates Phase 2 PRs. Work continues on squad branches/worktrees; PRs request Copilot review and merge through gatekeeper workflow once CI is green and threads resolved.
+- **Updated:** 2026-04-22T15:04:16Z
+- **Active slice:** PR #77 review follow-up — resolve Copilot review comments on runtime Keycloak integration for #76.
+- **Execution status:** Three open Copilot review threads identified across platform, backend, and frontend surfaces; fixes are being routed in parallel with QA coverage updates.
+- **Primary next slice:** Close the three review threads on `squad/76-complete-runtime-keycloak-auth-integration` without regressing the green validation/smoke lanes.
+- **Parallel tracks:** Brand handles `scripts/k3d/smoke.sh` Bash compatibility; Data hardens typed 409 conflict handling in API auth reconciliation; Stef fixes Keycloak login null-client UX; Chunk adds/adjusts regression coverage for each.
+- **QA gates:** Preserve green API, control-plane, web, manifest validation, and k3d smoke evidence after the review fixes land.
+- **Reviewer process:** Copilot remains the gate for this PR; resolve threads, rerun affected validation, then re-request review if needed.

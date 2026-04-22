@@ -1,5 +1,6 @@
 import type {
   AdminAccountsResponse,
+  AuthConfigResponse,
   AdminRestoreResponse,
   AdminOverviewResponse,
   AuthSessionResponse,
@@ -87,6 +88,11 @@ async function readJson<T>(response: Response) {
   }
 
   return (await response.json()) as T
+}
+
+export async function fetchAuthConfig() {
+  const response = await fetch(`${apiBaseUrl}/api/auth/config`)
+  return readJson<AuthConfigResponse>(response)
 }
 
 export async function registerOwner(input: OwnerRegistrationInput) {

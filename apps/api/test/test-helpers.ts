@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { SuperTest, Test } from 'supertest'
 import { createApp } from '../src/app.js'
+import type { TenantRuntimeAuth } from '../src/keycloak-auth.js'
 import {
   createNoteStore,
   restoreNoteStoreFromBackup,
@@ -16,6 +17,7 @@ export interface CreateTestAppOptions {
   allowedOrigins?: string | readonly string[]
   directoryPrefix?: string
   isShuttingDown?: () => boolean
+  runtimeAuth?: TenantRuntimeAuth
   serveWeb?: boolean
   webDistPath?: string
 }
@@ -38,6 +40,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
       typeof options.allowedOrigins === 'string'
         ? options.allowedOrigins
         : options.allowedOrigins?.join(','),
+    runtimeAuth: options.runtimeAuth,
     isShuttingDown: options.isShuttingDown,
     serveWeb: options.serveWeb,
     webDistPath: options.webDistPath,
