@@ -16,11 +16,14 @@ Use this when the repo already has an internal control-plane API and the team ne
 - Use a Vite dev proxy locally and a reverse proxy in deployed environments so the browser never depends on a new CORS exception.
 - Reuse the existing Keycloak workforce/admin client accepted by the control-plane instead of adding a separate auth broker first.
 - Make the first slice read-only (`GET /internal/fleet/status`) and add write controls only after the auth and fleet contract are stable.
+- When write controls land, keep them on the existing control-plane routes: review `POST /internal/tenants` before chaining into `POST /internal/tenants/:tenantId/provision`, and require typed confirmation before `deprovision` leaves the browser.
 
 ## Examples
 - `apps/operator-portal/vite.config.ts`
 - `apps/operator-portal/src/control-plane-api.ts`
 - `apps/operator-portal/src/OperatorPortal.tsx`
+- `apps/operator-portal/src/ProvisionTenantPanel.tsx`
+- `apps/operator-portal/src/TenantDeprovisionDialog.tsx`
 - `.squad/decisions/inbox/brand-issue68-first-slice.md`
 
 ## Anti-Patterns

@@ -99,3 +99,9 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Started Issue #68 QA-lane prep as Chunk/Tester.
 - Focus: inspect control-plane + web test surfaces, lock stable operator-slice contracts with tests where possible, and publish first-slice QA gate + risks.
 - Issue #68 QA prep landed control-plane acceptance tests for admin-realm auth on the fleet-status read surface and audit-trail preservation on provision/deprovision flows; first-slice recommendation is an auth-gated read-heavy portal before live write controls.
+
+## 2026-04-22: Issue #68 operator portal UX slice
+
+- Extended `apps/operator-portal` beyond the read-only dashboard: the portal now provisions tenants via the existing create + provision control-plane routes, requires an operator reason, and reloads fleet state from `/internal/fleet/status` instead of synthesizing local lifecycle updates.
+- Added a destructive deprovision dialog with typed-slug confirmation and reason capture so the portal makes side effects explicit before sending `POST /internal/tenants/:tenantId/deprovision`.
+- Focused operator lifecycle regressions now live in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`; workspace validation passed with `npm run lint --workspace apps/operator-portal && npm run test --workspace apps/operator-portal && npm run build --workspace apps/operator-portal`.

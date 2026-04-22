@@ -5383,3 +5383,28 @@ Any write action that lands in the first implementation wave must satisfy all th
 - Brand can move fast on the shell if the first slice focuses on auth gate + fleet read contract.
 - Provision/deprovision buttons are acceptable only when they reuse `/internal/tenants/:tenantId/{provision,deprovision}` and surface explicit danger/impact copy.
 - QA will block any write-first slice that hides side effects, skips audit trail visibility, or duplicates control-plane state in the frontend.
+
+### 2026-04-22: Stef — Issue #68 operator portal UX provisioning flow
+
+**Decided by:** Stef (Frontend Dev)  
+**Date:** 2026-04-22  
+**Type:** Architecture & Portal Flow
+
+## Decision
+
+For the next mergeable operator-portal slice, tenant provisioning stays a reviewed two-step browser flow on the **existing** control-plane contract:
+
+1. `POST /internal/tenants` creates the tenant record with `id`, `slug`, `ownerId`, and `version`.
+2. `POST /internal/tenants/:tenantId/provision` immediately follows with a **required operator reason** and `triggeredBy` sourced from Keycloak token claims when available (fallback: `operator-portal`).
+3. `POST /internal/tenants/:tenantId/deprovision` requires both a reason and typed-slug confirmation in the portal UX before the destructive call is sent.
+
+## Why
+
+- The control-plane already exposes create/provision/deprovision routes, so the portal should compose them instead of inventing portal-only write endpoints.
+- Requiring an operator reason on both provision and deprovision keeps the latest transition copy useful immediately after the action lands.
+- The issue body mentions richer inputs like custom domains and initial admin email, but the current backend contract does not support those yet. The portal should not fake those fields until Data/Brand extend the control-plane API.
+
+## Follow-up
+
+- Data should extend the control-plane contract before the portal asks for initial admin email or domain-level inputs.
+- Chunk should keep focused regression coverage on the two-step create→provision path and typed destructive confirmation.
