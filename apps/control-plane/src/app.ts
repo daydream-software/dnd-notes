@@ -6,7 +6,12 @@ import {
   scrypt,
   timingSafeEqual,
 } from 'node:crypto'
-import express, { type Express, type Request, type Response } from 'express'
+import express, {
+  type Express,
+  type NextFunction,
+  type Request,
+  type Response,
+} from 'express'
 import { z } from 'zod'
 import {
   ControlPlaneAuthError,
@@ -662,6 +667,22 @@ export function createApp({
     })
     return false
   }
+  const createPortalRateLimitMiddleware = (
+    policyKey: string,
+    policy: RateLimitPolicy,
+  ) => {
+    return (
+      request: Request,
+      response: Response<ErrorResponse>,
+      next: NextFunction,
+    ) => {
+      if (isRateLimited(request, response, policyKey, policy)) {
+        return
+      }
+
+      next()
+    }
+  }
   const rollbackPortalTenant = async (params: {
     tenantId: string
     ownerId: string
@@ -847,15 +868,12 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/signup`,
+    createPortalRateLimitMiddleware('portal-signup', portalSignupRateLimitPolicy),
     portalJsonParser,
     async (
       request: Request,
       response: Response<PortalSessionResponse | ErrorResponse>,
     ) => {
-      if (isRateLimited(request, response, 'portal-signup', portalSignupRateLimitPolicy)) {
-        return
-      }
-
       if (!ensurePortalLocalAuthEnabled(response)) {
         return
       }
@@ -940,15 +958,12 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/login`,
+    createPortalRateLimitMiddleware('portal-login', portalLoginRateLimitPolicy),
     portalJsonParser,
     async (
       request: Request,
       response: Response<PortalSessionResponse | ErrorResponse>,
     ) => {
-      if (isRateLimited(request, response, 'portal-login', portalLoginRateLimitPolicy)) {
-        return
-      }
-
       if (!ensurePortalLocalAuthEnabled(response)) {
         return
       }

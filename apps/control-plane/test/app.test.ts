@@ -686,6 +686,23 @@ describe('Control Plane API', () => {
       assert.strictEqual(typeof response.headers['retry-after'], 'string')
     })
 
+    it('rate limits portal signup before parsing request bodies', async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app).post('/portal/signup').send({}).expect(400)
+      }
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .set('Content-Type', 'application/json')
+        .send('{"broken":')
+        .expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal signup attempts. Please wait before trying again.',
+      )
+    })
+
     it('rate limits repeated portal login attempts', async () => {
       await request(app)
         .post('/portal/signup')
@@ -724,6 +741,43 @@ describe('Control Plane API', () => {
         'Too many portal login attempts. Please wait before trying again.',
       )
       assert.strictEqual(typeof response.headers['retry-after'], 'string')
+    })
+
+    it('rate limits portal login before parsing request bodies', async () => {
+      await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app)
+          .post('/portal/login')
+          .send({
+            email: 'owner@example.com',
+            password: 'wrong-password',
+          })
+          .expect(401)
+      }
+
+      const response = await request(app)
+        .post('/portal/login')
+        .set('Content-Type', 'application/json')
+        .send('{"broken":')
+        .expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal login attempts. Please wait before trying again.',
+      )
     })
   })
 

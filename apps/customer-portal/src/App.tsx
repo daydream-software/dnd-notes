@@ -267,7 +267,11 @@ export default function App() {
 
       handleSuccessfulSession(response)
       setNotice('Portal account ready. Your first instance request is now tracked below.')
-      setSignupDraft(defaultSignupDraft)
+      setSignupDraft((currentDraft) => ({
+        ...defaultSignupDraft,
+        planTier: currentDraft.planTier,
+        paymentProvider: currentDraft.paymentProvider,
+      }))
       setHasEditedSignupSlug(false)
       setLoginEmail(response.dashboard.account.email)
     } catch (requestError) {
@@ -350,6 +354,8 @@ export default function App() {
       setNotice('Tenant request submitted. The dashboard now reflects the latest instance list.')
       setCreateTenantDraft((currentDraft) => ({
         ...defaultCreateTenantDraft,
+        planTier: currentDraft.planTier,
+        paymentProvider: currentDraft.paymentProvider,
         billingEmail: response.account.billingEmail ?? currentDraft.billingEmail,
       }))
       setHasEditedCreateTenantSlug(false)

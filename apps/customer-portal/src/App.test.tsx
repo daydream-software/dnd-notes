@@ -134,6 +134,8 @@ describe('customer portal', () => {
   })
 
   it('creates a portal account and renders the dashboard after signup', async () => {
+    let signupCount = 0
+
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
 
@@ -143,14 +145,20 @@ describe('customer portal', () => {
 
       if (path === '/portal-api/portal/signup' && method === 'POST') {
         const body = readMockJsonBody<PortalSignupRequest>(init)
+        signupCount += 1
         expect(body?.email).toBe('owner@example.com')
         expect(body?.password).toBe('top-secret-passphrase')
-        expect(body?.tenantSlug).toBe('misty-harbor')
+        expect(body?.planTier).toBe('adventurer')
+        expect(body?.tenantSlug).toBe(signupCount === 1 ? 'misty-harbor' : 'second-harbor')
 
         return createJsonResponse({
           token: 'portal-session-token',
           dashboard: baseDashboard,
         }, 201)
+      }
+
+      if (path === '/portal-api/portal/logout' && method === 'POST') {
+        return createJsonResponse({ signedOut: true })
       }
 
       if (path === '/portal-api/portal/me' && method === 'GET') {
@@ -175,6 +183,18 @@ describe('customer portal', () => {
     expect(screen.getByText('Misty Harbor')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Open tenant app' })).toBeTruthy()
     expect(sessionStorage.getItem(storedTokenKey)).toBe('portal-session-token')
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+    await screen.findByRole('button', { name: 'Create portal account' })
+
+    await user.type(screen.getByLabelText('Work email'), 'owner@example.com')
+    await user.type(screen.getByLabelText('Display name'), 'Alyx')
+    await user.type(screen.getAllByLabelText('Password')[0], 'top-secret-passphrase')
+    await user.type(screen.getByLabelText('Tenant name'), 'Second Harbor')
+    await user.click(screen.getByRole('button', { name: 'Create portal account' }))
+
+    expect(await screen.findByText('Customer dashboard')).toBeTruthy()
+    expect(signupCount).toBe(2)
   })
 
   it('does not re-fetch the dashboard immediately after signup succeeds', async () => {
@@ -280,6 +300,7 @@ describe('customer portal', () => {
 
   it('creates an additional tenant from the customer dashboard', async () => {
     sessionStorage.setItem(storedTokenKey, 'portal-session-token')
+    const tenantRequests: PortalCreateTenantRequest[] = []
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
@@ -294,7 +315,8 @@ describe('customer portal', () => {
 
       if (path === '/portal-api/portal/me/tenants' && method === 'POST') {
         const body = readMockJsonBody<PortalCreateTenantRequest>(init)
-        expect(body?.tenantSlug).toBe('emberfall')
+        expect(body).toBeTruthy()
+        tenantRequests.push(body!)
 
         return createJsonResponse({
           ...baseDashboard,
@@ -354,6 +376,10 @@ describe('customer portal', () => {
     expect(await screen.findByText('Customer dashboard')).toBeTruthy()
     expect(await screen.findByRole('heading', { name: 'Add another tenant' })).toBeTruthy()
 
+    await user.click(screen.getByLabelText('Plan'))
+    await user.click(await screen.findByRole('option', { name: 'Guild' }))
+    await user.click(screen.getByLabelText('Payment provider placeholder'))
+    await user.click(await screen.findByRole('option', { name: 'Square placeholder' }))
     await user.type(screen.getByLabelText('Tenant name'), 'Emberfall')
     await user.clear(screen.getByLabelText('Tenant slug'))
     await user.type(screen.getByLabelText('Tenant slug'), 'emberfall')
@@ -365,6 +391,17 @@ describe('customer portal', () => {
         'Tenant request submitted. The dashboard now reflects the latest instance list.',
       ),
     ).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Tenant name'), 'Second Emberfall')
+    await user.clear(screen.getByLabelText('Tenant slug'))
+    await user.type(screen.getByLabelText('Tenant slug'), 'second-emberfall')
+    await user.click(screen.getByRole('button', { name: 'Create tenant request' }))
+
+    expect(tenantRequests).toHaveLength(2)
+    expect(tenantRequests[0]?.planTier).toBe('guild')
+    expect(tenantRequests[0]?.paymentProvider).toBe('square')
+    expect(tenantRequests[1]?.planTier).toBe('guild')
+    expect(tenantRequests[1]?.paymentProvider).toBe('square')
   })
 
   it('clears the dashboard after sign out', async () => {
