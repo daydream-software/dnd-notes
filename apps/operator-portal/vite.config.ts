@@ -1,20 +1,7 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
 import { defineConfig, loadEnv } from 'vite'
-
-function normalizeBasePath(value: string | undefined, fallback: string) {
-  const trimmedValue = value?.trim()
-
-  if (!trimmedValue) {
-    return fallback
-  }
-
-  if (trimmedValue === '/') {
-    return trimmedValue
-  }
-
-  return trimmedValue.replace(/\/+$/, '')
-}
+import { normalizeBasePath } from './src/base-path'
 
 function escapeForRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')

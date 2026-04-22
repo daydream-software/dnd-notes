@@ -1,18 +1,5 @@
 import type { OperatorKeycloakConfig } from './types'
-
-function normalizeBasePath(value: string | undefined, fallback: string) {
-  const trimmedValue = value?.trim()
-
-  if (!trimmedValue) {
-    return fallback
-  }
-
-  if (trimmedValue === '/') {
-    return trimmedValue
-  }
-
-  return trimmedValue.replace(/\/+$/, '')
-}
+import { normalizeBasePath } from './base-path'
 
 function normalizeUrl(value: string | undefined, fallback: string) {
   const trimmedValue = value?.trim()

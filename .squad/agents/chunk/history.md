@@ -156,3 +156,8 @@ Established QA gate for #68 operator portal first slice:
 - `apps/operator-portal/src/OperatorPortal.actions.test.tsx` now refreshes fleet state while the provisioning dialog is open and proves the confirm CTA locks before any create/provision requests fire when the provisioning lane flips disabled.
 - The same focused action suite now gives rollout failure cases readable Vitest names by passing the scenario label positionally in `it.each(...)`, so CI output shows human labels instead of stringified row objects.
 - Verified with `npm run lint --workspace apps/operator-portal && npm run build --workspace apps/operator-portal && npm run test --workspace apps/operator-portal -- src/OperatorPortal.actions.test.tsx`.
+
+### PR #78 base-path utility review (2026-04-22T19:55Z)
+- The base-path follow-up is low-risk when `apps/operator-portal/src/base-path.ts` stays a pure string helper and both `apps/operator-portal/src/config.ts` and `apps/operator-portal/vite.config.ts` import it instead of carrying copy-pasted normalization logic.
+- `apps/operator-portal/src/base-path.test.ts` is the right regression seam: keep coverage on blank input fallback, `/` passthrough, and whitespace/trailing-slash trimming so runtime and Vite proxy config cannot silently diverge later.
+- Reviewer proof for this slice is `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal`; I also re-ran the full repo `npm run lint && npm test && npm run build` and it stayed green with the shared utility wired in.

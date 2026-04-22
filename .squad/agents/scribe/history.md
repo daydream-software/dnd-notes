@@ -91,6 +91,26 @@ Scribe initialized as the team's memory and decision merger.
 
 **Current status:** PR mergeable after addressing two new Keycloak session-management issues. Control-plane failure flagged as out-of-scope per squad.identity/now.md guidance ("avoid disturbing the separate flaky control-plane CI diagnosis unless a dedicated follow-up is requested").
 
+## PR #78 Review Follow-Up Round 3 (2026-04-22T19:45:59+)
+
+**Triage:** One new unresolved review comment detected (9/10 prior threads resolved or deferred).
+
+**New review comment (unresolved):**
+1. **`normalizeBasePath()` duplication:** Function appears in both `apps/operator-portal/vite.config.ts` (line 17) and `src/config.ts` with identical logic. Should extract into shared utility module to avoid future drift if normalization rules change.
+
+**Resolved/Deferred threads (9 total):**
+- Session log file cleanup (resolved, transient artifact removed)
+- README operator-portal scope clarification (resolved, describe actual provision/deprovision/update flows)
+- Orchestration runtime log cleanup (resolved, transient artifact removed)
+- ProvisionTenantPanel mutation guard (resolved, re-check added in handleConfirm + button gating)
+- OperatorPortal.actions.test rollout matrix readability (resolved, labeled scenarios for Vitest output)
+- Fetch-mock error handling in test (resolved, unexpected endpoints return 500 response)
+- Stef history duplicate header (resolved, duplicate "## Core Context" removed)
+- readStoredKeycloakTokens() validation (resolved, now validates accessToken/refreshToken presence/type, clears malformed storage)
+- clearSession() incomplete reset (resolved, now clears error + isLoadingFleet on logout)
+
+**Status:** 9/10 threads closed. 1 unresolved: normalizeBasePath() duplication (deferred; code smell but not blocking merge per Data's classification pattern). PR state remains mergeable; FFMikha batching final commit and review replies to resolve the remaining thread.
+
 ## Learnings
 
-Initial squad setup complete.
+Initial squad setup complete. Pattern observed: Data's code-review classification (blocking/deferred/N/A) applied across review cycles; transient squad logs require explicit cleanup on commit; operator-portal session/auth hardening is defensive against malformed token state and UI cleanup post-logout.

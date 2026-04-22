@@ -72,6 +72,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **CI-Safe Namespace Polling Tests:** For control-plane deletion tests that model repeated namespace reads before a terminal 404, keep the fake countdown/assertions and widen the explicit timeout budget instead of rewriting production polling. The current stable shape is `namespaceReadCountdown = 2`, `readyPollIntervalMs = 1`, and `deleteTimeoutMs = 200` in `apps/control-plane/test/provisioning.test.ts`, which preserves the namespace-termination intent while absorbing CI scheduler variance. Key files: `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
 
+- **Shared Operator Portal Base-Path Normalization:** Keep `VITE_OPERATOR_API_BASE_PATH` normalization in `apps/operator-portal/src/base-path.ts` and reuse it from both `apps/operator-portal/vite.config.ts` and `apps/operator-portal/src/config.ts`. A focused regression in `apps/operator-portal/src/base-path.test.ts` should lock the blank/root/trailing-slash cases so the dev proxy and runtime config cannot drift.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.
