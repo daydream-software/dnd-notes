@@ -110,3 +110,27 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 - **PR #77 JSON payload gate (2026-04-22):** the cheapest high-signal regression for `scripts/k3d/smoke.sh` is to execute `build_tenant_create_payload()` directly and `JSON.parse` its output in `apps/control-plane/test/k3d-smoke-payload.test.ts`; that catches bad escaping before a full k3d boot. After the script change lands, the follow-up manual proof is still `npm run k3d:smoke`, because only the live lane confirms the control-plane accepts the tenant-create payload end to end.
 
 📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
+
+### Issue #68 QA lane prep (2026-04-22)
+- The highest-signal first slice for the operator portal is an auth-gated, read-heavy shell on top of the existing control-plane contract: `GET /internal/fleet/status` for fleet state plus tenant reads for drill-in. Avoid shipping portal-local write paths before the UI can show clear side-effect copy and post-action transition evidence.
+- Added control-plane regressions in `apps/control-plane/test/keycloak-auth.test.ts` so the future portal's primary read surface (`/internal/fleet/status`) and a representative write route (`/internal/tenants/:tenantId/provision`) both stay locked behind admin/workforce Keycloak roles.
+- Extended `apps/control-plane/test/app.test.ts` so fleet status, provision, and deprovision coverage now preserve `latestTransition.triggeredBy` and `reason`, giving the portal a stable audit trail for operator side-effect clarity.
+- Reuse `apps/web/src/SiteAdminPanel.tsx` and `apps/web/src/App.site-admin.test.tsx` as the local precedent for destructive-action warning copy and confirmation-driven UX.
+
+---
+
+## Issue #68 First Operator Portal QA Gate (2026-04-22T16:51:23Z)
+
+Established QA gate for #68 operator portal first slice:
+- Defined auth-gated, read-heavy control surface acceptance criteria
+- Added tests for operator auth on fleet reads and representative write routes
+- Validated audit trail visibility for write operations (`triggeredBy`, `reason` fields)
+- Extended regressions for fleet status and provision/deprovision side effects
+- Confirmed all lint, test, build gates pass
+
+**Key decision locked:** Chunk/issue68-qa.md (Scribe merged to decisions.md)
+
+**Gate pattern:** Any write action must (1) call existing control-plane endpoint, (2) surface side effect clearly, (3) show audit trail afterward.
+
+**Status:** QA gate established and validated. Ready for merge.
+

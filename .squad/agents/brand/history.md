@@ -74,3 +74,21 @@ Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decis
 
 
 
+- **Issue #68 first slice:** Use a dedicated `apps/operator-portal/` Vite workspace for the operator UI instead of mixing platform controls into the tenant app. Keep browser API traffic same-origin through `/operator-api` (Vite dev proxy locally, reverse proxy in deployment) and keep the first slice read-only on top of `GET /internal/fleet/status`. Key files: `apps/operator-portal/src/OperatorPortal.tsx`, `apps/operator-portal/src/control-plane-api.ts`, `apps/operator-portal/vite.config.ts`, `apps/operator-portal/.env.example`.
+
+---
+
+## Issue #68 First Operator Portal Slice (2026-04-22T16:51:23Z)
+
+Executed first slice of #68 operator portal feature:
+- Built dedicated `apps/operator-portal/` Vite workspace for operator UI (not mixed into tenant app)
+- Implemented Keycloak-gated operator authentication using existing `dnd-notes-control-plane` client
+- Wired read-only fleet dashboard backed by `GET /internal/fleet/status` control-plane contract
+- Configured same-origin `/operator-api` transport (Vite dev proxy locally, reverse proxy in deployment)
+- Added comprehensive tests for auth flow and fleet status integration
+- Documented operator portal architecture and deployment strategy
+
+**Key decision locked:** Brand/issue68-first-slice.md (Scribe merged to decisions.md)
+
+**Status:** Ready for merge. Follow-up slices (provision/deprovision, lifecycle actions) can build on this scaffold.
+

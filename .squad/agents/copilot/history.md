@@ -94,3 +94,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 - `apps/web/src/App.tsx` no longer silently optional-chains the Keycloak login CTA. In Keycloak mode, a missing `keycloakClientRef.current` now throws a user-facing inline auth error telling the user to reload and try again.
 - `apps/web/src/App.keycloak-auth.test.tsx` now covers the missing-client path by rejecting Keycloak init during bootstrap, then asserting the sign-in CTA surfaces the inline error instead of no-oping.
+
+## Session Update (2026-04-22)
+- Started Issue #68 QA-lane prep as Chunk/Tester.
+- Focus: inspect control-plane + web test surfaces, lock stable operator-slice contracts with tests where possible, and publish first-slice QA gate + risks.
+- Issue #68 QA prep landed control-plane acceptance tests for admin-realm auth on the fleet-status read surface and audit-trail preservation on provision/deprovision flows; first-slice recommendation is an auth-gated read-heavy portal before live write controls.

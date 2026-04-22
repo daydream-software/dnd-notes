@@ -5317,3 +5317,69 @@ Post-merge Scribe work (decision consolidation, session logs written *after* PR 
 - Subsequent feature branches start from clean, synced main
 - Contributors can safely delete merged branches without fear
 - Parallel development remains unaffected (only deletes current-branch's merged refs)
+
+---
+
+### 2026-04-22: Brand — Issue #68 First Operator Portal Workspace Architecture
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-22  
+**Issue:** #68
+
+## Context
+
+Issue #68 needs a thin, mergeable operator portal slice that proves browser auth and fleet visibility against the real control-plane without inventing a second write path.
+
+## Decision
+
+1. Ship the first UI slice as a dedicated workspace, `apps/operator-portal/`, instead of folding platform administration into the tenant notes SPA.
+2. Keep browser-to-control-plane traffic same-origin on `/operator-api/*`:
+   - Local development uses the Vite dev proxy in `apps/operator-portal/vite.config.ts`.
+   - Deployed environments should reverse-proxy `/operator-api/*` to the control-plane service instead of opening a new CORS surface.
+3. Use the existing public Keycloak client accepted by the control-plane (`dnd-notes-control-plane`) against the workforce/admin realm for operator login.
+4. Keep the first slice read-only: the portal consumes `GET /internal/fleet/status` only. Future create/provision/deprovision UI must call the existing `/internal/tenants`, `/internal/tenants/:tenantId/provision`, and `/internal/tenants/:tenantId/deprovision` endpoints directly.
+
+## Why
+
+- This lands an end-to-end portal slice quickly without entangling tenant UX with platform operations.
+- Same-origin `/operator-api` keeps local and hosted setup boring, avoids a new CORS contract, and matches the repo's broader same-origin deployment preference.
+- Read-only first keeps the auth + fleet-status contract stable before higher-risk write controls land.
+
+## Consequences
+
+- Operators now have a real Keycloak-gated dashboard path for fleet visibility.
+- Follow-up slices can add provisioning and lifecycle actions in the same workspace without renegotiating auth or transport.
+- Deployment docs should treat `/operator-api` as part of the operator portal ingress contract.
+
+---
+
+### 2026-04-22: Chunk — Issue #68 First-Slice QA Gate (Auth-Gated Read-Heavy Control Surface)
+
+**Decided by:** Chunk (Tester)  
+**Date:** 2026-04-22  
+**Issue:** #68
+
+## Context
+
+The first operator control portal slice must balance speed with safety. The existing control-plane already provides a stable fleet-status contract; the portal is the frontend layer on top.
+
+## Decision
+
+Treat the first operator control portal slice as an **auth-gated, read-heavy control surface** that consumes the existing control-plane contract (`GET /internal/fleet/status` plus tenant registry reads) before shipping live operator write controls.
+
+Any write action that lands in the first implementation wave must satisfy all three gates:
+1. It calls the existing control-plane write endpoint instead of inventing a portal-local mutation path;
+2. The UI states the operational side effect clearly before execution;
+3. The resulting side effect is visible afterward through transition/audit data (`latestTransition` or `/internal/tenants/:tenantId/transitions`) including `triggeredBy` and `reason`.
+
+## Why
+
+- Fleet status is already the thin, canonical source of truth for operator visibility.
+- Starting read-heavy keeps the portal slice thin while auth, provisioning, restore, and maintenance flows are still settling.
+- Prevents false-safe UI where buttons exist before the operator can see who triggered an action or why the fleet changed state.
+
+## Consequences
+
+- Brand can move fast on the shell if the first slice focuses on auth gate + fleet read contract.
+- Provision/deprovision buttons are acceptable only when they reuse `/internal/tenants/:tenantId/{provision,deprovision}` and surface explicit danger/impact copy.
+- QA will block any write-first slice that hides side effects, skips audit trail visibility, or duplicates control-plane state in the frontend.
