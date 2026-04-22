@@ -84,3 +84,13 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Fixed the remaining tenant runtime Keycloak reconciliation edge in `apps/api/src/note-store.ts`: when an existing `keycloak_sub` logs in with a new IdP email that already belongs to another local owner row, the API now keeps the linked row’s persisted email/admin state instead of crashing on the unique-email constraint.
 - Added a runtime-auth regression in `apps/api/test/keycloak-runtime-auth.test.ts` that proves the linked owner still reaches campaigns while `/api/admin/accounts` stays forbidden during the collision, so tenant-local authorization boundaries remain anchored to the local row.
 - Cleaned the duplicate `AUTH_MODE` entry in `apps/api/.env.example` and re-ran `npm run lint --workspace apps/api && npm run test --workspace apps/api && npm run build --workspace apps/api`.
+
+## 2026-04-22: PR #77 backend review follow-up
+
+- Replaced the brittle `/api/auth/session` 409 mapping in `apps/api/src/route-support.ts` with a typed `OwnerKeycloakLinkConflictError` exported from `apps/api/src/note-store.ts`, so route behavior no longer depends on parsing `Error.message`.
+- Added runtime-auth regressions in `apps/api/test/keycloak-runtime-auth.test.ts` for both the real conflicting-subject 409 path and a synthetic typed-conflict case with an arbitrary message, proving the HTTP mapping stays stable across refactors.
+
+## 2026-04-22: PR #77 frontend review follow-up
+
+- `apps/web/src/App.tsx` no longer silently optional-chains the Keycloak login CTA. In Keycloak mode, a missing `keycloakClientRef.current` now throws a user-facing inline auth error telling the user to reload and try again.
+- `apps/web/src/App.keycloak-auth.test.tsx` now covers the missing-client path by rejecting Keycloak init during bootstrap, then asserting the sign-in CTA surfaces the inline error instead of no-oping.

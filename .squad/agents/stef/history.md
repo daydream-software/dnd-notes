@@ -61,4 +61,11 @@ Stef initialized as Frontend Dev for the initial project squad.
 - **Missing piece**: Phase 1 provisioning driver/worker (Issue #54?) that actually orchestrates the control-plane API to create/manage instances. Currently no service or script calls the control-plane endpoints.
 - **Decision**: Control plane plumbing is in place; next phase adds the provisioning orchestrator (backend service/worker), then the operator dashboard (#57).
 
+### PR #77 Keycloak auth UX (2026-04-22)
+
+- `apps/web/src/App.tsx` must treat a missing `keycloakClientRef.current` in Keycloak mode as an inline auth failure, not a silent optional-chained no-op. Reuse the existing owner-auth `error` alert so the screen stays low-friction and users get a direct reload/retry message.
+- The focused regression for this lane lives in `apps/web/src/App.keycloak-auth.test.tsx`; the easiest way to drive the missing-client state is to reject `RuntimeKeycloakClient.init()` during bootstrap so `clearSession()` nulls the ref before the user clicks the Keycloak CTA again.
+- Keep the runtime split clean: `/api/auth/config` still comes from `apps/web/src/api.ts`, the browser Keycloak wrapper stays in `apps/web/src/keycloak-client.ts`, and App-level UX fallbacks belong in `App.tsx` rather than in API helpers.
+
+📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
 

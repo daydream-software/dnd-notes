@@ -5136,3 +5136,83 @@ When runtime Keycloak auth reconciles an existing local owner by `keycloak_sub`,
 - Site-admin access does not jump across accounts just because an IdP email now matches a privileged local address.
 - Regression tests ensure collision handling remains explicit across auth refactors.
 
+---
+
+### 2026-04-22: Brand — PR #77 Bash compatibility
+
+## Decision
+
+Contributor-facing repo scripts may keep Bash-specific safety features, but any Bash 4.4+ only shell options must be gated with an explicit `BASH_VERSINFO` check instead of being enabled unconditionally.
+
+## Why
+
+`scripts/k3d/smoke.sh` is part of the normal local platform loop and should still start in older-but-common environments, especially macOS's stock `/usr/bin/bash` 3.2. An explicit version guard preserves stricter behavior on newer Bash versions without turning the script into a hard failure on machines that have not upgraded Bash.
+
+---
+
+### 2026-04-22: Data — PR #77 typed Keycloak conflict handling
+
+## Decision
+
+Keycloak owner-link conflicts crossing from `apps/api/src/note-store.ts` into `apps/api/src/route-support.ts` should use an exported typed error (`OwnerKeycloakLinkConflictError`) instead of asking the route layer to infer HTTP 409 from a substring in `Error.message`.
+
+## Why
+
+The review issue on PR #77 was a contract problem, not just a wording problem: message matching makes a harmless refactor silently change a controlled 409 into a 500. A typed conflict keeps the persistence boundary explicit, preserves current reconciliation behavior for the same-sub email-collision case, and gives tests a stable thing to assert even when the human-readable message changes.
+
+---
+
+### 2026-04-22: PR #77 regression gate — automated where it counts, manual where shell infra stops
+
+**Decided by:** Chunk (Tester)  
+**Date:** 2026-04-22
+
+## Context
+
+PR #77 picked up three Copilot review threads across platform, backend, and frontend code. The API and web concerns have stable local test harnesses, but the k3d smoke script still runs as a live shell/infrastructure path with no existing automated compatibility lane for older Bash.
+
+## Decision
+
+For this review cycle:
+
+1. Lock the API Keycloak identity-conflict fix with automated regression coverage in `apps/api/test/keycloak-runtime-auth.test.ts`.
+2. Lock the web Keycloak missing-client UX fix with automated regression coverage in `apps/web/src/App.keycloak-auth.test.tsx`.
+3. Treat `scripts/k3d/smoke.sh` older-Bash compatibility as a **manual QA gate** until the repo gains a real shell-script regression harness.
+
+## Why
+
+- The API and web bugs are deterministic and cheap to exercise in CI.
+- The shell comment is about startup compatibility in Bash 3.2-style environments, which current repo tooling does not emulate.
+- A focused manual check on an older Bash shell catches the actual user-facing failure (`invalid shell option name`) without inventing brittle fake coverage.
+
+## Impact
+
+Reviewers should expect green automated evidence for the API/web fixes and one explicit manual smoke note for the shell thread. If future work adds shell-test infrastructure, this manual gate should be replaced with an automated regression.
+
+---
+
+### 2026-04-22: PR #77 Keycloak missing-client UX
+
+**Decided by:** Stef (Frontend Dev)  
+**Date:** 2026-04-22  
+**Type:** Frontend auth UX
+
+## Context
+
+The owner auth screen can still render in Keycloak mode after bootstrap has cleared `keycloakClientRef.current` (for example after runtime init fails). The prior submit path used optional chaining on `login()`, so the button could appear live while doing nothing.
+
+## Decision
+
+When Keycloak mode is active but the runtime client is unavailable, keep the existing owner-auth screen and surface the failure through the inline `error` alert with explicit reload/retry copy. Do not leave the CTA as a silent no-op.
+
+## Why
+
+- Reuses the app's existing auth error surface instead of inventing a second failure UI.
+- Keeps the flow low-friction: users learn what went wrong without extra clicks or hidden states.
+- Makes future regressions obvious in both the UI and targeted tests.
+
+## Impact
+
+- Frontend Keycloak entry points should explicitly guard missing runtime clients instead of optional-chaining user actions.
+- Regression tests for auth CTAs should assert the user-visible error state whenever a runtime dependency can disappear after bootstrap.
+
