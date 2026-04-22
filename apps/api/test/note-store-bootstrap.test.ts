@@ -84,7 +84,8 @@ class FakePostgresDatabase implements NoteStoreDatabase {
         }
 
         if (sql.includes('FROM information_schema.table_constraints')) {
-          return this.options.ownerAccountUniqueColumns?.includes('keycloak_sub')
+          return this.options.ownerAccountUniqueColumns?.length === 1 &&
+            this.options.ownerAccountUniqueColumns[0] === 'keycloak_sub'
             ? { constraint_name: 'owner_accounts_keycloak_sub_key' }
             : undefined
         }
@@ -158,6 +159,39 @@ test('least-privilege postgres runtime accepts a unique keycloak_sub index', asy
   await initializeNoteStoreDatabase(database, new Set(['admin@example.com']))
 
   assert.deepEqual(database.executedSql, [])
+})
+
+test('least-privilege postgres runtime rejects composite keycloak_sub unique constraints', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerAccountUniqueColumns: ['keycloak_sub', 'tenant_id'],
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /unique owner_accounts\.keycloak_sub enforcement/,
+  )
+})
+
+test('least-privilege postgres runtime rejects composite keycloak_sub unique indexes', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: false,
+    ownerEmails: ['Admin@Example.com'],
+    ownerEmailIndexDefinition,
+    ownerAccountColumns: ['keycloak_sub'],
+    ownerKeycloakSubIndexDefinition:
+      'CREATE UNIQUE INDEX idx_owner_accounts_keycloak_sub ON public.owner_accounts USING btree (keycloak_sub, tenant_id) WHERE (keycloak_sub IS NOT NULL)',
+    tableNames: requiredPostgresTables,
+  })
+
+  await assert.rejects(
+    initializeNoteStoreDatabase(database, new Set(['admin@example.com'])),
+    /unique owner_accounts\.keycloak_sub enforcement/,
+  )
 })
 
 test('least-privilege postgres runtime fails fast when the pre-initialized schema is incomplete', async () => {

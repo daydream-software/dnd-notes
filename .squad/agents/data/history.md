@@ -577,6 +577,3 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 **Commit:** b7badaa
 
 **Outcome:** PR #72 is unblocked and ready for CI clearance and merge.
-
-## 2026-04-21: Issue #56 Auth Seam Prep
-

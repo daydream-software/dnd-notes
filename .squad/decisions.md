@@ -4916,8 +4916,8 @@ Implement auth-provider abstraction boundaries without full Keycloak OIDC.
 ## Changes
 
 **Schema:**
-- Added `owner_accounts.keycloak_sub TEXT UNIQUE` (nullable)
-- SQLite migration logic added to `ensureOwnerKeycloakSubColumn()`
+- Added nullable `owner_accounts.keycloak_sub TEXT`
+- SQLite migration logic added to `ensureOwnerKeycloakSubColumn()` with a separate unique partial index on non-null `keycloak_sub`
 - Column added to all owner account SELECT queries and row mappers
 
 **Types:**
@@ -5036,4 +5036,3 @@ The repo already has an internal control-plane API surface, while issue `#68` ow
 ## Implications
 
 `backupMetadata` remains opaque in storage; the status surface only lifts known fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`, `lastRestoreDrillStatus`, and `location` when present. Future UI work should consume this contract instead of inventing a parallel status aggregation path.
-
