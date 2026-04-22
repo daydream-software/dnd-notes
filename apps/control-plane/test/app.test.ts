@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
 import {
+  TenantProvisioningConflictError,
   TenantProvisioningValidationError,
   type TenantProvisioningPort,
 } from '../src/provisioning.js'
@@ -134,6 +135,7 @@ describe('Control Plane API', () => {
           id: 'tenant-123',
           slug: 'test-tenant',
           ownerId: 'owner-456',
+          initialAdminEmail: 'admin@example.com',
           version: '1.0.0',
         })
         .expect(201)
@@ -141,10 +143,25 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.tenant.id, 'tenant-123')
       assert.strictEqual(response.body.tenant.slug, 'test-tenant')
       assert.strictEqual(response.body.tenant.ownerId, 'owner-456')
+      assert.strictEqual(response.body.tenant.initialAdminEmail, 'admin@example.com')
       assert.strictEqual(response.body.tenant.subdomain, null)
       assert.strictEqual(response.body.tenant.version, '1.0.0')
       assert.strictEqual(response.body.tenant.currentState, 'provisioning')
       assert.strictEqual(response.body.tenant.desiredState, 'provisioning')
+    })
+
+    it('validates initial admin email format when provided', async () => {
+      const response = await authedPost(tenantsPath)
+        .send({
+          id: 'tenant-123',
+          slug: 'test-tenant',
+          ownerId: 'owner-456',
+          initialAdminEmail: 'not-an-email',
+          version: '1.0.0',
+        })
+        .expect(400)
+
+      assert.strictEqual(response.body.error, 'Invalid request body')
     })
 
     it('rejects duplicate tenant ID', async () => {
@@ -237,6 +254,7 @@ describe('Control Plane API', () => {
         id: 'tenant-ready',
         slug: 'tenant-ready',
         ownerId: 'owner-1',
+        initialAdminEmail: 'admin@tenant-ready.example',
         version: '1.0.0',
       })
       tenantRegistry.updateTenantDesiredState('tenant-ready', 'ready')
@@ -293,6 +311,10 @@ describe('Control Plane API', () => {
       )
       assert.ok(readyTenant)
       assert.strictEqual(readyTenant.health, 'healthy')
+      assert.strictEqual(
+        readyTenant.tenant.initialAdminEmail,
+        'admin@tenant-ready.example',
+      )
       assert.strictEqual(readyTenant.backup.lastBackupAt, '2026-04-18T22:00:00Z')
       assert.strictEqual(readyTenant.backup.lastBackupStatus, 'succeeded')
       assert.strictEqual(
@@ -304,6 +326,8 @@ describe('Control Plane API', () => {
         readyTenant.backup.location,
         'blob://backups/tenant-ready',
       )
+      assert.strictEqual(readyTenant.latestTransition.triggeredBy, 'test-suite')
+      assert.strictEqual(readyTenant.latestTransition.reason, 'Provisioned in test')
       assert.strictEqual(readyTenant.latestTransition.toState, 'ready')
 
       const failedTenant = response.body.tenants.find(
@@ -312,6 +336,8 @@ describe('Control Plane API', () => {
       assert.ok(failedTenant)
       assert.strictEqual(failedTenant.health, 'attention')
       assert.strictEqual(failedTenant.backup.rawMetadata, null)
+      assert.strictEqual(failedTenant.latestTransition.triggeredBy, 'test-suite')
+      assert.strictEqual(failedTenant.latestTransition.reason, 'Synthetic failure in test')
       assert.strictEqual(failedTenant.latestTransition.toState, 'failed')
     })
 
@@ -572,8 +598,18 @@ describe('Control Plane API', () => {
         version: '1.0.0',
       })
 
+      let receivedProvisionRequest:
+        | {
+            tenantId: string
+            triggeredBy: string
+            reason?: string
+            version?: string
+          }
+        | undefined
+
       tenantProvisioningService = {
-        async provisionTenant() {
+        async provisionTenant(request) {
+          receivedProvisionRequest = request
           tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
           tenantRegistry.updateTenantStorageReference(
             'tenant-123',
@@ -583,8 +619,8 @@ describe('Control Plane API', () => {
           tenantRegistry.updateTenantState(
             'tenant-123',
             'ready',
-            'test-suite',
-            'Provisioned in test',
+            request.triggeredBy,
+            request.reason,
           )
 
           return {
@@ -612,10 +648,17 @@ describe('Control Plane API', () => {
 
       const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
         .send({
-          triggeredBy: 'test-suite',
+          triggeredBy: 'operator@example.com',
+          reason: 'Provision the first operator-portal tenant',
         })
         .expect(200)
 
+      assert.deepStrictEqual(receivedProvisionRequest, {
+        tenantId: 'tenant-123',
+        triggeredBy: 'operator@example.com',
+        reason: 'Provision the first operator-portal tenant',
+        version: undefined,
+      })
       assert.strictEqual(response.body.tenant.currentState, 'ready')
       assert.strictEqual(response.body.tenant.subdomain, 't-opaque123456')
       assert.strictEqual(
@@ -626,6 +669,20 @@ describe('Control Plane API', () => {
       assert.strictEqual(
         response.body.resources.pvcName,
         'dnd-notes-data-t-opaque123456',
+      )
+
+      const transitions = await authedGet(`${tenantPath('tenant-123')}/transitions`).expect(
+        200,
+      )
+
+      assert.strictEqual(transitions.body.transitions[0].toState, 'ready')
+      assert.strictEqual(
+        transitions.body.transitions[0].triggeredBy,
+        'operator@example.com',
+      )
+      assert.strictEqual(
+        transitions.body.transitions[0].reason,
+        'Provision the first operator-portal tenant',
       )
     })
 
@@ -658,11 +715,184 @@ describe('Control Plane API', () => {
         })
         .expect(400)
 
+      assert.strictEqual(response.body.code, 'invalid_target_version')
       assert.strictEqual(response.body.error, 'Invalid tenant provisioning request')
       assert.strictEqual(
         response.body.details,
         'Tenant version must be a valid container image tag',
       )
+    })
+
+    it('returns 409 when the provisioning service rejects a concurrent rolling update', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new TenantProvisioningConflictError(
+            'Tenant tenant-123 already has a rolling update in progress. Wait for it to return to ready before starting another rollout.',
+            'tenant_rollout_in_progress',
+          )
+        },
+        async deprovisionTenant() {
+          throw new Error('not used')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+          version: '1.1.0',
+        })
+        .expect(409)
+
+      assert.strictEqual(response.body.code, 'tenant_rollout_in_progress')
+      assert.strictEqual(response.body.error, 'Tenant rolling update conflict')
+      assert.match(response.body.details, /already has a rolling update in progress/)
+    })
+
+    it('returns 409 when the provisioning service rejects a non-ready rolling update', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new TenantProvisioningConflictError(
+            'Tenant tenant-123 cannot start a rolling update from state maintenance. Rolling updates are only supported for ready tenants.',
+            'tenant_rollout_disallowed',
+          )
+        },
+        async deprovisionTenant() {
+          throw new Error('not used')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+          version: '1.1.0',
+        })
+        .expect(409)
+
+      assert.strictEqual(response.body.code, 'tenant_rollout_disallowed')
+      assert.strictEqual(response.body.error, 'Tenant rolling update conflict')
+      assert.match(response.body.details, /only supported for ready tenants/)
+    })
+
+    it('returns 400 when the provisioning service rejects a stale no-op rollout target', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new TenantProvisioningValidationError(
+            'Tenant tenant-123 is already running version 1.1.0. Choose a different target version for a rolling update.',
+            'unsupported_target_version',
+          )
+        },
+        async deprovisionTenant() {
+          throw new Error('not used')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+          version: '1.1.0',
+        })
+        .expect(400)
+
+      assert.strictEqual(response.body.code, 'unsupported_target_version')
+      assert.strictEqual(response.body.error, 'Invalid tenant provisioning request')
+      assert.match(response.body.details, /already running version 1.1.0/)
+    })
+
+    it('returns a rollout-specific operator-facing error when a versioned provision fails', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new Error('synthetic infrastructure failure')
+        },
+        async deprovisionTenant() {
+          throw new Error('not used')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+          version: '1.1.0',
+        })
+        .expect(500)
+
+      assert.strictEqual(response.body.code, 'tenant_rollout_failed')
+      assert.strictEqual(response.body.error, 'Tenant rolling update failed')
+      assert.strictEqual(
+        response.body.details,
+        'Rolling update failed for tenant tenant-123. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.',
+      )
+    })
+
+    it('keeps the generic provisioning error shape for first-time provisioning failures', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new Error('synthetic infrastructure failure')
+        },
+        async deprovisionTenant() {
+          throw new Error('not used')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/provision`)
+        .send({
+          triggeredBy: 'test-suite',
+          version: '1.0.0',
+        })
+        .expect(500)
+
+      assert.strictEqual(response.body.code, undefined)
+      assert.strictEqual(response.body.error, 'Failed to provision tenant resources')
+      assert.strictEqual(response.body.details, 'synthetic infrastructure failure')
     })
   })
 
@@ -684,18 +914,27 @@ describe('Control Plane API', () => {
         'Provisioned in test',
       )
 
+      let receivedDeprovisionRequest:
+        | {
+            tenantId: string
+            triggeredBy: string
+            reason?: string
+          }
+        | undefined
+
       tenantProvisioningService = {
         async provisionTenant() {
           throw new Error('not used')
         },
-        async deprovisionTenant() {
+        async deprovisionTenant(request) {
+          receivedDeprovisionRequest = request
           tenantRegistry.updateTenantStorageReference('tenant-123', null)
           tenantRegistry.updateTenantDesiredState('tenant-123', 'deprovisioned')
           tenantRegistry.updateTenantState(
             'tenant-123',
             'deprovisioned',
-            'test-suite',
-            'Removed in test',
+            request.triggeredBy,
+            request.reason,
           )
 
           return {
@@ -710,13 +949,33 @@ describe('Control Plane API', () => {
 
       const response = await authedPost(`${tenantPath('tenant-123')}/deprovision`)
         .send({
-          triggeredBy: 'test-suite',
+          triggeredBy: 'operator@example.com',
+          reason: 'Decommission the retired tenant',
         })
         .expect(200)
 
+      assert.deepStrictEqual(receivedDeprovisionRequest, {
+        tenantId: 'tenant-123',
+        triggeredBy: 'operator@example.com',
+        reason: 'Decommission the retired tenant',
+      })
       assert.strictEqual(response.body.deprovisioned, true)
       assert.strictEqual(response.body.tenant.currentState, 'deprovisioned')
       assert.strictEqual(response.body.tenant.storageReference, null)
+
+      const transitions = await authedGet(`${tenantPath('tenant-123')}/transitions`).expect(
+        200,
+      )
+
+      assert.strictEqual(transitions.body.transitions[0].toState, 'deprovisioned')
+      assert.strictEqual(
+        transitions.body.transitions[0].triggeredBy,
+        'operator@example.com',
+      )
+      assert.strictEqual(
+        transitions.body.transitions[0].reason,
+        'Decommission the retired tenant',
+      )
     })
   })
 

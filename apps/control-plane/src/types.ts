@@ -15,6 +15,7 @@ export interface Tenant {
   slug: string
   subdomain: string | null
   ownerId: string
+  initialAdminEmail: string | null
   desiredState: TenantState
   currentState: TenantState
   version: string
@@ -111,6 +112,7 @@ export interface FleetStatusResponse {
 }
 
 export interface ErrorResponse {
+  code?: string
   error: string
   details?: string
 }

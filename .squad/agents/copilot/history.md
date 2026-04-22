@@ -6,7 +6,7 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context
+## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Copilot enabled as autonomous coding agent for squad via auto-assignment to squad:copilot issues.
 
@@ -94,3 +94,45 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 - `apps/web/src/App.tsx` no longer silently optional-chains the Keycloak login CTA. In Keycloak mode, a missing `keycloakClientRef.current` now throws a user-facing inline auth error telling the user to reload and try again.
 - `apps/web/src/App.keycloak-auth.test.tsx` now covers the missing-client path by rejecting Keycloak init during bootstrap, then asserting the sign-in CTA surfaces the inline error instead of no-oping.
+
+## Session Update (2026-04-22)
+- Started Issue #68 QA-lane prep as Chunk/Tester.
+- Focus: inspect control-plane + web test surfaces, lock stable operator-slice contracts with tests where possible, and publish first-slice QA gate + risks.
+- Issue #68 QA prep landed control-plane acceptance tests for admin-realm auth on the fleet-status read surface and audit-trail preservation on provision/deprovision flows; first-slice recommendation is an auth-gated read-heavy portal before live write controls.
+
+## 2026-04-22: Issue #68 operator portal UX slice
+
+- Extended `apps/operator-portal` beyond the read-only dashboard: the portal now provisions tenants via the existing create + provision control-plane routes, requires an operator reason, and reloads fleet state from `/internal/fleet/status` instead of synthesizing local lifecycle updates.
+- Added a destructive deprovision dialog with typed-slug confirmation and reason capture so the portal makes side effects explicit before sending `POST /internal/tenants/:tenantId/deprovision`.
+- Focused operator lifecycle regressions now live in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`; workspace validation passed with `npm run lint --workspace apps/operator-portal && npm run test --workspace apps/operator-portal && npm run build --workspace apps/operator-portal`.
+
+
+## 2026-04-22: Issue #68 control-plane contract slice
+
+- Extended the control-plane tenant contract so `POST /internal/tenants` can persist an optional `initialAdminEmail`, and surfaced it back through tenant reads plus `GET /internal/fleet/status`.
+- Updated the operator portal to send that field on the existing create → provision flow, display it in the fleet read model, and warn that the email is only recorded metadata until a later bootstrap slice lands.
+- Added focused control-plane and operator-portal regressions, updated the relevant READMEs, and re-ran lint/test/build for both workspaces successfully.
+
+## 2026-04-22: Issue #68 rolling update UX follow-up
+
+- Closed the final PR #78 review thread by extracting shared `normalizeBasePath()` logic into `apps/operator-portal/src/base-path.ts`, reusing it from both `apps/operator-portal/vite.config.ts` and `apps/operator-portal/src/config.ts`, and adding `apps/operator-portal/src/base-path.test.ts` to lock the normalization behavior.
+- Revalidated the touched workspace with `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal`.
+
+- Added the next thin operator-portal lifecycle slice in `apps/operator-portal`: ready tenants can now start a rolling update through the existing `POST /internal/tenants/:tenantId/provision` route by supplying a target version plus operator reason.
+- Kept the UX explicit but low-friction with a dedicated dialog (`TenantUpgradeDialog.tsx`) that explains the drain-first replacement semantics and requires the target version to be re-entered before the call is sent.
+- Extended `apps/operator-portal/src/OperatorPortal.actions.test.tsx` with a focused regression for the upgrade path and re-ran `npm run lint --workspace apps/operator-portal && npm run build --workspace apps/operator-portal && npm run test --workspace apps/operator-portal --` successfully.
+
+- 2026-04-22T17:32:29Z Started issue #68 control-plane rollout failure hardening: investigating provision route, portal rolling-update consumer, and backend failure contracts before a thin mergeable fix slice.
+- 2026-04-22T17:40:00Z Coordinator resumed issue #68 after compaction: rolling-update QA log is persisted, Data's rollout-failure hardening landed locally with explicit 400/409/500 control-plane contracts, and the next enforced handoff is Chunk QA on operator-facing failure copy plus regression coverage before batching commits/push prep.
+
+- 2026-04-22T17:38:00Z Completed issue #68 rollout failure hardening: versioned control-plane provision requests now return explicit 400/409/500 rollout contracts for unsupported targets, concurrent/disallowed rollout attempts, and mid-flight rollout failures; focused control-plane tests plus operator-portal validation passed. Shared worktree was already dirty with unrelated #68 changes, so Data left the code uncommitted; Scribe logged the slice in `.squad/log/2026-04-22T17:38:00Z-issue68-rollout-failure-hardening.md` and `.squad/orchestration-log/2026-04-22T17:38:00Z-data.md`.
+- 2026-04-22T18:00:00Z Chunk QA picked up issue #68 rollout-failure hardening review: inspecting Data's uncommitted control-plane failure-contract slice, operator-portal operator-facing copy/tests, and validating both touched workspaces before approving for batching.
+- 2026-04-22T18:02:00Z Completed Chunk QA review for issue #68 rollout-failure hardening: approved Data's control-plane slice after adding route-level regressions for stale/no-op and non-ready rollout mappings plus operator-portal inline rollout-error coverage/copy so stale 400/409/500 rollout contracts stay visible to operators. Re-ran lint/test/build for both `apps/control-plane` and `apps/operator-portal` successfully; worktree remains intentionally dirty/uncommitted because unrelated #68 changes are present.
+- 2026-04-22T19:08:00Z Picked up the newest PR #78 Copilot review follow-up on `squad/68-operator-control-portal`: one portal UX gap let a stale open provision dialog proceed after mutations became disabled, and one parameterized portal regression still produced unreadable `[object Object]` case names in CI output.
+- 2026-04-22T19:12:00Z Landed the PR #78 review-fix batch for issue #68: `ProvisionTenantPanel` now re-checks `disabledReason` inside confirm and disables the confirm CTA, operator-portal actions tests cover the stale-review lockout, and rollout guidance cases now use readable scenario labels. Re-ran `npm run lint --workspace apps/operator-portal && npm run test --workspace apps/operator-portal && npm run build --workspace apps/operator-portal` successfully before push/reply/resolve work.
+- 2026-04-22T19:20:00Z Picked up the next PR #78 review round immediately after the previous threads were resolved: Mikey triaged two fresh comments down to an operator-portal test-mock fix plus a duplicate `Core Context` cleanup in `.squad/agents/stef/history.md`, while Scribe logged the new cycle.
+- 2026-04-22T19:28:00Z Completed the latest PR #78 follow-up batch for issue #68: `apps/operator-portal/src/OperatorPortal.actions.test.tsx` now returns explicit 500 responses for unexpected POST calls in the stale-dialog regression instead of crashing on `undefined`, the duplicate `## Core Context` header was removed from `stef/history.md`, and Chunk approved the batch after focused operator-portal lint/test/build stayed green.
+- 2026-04-22T19:31:00Z Picked up another PR #78 round after two fresh comments and two red checks appeared: Mikey triaged both new comments to operator-portal session/auth lifecycle fixes, Brand diagnosed the red checks down to a new control-plane test with an overly tight 50ms polling timeout, and Scribe logged the combined review/CI cycle.
+- 2026-04-22T19:39:00Z Completed the current PR #78 follow-up batch for issue #68: stored operator-portal Keycloak tokens are now shape-validated before reuse and invalid blobs are cleared, `clearSession()` resets stale error/loading state so logout returns to a clean sign-in screen, a focused `keycloak-client` test was added alongside updated app-level regressions, and the new control-plane namespace-termination test timeout was relaxed from 50ms to 200ms to keep CI stable without touching production logic. Chunk approved the batch after rerunning the touched operator-portal and control-plane lint/test/build paths.
+- 2026-04-22T19:45:00Z Picked up the final known PR #78 review comment immediately after the previous batch was pushed: Mikey triaged it to a duplicated `normalizeBasePath()` helper shared between `apps/operator-portal/vite.config.ts` and `apps/operator-portal/src/config.ts`, Scribe logged the round, and Brand owned the low-risk config refactor while Chunk prepared the reviewer gate.
+- 2026-04-22T19:48:00Z Completed the final PR #78 follow-up batch for issue #68: `normalizeBasePath()` now lives in a shared `apps/operator-portal/src/base-path.ts` helper consumed by both Vite and runtime config, `apps/operator-portal/src/base-path.test.ts` locks the blank/root/trailing-slash behavior, and Chunk approved the refactor after operator-portal plus full-repo validation stayed green.

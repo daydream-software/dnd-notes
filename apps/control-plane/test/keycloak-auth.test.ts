@@ -52,6 +52,24 @@ describe('Control Plane Keycloak auth', () => {
     assert.deepEqual(response.body.tenants, [])
   })
 
+  it('accepts workforce/admin Keycloak JWTs for the fleet status surface', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+    const app = createKeycloakApp()
+    const token = keycloak.issueToken({
+      audience: 'account',
+      clientId,
+      roles: ['control-plane-admin'],
+    })
+
+    const response = await request(app)
+      .get('/internal/fleet/status')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    assert.equal(response.body.controlPlane.status, 'healthy')
+    assert.equal(response.body.summary.totalTenants, 0)
+  })
+
   it('rejects valid JWTs that lack a required workforce/admin role', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
     const app = createKeycloakApp()
@@ -60,6 +78,29 @@ describe('Control Plane Keycloak auth', () => {
     const response = await request(app)
       .get('/internal/tenants')
       .set('Authorization', `Bearer ${token}`)
+      .expect(403)
+
+    assert.equal(response.body.error, 'Forbidden')
+  })
+
+  it('rejects write-side routes when the JWT lacks a required workforce/admin role', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+    tenantRegistry.createTenant({
+      id: 'tenant-123',
+      slug: 'test-tenant',
+      ownerId: 'owner-456',
+      version: '1.0.0',
+    })
+    const app = createKeycloakApp()
+    const token = keycloak.issueToken({ clientId, roles: ['tenant-user'] })
+
+    const response = await request(app)
+      .post('/internal/tenants/tenant-123/provision')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        triggeredBy: 'operator@example.com',
+        reason: 'Portal smoke test',
+      })
       .expect(403)
 
     assert.equal(response.body.error, 'Forbidden')
