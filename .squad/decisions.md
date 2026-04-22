@@ -5411,8 +5411,8 @@ For the next mergeable operator-portal slice, tenant provisioning stays a review
 
 ### 2026-04-22: Data — Issue #68 contract slice
 
-**Decided by:** Data (Backend Dev)  
-**Date:** 2026-04-22  
+**Decided by:** Data (Backend Dev)
+**Date:** 2026-04-22
 **Type:** Operator portal / control-plane contract
 
 ## Decision
@@ -5460,3 +5460,40 @@ For the next mergeable #68 portal slice, the additional lifecycle action should 
 - The portal stays thin and keeps using the same `/operator-api` write path family.
 - Failed or half-provisioned tenants still need a backend-owned decision before the UI exposes retry/recovery affordances.
 - Chunk should keep the upgrade regression focused in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`, while future custom-domain work still waits on Brand.
+
+### 2026-04-22: Data — Issue #68 rollout failure hardening
+
+**Decided by:** Data (Backend Dev)
+**Date:** 2026-04-22
+**Type:** Control-plane rollout contract hardening
+
+## Context
+
+The operator portal already reuses `POST /internal/tenants/:tenantId/provision` for ready-tenant rolling updates. QA flagged that unsupported targets, concurrent rollouts, and mid-flight rollout failures were still surfacing as generic backend text.
+
+## Decision
+
+Keep the existing provision endpoint as the single control-plane write path, but make versioned rollout failures explicit and stable:
+
+1. `TenantProvisioningService.provisionTenant()` owns ready-tenant rollout guardrails and classifies them as typed failures:
+   - `unsupported_target_version` for same-version or no-op targets
+   - `tenant_rollout_in_progress` for concurrent rollouts
+   - `tenant_rollout_disallowed` for non-ready rollout attempts
+2. `apps/control-plane/src/app.ts` translates those typed rollout failures into a stable HTTP contract for versioned provision requests:
+   - `400 unsupported_target_version`
+   - `409 tenant_rollout_in_progress`
+   - `409 tenant_rollout_disallowed`
+   - `500 tenant_rollout_failed` with operator guidance instead of raw backend text when a rollout breaks mid-flight
+3. First-time provisioning keeps the older generic `500` failure shape; this slice hardens only ready-tenant rolling updates.
+
+## Why
+
+- Operators need errors that tell them what to do next, not raw control-plane exception text.
+- The browser constrains the happy path, but scripts and future callers still hit the canonical provision route directly, so the backend must defend it.
+- Limiting the new contract to versioned rollout requests keeps the slice mergeable without broadening initial-provisioning behavior.
+
+## Consequences
+
+- The operator portal and future automation can key off stable `400`/`409`/`500` rollout codes instead of parsing free-form strings.
+- Chunk's next QA pass can focus on operator-facing failure copy and regression coverage against the explicit contract.
+- Recovery/retry UX can build on these typed failures later without introducing a second rollout endpoint.

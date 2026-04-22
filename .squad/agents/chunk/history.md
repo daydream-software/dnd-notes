@@ -16,6 +16,8 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 
 ## Recent Updates (Last 5)
 
+📌 Team update (2026-04-22T17:38:00Z): Issue #68 rollout-failure hardening landed locally by Data. Ready-tenant rolling updates now return stable control-plane responses: `400 unsupported_target_version` for same-version/no-op targets, `409 tenant_rollout_in_progress` / `tenant_rollout_disallowed` for concurrent or non-ready requests, and `500 tenant_rollout_failed` with operator guidance instead of raw backend text. Focused control-plane tests and operator-portal validation passed. Shared worktree stayed dirty, so no code commit was cut. Next: Chunk QA should validate operator-facing failure copy + regression coverage before batching. — Scribe
+
 📌 Team update (2026-04-22T17:27:18Z): Issue #68 rolling-update lifecycle action completed by Stef. Reuses POST /internal/tenants/:tenantId/provision with version override, exposed only for ready tenants, requires operator reason + typed target-version confirmation. Focused regression in OperatorPortal.actions.test.tsx. Portal lint/build/test passing. Next: Chunk owns QA/reviewer pass on rolling-update action. — Scribe
 
 📌 Issue #68 rolling-update lifecycle action QA review (2026-04-22T17:31:44Z): Chunk approved rolling-update slice. Verified ready-only guardrail, audit visibility, operator-facing confirmation flow. Added focused regression lock in OperatorPortal.actions.test.tsx. Portal validation passing (lint/test/build). Ready for merge. Orchestration log at `.squad/orchestration-log/2026-04-22T17:31:44Z-chunk.md`. Session log at `.squad/log/2026-04-22T17:31:44Z-issue68-lifecycle-review.md`. — Chunk (QA/Tester)
