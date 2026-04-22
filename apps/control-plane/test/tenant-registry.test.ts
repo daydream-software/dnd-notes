@@ -419,4 +419,29 @@ describe('TenantRegistry', () => {
       tenantRegistry.close()
     }
   })
+
+  it('creates an expression index for portal session expiry lookups', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const tenantRegistry = new TenantRegistry(databasePath)
+
+    try {
+      const db = new Database(databasePath, { readonly: true })
+      const index = db
+        .prepare(
+          `SELECT sql
+           FROM sqlite_master
+           WHERE type = 'index'
+             AND name = 'idx_portal_sessions_expires_at_datetime'`,
+        )
+        .get() as { sql: string } | undefined
+      db.close()
+
+      assert.ok(index)
+      assert.match(index.sql, /datetime\(expires_at\)/)
+    } finally {
+      tenantRegistry.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
 })

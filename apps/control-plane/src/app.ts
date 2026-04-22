@@ -169,6 +169,7 @@ const portalPlanCatalog = [
   },
 ] as const
 const portalPlanSchema = z.enum(['adventurer', 'guild', 'realm'])
+const rateLimitBucketSweepIntervalMs = 60 * 1000
 const portalSignupRateLimitPolicy: RateLimitPolicy = {
   maxRequests: 5,
   windowMs: 1000 * 60 * 15,
@@ -446,6 +447,7 @@ export function createApp({
   const app = express()
   const portalJsonParser = express.json({ limit: '16kb' })
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
+  let nextRateLimitBucketSweepAt = 0
   const buildHealthResponse = (): HealthResponse => ({
     status: 'healthy',
     uptime: process.uptime(),
@@ -607,10 +609,14 @@ export function createApp({
   ) => {
     const now = Date.now()
 
-    for (const [key, bucket] of rateLimitBuckets) {
-      if (bucket.resetAt <= now) {
-        rateLimitBuckets.delete(key)
+    if (now >= nextRateLimitBucketSweepAt) {
+      for (const [key, bucket] of rateLimitBuckets) {
+        if (bucket.resetAt <= now) {
+          rateLimitBuckets.delete(key)
+        }
       }
+
+      nextRateLimitBucketSweepAt = now + rateLimitBucketSweepIntervalMs
     }
 
     const bucketKey = [policyKey, readRateLimitClientId(request)].join(':')
@@ -994,6 +1000,7 @@ export function createApp({
   app.post(
     `${portalRoutePrefix}/logout`,
     createPortalSessionMiddleware(tenantRegistry),
+    portalJsonParser,
     (
       request: Request,
       response: Response<PortalLogoutResponse | ErrorResponse>,

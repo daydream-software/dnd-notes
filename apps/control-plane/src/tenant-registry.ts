@@ -258,8 +258,10 @@ export class TenantRegistry {
       CREATE INDEX IF NOT EXISTS idx_portal_sessions_account_id
       ON portal_sessions(account_id);
 
-      CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at
-      ON portal_sessions(expires_at);
+      DROP INDEX IF EXISTS idx_portal_sessions_expires_at;
+
+      CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at_datetime
+      ON portal_sessions(datetime(expires_at));
     `)
   }
 
