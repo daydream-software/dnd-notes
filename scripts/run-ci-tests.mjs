@@ -15,6 +15,7 @@ const suites = [
   { name: 'api', script: 'test:ci:api' },
   { name: 'control-plane', script: 'test:ci:control-plane' },
   { name: 'operator-portal', script: 'test:ci:operator-portal' },
+  { name: 'customer-portal', script: 'test:ci:customer-portal' },
 ]
 
 function getNpmCommand() {

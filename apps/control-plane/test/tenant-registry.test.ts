@@ -398,7 +398,7 @@ describe('TenantRegistry', () => {
         id: 'session-1',
         accountId: account.id,
         tokenHash: 'hashed-token',
-        expiresAt: '2999-01-01T00:00:00.000Z',
+        expiresAt: '2999-01-01 00:00:00',
       })
 
       const storedAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')

@@ -102,7 +102,7 @@ const baseDashboard: PortalDashboardResponse = {
 
 describe('customer portal', () => {
   beforeEach(() => {
-    localStorage.clear()
+    sessionStorage.clear()
   })
 
   afterEach(() => {
@@ -174,11 +174,11 @@ describe('customer portal', () => {
     expect(await screen.findByText('Customer dashboard')).toBeTruthy()
     expect(screen.getByText('Misty Harbor')).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Open tenant app' })).toBeTruthy()
-    expect(localStorage.getItem(storedTokenKey)).toBe('portal-session-token')
+    expect(sessionStorage.getItem(storedTokenKey)).toBe('portal-session-token')
   })
 
   it('creates an additional tenant from the customer dashboard', async () => {
-    localStorage.setItem(storedTokenKey, 'portal-session-token')
+    sessionStorage.setItem(storedTokenKey, 'portal-session-token')
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
@@ -267,7 +267,7 @@ describe('customer portal', () => {
   })
 
   it('clears the dashboard after sign out', async () => {
-    localStorage.setItem(storedTokenKey, 'portal-session-token')
+    sessionStorage.setItem(storedTokenKey, 'portal-session-token')
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
@@ -296,7 +296,7 @@ describe('customer portal', () => {
 
     expect(await screen.findByRole('button', { name: 'Create portal account' })).toBeTruthy()
     await waitFor(() => {
-      expect(localStorage.getItem(storedTokenKey)).toBeNull()
+      expect(sessionStorage.getItem(storedTokenKey)).toBeNull()
     })
   })
 })

@@ -54,16 +54,16 @@ const defaultCreateTenantDraft = {
 }
 
 function readStoredSessionToken() {
-  const storedValue = window.localStorage.getItem(sessionTokenStorageKey)
+  const storedValue = window.sessionStorage.getItem(sessionTokenStorageKey)
   return storedValue && storedValue.trim().length > 0 ? storedValue : null
 }
 
 function persistSessionToken(token: string) {
-  window.localStorage.setItem(sessionTokenStorageKey, token)
+  window.sessionStorage.setItem(sessionTokenStorageKey, token)
 }
 
 function clearSessionToken() {
-  window.localStorage.removeItem(sessionTokenStorageKey)
+  window.sessionStorage.removeItem(sessionTokenStorageKey)
 }
 
 function formatTimestamp(value: string | null) {

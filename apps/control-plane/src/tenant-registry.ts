@@ -670,7 +670,7 @@ export class TenantRegistry {
         `SELECT id, account_id, token_hash, expires_at, created_at
          FROM portal_sessions
          WHERE token_hash = ?
-           AND expires_at > datetime('now')`,
+           AND datetime(expires_at) > datetime('now')`,
       )
       .get(tokenHash)
 
@@ -951,7 +951,7 @@ export class TenantRegistry {
     this.db
       .prepare(
         `DELETE FROM portal_sessions
-         WHERE expires_at <= datetime('now')`,
+         WHERE datetime(expires_at) <= datetime('now')`,
       )
       .run()
   }

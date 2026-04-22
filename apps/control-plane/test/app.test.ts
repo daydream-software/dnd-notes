@@ -421,6 +421,60 @@ describe('Control Plane API', () => {
 
       assert.strictEqual(response.body.error, 'Unauthorized')
     })
+
+    it('rate limits repeated portal signup attempts', async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app).post('/portal/signup').send({}).expect(400)
+      }
+
+      const response = await request(app).post('/portal/signup').send({}).expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal signup attempts. Please wait before trying again.',
+      )
+      assert.strictEqual(typeof response.headers['retry-after'], 'string')
+    })
+
+    it('rate limits repeated portal login attempts', async () => {
+      await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app)
+          .post('/portal/login')
+          .send({
+            email: 'owner@example.com',
+            password: 'wrong-password',
+          })
+          .expect(401)
+      }
+
+      const response = await request(app)
+        .post('/portal/login')
+        .send({
+          email: 'owner@example.com',
+          password: 'wrong-password',
+        })
+        .expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal login attempts. Please wait before trying again.',
+      )
+      assert.strictEqual(typeof response.headers['retry-after'], 'string')
+    })
   })
 
   describe('POST /internal/tenants', () => {

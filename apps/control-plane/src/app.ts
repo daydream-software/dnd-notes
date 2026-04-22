@@ -3,7 +3,7 @@ import {
   createHash,
   randomBytes,
   randomUUID,
-  scryptSync,
+  scrypt,
   timingSafeEqual,
 } from 'node:crypto'
 import express, { type Express, type Request, type Response } from 'express'
@@ -114,6 +114,17 @@ function hasBackupMetadata(rawMetadata: string | null) {
   return rawMetadata !== null && rawMetadata.trim().length > 0
 }
 
+interface RateLimitBucket {
+  count: number
+  resetAt: number
+}
+
+interface RateLimitPolicy {
+  maxRequests: number
+  windowMs: number
+  errorMessage: string
+}
+
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
   adminToken?: string
@@ -133,6 +144,7 @@ const portalSessionLifetimeMs = 30 * 24 * 60 * 60 * 1000
 const internalRoutePrefix = '/internal'
 const tenantRoutePrefix = `${internalRoutePrefix}/tenants`
 const portalRoutePrefix = '/portal'
+const dummyPortalPasswordHash = `${'0'.repeat(32)}:${'0'.repeat(128)}`
 const portalPlanCatalog = [
   {
     id: 'adventurer',
@@ -157,6 +169,16 @@ const portalPlanCatalog = [
   },
 ] as const
 const portalPlanSchema = z.enum(['adventurer', 'guild', 'realm'])
+const portalSignupRateLimitPolicy: RateLimitPolicy = {
+  maxRequests: 5,
+  windowMs: 1000 * 60 * 15,
+  errorMessage: 'Too many portal signup attempts. Please wait before trying again.',
+}
+const portalLoginRateLimitPolicy: RateLimitPolicy = {
+  maxRequests: 5,
+  windowMs: 1000 * 60 * 15,
+  errorMessage: 'Too many portal login attempts. Please wait before trying again.',
+}
 
 const createTenantSchema = z.object({
   id: z.string().min(1),
@@ -262,6 +284,10 @@ function buildRolloutFailureDetails(tenantId: string) {
   return `Rolling update failed for tenant ${tenantId}. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.`
 }
 
+function readRateLimitClientId(request: Request) {
+  return request.ip ?? request.socket.remoteAddress ?? 'unknown'
+}
+
 function normalizePortalEmail(email: string) {
   return email.trim().toLowerCase()
 }
@@ -274,20 +300,43 @@ function hashPortalSessionToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
 
-function createPortalPasswordHash(password: string) {
+function formatSqliteUtcDateTime(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0')
+
+  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(
+    date.getUTCDate(),
+  )} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(
+    date.getUTCSeconds(),
+  )}`
+}
+
+function derivePortalPasswordKey(password: string, salt: string) {
+  return new Promise<Buffer>((resolve, reject) => {
+    scrypt(password, salt, 64, (error, derivedKey) => {
+      if (error) {
+        reject(error)
+        return
+      }
+
+      resolve(derivedKey as Buffer)
+    })
+  })
+}
+
+async function createPortalPasswordHash(password: string) {
   const salt = randomBytes(16).toString('hex')
-  const derivedKey = scryptSync(password, salt, 64).toString('hex')
+  const derivedKey = (await derivePortalPasswordKey(password, salt)).toString('hex')
   return `${salt}:${derivedKey}`
 }
 
-function verifyPortalPassword(password: string, storedHash: string) {
+async function verifyPortalPassword(password: string, storedHash: string) {
   const [salt, expectedHex] = storedHash.split(':')
 
   if (!salt || !expectedHex) {
     return false
   }
 
-  const provided = Buffer.from(scryptSync(password, salt, 64))
+  const provided = await derivePortalPasswordKey(password, salt)
   const expected = Buffer.from(expectedHex, 'hex')
 
   if (provided.length !== expected.length) {
@@ -298,7 +347,7 @@ function verifyPortalPassword(password: string, storedHash: string) {
 }
 
 function buildPortalSessionExpiry() {
-  return new Date(Date.now() + portalSessionLifetimeMs).toISOString()
+  return formatSqliteUtcDateTime(new Date(Date.now() + portalSessionLifetimeMs))
 }
 
 interface PortalAuthenticatedRequest extends Request {
@@ -395,6 +444,8 @@ export function createApp({
   tenantPublicScheme = 'https',
 }: CreateAppOptions): Express {
   const app = express()
+  const portalJsonParser = express.json({ limit: '16kb' })
+  const rateLimitBuckets = new Map<string, RateLimitBucket>()
   const buildHealthResponse = (): HealthResponse => ({
     status: 'healthy',
     uptime: process.uptime(),
@@ -548,6 +599,43 @@ export function createApp({
       dashboard: buildPortalDashboardResponse(account),
     }
   }
+  const isRateLimited = (
+    request: Request,
+    response: Response<ErrorResponse>,
+    policyKey: string,
+    policy: RateLimitPolicy,
+  ) => {
+    const now = Date.now()
+
+    for (const [key, bucket] of rateLimitBuckets) {
+      if (bucket.resetAt <= now) {
+        rateLimitBuckets.delete(key)
+      }
+    }
+
+    const bucketKey = [policyKey, readRateLimitClientId(request)].join(':')
+    const existingBucket = rateLimitBuckets.get(bucketKey)
+
+    if (!existingBucket || existingBucket.resetAt <= now) {
+      rateLimitBuckets.set(bucketKey, {
+        count: 1,
+        resetAt: now + policy.windowMs,
+      })
+      return false
+    }
+
+    if (existingBucket.count >= policy.maxRequests) {
+      response.set(
+        'Retry-After',
+        Math.max(1, Math.ceil((existingBucket.resetAt - now) / 1000)).toString(),
+      )
+      response.status(429).json({ error: policy.errorMessage })
+      return true
+    }
+
+    existingBucket.count += 1
+    return false
+  }
   const ensurePortalLocalAuthEnabled = (
     response: Response<ErrorResponse>,
   ): boolean => {
@@ -666,7 +754,6 @@ export function createApp({
   })
   app.use(internalRoutePrefix, createAdminAuthMiddleware(adminToken, adminAuth))
   app.use(internalRoutePrefix, express.json())
-  app.use(portalRoutePrefix, express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json(buildHealthResponse())
@@ -688,10 +775,15 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/signup`,
+    portalJsonParser,
     async (
       request: Request,
       response: Response<PortalSessionResponse | ErrorResponse>,
     ) => {
+      if (isRateLimited(request, response, 'portal-signup', portalSignupRateLimitPolicy)) {
+        return
+      }
+
       if (!ensurePortalLocalAuthEnabled(response)) {
         return
       }
@@ -736,7 +828,7 @@ export function createApp({
             id: accountId,
             email: normalizedEmail,
             displayName: parseResult.data.displayName,
-            passwordHash: createPortalPasswordHash(parseResult.data.password),
+            passwordHash: await createPortalPasswordHash(parseResult.data.password),
             billingEmail: normalizedBillingEmail,
             billingProvider: parseResult.data.paymentProvider,
           })
@@ -767,10 +859,15 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/login`,
-    (
+    portalJsonParser,
+    async (
       request: Request,
       response: Response<PortalSessionResponse | ErrorResponse>,
     ) => {
+      if (isRateLimited(request, response, 'portal-login', portalLoginRateLimitPolicy)) {
+        return
+      }
+
       if (!ensurePortalLocalAuthEnabled(response)) {
         return
       }
@@ -787,13 +884,20 @@ export function createApp({
 
       const normalizedEmail = normalizePortalEmail(parseResult.data.email)
       const authRecord = tenantRegistry.getPortalAccountAuthByEmail(normalizedEmail)
+      const storedHash =
+        authRecord?.account.authProvider === 'local' && authRecord.passwordHash
+          ? authRecord.passwordHash
+          : dummyPortalPasswordHash
+      const passwordMatches = await verifyPortalPassword(
+        parseResult.data.password,
+        storedHash,
+      )
+      const passwordIsValid =
+        authRecord?.account.authProvider === 'local' &&
+        authRecord.passwordHash !== null &&
+        passwordMatches
 
-      if (
-        !authRecord ||
-        authRecord.account.authProvider !== 'local' ||
-        !authRecord.passwordHash ||
-        !verifyPortalPassword(parseResult.data.password, authRecord.passwordHash)
-      ) {
+      if (!authRecord || !passwordIsValid) {
         response.status(401).json({
           error: 'Unauthorized',
           details: 'Email or password is incorrect.',
@@ -827,6 +931,7 @@ export function createApp({
   app.post(
     `${portalRoutePrefix}/me/tenants`,
     createPortalSessionMiddleware(tenantRegistry),
+    portalJsonParser,
     async (
       request: Request,
       response: Response<PortalDashboardResponse | ErrorResponse>,
