@@ -18,6 +18,8 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 
 📌 Team update (2026-04-22T17:27:18Z): Issue #68 rolling-update lifecycle action completed by Stef. Reuses POST /internal/tenants/:tenantId/provision with version override, exposed only for ready tenants, requires operator reason + typed target-version confirmation. Focused regression in OperatorPortal.actions.test.tsx. Portal lint/build/test passing. Next: Chunk owns QA/reviewer pass on rolling-update action. — Scribe
 
+📌 Issue #68 rolling-update lifecycle action QA review (2026-04-22T17:31:44Z): Chunk approved rolling-update slice. Verified ready-only guardrail, audit visibility, operator-facing confirmation flow. Added focused regression lock in OperatorPortal.actions.test.tsx. Portal validation passing (lint/test/build). Ready for merge. Orchestration log at `.squad/orchestration-log/2026-04-22T17:31:44Z-chunk.md`. Session log at `.squad/log/2026-04-22T17:31:44Z-issue68-lifecycle-review.md`. — Chunk (QA/Tester)
+
 
 
 ## Learnings
@@ -123,3 +125,9 @@ Established QA gate for #68 operator portal first slice:
 
 **Status:** QA gate established and validated. Ready for merge.
 
+### Issue #68 Rolling-Update QA Pass (2026-04-22T17:30:00Z)
+- `apps/operator-portal/src/TenantUpgradeDialog.tsx` keeps the rolling-update path honest by requiring a different target version, a non-empty operator reason, and typed target-version confirmation before it reuses `POST /internal/tenants/:tenantId/provision`.
+- `apps/operator-portal/src/OperatorPortal.tsx` only exposes `Roll to new version` for tenants in `ready`, and `apps/operator-portal/src/OperatorPortal.actions.test.tsx` now locks that ready-only visibility alongside the successful rollout/audit-refresh path.
+- Focused regression placement still matches the frontend testing pattern: `apps/operator-portal/src/App.test.tsx` stays smoke-sized while lifecycle behavior lives in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`.
+- Verified portal gate with `cd apps/operator-portal && npm test && npm run lint && npm run build` — all green.
+- Highest remaining risk: unsupported target versions, concurrent upgrade attempts, or control-plane-side rollout failures will surface only whatever error text the backend returns, so deeper failure-mode confidence still depends on control-plane coverage.

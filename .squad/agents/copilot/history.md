@@ -118,3 +118,5 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Added the next thin operator-portal lifecycle slice in `apps/operator-portal`: ready tenants can now start a rolling update through the existing `POST /internal/tenants/:tenantId/provision` route by supplying a target version plus operator reason.
 - Kept the UX explicit but low-friction with a dedicated dialog (`TenantUpgradeDialog.tsx`) that explains the drain-first replacement semantics and requires the target version to be re-entered before the call is sent.
 - Extended `apps/operator-portal/src/OperatorPortal.actions.test.tsx` with a focused regression for the upgrade path and re-ran `npm run lint --workspace apps/operator-portal && npm run build --workspace apps/operator-portal && npm run test --workspace apps/operator-portal --` successfully.
+
+- 2026-04-22T17:32:29Z Started issue #68 control-plane rollout failure hardening: investigating provision route, portal rolling-update consumer, and backend failure contracts before a thin mergeable fix slice.

@@ -15,11 +15,13 @@ Use this when a broad app-level frontend test file becomes the blocker instead o
 - Build fixtures around the user-facing contract, not the whole app state tree.
 - For search features, cover every advertised search axis and at least one reset path so the UI cannot get stuck in a filtered state.
 - For runtime-integrated auth flows, force the bootstrap dependency to fail and then re-trigger the primary CTA so the regression proves users see the existing inline error surface instead of a silent no-op.
+- For lifecycle-action portals, lock both action eligibility (only supported resource states show the CTA) and the confirmation/audit-refresh path in the focused action suite.
 
 ## Examples
 - apps/web/src/App.test.tsx now proves onboarding render, owner registration workspace load, and saved-session restore.
 - apps/web/src/CampaignSearch.test.tsx owns campaign-search regressions for title, body, tags, session names, collaborator names, and clearing search on new note.
 - apps/web/src/App.keycloak-auth.test.tsx drives a missing Keycloak client by rejecting `init()`, then verifies the Keycloak sign-in button shows the auth-card error state rather than silently doing nothing.
+- apps/operator-portal/src/OperatorPortal.actions.test.tsx keeps rolling-update regressions out of `App.test.tsx` by proving only ready tenants see the action and that a confirmed rollout reuses the provision route before refreshed audit copy appears.
 
 ## Anti-Patterns
 - Re-growing App.test.tsx into a catch-all integration file for every frontend feature.
