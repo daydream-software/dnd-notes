@@ -79,3 +79,10 @@ Stef initialized as Frontend Dev for the initial project squad.
 - Deprovisioning lives in `apps/operator-portal/src/TenantDeprovisionDialog.tsx` and requires both a reason and typed-slug confirmation so destructive work is explicit before the browser sends the real control-plane request.
 - Portal write helpers now live in `apps/operator-portal/src/control-plane-api.ts`, and focused lifecycle regressions live in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` so `App.test.tsx` can stay closer to shell/auth smoke coverage.
 - **Decision locked (2026-04-22)**: Portal provisioning flow stays a two-step control-plane composition (create + provision with operator reason). Deprovision requires reason + typed-slug confirmation. Portal does not invent write endpoints; uses existing control-plane contract. Follow-up: Data extends contract for additional inputs (domains, admin email) before portal asks for those fields.
+
+### Issue #68 rolling update UX (2026-04-22)
+
+- The next safe lifecycle action in `apps/operator-portal` is a rolling update, not a generic reprovision: the portal should only expose it for tenants already in `ready`, because the control-plane contract explicitly documents version-override upgrades on `POST /internal/tenants/:tenantId/provision`.
+- `apps/operator-portal/src/TenantUpgradeDialog.tsx` keeps the write path thin by reusing `provisionTenant()` with a required operator reason and a typed target-version confirmation, so rollout intent is explicit without adding a second browser-only state machine.
+- Focused lifecycle coverage for the upgrade flow belongs in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`; keep `App.test.tsx` limited to auth/shell smoke.
+- **Rolled out (2026-04-22):** TenantUpgradeDialog component + portal lifecycle menu wired. Portal lint/build/test all passing. Regression coverage in OperatorPortal.actions.test.tsx. Chunk to own QA/reviewer pass on rolling-update action next.

@@ -26,8 +26,7 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 
 ## Recent Updates (Last 5)
 
-
-
+📌 Team update (2026-04-22T17:27:18Z): Issue #68 rolling-update lifecycle action completed by Stef. Reuses POST /internal/tenants/:tenantId/provision with version override, exposed only for ready tenants, requires operator reason + typed target-version confirmation. Focused regression in OperatorPortal.actions.test.tsx. Portal lint/build/test passing. Next: Chunk owns QA/reviewer pass on rolling-update action. — Scribe
 
 
 

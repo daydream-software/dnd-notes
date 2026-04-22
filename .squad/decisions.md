@@ -5435,3 +5435,28 @@ For the next mergeable #68 backend slice:
 - Portal provisioning can now collect `initialAdminEmail` and keep using the existing create → provision route chain.
 - Future tenant-bootstrap work can consume registry metadata instead of adding another ad hoc operator input path.
 - A later custom-domain slice should be routed to Brand once ingress/DNS/TLS ownership is defined.
+### 2026-04-22: Stef — Issue #68 rolling update portal action
+
+**Decided by:** Stef (Frontend Dev)  
+**Date:** 2026-04-22  
+**Type:** Portal UX / lifecycle action
+
+## Decision
+
+For the next mergeable #68 portal slice, the additional lifecycle action should be **rolling update only**:
+
+1. The portal reuses `POST /internal/tenants/:tenantId/provision` with a `version` override instead of inventing a separate upgrade endpoint.
+2. The UI exposes the action only for tenants currently in `ready`, where the control-plane contract already documents the drain-first rolling-update behavior.
+3. The confirmation UX requires an operator reason plus re-entering the target version before the browser sends the request.
+
+## Why
+
+- This is the cleanest lifecycle contract already documented and tested in the control plane.
+- Restricting the button to `ready` tenants keeps the portal honest about what is a supported rolling update versus a murkier reprovision/recovery flow.
+- Re-entering the target version makes the rollout intent explicit without making operators jump through the same destructive safeguards as deprovision.
+
+## Consequences
+
+- The portal stays thin and keeps using the same `/operator-api` write path family.
+- Failed or half-provisioned tenants still need a backend-owned decision before the UI exposes retry/recovery affordances.
+- Chunk should keep the upgrade regression focused in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`, while future custom-domain work still waits on Brand.

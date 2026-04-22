@@ -24,6 +24,7 @@ Data initialized as Backend Dev for the initial project squad.
 
 📌 Issue #56 auth-seam prep completed (2026-04-21T22:45:02Z): Delivered Phase 2 auth-provider abstraction boundaries. Added `owner_accounts.keycloak_sub` column (nullable, unique), introduced `AuthenticatedUser` shared contract, documented `requireAuthenticatedAccount()` and `createAdminAuthMiddleware()` as future delegation points, kept local auth fully functional, marked `/api/auth/*` routes as Phase 2a coexist/2b cutover. No speculative provider code. All tests pass (96/96 api, 63/63 control-plane), lint/build clean. Commit `e69b93d` on `squad/56-integrate-keycloak-oidc`. Ready for follow-up OIDC implementation per Epic #42 Decision 9. — Data (Agent)
 
+📌 Team update (2026-04-22T17:27:18Z): Issue #68 rolling-update lifecycle action completed by Stef. Reuses POST /internal/tenants/:tenantId/provision with version override, exposed only for ready tenants. Decision merged: control-plane contract is canonical; portal does not invent endpoints. Follow-ups: Data extends contract for domain/admin inputs; Chunk verifies regression coverage. Portal lint/build/test passing. — Scribe
 
 ## Learnings
 

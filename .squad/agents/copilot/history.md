@@ -112,3 +112,9 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Extended the control-plane tenant contract so `POST /internal/tenants` can persist an optional `initialAdminEmail`, and surfaced it back through tenant reads plus `GET /internal/fleet/status`.
 - Updated the operator portal to send that field on the existing create → provision flow, display it in the fleet read model, and warn that the email is only recorded metadata until a later bootstrap slice lands.
 - Added focused control-plane and operator-portal regressions, updated the relevant READMEs, and re-ran lint/test/build for both workspaces successfully.
+
+## 2026-04-22: Issue #68 rolling update UX follow-up
+
+- Added the next thin operator-portal lifecycle slice in `apps/operator-portal`: ready tenants can now start a rolling update through the existing `POST /internal/tenants/:tenantId/provision` route by supplying a target version plus operator reason.
+- Kept the UX explicit but low-friction with a dedicated dialog (`TenantUpgradeDialog.tsx`) that explains the drain-first replacement semantics and requires the target version to be re-entered before the call is sent.
+- Extended `apps/operator-portal/src/OperatorPortal.actions.test.tsx` with a focused regression for the upgrade path and re-ran `npm run lint --workspace apps/operator-portal && npm run build --workspace apps/operator-portal && npm run test --workspace apps/operator-portal --` successfully.
