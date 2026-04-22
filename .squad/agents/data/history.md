@@ -6,6 +6,21 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
+## Core Context (Summarized 2026-04-22T18:05:32Z)
+
+**Early Foundation (2026-04-11–2026-04-13):** Data initialized as Backend Dev. Established SQLite note schema with campaign/membership/session/note tables, guest-token sharing, and ownership model. Built issue #23 membership consolidation backend (preview/apply on note attribution). Completed issue #27 session-browsing backend with auth fixes for collaborators and URL decoding safety. Approved for merge after Chunk's rejection cycle.
+
+**Linking & Activity (2026-04-13–2026-04-15):** Completed issue #30 note-to-note links backend (20-link limit, JSON storage, backlinks endpoint). Built issue #33 recent-activity read contract (campaign-scoped, latest-state only, no audit table). Established rich-note formatting via react-markdown + remark-gfm in frontend. All backend slices focused on metadata-light, query-efficient SQLite patterns.
+
+**Database Adapter & Postgres Migration (2026-04-15–2026-04-18):** Issue #58 abstracted note-store behind async adapter to support both SQLite (dev default) and Postgres (via DATABASE_URL env var). Built pool tuning contracts and statement timeouts. Backup/restore kept SQLite-compatible snapshot format for recovery across both backends.
+
+**Control-Plane & Tenant Lifecycle (2026-04-18–2026-04-22):** Completed issue #42 control-plane thin REST layer for tenant create/state transitions. Built tenant provisioning service with rollout guardrails and typed-failure responses (400 unsupported_target_version, 409 tenant_rollout_in_progress/disallowed, 500 tenant_rollout_failed). Issue #68 extended provisioning contract with optional initialAdminEmail metadata. All control-plane changes kept single-write routes (/internal/tenants*) with explicit HTTP status mapping and operator guidance instead of raw exception text.
+
+**Cross-Team Patterns:** Share-link metadata-only listing with owner-only reveal API. Membership guest-token rotation on consolidation. Session/note queries behind resolveAccessibleCampaign() for collaborator access. Shared-membership email-collision handling (keep linked account's persisted email). Tenant Deployment single-replica RollingUpdate with drain-first (maxSurge:0, maxUnavailable:1) + minReadySeconds:5 + gracefulShutdown:30s.
+
+---
+
+
 ## Core Context
 
 Data initialized as Backend Dev for the initial project squad.
