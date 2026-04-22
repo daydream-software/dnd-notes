@@ -1,9 +1,9 @@
 # Current Focus
 
-- **Updated:** 2026-04-22T15:04:16Z
-- **Active slice:** PR #77 review follow-up — resolve Copilot review comments on runtime Keycloak integration for #76.
-- **Execution status:** Three open Copilot review threads identified across platform, backend, and frontend surfaces; fixes are being routed in parallel with QA coverage updates.
-- **Primary next slice:** Close the three review threads on `squad/76-complete-runtime-keycloak-auth-integration` without regressing the green validation/smoke lanes.
-- **Parallel tracks:** Brand handles `scripts/k3d/smoke.sh` Bash compatibility; Data hardens typed 409 conflict handling in API auth reconciliation; Stef fixes Keycloak login null-client UX; Chunk adds/adjusts regression coverage for each.
-- **QA gates:** Preserve green API, control-plane, web, manifest validation, and k3d smoke evidence after the review fixes land.
-- **Reviewer process:** Copilot remains the gate for this PR; resolve threads, rerun affected validation, then re-request review if needed.
+- **Updated:** 2026-04-22T18:00:47Z
+- **Active slice:** PR #78 review follow-up for issue #68 — remove transient `.squad` runtime logs from the branch, correct the operator-portal README intro, and close the new Copilot review threads.
+- **Execution status:** Three unresolved Copilot review threads are open on `squad/68-operator-control-portal`: two on tracked `.squad/log` / `.squad/orchestration-log` artifacts that should not ship in the PR, and one on stale "Read-only" wording in `apps/operator-portal/README.md`.
+- **Primary next slice:** Land the review-fix batch, preserve green validation for touched workspaces, push the branch, and resolve the three review threads on PR #78.
+- **Parallel tracks:** Brand handles git hygiene / tracked runtime log removal, Stef updates the operator-portal README wording, and Chunk reviews the PR-fix batch plus checks for any remaining ignored runtime artifacts in the branch.
+- **QA gates:** Preserve the green repo/workspace validation already achieved for issue #68 while ensuring the PR no longer includes ignored runtime logs.
+- **Forward-looking note:** User wants the operator portal folded into the future `k3d:smoke` lane so tenant provisioning can be exercised through the operator-facing API/UI path instead of manifests.

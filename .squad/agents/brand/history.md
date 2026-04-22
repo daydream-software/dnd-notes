@@ -64,6 +64,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 📌 Team update (2026-04-22T15:44:09Z): PR #77 JSON payload follow-up complete. Brand replaced manual tenant-create payload construction with Node JSON.stringify in scripts/k3d/smoke.sh; Chunk added regression coverage in apps/control-plane/test/k3d-smoke-payload.test.ts validating emitted JSON before live smoke run; all gates green (lint/test/build/platform:validate). Two decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:44:09Z-pr77-json-fix.md`. — Scribe
 
+- **PR Hygiene for Runtime Squad Artifacts:** `.squad/log/` and `.squad/orchestration-log/` are runtime-state paths already ignored in `.gitignore`, so if a branch accidentally tracks one of those files, fix the PR by deleting only the stray log artifacts and leave durable tracked coordination files alone. Current example: PR #78 cleanup removed `.squad/log/2026-04-22T17:38:00Z-issue68-rollout-failure-hardening.md` and `.squad/orchestration-log/2026-04-22T17:38:00Z-data.md` while preserving `.squad/identity/now.md` and inbox directives.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.

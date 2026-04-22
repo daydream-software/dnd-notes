@@ -5497,3 +5497,8 @@ Keep the existing provision endpoint as the single control-plane write path, but
 - The operator portal and future automation can key off stable `400`/`409`/`500` rollout codes instead of parsing free-form strings.
 - Chunk's next QA pass can focus on operator-facing failure copy and regression coverage against the explicit contract.
 - Recovery/retry UX can build on these typed failures later without introducing a second rollout endpoint.
+
+### 2026-04-22T18:00:47Z: User directive — k3d:smoke integration
+**By:** FFMikha (via Copilot)
+**What:** The operator portal should be included in `k3d:smoke` so the local k3d rehearsal can configure a tenant through the API/UI path instead of relying on manifests.
+**Why:** User request — captured for team memory

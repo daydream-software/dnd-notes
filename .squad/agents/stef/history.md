@@ -86,3 +86,8 @@ Stef initialized as Frontend Dev for the initial project squad.
 - `apps/operator-portal/src/TenantUpgradeDialog.tsx` keeps the write path thin by reusing `provisionTenant()` with a required operator reason and a typed target-version confirmation, so rollout intent is explicit without adding a second browser-only state machine.
 - Focused lifecycle coverage for the upgrade flow belongs in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`; keep `App.test.tsx` limited to auth/shell smoke.
 - **Rolled out (2026-04-22):** TenantUpgradeDialog component + portal lifecycle menu wired. Portal lint/build/test all passing. Regression coverage in OperatorPortal.actions.test.tsx. Chunk to own QA/reviewer pass on rolling-update action next.
+
+### PR #78 operator-portal README wording (2026-04-22)
+
+- `apps/operator-portal/README.md` intro must not describe the portal as read-only anymore. It needs to say the current surface both reads fleet status and triggers real lifecycle writes through the existing control-plane contract: create + provision, deprovision, and rolling updates for ready tenants.
+
