@@ -67,6 +67,7 @@ class FakeInfrastructureManager {
     authMode: string | undefined
     deploymentReadinessPath: string | undefined
     keycloakClientId: string | undefined
+    keycloakJwksUrl: string | undefined
     keycloakRealm: string | undefined
     keycloakUrl: string | undefined
     deploymentStrategyType: string | undefined
@@ -84,6 +85,7 @@ class FakeInfrastructureManager {
     configMap?: {
       data?: {
         AUTH_MODE?: string
+        KEYCLOAK_JWKS_URL?: string
         KEYCLOAK_REALM?: string
         KEYCLOAK_TENANT_CLIENT_ID?: string
         KEYCLOAK_URL?: string
@@ -125,6 +127,7 @@ class FakeInfrastructureManager {
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.readinessProbe
           ?.httpGet?.path,
       keycloakClientId: bundle.configMap?.data?.KEYCLOAK_TENANT_CLIENT_ID,
+      keycloakJwksUrl: bundle.configMap?.data?.KEYCLOAK_JWKS_URL,
       keycloakRealm: bundle.configMap?.data?.KEYCLOAK_REALM,
       keycloakUrl: bundle.configMap?.data?.KEYCLOAK_URL,
       deploymentStrategyType: bundle.deployment.spec?.strategy?.type,
@@ -259,6 +262,7 @@ describe('TenantProvisioningService', () => {
         tenantRuntimeAuth: {
           mode: 'keycloak',
           keycloakUrl: 'https://auth.example.com',
+          keycloakJwksUrl: 'http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-prod/protocol/openid-connect/certs',
           keycloakRealm: 'dnd-notes-prod',
           keycloakClientId: 'dnd-notes-tenant-app',
         },
@@ -288,6 +292,10 @@ describe('TenantProvisioningService', () => {
       assert.equal(
         infrastructureManager.bundles[0].keycloakRealm,
         'dnd-notes-prod',
+      )
+      assert.equal(
+        infrastructureManager.bundles[0].keycloakJwksUrl,
+        'http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-prod/protocol/openid-connect/certs',
       )
       assert.equal(
         infrastructureManager.bundles[0].keycloakClientId,

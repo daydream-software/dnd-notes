@@ -61,7 +61,7 @@ curl -H "Authorization: Bearer ${CONTROL_PLANE_TOKEN}" \
   http://localhost:3101/internal/tenants
 ```
 
-The control-plane service validates incoming bearer tokens against Keycloak JWKS. Tenant runtime provisioning uses the separate `TENANT_AUTH_MODE` / `TENANT_KEYCLOAK_*` variables when it needs to inject Keycloak config into tenant pods.
+The control-plane service validates incoming bearer tokens against Keycloak JWKS. Tenant runtime provisioning uses the separate `TENANT_AUTH_MODE` / `TENANT_KEYCLOAK_*` variables when it needs to inject Keycloak config into tenant pods. If tenant pods need a different network path for JWKS than the browser-facing issuer URL, set `TENANT_KEYCLOAK_JWKS_URL` as the server-side override.
 
 ## Local k3d rehearsal
 
@@ -94,6 +94,7 @@ The k3d overlay ConfigMap automatically sets:
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
 - `TENANT_AUTH_MODE=keycloak`
 - `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
 - `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
 
@@ -114,7 +115,8 @@ For Keycloak integration in hosted environments:
 1. Set `CONTROL_PLANE_KEYCLOAK_URL` / `TENANT_KEYCLOAK_URL` to your managed Keycloak instance (for example `https://auth.example.com`)
 2. Configure a workforce/admin client (`dnd-notes-control-plane`) plus a tenant SPA client (`dnd-notes-tenant-app`) with the hosted redirect/web origins you need.
 3. Ensure `CONTROL_PLANE_KEYCLOAK_REALM` / `TENANT_KEYCLOAK_REALM` match the intended workforce and tenant realms.
-4. Keep `CONTROL_PLANE_ADMIN_TOKEN` populated only if you intentionally want the static fallback mode available.
+4. Set `TENANT_KEYCLOAK_JWKS_URL` only when tenant pods cannot reach the public issuer host directly; otherwise leave it aligned with the default realm certs endpoint.
+5. Keep `CONTROL_PLANE_ADMIN_TOKEN` populated only if you intentionally want the static fallback mode available.
 
 ## Validation
 

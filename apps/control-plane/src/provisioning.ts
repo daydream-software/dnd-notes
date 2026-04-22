@@ -149,6 +149,7 @@ export class TenantProvisioningValidationError extends Error {
 interface TenantRuntimeAuthConfig {
   mode: 'local' | 'keycloak'
   keycloakClientId?: string
+  keycloakJwksUrl?: string
   keycloakRealm?: string
   keycloakUrl?: string
 }
@@ -809,6 +810,9 @@ export function buildTenantInfrastructureBundle(
     configMapData.KEYCLOAK_REALM = options.tenantRuntimeAuth.keycloakRealm
     configMapData.KEYCLOAK_TENANT_CLIENT_ID =
       options.tenantRuntimeAuth.keycloakClientId
+    if (options.tenantRuntimeAuth.keycloakJwksUrl) {
+      configMapData.KEYCLOAK_JWKS_URL = options.tenantRuntimeAuth.keycloakJwksUrl
+    }
   }
 
   return {

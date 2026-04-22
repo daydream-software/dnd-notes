@@ -71,6 +71,10 @@ When `AUTH_MODE=keycloak`, the tenant runtime validates Keycloak JWTs for authen
   Example (k3d): `http://keycloak.127.0.0.1.nip.io:8080`  
   Example (hosted): `https://auth.example.com`
 
+- **`KEYCLOAK_JWKS_URL`** (optional when `AUTH_MODE=keycloak`)  
+  Server-side override for the JWKS endpoint used to validate bearer tokens. Leave it unset when the runtime can reach `{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs` directly.  
+  Example (k3d tenant pod): `http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
+
 - **`KEYCLOAK_REALM`** (required when `AUTH_MODE=keycloak`)  
   Keycloak realm name for tenant users and control-plane admins.  
   Example: `dnd-notes-dev` (k3d), `dnd-notes-prod` (hosted)
@@ -80,7 +84,10 @@ When `AUTH_MODE=keycloak`, the tenant runtime validates Keycloak JWTs for authen
   Example: `dnd-notes-tenant-app`
 
 Tenant runtimes validate JWTs through the realm JWKS endpoint, so they do **not**
-need a tenant client secret in the pod environment.
+need a tenant client secret in the pod environment. In local k3d, the browser-facing
+Keycloak URL resolves to `127.0.0.1`, which is not reachable from inside tenant pods,
+so tenant workloads should use `KEYCLOAK_JWKS_URL` to point at the in-cluster
+`platform-keycloak` Service while keeping `KEYCLOAK_URL` on the public issuer/origin.
 
 #### Runtime Auth Flow (Keycloak mode)
 

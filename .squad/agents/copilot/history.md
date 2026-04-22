@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 k3d tenant JWT validation fixed (2026-04-22T02:28:08Z): The live smoke tenant token was valid, but tenant pods were still trying to fetch JWKS through `http://keycloak.127.0.0.1.nip.io:8080`, which resolves to pod-local loopback in k3d. The runtime now supports a separate `KEYCLOAK_JWKS_URL` override, control-plane provisioning injects `TENANT_KEYCLOAK_JWKS_URL`, and the k3d overlay points tenant pods at the in-cluster `platform-keycloak` Service while keeping the public Keycloak URL for browser auth/config. Also ignored `.k3d-smoke-work/` so preserved smoke artifacts stop showing up as untracked files. — Data (Agent)
+
 📌 k3d smoke 401 traced to Keycloak `azp` handling (2026-04-22T02:15:07Z): The control-plane smoke token was valid but carried the common Keycloak direct-grant shape (`azp=dnd-notes-control-plane`, audience not equal to the client). The API and control-plane JWT validators now treat `azp` as the authoritative client binding when present, while fallbacking to `aud` when it is absent. Fake Keycloak defaults/tests were updated to exercise the `aud=account` path so the smoke-only regression is covered in automated tests. — Data (Agent)
 
 📌 k3d smoke failure handling tightened (2026-04-22T02:05:26Z): `scripts/k3d/smoke.sh` now enables `inherit_errexit`, records the failing command via an `ERR` trap, preserves `.k3d-smoke-work` on failure, and prints the preserved log path plus the failed command alongside the control-plane log tail. This keeps non-zero smoke failures loud and debuggable instead of cleaning away the evidence. — Data (Agent)

@@ -7,11 +7,17 @@ import { createShutdownController } from './shutdown.js'
 
 const port = Number(process.env.PORT ?? 3001)
 const serveWeb = process.env.SERVE_WEB === 'true'
+const rawKeycloakJwksUrl = process.env.KEYCLOAK_JWKS_URL?.trim()
+const keycloakJwksUrl =
+  rawKeycloakJwksUrl === undefined || rawKeycloakJwksUrl === ''
+    ? undefined
+    : rawKeycloakJwksUrl
 const runtimeAuth = createTenantRuntimeAuth({
   mode: process.env.AUTH_MODE,
   keycloakUrl: process.env.KEYCLOAK_URL,
   keycloakRealm: process.env.KEYCLOAK_REALM,
   clientId: process.env.KEYCLOAK_TENANT_CLIENT_ID,
+  jwksUrl: keycloakJwksUrl,
 })
 const shutdownGracePeriodMs = 30_000
 const siteAdminEmails =

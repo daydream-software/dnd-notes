@@ -52,6 +52,11 @@ const CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES =
 const TENANT_AUTH_MODE =
   process.env.TENANT_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
 const TENANT_KEYCLOAK_URL = process.env.TENANT_KEYCLOAK_URL
+const rawTenantKeycloakJwksUrl = process.env.TENANT_KEYCLOAK_JWKS_URL?.trim()
+const TENANT_KEYCLOAK_JWKS_URL =
+  rawTenantKeycloakJwksUrl === undefined || rawTenantKeycloakJwksUrl === ''
+    ? undefined
+    : rawTenantKeycloakJwksUrl
 const TENANT_KEYCLOAK_REALM = process.env.TENANT_KEYCLOAK_REALM
 const TENANT_KEYCLOAK_CLIENT_ID = process.env.TENANT_KEYCLOAK_CLIENT_ID
 const TENANT_BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN
@@ -180,6 +185,7 @@ if (ENABLE_TENANT_PROVISIONING) {
         ? {
             mode: 'keycloak',
             keycloakUrl: TENANT_KEYCLOAK_URL,
+            keycloakJwksUrl: TENANT_KEYCLOAK_JWKS_URL,
             keycloakRealm: TENANT_KEYCLOAK_REALM,
             keycloakClientId: TENANT_KEYCLOAK_CLIENT_ID,
           }

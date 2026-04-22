@@ -149,25 +149,28 @@ function validateStandardClaims(claims: JwtClaims, issuer: string, clientId: str
 }
 
 function buildKeycloakEndpoints(options: CreateControlPlaneAdminAuthOptions) {
-  if (options.issuer && options.jwksUrl && options.clientId) {
-    return {
-      clientId: options.clientId,
-      issuer: options.issuer,
-      jwksUrl: options.jwksUrl,
-    }
-  }
-
-  if (!options.keycloakUrl || !options.keycloakRealm || !options.clientId) {
+  if (!options.clientId) {
     throw new Error(
       'CONTROL_PLANE_AUTH_MODE=keycloak requires CONTROL_PLANE_KEYCLOAK_URL, CONTROL_PLANE_KEYCLOAK_REALM, and CONTROL_PLANE_KEYCLOAK_CLIENT_ID.',
     )
   }
 
-  const issuer = `${normalizeBaseUrl(options.keycloakUrl)}/realms/${options.keycloakRealm}`
+  const issuer =
+    options.issuer ??
+    (options.keycloakUrl && options.keycloakRealm
+      ? `${normalizeBaseUrl(options.keycloakUrl)}/realms/${options.keycloakRealm}`
+      : undefined)
+
+  if (!issuer) {
+    throw new Error(
+      'CONTROL_PLANE_AUTH_MODE=keycloak requires CONTROL_PLANE_KEYCLOAK_URL, CONTROL_PLANE_KEYCLOAK_REALM, and CONTROL_PLANE_KEYCLOAK_CLIENT_ID.',
+    )
+  }
+
   return {
     clientId: options.clientId,
     issuer,
-    jwksUrl: `${issuer}/protocol/openid-connect/certs`,
+    jwksUrl: options.jwksUrl ?? `${issuer}/protocol/openid-connect/certs`,
   }
 }
 

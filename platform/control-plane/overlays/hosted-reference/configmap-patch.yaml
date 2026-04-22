@@ -13,5 +13,6 @@ data:
   CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES: control-plane-admin,control-plane-workforce
   TENANT_AUTH_MODE: keycloak
   TENANT_KEYCLOAK_URL: https://auth.example.com
+  TENANT_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes/protocol/openid-connect/certs
   TENANT_KEYCLOAK_REALM: dnd-notes
   TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app

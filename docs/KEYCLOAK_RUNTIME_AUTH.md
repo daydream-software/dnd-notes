@@ -15,6 +15,7 @@ Tenant pods switch with `AUTH_MODE`:
 Required tenant env when `AUTH_MODE=keycloak`:
 
 - `KEYCLOAK_URL`
+- optional `KEYCLOAK_JWKS_URL`
 - `KEYCLOAK_REALM`
 - `KEYCLOAK_TENANT_CLIENT_ID`
 
@@ -43,6 +44,7 @@ The control-plane also decides how new tenant pods boot:
 
 - `TENANT_AUTH_MODE=local|keycloak`
 - `TENANT_KEYCLOAK_URL`
+- optional `TENANT_KEYCLOAK_JWKS_URL`
 - `TENANT_KEYCLOAK_REALM`
 - `TENANT_KEYCLOAK_CLIENT_ID`
 
@@ -64,8 +66,14 @@ The k3d control-plane overlay enables both runtime paths with:
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
 - `TENANT_AUTH_MODE=keycloak`
 - `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
 - `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
+
+The split matters in k3d: browsers and the local control-plane use the public
+issuer URL (`http://keycloak.127.0.0.1.nip.io:8080`), but tenant pods cannot
+resolve `127.0.0.1` back to the host. They must fetch JWKS through the in-cluster
+`platform-keycloak` Service instead.
 
 ## Hosted contract
 

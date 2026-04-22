@@ -100,8 +100,14 @@ The k3d overlay ConfigMap automatically injects:
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
 - `TENANT_AUTH_MODE=keycloak`
 - `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
 - `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
+
+`TENANT_KEYCLOAK_JWKS_URL` is intentionally different from `TENANT_KEYCLOAK_URL` in
+k3d: the browser-facing hostname resolves to `127.0.0.1`, which tenant pods cannot
+use to fetch JWKS. The in-cluster Service URL keeps bearer-token validation working
+inside the workload while the frontend still points users at the public issuer URL.
 
 ## What `k3d:smoke` proves
 
