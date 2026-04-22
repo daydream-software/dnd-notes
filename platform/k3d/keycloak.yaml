@@ -96,19 +96,23 @@ data:
           "standardFlowEnabled": false,
           "bearerOnly": false,
           "implicitFlowEnabled": false,
-          "directAccessGrantsEnabled": true,
-          "roles": {
-            "client": [
-              {
-                "name": "control-plane-admin"
-              },
-              {
-                "name": "control-plane-workforce"
-              }
-            ]
-          }
+          "directAccessGrantsEnabled": true
         }
-      ]
+      ],
+      "roles": {
+        "client": {
+          "dnd-notes-control-plane": [
+            {
+              "name": "control-plane-admin",
+              "clientRole": true
+            },
+            {
+              "name": "control-plane-workforce",
+              "clientRole": true
+            }
+          ]
+        }
+      }
     }
 ---
 apiVersion: v1

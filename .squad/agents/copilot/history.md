@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Issue #76 k3d follow-up fixed (2026-04-22T01:56:16Z): Local `k3d:smoke` exposed that the seeded Keycloak realm declared client roles under `clients[].roles`, which Keycloak 26 rejects during import. The fix moved control-plane roles to `roles.client["dnd-notes-control-plane"]` in `platform/k3d/keycloak.yaml` and extended `scripts/platform/validate-manifests.sh` to parse the embedded realm JSON so `npm run platform:validate` now catches this regression before smoke runs. — Data (Agent)
+
 📌 Issue #76 picked up (2026-04-22T00:49:24Z): Routing to the `squad:data` lane for runtime Keycloak auth integration across tenant apps and the control-plane. Scope includes tenant JWT validation, control-plane admin JWT validation, Keycloak env/config wiring for k3d + hosted setups, and docs/tests for the runtime flow. This is auth-sensitive work and should receive squad review before merge. — Data (Agent)
 
 📌 Issue #76 approach locked (2026-04-22T01:20:00Z): Chosen implementation shape is explicit runtime config, not build-time magic: tenant apps will expose `/api/auth/config`, validate Keycloak JWTs against configured issuer/JWKS when `AUTH_MODE=keycloak`, reconcile identities onto local `owner_accounts.keycloak_sub`, and keep guest/share-link authorization local. Control-plane auth will mirror that with its own `CONTROL_PLANE_AUTH_MODE=keycloak` workforce/admin JWT path while retaining the static bearer fallback for non-Keycloak environments. — Data (Agent)
