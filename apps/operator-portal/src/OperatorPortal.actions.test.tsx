@@ -389,6 +389,119 @@ describe('operator portal lifecycle actions', () => {
     expect(screen.getByText('Launch the customer-facing demo tenant')).toBeTruthy()
   })
 
+  it('locks the provisioning confirmation if the live fleet disables mutations after review opens', async () => {
+    const accessToken = createMockJwt({ email: 'stef@example.com' })
+    const disabledReason = 'Tenant provisioning service degraded after refresh.'
+    const fleetResponses = [
+      createFleetStatus(),
+      {
+        ...createFleetStatus(),
+        dependencies: {
+          ...createFleetStatus().dependencies,
+          tenantProvisioning: {
+            status: 'disabled' as const,
+            details: disabledReason,
+          },
+        },
+      },
+    ]
+    const createRequests: Array<{
+      id: string
+      ownerId: string
+      initialAdminEmail: string
+      slug: string
+      version: string
+    }> = []
+    const provisionRequests: Array<{ triggeredBy: string; reason: string; version: string }> = []
+
+    localStorage.setItem(
+      storedTokensKey,
+      JSON.stringify({
+        accessToken,
+        refreshToken: 'operator-refresh-token',
+      }),
+    )
+    initMock.mockResolvedValue({
+      accessToken,
+      refreshToken: 'operator-refresh-token',
+    })
+    refreshMock.mockResolvedValue({
+      accessToken,
+      refreshToken: 'operator-refresh-token',
+    })
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        return createJsonResponse(fleetResponses.shift() ?? fleetResponses[0] ?? createFleetStatus())
+      }
+
+      if (path === '/operator-api/internal/tenants' && method === 'POST') {
+        const request = readMockJsonBody<{
+          id: string
+          ownerId: string
+          initialAdminEmail: string
+          slug: string
+          version: string
+        }>(init)
+
+        if (!request) {
+          throw new Error('Missing create tenant request body')
+        }
+
+        createRequests.push(request)
+      }
+
+      if (path === '/operator-api/internal/tenants/candlekeep/provision' && method === 'POST') {
+        const request = readMockJsonBody<{ triggeredBy: string; reason: string; version: string }>(init)
+
+        if (!request) {
+          throw new Error('Missing provision request body')
+        }
+
+        provisionRequests.push(request)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'Provision tenant' })).toBeTruthy()
+
+    const user = userEvent.setup()
+    await user.type(screen.getByLabelText(/tenant slug/i), 'candlekeep')
+    await user.type(screen.getByLabelText(/owner id/i), 'owner-99')
+    await user.type(
+      screen.getByLabelText(/initial admin email/i),
+      'keeper@candlekeep.example',
+    )
+    await user.clear(screen.getByLabelText(/tenant version/i))
+    await user.type(screen.getByLabelText(/tenant version/i), '2.1.0')
+    await user.type(
+      screen.getByLabelText(/^operator reason/i),
+      'Launch the customer-facing demo tenant',
+    )
+
+    await user.click(screen.getByRole('button', { name: 'Review and provision tenant' }))
+
+    const provisionDialog = await screen.findByRole('dialog')
+    const confirmButton = within(provisionDialog).getByRole('button', {
+      name: 'Create and provision tenant',
+    }) as HTMLButtonElement
+    expect(confirmButton.disabled).toBe(false)
+
+    await user.click(screen.getByRole('button', { name: 'Refresh fleet', hidden: true }))
+
+    expect(await within(provisionDialog).findByText(disabledReason)).toBeTruthy()
+    expect(confirmButton.disabled).toBe(true)
+
+    expect(createRequests).toEqual([])
+    expect(provisionRequests).toEqual([])
+    expect(screen.queryByText(/Provisioned candlekeep\./)).toBeNull()
+  })
+
   it('requires an explicit slug confirmation before deprovisioning a tenant', async () => {
     const accessToken = createMockJwt({ preferred_username: 'stef@example.com' })
     const initialFleetStatus = createFleetStatus()
@@ -772,55 +885,63 @@ describe('operator portal lifecycle actions', () => {
   })
 
   it.each([
-    {
-      name: 'stale no-op targets',
-      status: 400,
-      body: {
-        code: 'unsupported_target_version',
-        error: 'Invalid tenant provisioning request',
-        details:
+    [
+      'stale no-op targets',
+      {
+        status: 400,
+        body: {
+          code: 'unsupported_target_version',
+          error: 'Invalid tenant provisioning request',
+          details:
+            'Tenant tenant-ready is already running version 2.1.0. Choose a different target version for a rolling update.',
+        },
+        expectedMessage:
           'Tenant tenant-ready is already running version 2.1.0. Choose a different target version for a rolling update.',
       },
-      expectedMessage:
-        'Tenant tenant-ready is already running version 2.1.0. Choose a different target version for a rolling update.',
-    },
-    {
-      name: 'concurrent rollouts',
-      status: 409,
-      body: {
-        code: 'tenant_rollout_in_progress',
-        error: 'Tenant rolling update conflict',
-        details:
+    ],
+    [
+      'concurrent rollouts',
+      {
+        status: 409,
+        body: {
+          code: 'tenant_rollout_in_progress',
+          error: 'Tenant rolling update conflict',
+          details:
+            'Tenant tenant-ready already has a rolling update in progress. Wait for it to return to ready before starting another rollout.',
+        },
+        expectedMessage:
           'Tenant tenant-ready already has a rolling update in progress. Wait for it to return to ready before starting another rollout.',
       },
-      expectedMessage:
-        'Tenant tenant-ready already has a rolling update in progress. Wait for it to return to ready before starting another rollout.',
-    },
-    {
-      name: 'non-ready rollout retries',
-      status: 409,
-      body: {
-        code: 'tenant_rollout_disallowed',
-        error: 'Tenant rolling update conflict',
-        details:
+    ],
+    [
+      'non-ready rollout retries',
+      {
+        status: 409,
+        body: {
+          code: 'tenant_rollout_disallowed',
+          error: 'Tenant rolling update conflict',
+          details:
+            'Tenant tenant-ready cannot start a rolling update from state maintenance. Rolling updates are only supported for ready tenants.',
+        },
+        expectedMessage:
           'Tenant tenant-ready cannot start a rolling update from state maintenance. Rolling updates are only supported for ready tenants.',
       },
-      expectedMessage:
-        'Tenant tenant-ready cannot start a rolling update from state maintenance. Rolling updates are only supported for ready tenants.',
-    },
-    {
-      name: 'mid-flight rollout failures',
-      status: 500,
-      body: {
-        code: 'tenant_rollout_failed',
-        error: 'Tenant rolling update failed',
-        details:
+    ],
+    [
+      'mid-flight rollout failures',
+      {
+        status: 500,
+        body: {
+          code: 'tenant_rollout_failed',
+          error: 'Tenant rolling update failed',
+          details:
+            'Rolling update failed for tenant tenant-ready. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.',
+        },
+        expectedMessage:
           'Rolling update failed for tenant tenant-ready. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.',
       },
-      expectedMessage:
-        'Rolling update failed for tenant tenant-ready. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.',
-    },
-  ])('surfaces stable rollout guidance inline for %s', async ({ status, body, expectedMessage }) => {
+    ],
+  ])('surfaces stable rollout guidance inline for %s', async (_, { status, body, expectedMessage }) => {
     const accessToken = createMockJwt({ email: 'stef@example.com' })
 
     localStorage.setItem(

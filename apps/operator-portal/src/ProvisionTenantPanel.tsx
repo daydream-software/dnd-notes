@@ -141,6 +141,11 @@ export default function ProvisionTenantPanel({
   }
 
   const handleConfirm = async () => {
+    if (disabledReason) {
+      onError(disabledReason)
+      return
+    }
+
     if (validationMessage) {
       onError(validationMessage)
       return
@@ -396,13 +401,23 @@ export default function ProvisionTenantPanel({
               the audit trail. This slice records the initial admin email for later
               bootstrap work; it does not create the in-tenant admin account yet.
             </Alert>
+
+            {disabledReason ? (
+              <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                {disabledReason}
+              </Alert>
+            ) : null}
           </Stack>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button onClick={() => setIsReviewOpen(false)} disabled={isSubmitting}>
             Back
           </Button>
-          <Button variant="contained" onClick={() => void handleConfirm()} disabled={isSubmitting}>
+          <Button
+            variant="contained"
+            onClick={() => void handleConfirm()}
+            disabled={Boolean(disabledReason) || isSubmitting}
+          >
             {isSubmitting ? 'Provisioning…' : 'Create and provision tenant'}
           </Button>
         </DialogActions>

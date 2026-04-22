@@ -91,3 +91,7 @@ Stef initialized as Frontend Dev for the initial project squad.
 
 - `apps/operator-portal/README.md` intro must not describe the portal as read-only anymore. It needs to say the current surface both reads fleet status and triggers real lifecycle writes through the existing control-plane contract: create + provision, deprovision, and rolling updates for ready tenants.
 
+### PR #78 operator-portal review follow-up (2026-04-22)
+
+- Keep the stale-review regression in `apps/operator-portal/src/OperatorPortal.actions.test.tsx`: open the provision dialog, refresh fleet state, and assert the confirm button locks when `dependencies.tenantProvisioning.status` flips to `disabled`.
+- For readable Vitest lifecycle output, prefer `it.each` tuple rows with the scenario label as the first element in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` instead of relying on object-row titles.

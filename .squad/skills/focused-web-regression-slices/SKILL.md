@@ -16,14 +16,16 @@ Use this when a broad app-level frontend test file becomes the blocker instead o
 - For search features, cover every advertised search axis and at least one reset path so the UI cannot get stuck in a filtered state.
 - For runtime-integrated auth flows, force the bootstrap dependency to fail and then re-trigger the primary CTA so the regression proves users see the existing inline error surface instead of a silent no-op.
 - For lifecycle-action portals, lock both action eligibility (only supported resource states show the CTA) and the confirmation/audit-refresh path in the focused action suite.
+- When Vitest `it.each` uses object-heavy fixtures, pass a human scenario label as the first tuple item (or otherwise separate it from the row object) so CI failures name the behavior instead of dumping the full case payload.
 
 ## Examples
 - apps/web/src/App.test.tsx now proves onboarding render, owner registration workspace load, and saved-session restore.
 - apps/web/src/CampaignSearch.test.tsx owns campaign-search regressions for title, body, tags, session names, collaborator names, and clearing search on new note.
 - apps/web/src/App.keycloak-auth.test.tsx drives a missing Keycloak client by rejecting `init()`, then verifies the Keycloak sign-in button shows the auth-card error state rather than silently doing nothing.
-- apps/operator-portal/src/OperatorPortal.actions.test.tsx keeps rolling-update regressions out of `App.test.tsx` by proving only ready tenants see the action and that a confirmed rollout reuses the provision route before refreshed audit copy appears.
+- apps/operator-portal/src/OperatorPortal.actions.test.tsx keeps rolling-update regressions out of `App.test.tsx` by proving only ready tenants see the action, that a confirmed rollout reuses the provision route before refreshed audit copy appears, and that error-case rows use tuple labels (`['stale no-op targets', { ... }]`) so Vitest output stays readable in CI.
 
 ## Anti-Patterns
 - Re-growing App.test.tsx into a catch-all integration file for every frontend feature.
 - Sharing giant mock servers across unrelated regressions when a small endpoint-scoped stub would do.
 - Covering only happy-path text search and skipping the other search scopes promised by the UI copy.
+- Naming parametrized cases with `%s` while passing whole row objects, which turns CI failure output into unreadable object dumps and hides which scenario actually failed.
