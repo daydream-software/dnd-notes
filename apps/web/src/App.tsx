@@ -191,6 +191,8 @@ type NarrowWorkspacePanel = 'browse' | 'editor'
 const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 const keycloakTokensStorageKey = 'dnd-notes:keycloak-auth-tokens'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
+const missingKeycloakClientErrorMessage =
+  'Keycloak sign-in is not ready yet. Reload and try again.'
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
 const recentActivityLimit = 20
 const defaultNotesPaneDescription =
@@ -2207,7 +2209,13 @@ function App() {
     try {
       if (isKeycloakAuthConfig(authConfig)) {
         if (!authToken) {
-          await keycloakClientRef.current?.login(window.location.href)
+          const keycloakClient = keycloakClientRef.current
+
+          if (!keycloakClient) {
+            throw new Error(missingKeycloakClientErrorMessage)
+          }
+
+          await keycloakClient.login(window.location.href)
           return
         }
 
@@ -2431,7 +2439,13 @@ function App() {
 
     try {
       if (isKeycloakAuthConfig(authConfig)) {
-        await keycloakClientRef.current?.login(window.location.href)
+        const keycloakClient = keycloakClientRef.current
+
+        if (!keycloakClient) {
+          throw new Error(missingKeycloakClientErrorMessage)
+        }
+
+        await keycloakClient.login(window.location.href)
         return
       }
 

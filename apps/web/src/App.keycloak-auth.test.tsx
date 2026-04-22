@@ -200,4 +200,42 @@ describe('App Keycloak runtime auth', () => {
     expect(await screen.findByText('Storm ledger updated')).toBeTruthy()
     expect(screen.queryByText('Sign in with Keycloak')).toBeNull()
   })
+
+  it('shows an auth error instead of silently no-oping when the Keycloak client is missing', async () => {
+    initMock.mockRejectedValue(new Error('Could not initialize the Keycloak client.'))
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/api/auth/config' && method === 'GET') {
+        return createJsonResponse({
+          mode: 'keycloak',
+          keycloak: {
+            url: 'https://auth.example.com',
+            realm: 'dnd-notes',
+            clientId: 'dnd-notes-web',
+          },
+        })
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    const user = userEvent.setup()
+    const button = await screen.findByRole('button', {
+      name: 'Continue with Keycloak',
+    })
+
+    expect(await screen.findByText('Could not initialize the Keycloak client.')).toBeTruthy()
+
+    await user.click(button)
+
+    expect(loginMock).not.toHaveBeenCalled()
+    expect(
+      await screen.findByText(
+        'Keycloak sign-in is not ready yet. Reload and try again.',
+      ),
+    ).toBeTruthy()
+  })
 })

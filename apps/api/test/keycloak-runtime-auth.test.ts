@@ -3,6 +3,7 @@ import test from 'node:test'
 import request from 'supertest'
 import { defaultCampaignId } from '../src/campaign.js'
 import { createTenantRuntimeAuth } from '../src/keycloak-auth.js'
+import { OwnerKeycloakLinkConflictError } from '../src/note-store.js'
 import { createTestApp, withAuth, withGuest } from './test-helpers.js'
 import fakeKeycloakModule from '../../../tests/fake-keycloak.js'
 
@@ -121,6 +122,79 @@ test('tenant runtime auth preserves the linked owner when a Keycloak email chang
   assert.equal(localSiteAdmin.email, claimedEmail)
   assert.equal(localSiteAdmin.isSiteAdmin, true)
   assert.equal(localSiteAdmin.keycloakSub, null)
+})
+
+test('tenant runtime auth returns 409 when another Keycloak subject claims an existing linked email', async (t) => {
+  const keycloak = await startFakeKeycloakServer()
+  t.after(() => keycloak.close())
+
+  const { app, cleanup, noteStore } = await createTestApp({
+    runtimeAuth: createKeycloakRuntimeAuth(keycloak.baseUrl, keycloak.issuer),
+  })
+  t.after(cleanup)
+
+  const linkedToken = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: 'owner@example.com',
+    subject: 'linked-owner-subject',
+    userName: 'Linked Owner',
+  })
+  const conflictingToken = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: 'owner@example.com',
+    subject: 'conflicting-owner-subject',
+    userName: 'Conflicting Owner',
+  })
+
+  const linkedSessionResponse = await withAuth(request(app), linkedToken).get('/api/auth/session')
+  assert.equal(linkedSessionResponse.status, 200)
+
+  const conflictResponse = await withAuth(request(app), conflictingToken).get('/api/auth/session')
+  assert.equal(conflictResponse.status, 409)
+  assert.equal(
+    conflictResponse.body.error,
+    'This owner account is already linked to a different Keycloak identity.',
+  )
+
+  const ownerAccounts = await noteStore.listOwnerAccounts()
+  assert.equal(ownerAccounts.length, 1)
+  assert.equal(ownerAccounts[0]?.keycloakSub, 'linked-owner-subject')
+})
+
+test('tenant runtime auth maps typed Keycloak link conflicts to 409 without reading the error text', async (t) => {
+  const keycloak = await startFakeKeycloakServer()
+  t.after(() => keycloak.close())
+
+  const { app, cleanup, noteStore } = await createTestApp({
+    runtimeAuth: createKeycloakRuntimeAuth(keycloak.baseUrl, keycloak.issuer),
+  })
+  t.after(cleanup)
+
+  const originalFindOrCreateOwnerByKeycloakIdentity =
+    noteStore.findOrCreateOwnerByKeycloakIdentity.bind(noteStore)
+  noteStore.findOrCreateOwnerByKeycloakIdentity = async () => {
+    throw new OwnerKeycloakLinkConflictError(
+      'owner-123',
+      'route layer should not need this message to return 409',
+    )
+  }
+  t.after(() => {
+    noteStore.findOrCreateOwnerByKeycloakIdentity = originalFindOrCreateOwnerByKeycloakIdentity
+  })
+
+  const token = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: 'owner@example.com',
+    subject: 'typed-conflict-subject',
+    userName: 'Typed Conflict',
+  })
+
+  const response = await withAuth(request(app), token).get('/api/auth/session')
+  assert.equal(response.status, 409)
+  assert.equal(
+    response.body.error,
+    'This owner account is already linked to a different Keycloak identity.',
+  )
 })
 
 test('tenant runtime auth rejects wrong-client, expired, and local-auth requests when Keycloak mode is enabled', async (t) => {

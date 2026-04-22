@@ -183,6 +183,19 @@ export interface CreateNoteStoreOptions {
 }
 
 export class InvalidBackupDatabaseError extends Error {}
+export const ownerKeycloakLinkConflictCode = 'OWNER_KEYCLOAK_LINK_CONFLICT'
+
+export class OwnerKeycloakLinkConflictError extends Error {
+  readonly code = ownerKeycloakLinkConflictCode
+
+  constructor(
+    readonly ownerId: string,
+    message = 'This owner account is already linked to a different Keycloak identity.',
+  ) {
+    super(message)
+    this.name = 'OwnerKeycloakLinkConflictError'
+  }
+}
 
 const requiredBackupTables = [
   'owner_accounts',
@@ -1615,9 +1628,7 @@ export async function createNoteStore(
           byEmail.keycloak_sub !== null &&
           byEmail.keycloak_sub !== identity.keycloakSub
         ) {
-          throw new Error(
-            `Owner account "${byEmail.id}" is already linked to a different Keycloak subject.`,
-          )
+          throw new OwnerKeycloakLinkConflictError(byEmail.id)
         }
 
         const updatedAt = new Date().toISOString()

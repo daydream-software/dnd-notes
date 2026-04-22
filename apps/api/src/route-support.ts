@@ -3,7 +3,10 @@ import {
   KeycloakTokenValidationError,
   type TenantRuntimeAuth,
 } from './keycloak-auth.js'
-import type { NoteStore } from './note-store.js'
+import {
+  OwnerKeycloakLinkConflictError,
+  type NoteStore,
+} from './note-store.js'
 import type {
   ActivityCollaborator,
   CampaignMembership,
@@ -314,10 +317,7 @@ export async function requireAuthenticatedAccount(
         return null
       }
 
-      if (
-        error instanceof Error &&
-        error.message.includes('already linked to a different Keycloak subject')
-      ) {
+      if (error instanceof OwnerKeycloakLinkConflictError) {
         response.status(409).json({
           error: 'This owner account is already linked to a different Keycloak identity.',
         })
