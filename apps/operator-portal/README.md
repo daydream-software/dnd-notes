@@ -1,6 +1,12 @@
 # Operator Portal
 
-Read-only operator control portal for the platform control-plane.
+Operator control portal for the platform control-plane.
+
+The portal is not read-only: alongside fleet-status reads, it can create tenant
+records and provision them, deprovision live tenants, and start rolling updates
+for ready tenants through the existing control-plane routes. Those actions have
+real side effects on live infrastructure and data-plane resources, so the UI
+keeps explicit confirmation around each write path.
 
 ## Current slice
 
