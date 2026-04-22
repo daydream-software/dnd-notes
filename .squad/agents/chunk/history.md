@@ -26,6 +26,11 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 
 ## Learnings
 
+### PR #78 follow-up QA review (2026-04-22)
+- `apps/operator-portal/src/OperatorPortal.actions.test.tsx` should keep recording unexpected create/provision POST payloads, but each unexpected mock branch must return an explicit `500` JSON response so accidental writes fail as actionable HTTP errors instead of `undefined` crashes.
+- `.squad/agents/stef/history.md` should keep a single `## Core Context` heading after summarization; duplicate headings are cleanup-only and safe to delete.
+- Focused validation for this operator-portal lane is `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal` from the repo root.
+
 ### Phase 2 QA Gate (2026-04-22)
 - **Critical discovery:** #40 (Restore Safety) is a blocker for both #56 (OIDC) and #69 (Per-Tenant Roles). Execution order is not optional.
 - **Why:** #69 credential rotation and #56 token refresh both require maintenance-mode signaling. Without #40's restore-safety gates, both create orphan-auth failures (silent 401 instead of "maintenance", orphaned Postgres connections, token realm confusion, credential sync races during graceful shutdown).

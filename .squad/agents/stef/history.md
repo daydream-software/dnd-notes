@@ -10,9 +10,6 @@
 
 Stef initialized as Frontend Dev for the initial project squad.
 
-
-## Core Context (Summarized 2026-04-22T18:24:34Z)
-
 *History summarized on 2026-04-18T22:58:15.116987 — old entries moved to archive. Keeping last 10 team updates and all learnings.*
 
 

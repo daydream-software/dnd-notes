@@ -451,6 +451,10 @@ describe('operator portal lifecycle actions', () => {
         }
 
         createRequests.push(request)
+        return createJsonResponse(
+          { error: 'Unexpected tenant create call while provisioning is disabled.' },
+          500,
+        )
       }
 
       if (path === '/operator-api/internal/tenants/candlekeep/provision' && method === 'POST') {
@@ -461,6 +465,10 @@ describe('operator portal lifecycle actions', () => {
         }
 
         provisionRequests.push(request)
+        return createJsonResponse(
+          { error: 'Unexpected tenant provision call while provisioning is disabled.' },
+          500,
+        )
       }
 
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)

@@ -68,6 +68,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **CI Duplicate-Check Triage:** `.github/workflows/ci.yml` runs `npm run test:ci`, publishes JUnit via EnricoMi as a separate `Test Results` check, then fails the `validate` job if any suite failed. On PR #78, red `validate` + red `Test Results` mapped to one underlying control-plane test (`apps/control-plane/test/provisioning.test.ts` namespace-deletion wait) rather than two independent failures. When the head commit only touches docs and the prior branch SHA was green, treat this pattern as a flaky/timing-sensitive repo test first, not an Actions outage. Key files: `.github/workflows/ci.yml`, `scripts/run-ci-tests.mjs`, `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
 
+- **Operator Portal Unexpected POST Mocks:** In `apps/operator-portal/src/OperatorPortal.actions.test.tsx`, any fetch mock branch that records a write request expected not to happen should still return an explicit error `Response` (500 is fine) after pushing the request. That keeps accidental calls diagnosable as HTTP failures instead of letting `fetch()` resolve to `undefined` and crash later with ambiguous property-access errors.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.

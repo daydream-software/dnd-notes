@@ -14,12 +14,14 @@ Use this when a platform/control-plane feature is growing a browser UI for opera
 - Test auth on both the primary read endpoint and at least one representative write endpoint; operator portals often accidentally secure the list page but not the action routes.
 - Require every destructive or high-impact action to show pre-action side-effect copy and post-action audit evidence (`triggeredBy`, `reason`, latest transition).
 - If a high-impact confirmation dialog can stay open across refreshes, feed the live mutation-disabled reason into the final confirm step too: re-check it in the submit handler, show the fresh reason in the dialog, and disable the terminal CTA before any stale click can escape.
+- When a write-path fetch mock is only there to record an unexpected call, still return an explicit error `Response` after recording it so the test fails as a clear HTTP error instead of exploding later on `undefined`.
 - Keep write paths delegated to the backend control-plane contract; the frontend should not synthesize state transitions locally.
 
 ## Examples
 - `apps/control-plane/test/keycloak-auth.test.ts` now locks Keycloak admin/workforce access for `GET /internal/fleet/status` and rejection on `POST /internal/tenants/:tenantId/provision` when the role is wrong.
 - `apps/control-plane/test/app.test.ts` now asserts `latestTransition.triggeredBy` and `reason` for fleet status plus provision/deprovision flows, so a future portal can explain operator side effects after the action lands.
 - `apps/operator-portal/src/ProvisionTenantPanel.tsx` and `apps/operator-portal/src/OperatorPortal.actions.test.tsx` now keep tenant provisioning honest after a live fleet refresh by disabling the final confirmation button and surfacing the fresh lane-disabled reason inside the already-open dialog.
+- `apps/operator-portal/src/OperatorPortal.actions.test.tsx` now returns explicit 500 responses from the create/provision mock branches in the stale-dialog regression, so an accidental POST surfaces as an actionable HTTP failure while the request is still captured for assertions.
 - `apps/web/src/SiteAdminPanel.tsx` shows the expected UI pattern: warn before destructive restore work and keep the side effect explicit in the copy.
 
 ## Anti-Patterns
@@ -27,3 +29,4 @@ Use this when a platform/control-plane feature is growing a browser UI for opera
 - Treating auth as covered because one internal route is protected while the portal’s actual read/write endpoints stay untested.
 - Hiding why a tenant moved state by omitting operator identity/reason from the surfaced transition data.
 - Leaving a destructive/provisioning confirm dialog armed after the underlying fleet state changes, so a stale modal can still fire a mutation the live portal has already disabled.
+- Letting a matched fetch mock branch fall through without returning a `Response`, which turns an accidental mutation into an opaque `undefined` crash instead of a debuggable failure.

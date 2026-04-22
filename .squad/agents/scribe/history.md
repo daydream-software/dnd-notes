@@ -57,6 +57,27 @@ Scribe initialized as the team's memory and decision merger.
   - ✅ All recovery steps completed; #52 follow-up now proceeding independently from #60 squash-merge corruption.
 - **Status:** RECOVERY VERIFIED. PR #61 awaiting review; #52 containerization work isolated and resumable.
 
+## PR #78 Review Follow-Up Round (2026-04-22T19:12+)
+
+**Context:** PR #78 (feat: operator-portal, issue #68) entered second review-fix cycle after Copilot re-review. Two open threads remained unresolved:
+
+1. **ProvisionTenantPanel mutation guard (blocking):** `disabledReason` was enforced only in `handleSubmit()`, allowing `handleConfirm()` to proceed if fleet state changed while the dialog was open. Required re-check in `handleConfirm()` and confirm-button gating.
+2. **OperatorPortal.actions.test rollout matrix readability:** Test case names rendered as `[object Object]` instead of readable scenario labels, making CI failures hard to diagnose.
+
+**Resolution:**
+- Copilot implemented both fixes locally on `squad/68-operator-control-portal` branch and verified with focused lint/test/build (green).
+- FFMikha reviewed fixes and approved the batch; Chunk QA-validated gates.
+- Stef contributed code review feedback and sign-off on test coverage.
+- Outcome: Two test-helpers return explicit error responses on unexpected calls; rollout matrix now uses labeled test scenarios for readable Vitest output.
+
+**Review threads remaining (1 unresolved):**
+- `.squad/agents/stef/history.md` duplicate "## Core Context" header noted; Copilot flagged for cleanup.
+- `OperatorPortal.actions.test.tsx` fetch-mock error handling: handler should return 500 instead of undefined when unexpected endpoint called (deferred; labeled as good-catch but non-blocking).
+
+**Status:** Ready for final push + thread resolution. FFMikha batching final commit and review-comment replies.
+
+**Team pattern:** Data's code-review classification (blocking/deferred/N/A) applied here: two fixes classified blocking + in-flight fixes; remaining lint/CI noise classified deferred. Queue state green, PR mergeable after final reply.
+
 ## Learnings
 
 Initial squad setup complete.
