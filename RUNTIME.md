@@ -2,6 +2,9 @@
 
 This document defines the environment variables and runtime expectations for the dnd-notes tenant container.
 
+Issue #95 makes per-tenant Postgres the hosted steady-state target. SQLite
+remains the local fallback and snapshot interchange path during the cutover.
+
 ## Required Environment Variables
 
 None. The application will start with defaults.
@@ -175,15 +178,17 @@ readinessProbe:
 
 ## Persistent Storage
 
-### SQLite (Phase 0 local dev)
+### SQLite (local fallback and transitional runtime scratch)
 - **Mount point:** `/app/data`  
 - **File:** `/app/data/dnd-notes.sqlite`  
-- **Volume type:** Kubernetes `PersistentVolumeClaim` or local bind mount
+- **Volume type:** Local bind mount, or in the current hosted transition a
+  Kubernetes `PersistentVolumeClaim`
 
 The control-plane provisioning slice for issue #54 now keeps this mount present
 even when the tenant runs primarily against `DATABASE_URL`, so the container
 retains a writable runtime volume for SQLite-compatible fallback files and
-operator-managed storage lifecycle.
+operator-managed storage lifecycle. Issue #95 supersedes that PVC-backed tenant
+shape for hosted steady state.
 
 **Kubernetes example:**
 ```yaml
@@ -196,14 +201,16 @@ volumes:
       claimName: tenant-abc123-data
 ```
 
-### Postgres (Phase 1 target)
+### Postgres (hosted steady-state target)
 - **Connection:** Via `DATABASE_URL` environment variable  
 - **Least-privilege boundary:** Newly provisioned tenants receive a dedicated
   Postgres role and randomized password from the control plane. The control
   plane bootstraps the note-store schema before the tenant pod starts, so the
   runtime user does not need schema-creation rights.
-- **Persistence:** Managed by Postgres for note data; the control plane may also
-  mount `/app/data` on a PVC for runtime scratch/fallback storage.  
+- **Persistence:** Managed by Postgres for note data. During the current
+  transition the control plane may still mount `/app/data` for
+  runtime scratch/fallback storage, but #95 removes that tenant PVC from the
+  normal hosted pod shape.  
 - **Backup:** Control-plane orchestrated `pg_dump` to object storage
 
 ## Container Lifecycle
@@ -225,7 +232,9 @@ volumes:
 6. Exit with code 0 (or force-exit after the 30s grace period)
 
 ### Graceful Termination
-The container handles `SIGTERM` for zero-downtime rolling updates:
+The container handles `SIGTERM` for controlled rolling updates today and future
+overlapping zero-downtime updates once the tenant PVC leaves the normal hosted
+pod shape:
 ```javascript
 process.on('SIGTERM', () => shutdown(0))
 ```
@@ -249,7 +258,7 @@ The container runs as a non-root user (`appuser:appuser`, UID/GID assigned at bu
 
 **Security posture:**
 - No root privileges required at runtime
-- Write access only to `/app/data` (database volume)
+- Write access only to `/app/data` (local fallback / scratch volume)
 - Read-only for application code (`/app/apps/api`, `/app/apps/web`)
 
 ## Build & Deployment
@@ -271,14 +280,14 @@ docker run -p 3000:3000 \
 ### Kubernetes Deployment (Phase 1 shape)
 See issue #43 for full manifest examples after Phase 0 validation.
 
-## Phase 0 ↔ Phase 1 Migration Notes
+## Hosted persistence transition notes
 
-**Current (Phase 0):**
+**Current state in code:**
 - Hosted path: Postgres via `DATABASE_URL`
 - Local fallback: SQLite at `/app/data/dnd-notes.sqlite`
 - Backup via admin API (`GET /api/admin/backup`) using SQLite-compatible snapshots
 
-**Hosted rollout path (`#55`):**
+**Current hosted rollout contract:**
 - Postgres via `DATABASE_URL`, with newly provisioned tenants using
   tenant-scoped runtime credentials
 - PVC may stay mounted at `/app/data` for fallback/runtime files, but it is not
@@ -287,6 +296,14 @@ See issue #43 for full manifest examples after Phase 0 validation.
   to prevent pod overlap while the RWO PVC remains, plus readiness + shutdown
   drain instead of SQLite single-writer handoff
 - Backup via control-plane `pg_dump` CronJob remains a later slice
+
+**Target hosted steady state (`#95`):**
+- One Postgres database plus one least-privilege runtime role per tenant
+- No tenant PVC in the normal hosted pod shape
+- Rolling updates switch to overlapping `maxSurge: 1` / `maxUnavailable: 0`
+  once the pod no longer depends on SQLite handoff semantics
+- Backup/restore orchestration pivots to per-tenant `pg_dump` / `pg_restore`
+  while the SQLite-compatible admin snapshot bridge is phased out deliberately
 
 **Migration:**
 1. Download a fresh SQLite-compatible admin backup from the old SQLite-backed tenant.
@@ -299,7 +316,7 @@ Existing hosted tenants that already run on a shared runtime Postgres user are a
 deliberate migration boundary. This slice does not silently rotate those live
 credentials during ordinary reprovisioning.
 
-## Postgres-backed rolling-update choreography
+## Current Postgres-backed rolling-update choreography
 
 The first supported hosted upgrade path assumes the tenant is already using
 `DATABASE_URL`.
@@ -321,9 +338,9 @@ The first supported hosted upgrade path assumes the tenant is already using
 The `/app/data` PVC remains mounted but causes no multi-attach contention since
 the rollout strategy prevents pod overlap.
 
-**Future:** Once the PVC is removed from the normal pod shape or moved to
-RWX-capable storage, the rollout strategy can switch to `maxSurge: 1` /
-`maxUnavailable: 0` for zero-downtime updates without drain windows.
+**Target under #95:** Once the tenant PVC leaves the normal pod shape, the
+rollout strategy can switch to `maxSurge: 1` / `maxUnavailable: 0` for
+overlapping zero-downtime updates without drain windows.
 
 ## Exclusive maintenance work
 

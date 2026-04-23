@@ -65,7 +65,7 @@ the Conventional Commits format (for example `feat(api): harden CORS policy` or
 ## Workspace layout
 
 - `apps/web` — React + Vite + Material UI notes workspace
-- `apps/api` — Express + TypeScript API with SQLite persistence
+- `apps/api` — Express + TypeScript API with Postgres-first hosted persistence and SQLite local fallback
 - `apps/control-plane` — Express + TypeScript control plane for tenant registry and provisioning orchestration
 
 ## Control-plane provisioning
@@ -88,16 +88,19 @@ When provisioning is enabled, the control plane reconciles a tenant namespace,
 runtime ConfigMap/Secret, PVC, Service, Deployment, and a per-tenant Postgres
 database. New tenants also get a dedicated Postgres runtime role with a random
 password, plus control-plane schema bootstrap before the tenant pod starts, so
-the pod can run on least-privilege `DATABASE_URL` credentials. The tenant
-workload uses `/ready` for readiness and `/healthz` for liveness, and the PVC
-stays mounted at `/app/data` for explicit tenant storage lifecycle plus
-SQLite-compatible fallback files.
+the pod can run on least-privilege `DATABASE_URL` credentials. The current
+hosted slice still keeps `/app/data` on a PVC for explicit tenant storage
+lifecycle plus SQLite-compatible fallback files, but issue `#95` changes the
+target hosted steady-state to per-tenant Postgres without a tenant PVC in the
+normal pod shape.
 
 Postgres-backed tenant upgrades reuse `POST /internal/tenants/:tenantId/provision`
-with a version override. The generated tenant Deployment now makes the first
-rolling-update contract explicit (drain-first `RollingUpdate`, `maxSurge: 0`,
+with a version override. The generated tenant Deployment currently makes the
+first rollout contract explicit (drain-first `RollingUpdate`, `maxSurge: 0`,
 `maxUnavailable: 1`, `minReadySeconds: 5`), while the tenant runtime drains
-HTTP traffic and Postgres connections on `SIGTERM`. See
+HTTP traffic and Postgres connections on `SIGTERM`. Issue `#95` re-targets the
+hosted steady state to overlapping `maxSurge: 1` / `maxUnavailable: 0` updates
+once tenant pods stop depending on PVC-backed SQLite handoff. See
 [`apps/control-plane/README.md`](apps/control-plane/README.md) and
 [`RUNTIME.md`](RUNTIME.md) for the operator choreography and rollout rationale.
 
@@ -160,10 +163,11 @@ there for the API listener. When you set `NOTES_DB_PATH` in `apps/api/.env`, use
 paths relative to `apps/api` (for example `data/dnd-notes.sqlite`).
 
 Writable SQLite note stores intentionally stay on rollback-journal mode
-(`journal_mode=DELETE`), not WAL. Hosted production now targets Postgres, while
-the remaining SQLite paths are local fallback plus backup/restore snapshot
-interchange; keeping SQLite on a single-file journal model avoids WAL sidecars
-and checkpoint handling in those workflows.
+(`journal_mode=DELETE`), not WAL. Hosted production now targets per-tenant
+Postgres, while the remaining SQLite paths are local fallback plus
+backup/restore snapshot interchange during the `#95` cutover; keeping SQLite on
+a single-file journal model avoids WAL sidecars and checkpoint handling in
+those workflows.
 
 Optional Postgres pool tuning env vars:
 
@@ -309,10 +313,11 @@ and `POST /api/admin/restore` are site-admin-only. `/api/admin/accounts`
 returns the real-account directory plus current site-admin assignments.
 `/api/admin/overview` returns aggregate account, campaign, membership,
 share-link, and note counts for the admin surface. `/api/admin/backup`
-returns a SQLite snapshot as a downloadable attachment for operational backup
-workflows. `POST /api/admin/restore` accepts a raw SQLite upload
-(`application/octet-stream`) and replaces the live database after validating
-that the snapshot looks like a restorable dnd-notes database.
+returns a SQLite-compatible snapshot as a downloadable attachment for
+operational backup workflows. `POST /api/admin/restore` accepts a raw SQLite
+upload (`application/octet-stream`) and restores that snapshot into the active
+database backend after validating that it looks like a restorable dnd-notes
+database.
 
 For restore operations, use the site-admin panel upload flow and keep a freshly
 downloaded backup nearby. A successful restore may invalidate the current owner
@@ -322,12 +327,15 @@ require signing in again immediately afterward.
 ## Backup and restore runbook
 
 Use this runbook whenever you need to capture a backup, rehearse recovery, or
-replace the live SQLite database with a known-good snapshot.
+restore a known-good SQLite-compatible snapshot into the active database
+backend.
 
-This runbook assumes single-file SQLite snapshots. The app intentionally keeps
-file-backed SQLite stores on rollback-journal mode instead of WAL, so operators
-do not need to coordinate `<dbPath>-wal` / `<dbPath>-shm` sidecars during
-backup and restore handling.
+This runbook assumes single-file SQLite snapshots as the interchange artifact.
+When the app is running on file-backed SQLite, it intentionally keeps
+rollback-journal mode instead of WAL so operators do not need to coordinate
+`<dbPath>-wal` / `<dbPath>-shm` sidecars. When the app is running on Postgres,
+the same snapshot is imported through the restore flow instead of being copied
+into place as the live store.
 
 ### Minimum operating expectations
 
@@ -340,7 +348,7 @@ backup and restore handling.
 - label snapshots with when they were taken and why they exist (routine backup,
   pre-maintenance backup, rehearsal fixture, incident recovery, and so on);
 - treat restore as an operator action: ask active users to stop editing before
-  you replace the database, because connected clients are not yet placed into a
+  you start the restore, because connected clients are not yet placed into a
   maintenance mode automatically.
 
 ### Backup procedure
@@ -366,9 +374,10 @@ panel using **Restore backup**, confirm all of the following:
 ### Restore procedure
 
 1. Open the Site admin panel restore flow.
-2. Select the SQLite snapshot you intend to restore.
+2. Select the SQLite-compatible snapshot you intend to restore.
 3. Complete the required confirmation and start the restore.
-4. Wait for the app to finish replacing the live database.
+4. Wait for the app to finish importing the snapshot into the active database
+   backend.
 5. If the UI signs you out afterward, sign in again as a site admin before
    continuing validation.
 
