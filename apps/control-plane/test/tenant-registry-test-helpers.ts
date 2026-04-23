@@ -18,6 +18,7 @@ export function createTestTenantRegistry() {
     tenantRegistry,
     async cleanup() {
       await tenantRegistry.close()
+      await pool.end()
     },
   }
 }

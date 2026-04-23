@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { newDb } from 'pg-mem'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
+import { TenantRegistry } from '../src/tenant-registry.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 
 describe('TenantRegistry', () => {
@@ -74,6 +76,72 @@ describe('TenantRegistry', () => {
       assert.equal((await tenantRegistry.getTenant('tenant-2'))?.subdomain, 't-fresh')
     } finally {
       await cleanup()
+    }
+  })
+
+  it('returns the persisted subdomain when another writer wins the race', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let injectedConcurrentWrite = false
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        return await pool.query(text, values as unknown[])
+      },
+      async connect() {
+        const client = await pool.connect()
+
+        return {
+          async query(text: string, values?: readonly unknown[]) {
+            if (
+              !injectedConcurrentWrite &&
+              text.includes('SELECT subdomain') &&
+              text.includes('FOR UPDATE')
+            ) {
+              injectedConcurrentWrite = true
+              await pool.query(
+                `UPDATE tenants
+                 SET subdomain = $1
+                 WHERE id = $2`,
+                ['t-raced', 'tenant-1'],
+              )
+            }
+
+            return await client.query(text, values as unknown[])
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: wrappedPool,
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      const reserved = await tenantRegistry.reserveTenantSubdomain(
+        'tenant-1',
+        () => 't-fresh',
+      )
+
+      assert.equal(reserved, 't-raced')
+      assert.equal((await tenantRegistry.getTenant('tenant-1'))?.subdomain, 't-raced')
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
     }
   })
 
@@ -185,6 +253,27 @@ describe('TenantRegistry', () => {
       )
     } finally {
       await cleanup()
+    }
+  })
+
+  it('does not end an injected pool when the registry closes', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool,
+    })
+
+    try {
+      await tenantRegistry.checkHealth()
+      await tenantRegistry.close()
+
+      const result = await pool.query<{ value: number }>('SELECT 1 AS value')
+      assert.equal(result.rows[0]?.value, 1)
+    } finally {
+      await pool.end()
     }
   })
 

@@ -157,12 +157,14 @@ function isUniqueConstraintError(error: unknown): error is Error & { code?: stri
 
 export class TenantRegistry {
   private readonly pool: TenantRegistryPoolLike
+  private readonly ownsPool: boolean
   private readonly ready: Promise<void>
   private closed = false
 
   constructor(connectionString: string, options: TenantRegistryOptions = {}) {
-    const { pool } = resolveTenantRegistryPool(connectionString, options)
+    const { pool, ownedPool } = resolveTenantRegistryPool(connectionString, options)
     this.pool = pool
+    this.ownsPool = ownedPool !== undefined
     this.ready = this.migrateSchema()
   }
 
@@ -456,27 +458,43 @@ export class TenantRegistry {
       }
 
       try {
-        const updatedTenant = await this.run<{ subdomain: string }>(
-          `UPDATE tenants
-           SET subdomain = $1,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $2
-           RETURNING subdomain`,
-          [candidate, tenantId],
-        )
-
-        if ((updatedTenant.rowCount ?? updatedTenant.rows.length) === 1) {
-          return updatedTenant.rows[0].subdomain
-        }
-
-        const refreshedTenant = await this.getTenant(tenantId)
-        if (refreshedTenant?.subdomain != null) {
-          return assertPersistedTenantSubdomain(
-            tenantId,
-            refreshedTenant.subdomain,
-            'provisioning or deprovisioning tenant resources',
+        return await this.withTransaction(async (client) => {
+          const lockedTenant = await client.query<{ subdomain: string | null }>(
+            `SELECT subdomain
+             FROM tenants
+             WHERE id = $1
+             FOR UPDATE`,
+            [tenantId],
           )
-        }
+
+          if ((lockedTenant.rowCount ?? lockedTenant.rows.length) !== 1) {
+            throw new Error(`Tenant ${tenantId} not found`)
+          }
+
+          const persistedSubdomain = lockedTenant.rows[0]?.subdomain
+          if (persistedSubdomain != null) {
+            return assertPersistedTenantSubdomain(
+              tenantId,
+              persistedSubdomain,
+              'provisioning or deprovisioning tenant resources',
+            )
+          }
+
+          const updatedTenant = await client.query<{ subdomain: string }>(
+            `UPDATE tenants
+             SET subdomain = $1,
+                 updated_at = CURRENT_TIMESTAMP
+             WHERE id = $2
+             RETURNING subdomain`,
+            [candidate, tenantId],
+          )
+
+          if ((updatedTenant.rowCount ?? updatedTenant.rows.length) !== 1) {
+            throw new Error(`Tenant ${tenantId} not found`)
+          }
+
+          return updatedTenant.rows[0].subdomain
+        })
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           continue
@@ -1012,7 +1030,9 @@ export class TenantRegistry {
       // Allow cleanup to proceed even if bootstrap failed.
     }
 
-    await this.pool.end()
+    if (this.ownsPool) {
+      await this.pool.end()
+    }
   }
 
   private async purgeExpiredPortalSessions(): Promise<void> {

@@ -287,3 +287,4 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 **Ready for:** `npm run k3d:full-stack-smoke` validation
 
+- 2026-04-23T19:42:12Z Addressed PR #104 follow-up on `squad/97-control-plane-registry-postgres`: removed the stray SQLite tenant-registry backend so control-plane runtime is Postgres-only, made registry shutdown stop ending injected pools, switched subdomain reservation to a transaction + `SELECT ... FOR UPDATE` path so races return the persisted value without clobbering it, and fixed `scripts/k3d/smoke.sh` to start the control-plane with `CONTROL_PLANE_DATABASE_URL` instead of the removed `DATABASE_PATH`. Added focused registry regressions for the row-race and shared-pool shutdown cases; `npm test --workspace apps/control-plane` passed, while local `npm run k3d:smoke` remains blocked here by the Docker broker rejecting `rancher/k3s:v1.35.3-k3s1`.
