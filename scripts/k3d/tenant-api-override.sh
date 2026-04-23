@@ -219,12 +219,14 @@ wait_for_http "${proxy_origin}/api/auth/config" 60
 curl -fsS "${tenant_origin}/" >"${WORK_DIR}/upstream-root.html"
 curl -fsS -D "${WORK_DIR}/proxy-root.headers" "${proxy_origin}/" >"${WORK_DIR}/proxy-root.html"
 cmp -s "${WORK_DIR}/upstream-root.html" "${WORK_DIR}/proxy-root.html"
-grep -qi '^x-dnd-notes-override-target: tenant-cluster$' "${WORK_DIR}/proxy-root.headers"
+tr -d '\r' <"${WORK_DIR}/proxy-root.headers" \
+  | grep -qi '^x-dnd-notes-override-target: tenant-cluster$'
 
 curl -fsS "http://127.0.0.1:${LOCAL_API_PORT}/api/auth/config" >"${WORK_DIR}/local-auth-config.json"
 curl -fsS -D "${WORK_DIR}/proxy-auth-config.headers" "${proxy_origin}/api/auth/config" >"${WORK_DIR}/proxy-auth-config.json"
 cmp -s "${WORK_DIR}/local-auth-config.json" "${WORK_DIR}/proxy-auth-config.json"
-grep -qi '^x-dnd-notes-override-target: local-api$' "${WORK_DIR}/proxy-auth-config.headers"
+tr -d '\r' <"${WORK_DIR}/proxy-auth-config.headers" \
+  | grep -qi '^x-dnd-notes-override-target: local-api$'
 
 tenant_bearer_token="$(get_keycloak_access_token \
   "${TENANT_KEYCLOAK_URL}" \
@@ -243,7 +245,8 @@ curl -fsS \
   "${proxy_origin}/api/auth/session" \
   >"${WORK_DIR}/proxy-session.json"
 cmp -s "${WORK_DIR}/local-session.json" "${WORK_DIR}/proxy-session.json"
-grep -qi '^x-dnd-notes-override-target: local-api$' "${WORK_DIR}/proxy-session.headers"
+tr -d '\r' <"${WORK_DIR}/proxy-session.headers" \
+  | grep -qi '^x-dnd-notes-override-target: local-api$'
 
 curl -fsS \
   -H "Authorization: Bearer ${tenant_bearer_token}" \
