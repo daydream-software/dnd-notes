@@ -9,7 +9,6 @@ metadata:
     app.kubernetes.io/part-of: dnd-notes
 data:
   PORT: "3001"
-  DATABASE_PATH: /app/data/control-plane.sqlite
   CONTROL_PLANE_ENABLE_PROVISIONING: "true"
   CONTROL_PLANE_AUTH_MODE: static
   CONTROL_PLANE_KEYCLOAK_URL: https://auth.example.com

@@ -128,6 +128,16 @@ kubectl apply -f "${ROOT}/platform/k3d/postgres.yaml"
 apply_keycloak_manifest
 
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-postgres 180s
+
+# Create the control_plane database for the control-plane registry
+if [[ "$(
+  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+    psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'control_plane'"
+)" != "1" ]]; then
+  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+    psql -U postgres -c "CREATE DATABASE control_plane"
+fi
+
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
 
 echo
