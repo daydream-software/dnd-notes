@@ -1,4 +1,4 @@
-import { joinBasePath } from './base-path'
+import { joinBasePath } from '@dnd-notes/portal-utils'
 import { portalApiBasePath } from './config'
 import type {
   ErrorResponse,
