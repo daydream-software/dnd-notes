@@ -124,3 +124,4 @@ Tenant namespace tenant-t-opaque123456 did not terminate within 50ms
 3. Avoid: Logic rewrites; risks masking real async bugs
 
 The 200ms fix keeps the test validating K8s namespace polling + async termination semantics while eliminating CI timing variance.
+
