@@ -122,7 +122,6 @@ async function readSigningKey(jwksUrl: string, keyId: string) {
   const publicKey = createPublicKey({
     key: {
       kty: 'RSA',
-      kid: jwk.kid,
       n: jwk.n,
       e: jwk.e,
     },

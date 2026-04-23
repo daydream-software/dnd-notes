@@ -60,10 +60,3 @@ spec:
             runAsNonRoot: true
             runAsUser: 10001
             runAsGroup: 10001
-          volumeMounts:
-            - name: control-plane-data
-              mountPath: /app/data
-      volumes:
-        - name: control-plane-data
-          persistentVolumeClaim:
-            claimName: dnd-notes-control-plane-data

@@ -236,7 +236,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     reason?: string
     version?: string
   }): Promise<TenantProvisioningResponse> {
-    const tenant = this.getExistingTenant(params.tenantId)
+    const tenant = await this.getExistingTenant(params.tenantId)
     const requestedVersion = normalizeTenantVersionOverride(params.version)
     const isExistingRolloutState =
       tenant.currentState === 'ready' ||
@@ -277,10 +277,10 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     }
 
     if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
-      this.tenantRegistry.updateTenantVersion(tenant.id, requestedVersion)
+      await this.tenantRegistry.updateTenantVersion(tenant.id, requestedVersion)
     }
 
-    const refreshedTenant = this.getExistingTenant(tenant.id)
+    const refreshedTenant = await this.getExistingTenant(tenant.id)
     const hadPersistedSubdomain = refreshedTenant.subdomain != null
     const shouldMarkUpgrading =
       isVersionRollout &&
@@ -288,9 +288,9 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       refreshedTenant.currentState === 'ready'
 
     try {
-      this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
+      await this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
       if (shouldMarkUpgrading) {
-        this.tenantRegistry.updateTenantState(
+        await this.tenantRegistry.updateTenantState(
           refreshedTenant.id,
           'upgrading',
           params.triggeredBy,
@@ -299,14 +299,14 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       }
       const subdomain = assertPersistedTenantSubdomain(
         refreshedTenant.id,
-        this.tenantRegistry.reserveTenantSubdomain(
+        await this.tenantRegistry.reserveTenantSubdomain(
           refreshedTenant.id,
           () => this.createOpaqueSubdomainCandidate(),
         ),
         'provisioning tenant resources',
       )
       const existingResources = buildTenantResourceNames({
-        tenant: this.getExistingTenant(refreshedTenant.id),
+        tenant: await this.getExistingTenant(refreshedTenant.id),
         subdomain,
         baseDomain: this.baseDomain,
         imageRepository: this.imageRepository,
@@ -331,7 +331,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       )
 
       const bundle = buildTenantInfrastructureBundle({
-        tenant: this.getExistingTenant(refreshedTenant.id),
+        tenant: await this.getExistingTenant(refreshedTenant.id),
         subdomain,
         database,
         tenantRuntimeAuth: this.tenantRuntimeAuth,
@@ -342,7 +342,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         publicScheme: this.publicScheme,
         tenantPort: this.tenantPort,
       })
-      this.tenantRegistry.updateTenantStorageReference(
+      await this.tenantRegistry.updateTenantStorageReference(
         refreshedTenant.id,
         bundle.resources.pvcName,
       )
@@ -353,9 +353,9 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         this.readyTimeoutMs,
       )
 
-      const currentTenant = this.getExistingTenant(refreshedTenant.id)
+      const currentTenant = await this.getExistingTenant(refreshedTenant.id)
       if (currentTenant.currentState !== 'ready') {
-        this.tenantRegistry.updateTenantState(
+        await this.tenantRegistry.updateTenantState(
           refreshedTenant.id,
           'ready',
           params.triggeredBy,
@@ -364,13 +364,13 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       }
 
       return {
-        tenant: this.getExistingTenant(refreshedTenant.id),
+        tenant: await this.getExistingTenant(refreshedTenant.id),
         resources: bundle.resources,
       }
     } catch (error) {
-      const failedTenant = this.getExistingTenant(refreshedTenant.id)
+      const failedTenant = await this.getExistingTenant(refreshedTenant.id)
       if (failedTenant.currentState !== 'failed') {
-        this.tenantRegistry.updateTenantState(
+        await this.tenantRegistry.updateTenantState(
           refreshedTenant.id,
           'failed',
           params.triggeredBy,
@@ -386,7 +386,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     triggeredBy: string
     reason?: string
   }): Promise<TenantDeprovisionResponse> {
-    const tenant = this.getExistingTenant(params.tenantId)
+    const tenant = await this.getExistingTenant(params.tenantId)
 
     if (tenant.currentState === 'deprovisioned') {
       return {
@@ -413,11 +413,11 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     }
 
     if (tenant.storageReference) {
-      this.tenantRegistry.updateTenantStorageReference(tenant.id, null)
+      await this.tenantRegistry.updateTenantStorageReference(tenant.id, null)
     }
 
-    this.tenantRegistry.updateTenantDesiredState(tenant.id, 'deprovisioned')
-    this.tenantRegistry.updateTenantState(
+    await this.tenantRegistry.updateTenantDesiredState(tenant.id, 'deprovisioned')
+    await this.tenantRegistry.updateTenantState(
       tenant.id,
       'deprovisioned',
       params.triggeredBy,
@@ -425,7 +425,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     )
 
     return {
-      tenant: this.getExistingTenant(tenant.id),
+      tenant: await this.getExistingTenant(tenant.id),
       deprovisioned: true,
     }
   }
@@ -438,8 +438,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     return `${opaqueSubdomainPrefix}-${randomBytes(6).toString('hex')}`
   }
 
-  private getExistingTenant(tenantId: string): Tenant {
-    const tenant = this.tenantRegistry.getTenant(tenantId)
+  private async getExistingTenant(tenantId: string): Promise<Tenant> {
+    const tenant = await this.tenantRegistry.getTenant(tenantId)
     if (!tenant) {
       throw new Error(`Tenant ${tenantId} not found`)
     }

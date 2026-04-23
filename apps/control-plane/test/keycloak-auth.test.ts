@@ -3,7 +3,8 @@ import { afterEach, beforeEach, describe, it } from 'node:test'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
 import { createControlPlaneAdminAuth } from '../src/keycloak-auth.js'
-import { TenantRegistry } from '../src/tenant-registry.js'
+import { type TenantRegistry } from '../src/tenant-registry.js'
+import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 import fakeKeycloakModule from '../../../tests/fake-keycloak.js'
 
 describe('Control Plane Keycloak auth', () => {
@@ -12,15 +13,19 @@ describe('Control Plane Keycloak auth', () => {
   const { startFakeKeycloakServer } = fakeKeycloakModule
   let tenantRegistry: TenantRegistry
   let keycloak: Awaited<ReturnType<typeof startFakeKeycloakServer>> | undefined
+  let cleanupTenantRegistry: (() => Promise<void>) | undefined
 
   beforeEach(() => {
-    tenantRegistry = new TenantRegistry(':memory:')
+    const registry = createTestTenantRegistry()
+    tenantRegistry = registry.tenantRegistry
+    cleanupTenantRegistry = registry.cleanup
   })
 
   afterEach(async () => {
     await keycloak?.close()
     keycloak = undefined
-    tenantRegistry.close()
+    await cleanupTenantRegistry?.()
+    cleanupTenantRegistry = undefined
   })
 
   function createKeycloakApp() {
@@ -85,7 +90,7 @@ describe('Control Plane Keycloak auth', () => {
 
   it('rejects write-side routes when the JWT lacks a required workforce/admin role', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
-    tenantRegistry.createTenant({
+    await tenantRegistry.createTenant({
       id: 'tenant-123',
       slug: 'test-tenant',
       ownerId: 'owner-456',

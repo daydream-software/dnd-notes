@@ -175,5 +175,63 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - 2026-04-23T00:28:00Z Completed the ninth PR #80 Copilot review-fix batch for issue #70: customer-facing 500 responses on `POST /portal/signup` and `POST /portal/me/tenants` no longer echo raw internal error strings back to portal users. The control-plane now logs those failures server-side, returns stable client-safe details for unexpected signup/tenant-creation failures, and keeps portal conflicts on the explicit 409 path. Updated the affected portal failure regressions in `apps/control-plane/test/app.test.ts` to assert the sanitized details, and re-ran `npm run lint --workspace apps/control-plane && npm run test --workspace apps/control-plane -- && npm run build --workspace apps/control-plane` successfully.
 - 2026-04-23T00:41:00Z Completed the tenth PR #80 Copilot review-fix batch for issue #70: `apps/customer-portal/src/base-path.ts` now preserves `VITE_PORTAL_API_BASE_PATH=/` instead of collapsing root back to the fallback path, with a new `apps/customer-portal/src/base-path.test.ts` mirroring the operator-portal blank/root/trailing-slash coverage. `TenantRegistry.createPortalSession()` now reuses a private portal-session lookup instead of calling the public getter from inside the insert transaction, so new session creation only runs the expired-session purge once per request. Re-ran `npm run lint --workspace apps/control-plane && npm run test --workspace apps/control-plane -- && npm run build --workspace apps/control-plane && npm run lint --workspace apps/customer-portal && npm run test --workspace apps/customer-portal -- && npm run build --workspace apps/customer-portal` successfully.
 - 2026-04-23T00:47:00Z Completed the eleventh PR #80 Copilot review-fix batch for issue #70: customer-portal API URL construction now uses a shared `joinBasePath()` helper so `VITE_PORTAL_API_BASE_PATH=/` still produces same-origin request paths like `/portal/catalog` instead of protocol-relative `//portal/catalog`. Added focused customer-portal regression coverage for root and non-root base-path joining in `apps/customer-portal/src/base-path.test.ts`, wired `apps/customer-portal/src/control-plane-api.ts` through the helper for all fetches, and re-ran `npm run lint --workspace apps/customer-portal && npm run test --workspace apps/customer-portal -- && npm run build --workspace apps/customer-portal` successfully.
+
+
+## 2026-04-23: Issue #97 Control-Plane Postgres Migration Decision
+
+**Decision:** Convert TenantRegistry to an async, Postgres-only implementation for the control-plane.
+
+**Context:** The control-plane previously stored registry state in a PVC-backed SQLite file via `better-sqlite3`. Issue #97 moves that state to Postgres so the control-plane can run without a PVC-backed local database contract.
+
+**Options considered:**
+1. Keep the synchronous SQLite/PVC model - rejected: it preserves the deployment coupling issue this slice is meant to remove.
+2. Dual backend support (SQLite + Postgres) - rejected: Node has no synchronous Postgres client, and keeping a SQLite runtime path caused review drift and runtime dependency risk.
+3. SQLite cache backed by Postgres - rejected: overengineered for the registry slice.
+4. **Async Postgres-only registry** - **CHOSEN**: matches the target runtime contract and keeps the implementation coherent.
+
+**Implementation approach:**
+- Require `CONTROL_PLANE_DATABASE_URL` for the control-plane registry
+- Convert TenantRegistry methods and Express call sites to async/await
+- Re-export the Postgres registry directly from `tenant-registry.ts`
+- Remove the control-plane PVC and `DATABASE_PATH` runtime contract
+- Update k3d/bootstrap/smoke wiring to provision and pass the control-plane Postgres URL
+
+## Issue #97 Complete (2026-04-23)
+
+**Status:** ✅ Complete
+
+**What was done:**
+1. Converted the control-plane TenantRegistry to a Postgres-only async implementation
+   - `tenant-registry.ts` now re-exports the Postgres registry
+   - `tenant-registry-postgres.ts` owns schema/bootstrap and runtime access
+   - control-plane call sites now await registry operations
+2. Removed the control-plane PVC-backed runtime contract
+   - removed the PVC manifest from the base kustomization
+   - removed volume mounts from the control-plane Deployment
+   - removed `DATABASE_PATH` from the control-plane config path
+3. Added Postgres-backed platform wiring
+   - added `CONTROL_PLANE_DATABASE_URL` to the relevant manifests and overlays
+   - updated bootstrap and smoke scripts to create/use the `control_plane` database
+4. Closed follow-up review gaps
+   - removed the stray SQLite backend/runtime import path
+   - fixed shared-pool shutdown ownership
+   - made subdomain reservation race-safe with row locking
+   - aligned migration docs and handoff notes with the Postgres-only design
+
+**Validation:**
+- `npm test --workspace apps/control-plane` passes
+- `npm run platform:validate` passes
+
+**Representative commits:**
+- `c37a12a` - feat(control-plane): migrate registry to postgres fixes #97
+- `a5bb8f3` - feat(platform): migrate control-plane to Postgres registry
+- `175bf29` - fix(control-plane): address #97 review feedback
+- `e6fcb3e` - chore(control-plane): align #97 follow-up docs and tests
+
+**Next steps:**
+- rely on CI or a permitted local environment for `npm run k3d:full-stack-smoke`
+- keep future handoff docs aligned with the Postgres-only control-plane contract
+
+- 2026-04-23T19:42:12Z Addressed PR #104 follow-up on `squad/97-control-plane-registry-postgres`: removed the stray SQLite tenant-registry backend so control-plane runtime is Postgres-only, made registry shutdown stop ending injected pools, switched subdomain reservation to a transaction + `SELECT ... FOR UPDATE` path so races return the persisted value without clobbering it, and fixed `scripts/k3d/smoke.sh` to start the control-plane with `CONTROL_PLANE_DATABASE_URL` instead of the removed `DATABASE_PATH`. Added focused registry regressions for the row-race and shared-pool shutdown cases; `npm test --workspace apps/control-plane` passed, while local `npm run k3d:smoke` remains blocked here by the Docker broker rejecting `rancher/k3s:v1.35.3-k3s1`.
 - 2026-04-23T18:03:32Z Picked up the new top-priority platform epic after backlog triage: issue #95 (per-tenant Postgres / zero-downtime updates) is now ahead of #87 and #82, so work started on the thinnest lead-owned slice #96 from branch `squad/96-document-tenant-postgres-decision`. Current focus is updating `.squad/decisions.md`, adding the Mikey inbox decision note, and refreshing first-level docs so the repo clearly marks SQLite-per-tenant as superseded without overstating the runtime cutover status.
 - 2026-04-23T18:20:32Z Completed the documentation slice for issue #96 inside worktree `squad/96-document-tenant-postgres-decision`: added `.squad/decisions/inbox/mikey-tenant-postgres.md`, marked the old Phase 1 SQLite-per-tenant decision as superseded by #95, and rewrote the first-level `README.md` / `RUNTIME.md` wording so hosted steady state now clearly points at per-tenant Postgres while the current PVC-backed transitional rollout contract stays explicit.

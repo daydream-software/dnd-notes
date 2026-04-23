@@ -167,3 +167,72 @@ Established QA gate for #68 operator portal first slice:
 - Keep the portal create flow behavior-preserving by typing the request object explicitly in `apps/operator-portal/src/ProvisionTenantPanel.tsx` while still sending the reviewed `initialAdminEmail` value the UI requires today.
 - The fetch-mock seams in `apps/operator-portal/src/OperatorPortal.actions.test.tsx` should model the optional request field too and coalesce missing request email values back to `null` on mocked tenant responses, matching the control-plane tenant shape.
 - QA proof for this follow-up: baseline + post-fix `npm run lint:operator-portal && npm run test:operator-portal && npm run build:operator-portal`.
+
+## Issue #97 QA Gate — SQLite → Postgres Control-Plane Registry (Prepared 2026-04-23)
+
+**Stance:** Ready to QA the thin-slice Postgres migration. Current baseline: all 115 control-plane tests pass against SQLite; migration target is Postgres with zero assertion changes in test suite (only database backend swap).
+
+**Acceptance Checklist:**
+- ✅ No `better-sqlite3` in `apps/control-plane` source files
+- ✅ All 115 tests pass against Postgres without assertion rewrites
+- ✅ Constraint error codes (23505, 23503, etc.) map correctly → 409 API responses
+- ✅ Schema migrations v1→v5 idempotent on real Postgres
+- ✅ Pool graceful shutdown wired into existing close() path
+- ✅ `npm run k3d:full-stack-smoke` passes end-to-end
+- ✅ PVC removed; migration strategy documented
+
+**High-Risk Parity Gaps Identified:**
+1. Schema idempotence: SQLite `CREATE IF NOT EXISTS` → explicit Postgres migrations
+2. Transaction semantics: SQLite SERIALIZABLE → Postgres READ COMMITTED (default)
+3. Constraint mapping: Postgres error codes (23505 unique, 23503 foreign key, etc.)
+4. Graceful shutdown: pool.end() awaited during close
+5. Numeric types: SQLite TEXT/INTEGER → Postgres UUID/BIGINT/TIMESTAMP
+
+**Recommended Slice Order:**
+1. **Slice 1 (High Risk):** Schema definition + full test adapter. Gate: 115 tests pass.
+2. **Slice 2 (High Risk):** Constraint error mapping in app.ts. Gate: 409 responses, no 500s.
+3. **Slice 3 (Medium Risk):** Connection pooling + env config. Gate: CONTROL_PLANE_DATABASE_URL wired.
+4. **Slice 4 (Low-Medium Risk):** K3d provisioning + smoke integration.
+5. **Slice 5 (Low Risk):** PVC removal + docs cleanup.
+
+**Test Infrastructure Decisions Needed (Blocker):**
+- Schema migration framework: raw SQL vs. knex vs. other?
+- Test Postgres: testcontainers vs. ephemeral instance vs. CI managed?
+- Isolation level: explicit SET TRANSACTION or rely on READ COMMITTED default?
+
+**Current State:**
+- Worktree: fresh, no changes yet (HEAD at post-merge #81)
+- `npm test --workspace apps/control-plane` baseline: 115 pass, 0 fail
+- All existing regression coverage is SQLite-aware; minimal changes needed after DB swap
+
+**Next Move:**
+Waiting for Copilot to implement Slice 1. Will validate test coverage before approving each slice.
+
+
+**Work Completed (2026-04-23T21:00:00Z):**
+- Reviewed issue #97 scope (SQLite → Postgres control-plane registry migration)
+- Analyzed current SQLite-based tests: 115 passing, zero failures
+- Identified 5 high-risk parity gaps (schema idempotence, transaction semantics, constraint mapping, shutdown, type coercion)
+- Created detailed QA brief with acceptance gates, checkpoints, and approval criteria
+- Baseline validated: `npm test --workspace apps/control-plane` returns 115 pass / 0 fail
+- Committed QA preparation to worktree branch
+
+**Key Testing Strategy:**
+- All 115 existing tests must pass without assertion changes
+- Only database backend swaps from SQLite to Postgres
+- Constraint error mapping: SQLITE_CONSTRAINT_* → Postgres error codes (23505, 23503, etc.)
+- Schema migrations v1→v5 must be idempotent on real Postgres
+- Graceful shutdown path must remain unchanged
+
+**Recommended Slice Order (for Copilot):**
+1. Schema definition + test adapter (highest risk, must get 115 tests passing)
+2. Constraint error mapping in app.ts (must return 409, not 500)
+3. Connection pooling + env config (CONTROL_PLANE_DATABASE_URL)
+4. K3d provisioning + smoke integration
+5. PVC removal + docs cleanup
+
+**Next Actions:**
+- Waiting for Copilot to implement Slice 1
+- Will validate all test gates pass before approving each slice
+- Specific gate: `npm test --workspace apps/control-plane` must exit 0 with no assertion rewrites
+
