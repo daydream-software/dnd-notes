@@ -30,6 +30,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Local Override vs Pod-Network Auth Config:** For `scripts/k3d/tenant-api-override.sh`, treat `KEYCLOAK_JWKS_URL` from the tenant runtime ConfigMap as pod-scoped only when it points at `*.svc` / `*.svc.cluster.local`. The host-side `apps/api` override must clear that value and rely on the built-in `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs` fallback instead. Key files: `scripts/k3d/tenant-api-override.sh`, `apps/api/src/index.ts`, `apps/api/src/keycloak-auth.ts`, `platform/k3d/README.md`, `RUNTIME.md`.
 
+- **Post-Merge Orphan Recovery:** If a PR branch has a local-only follow-up docs/decision commit after the PR is already merged, recover it from `main` by fast-forwarding `main`, cherry-picking the missing commit, and pushing only the new recovery commit. Do not rewrite the merged branch or touch unrelated worktrees. Key paths: `.squad/decisions.md`, `.squad/agents/brand/history.md`; current example: recovered `9cccb60` from `squad/79-k3d-full-stack-smoke-live-override` onto `main` as `40c71f0`.
+
 - **Config Surfaces:** Web: `VITE_API_BASE_URL` (Vite env, defaults to http://localhost:3001). API: `PORT` (dotenv, default 3001). Shared routes: per-link `frameAncestors` policy. CORS: blanket allow (no options).
 
 - **Same-Origin Recommendation:** Eliminates CORS config, simplifies frame-ancestors, improves deployment friction. Recommend strongly for production.
@@ -126,4 +128,3 @@ Tenant namespace tenant-t-opaque123456 did not terminate within 50ms
 3. Avoid: Logic rewrites; risks masking real async bugs
 
 The 200ms fix keeps the test validating K8s namespace polling + async termination semantics while eliminating CI timing variance.
-
