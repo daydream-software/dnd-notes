@@ -15,7 +15,11 @@ export function normalizeBasePath(
   const withLeadingSlash = trimmedValue.startsWith('/')
     ? trimmedValue
     : `/${trimmedValue}`
-  const normalized = withLeadingSlash.replace(/\/+$/, '')
+
+  let normalized = withLeadingSlash
+  while (normalized.endsWith('/')) {
+    normalized = normalized.slice(0, -1)
+  }
 
   return normalized.length > 0 ? normalized : fallback
 }

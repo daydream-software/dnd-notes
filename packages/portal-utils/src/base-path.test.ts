@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { joinBasePath, normalizeBasePath } from './base-path'
+import { joinBasePath, normalizeBasePath } from './base-path.js'
 
 describe('normalizeBasePath', () => {
   it('falls back when unset or blank', () => {
