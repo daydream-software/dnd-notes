@@ -425,7 +425,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(result.tenant.subdomain, 't-existing123456')
       assert.equal(result.tenant.currentState, 'ready')
       assert.equal(
-        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).some(
+        (await tenantRegistry.getStateTransitions('tenant-demo')).some(
           (transition) => transition.toState === 'upgrading',
         ),
         true,
@@ -482,10 +482,10 @@ describe('TenantProvisioningService', () => {
         /Tenant version must be a non-empty string/,
       )
 
-      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
+      assert.equal((await tenantRegistry.getTenant('tenant-demo'))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
       assert.equal(
-        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).some(
+        (await tenantRegistry.getStateTransitions('tenant-demo')).some(
           (transition) => transition.toState === 'upgrading',
         ),
         false,
@@ -534,10 +534,10 @@ describe('TenantProvisioningService', () => {
         /Tenant version must be a valid container image tag/,
       )
 
-      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
+      assert.equal((await tenantRegistry.getTenant('tenant-demo'))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
       assert.equal(
-        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).some(
+        (await tenantRegistry.getStateTransitions('tenant-demo')).some(
           (transition) => transition.toState === 'upgrading',
         ),
         false,
@@ -594,7 +594,7 @@ describe('TenantProvisioningService', () => {
         },
       )
 
-      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
+      assert.equal((await tenantRegistry.getTenant('tenant-demo'))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
     } finally {
       await provisioningService.close()
@@ -645,10 +645,10 @@ describe('TenantProvisioningService', () => {
         },
       )
 
-      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
+      assert.equal((await tenantRegistry.getTenant('tenant-demo'))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
       assert.equal(
-        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).filter(
+        (await tenantRegistry.getStateTransitions('tenant-demo')).filter(
           (transition) => transition.toState === 'upgrading',
         ).length,
         1,
@@ -705,9 +705,9 @@ describe('TenantProvisioningService', () => {
         },
       )
 
-      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
+      assert.equal((await tenantRegistry.getTenant('tenant-demo'))?.version, '1.0.0')
       assert.equal(
-        (await (await tenantRegistry.getTenant('tenant-demo')))?.currentState,
+        (await tenantRegistry.getTenant('tenant-demo'))?.currentState,
         'maintenance',
       )
       assert.equal(infrastructureManager.bundles.length, 0)
@@ -894,7 +894,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(result.tenant.storageReference, null)
       assert.deepEqual(databaseManager.deletedDatabaseNames, [
         buildTenantResourceNames({
-          tenant: (await (await tenantRegistry.getTenant('tenant-demo')))!,
+          tenant: (await tenantRegistry.getTenant('tenant-demo'))!,
           subdomain: 't-existing123456',
           baseDomain: 'dnd-notes.test',
           imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -952,10 +952,10 @@ describe('TenantProvisioningService', () => {
       assert.equal(infrastructureManager.deletedResources.length, 0)
       assert.deepEqual(databaseManager.deletedDatabaseNames, [])
       assert.equal(
-        (await (await tenantRegistry.getTenant('tenant-demo')))?.storageReference,
+        (await tenantRegistry.getTenant('tenant-demo'))?.storageReference,
         'broken-storage-handle',
       )
-      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.currentState, 'ready')
+      assert.equal((await tenantRegistry.getTenant('tenant-demo'))?.currentState, 'ready')
     } finally {
       await provisioningService.close()
       await cleanup()

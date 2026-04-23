@@ -7,10 +7,9 @@ Migrated control-plane tenant registry from PVC-backed SQLite to shared Postgres
 ## Changes
 
 ### Code Changes
-- **Refactored TenantRegistry** into dual-mode async implementation:
-  - `tenant-registry.ts` - Thin wrapper that detects SQLite vs Postgres
-  - `tenant-registry-sqlite.ts` - SQLite backend (preserves local dev)
-  - `tenant-registry-postgres.ts` - New Postgres backend
+- **Refactored TenantRegistry** into a Postgres-only async implementation:
+  - `tenant-registry.ts` - Thin entrypoint that re-exports the Postgres registry
+  - `tenant-registry-postgres.ts` - Postgres-backed registry with schema bootstrap and pooling
 - **Updated app.ts** - Added `await` to 40+ TenantRegistry call sites
 - **Updated index.ts** - Added CONTROL_PLANE_DATABASE_URL support
 
@@ -26,7 +25,8 @@ Migrated control-plane tenant registry from PVC-backed SQLite to shared Postgres
 - **Updated k3d bootstrap:**
   - `scripts/k3d/bootstrap.sh` now creates `control_plane` database
 - **Updated smoke tests:**
-  - `scripts/k3d/full-stack-smoke.sh` wires CONTROL_PLANE_DATABASE_URL
+  - `scripts/k3d/smoke.sh` wires CONTROL_PLANE_DATABASE_URL for the local control-plane process
+  - `scripts/k3d/full-stack-smoke.sh` wires CONTROL_PLANE_DATABASE_URL for the in-cluster control-plane secret
 
 ## Validation
 
@@ -52,10 +52,9 @@ Migrated control-plane tenant registry from PVC-backed SQLite to shared Postgres
 
 **Challenge:** Node.js has no synchronous Postgres client, but TenantRegistry was built for synchronous better-sqlite3.
 
-**Solution:** Converted entire TenantRegistry to async, which was acceptable because:
+**Solution:** Converted the control-plane TenantRegistry to async, which was acceptable because:
 1. Express 5 naturally supports async route handlers
 2. The provisioning layer already used async/await
-3. Dual-mode implementation preserves local SQLite dev experience
+3. The hosted control-plane now has a single Postgres runtime contract
 
 **Key Decision:** Rather than trying to wedge synchronous Postgres access or add complex caching layers, we did the clean refactor to async. This makes the codebase more modern and maintainable.
-

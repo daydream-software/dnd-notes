@@ -142,12 +142,11 @@ Recovered orphaned commit `9cccb60` (k3d platform final fixes) after PR #81 squa
 
 **Challenge:** Node.js has no synchronous Postgres client, but TenantRegistry was built around synchronous better-sqlite3 calls. Converting to async required updating 40+ call sites.
 
-**Solution:** Refactored TenantRegistry into dual-mode implementation:
-- Created separate backend implementations (`tenant-registry-postgres.ts`, `tenant-registry-sqlite.ts`)
+**Solution:** Refactored TenantRegistry into a Postgres-only async implementation:
+- Moved the control-plane registry entrypoint to a thin re-export of `tenant-registry-postgres.ts`
 - Made all TenantRegistry methods async
 - Updated Express app to use async/await (app already supported it for provisioning)
-- Kept SQLite support for local dev (via DATABASE_PATH)
-- Added Postgres support for k8s deployment (via CONTROL_PLANE_DATABASE_URL)
+- Standardized control-plane runtime on `CONTROL_PLANE_DATABASE_URL`
 
 **Platform changes:**
 - Removed control-plane PVC (`pvc.yaml`) and volume mounts from Deployment
@@ -158,18 +157,17 @@ Recovered orphaned commit `9cccb60` (k3d platform final fixes) after PR #81 squa
 **Validation:** 
 - `npm test --workspace apps/control-plane`: 111/111 pass
 - `npm run platform:validate`: pass
-- Local SQLite tests still work (dual-mode preserved)
+- k3d smoke/full-stack flows updated to inject the control-plane Postgres URL
 
 **Key learnings:**
 - When migrating storage backends in Node, async conversion is often unavoidable
 - Express 5 handles async route handlers naturally - just add `await`
 - Platform PVC removal requires corresponding config/secret/bootstrap updates
-- Dual-mode implementations preserve local dev experience while enabling production Postgres
+- The control-plane registry should stay Postgres-only once the PVC-backed runtime is retired
 
 **Files changed:**
-- `apps/control-plane/src/tenant-registry*.ts` (split into 3 files)
+- `apps/control-plane/src/tenant-registry*.ts` (Postgres registry + thin entrypoint)
 - `apps/control-plane/src/app.ts` (added await to 40+ call sites)
 - `platform/control-plane/base/*.yaml` (removed PVC, updated config/secret)
 - `scripts/k3d/bootstrap.sh` (create control_plane database)
 - `scripts/k3d/full-stack-smoke.sh` (wire CONTROL_PLANE_DATABASE_URL)
-
