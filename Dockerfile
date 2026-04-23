@@ -5,6 +5,7 @@ FROM node:22.21.1-bookworm-slim AS base
 WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
+COPY packages/portal-utils ./packages/portal-utils
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 
@@ -18,6 +19,7 @@ FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
+RUN npm run build --workspace packages/portal-utils
 RUN npm run build --workspace apps/api
 RUN npm run build --workspace apps/web
 

@@ -21,6 +21,7 @@ apps/web/.vite
 docker/
 scripts/*
 !scripts/prepare.mjs
+!scripts/build-portal-utils.mjs
 .github/
 *.test.ts
 *.test.tsx
