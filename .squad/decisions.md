@@ -303,7 +303,7 @@ Start with:
 1. a small **control-plane registry/service**;
 2. a standard **reverse proxy** with wildcard DNS/TLS;
 3. **one app instance per customer** (container or service);
-4. **one SQLite file/volume per customer instance**.
+4. **one SQLite file/volume per customer instance** (**superseded by #95 on 2026-04-23**; replacement target: one Postgres database plus one least-privilege runtime role per tenant, with no tenant PVC in the normal hosted pod shape).
 
 Each customer instance should serve both web and API on the **same origin** under its own customer domain/subdomain. The control plane can live separately as the provisioning/admin surface.
 
