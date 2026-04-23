@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { newDb } from 'pg-mem'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
+import { createTenantRegistryPoolConfig } from '../src/tenant-registry-postgres.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 
@@ -275,6 +276,45 @@ describe('TenantRegistry', () => {
     } finally {
       await pool.end()
     }
+  })
+
+  it('builds the owned Postgres pool config from control-plane env settings', () => {
+    const config = createTenantRegistryPoolConfig(
+      'postgres://control-plane.test/tenant-registry',
+      {
+        CONTROL_PLANE_DATABASE_POOL_MIN: '2',
+        CONTROL_PLANE_DATABASE_POOL_MAX: '12',
+        CONTROL_PLANE_DATABASE_IDLE_TIMEOUT_MS: '45000',
+        CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS: '15000',
+        CONTROL_PLANE_DATABASE_STATEMENT_TIMEOUT_MS: '60000',
+      },
+    )
+
+    assert.equal(config.connectionString, 'postgres://control-plane.test/tenant-registry')
+    assert.equal(config.min, 2)
+    assert.equal(config.max, 12)
+    assert.equal(config.idleTimeoutMillis, 45_000)
+    assert.equal(config.connectionTimeoutMillis, 15_000)
+    assert.equal(config.statement_timeout, 60_000)
+  })
+
+  it('rejects invalid control-plane pool settings', () => {
+    assert.throws(
+      () =>
+        createTenantRegistryPoolConfig('postgres://control-plane.test/tenant-registry', {
+          CONTROL_PLANE_DATABASE_POOL_MIN: '5',
+          CONTROL_PLANE_DATABASE_POOL_MAX: '4',
+        }),
+      /CONTROL_PLANE_DATABASE_POOL_MAX \(4\) must be >= CONTROL_PLANE_DATABASE_POOL_MIN \(5\)/,
+    )
+
+    assert.throws(
+      () =>
+        createTenantRegistryPoolConfig('postgres://control-plane.test/tenant-registry', {
+          CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS: 'fast',
+        }),
+      /Invalid CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS value: fast/,
+    )
   })
 
   it('persists portal accounts and bearer-token sessions while purging expired sessions', async () => {

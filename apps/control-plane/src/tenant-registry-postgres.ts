@@ -102,17 +102,80 @@ interface StateTransitionRow {
   created_at: Date | string
 }
 
-function createOwnedTenantRegistryPool(connectionString: string): TenantRegistryPoolLike {
-  const config: PoolConfig = {
-    connectionString,
-    min: 0,
-    max: 10,
-    idleTimeoutMillis: 30_000,
-    connectionTimeoutMillis: 10_000,
-    statement_timeout: 30_000,
+function parseNonNegativeIntegerSetting(
+  name: string,
+  rawValue: string | undefined,
+  defaultValue: number,
+): number {
+  if (rawValue === undefined || rawValue.trim() === '') {
+    return defaultValue
   }
 
-  return new Pool(config)
+  if (!/^\d+$/.test(rawValue.trim())) {
+    throw new Error(`Invalid ${name} value: ${rawValue}`)
+  }
+
+  return Number(rawValue)
+}
+
+function parsePositiveIntegerSetting(
+  name: string,
+  rawValue: string | undefined,
+  defaultValue: number,
+): number {
+  const parsedValue = parseNonNegativeIntegerSetting(name, rawValue, defaultValue)
+
+  if (parsedValue < 1) {
+    throw new Error(`Invalid ${name} value: ${rawValue}`)
+  }
+
+  return parsedValue
+}
+
+export function createTenantRegistryPoolConfig(
+  connectionString: string,
+  env: NodeJS.ProcessEnv = process.env,
+): PoolConfig {
+  const config: PoolConfig = {
+    connectionString,
+    min: parseNonNegativeIntegerSetting(
+      'CONTROL_PLANE_DATABASE_POOL_MIN',
+      env.CONTROL_PLANE_DATABASE_POOL_MIN,
+      0,
+    ),
+    max: parsePositiveIntegerSetting(
+      'CONTROL_PLANE_DATABASE_POOL_MAX',
+      env.CONTROL_PLANE_DATABASE_POOL_MAX,
+      10,
+    ),
+    idleTimeoutMillis: parseNonNegativeIntegerSetting(
+      'CONTROL_PLANE_DATABASE_IDLE_TIMEOUT_MS',
+      env.CONTROL_PLANE_DATABASE_IDLE_TIMEOUT_MS,
+      30_000,
+    ),
+    connectionTimeoutMillis: parseNonNegativeIntegerSetting(
+      'CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS',
+      env.CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS,
+      10_000,
+    ),
+    statement_timeout: parseNonNegativeIntegerSetting(
+      'CONTROL_PLANE_DATABASE_STATEMENT_TIMEOUT_MS',
+      env.CONTROL_PLANE_DATABASE_STATEMENT_TIMEOUT_MS,
+      30_000,
+    ),
+  }
+
+  if ((config.max ?? 0) < (config.min ?? 0)) {
+    throw new Error(
+      `Invalid control-plane pool settings: CONTROL_PLANE_DATABASE_POOL_MAX (${config.max}) must be >= CONTROL_PLANE_DATABASE_POOL_MIN (${config.min}).`,
+    )
+  }
+
+  return config
+}
+
+function createOwnedTenantRegistryPool(connectionString: string): TenantRegistryPoolLike {
+  return new Pool(createTenantRegistryPoolConfig(connectionString))
 }
 
 function resolveTenantRegistryPool(

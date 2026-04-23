@@ -21,6 +21,7 @@ Migrated control-plane tenant registry from PVC-backed SQLite to shared Postgres
   - Removed DATABASE_PATH from base ConfigMap
 - **Added Postgres support:**
   - Added CONTROL_PLANE_DATABASE_URL to Secret
+  - Added optional `CONTROL_PLANE_DATABASE_*` pool tuning env vars for min/max/timeout settings
   - Updated k3d secret-patch with Postgres URL example
 - **Updated k3d bootstrap:**
   - `scripts/k3d/bootstrap.sh` now creates `control_plane` database
@@ -39,6 +40,12 @@ Migrated control-plane tenant registry from PVC-backed SQLite to shared Postgres
 
 - Run `npm run k3d:full-stack-smoke` for end-to-end validation
 - Consider updating RUNTIME.md with CONTROL_PLANE_DATABASE_URL documentation
+
+## Migration Strategy
+
+- Hosted rollouts assume a fresh control-plane Postgres bootstrap; this PR does not add an automated SQLite-to-Postgres migration path for pre-existing control-plane registries.
+- That matches the intended deployment path for this slice: there is no production control-plane SQLite dataset that must be preserved before switching hosted environments to `CONTROL_PLANE_DATABASE_URL`.
+- Older local/dev SQLite registries should be treated as disposable unless someone explicitly needs to preserve their metadata, in which case that migration remains a separate manual follow-up.
 
 ## Commits
 

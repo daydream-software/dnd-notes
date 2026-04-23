@@ -219,6 +219,11 @@ Environment variables:
 
 - `PORT` — HTTP port (default: 3001)
 - `CONTROL_PLANE_DATABASE_URL` — required Postgres connection string for the control-plane registry pool
+- `CONTROL_PLANE_DATABASE_POOL_MIN` — minimum Postgres connections kept in the control-plane registry pool (default: `0`)
+- `CONTROL_PLANE_DATABASE_POOL_MAX` — maximum Postgres connections allowed in the control-plane registry pool (default: `10`)
+- `CONTROL_PLANE_DATABASE_IDLE_TIMEOUT_MS` — idle Postgres connection timeout for the control-plane registry pool (default: `30000`)
+- `CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS` — connection acquisition timeout for the control-plane registry pool (default: `10000`)
+- `CONTROL_PLANE_DATABASE_STATEMENT_TIMEOUT_MS` — statement timeout for control-plane registry queries (default: `30000`)
 - `CONTROL_PLANE_AUTH_MODE` — `static` (default) or `keycloak`
 - `CONTROL_PLANE_ADMIN_TOKEN` — required bearer token for `/internal` routes when `CONTROL_PLANE_AUTH_MODE=static`
 - `CONTROL_PLANE_KEYCLOAK_URL` — Keycloak base URL for workforce/admin JWT validation
@@ -269,7 +274,10 @@ Postgres-backed for this slice. The registry stores:
 - Tenant registry (primary source of truth for tenant metadata)
 - State transition audit log (full lifecycle history)
 
-Future: Migrate to Postgres when fleet size justifies it.
+Hosted rollouts assume a fresh control-plane Postgres bootstrap. This slice does
+not include an automated SQLite-to-Postgres migration path for pre-existing
+control-plane registries; local/dev SQLite metadata should be recreated or
+manually migrated only if an older non-production environment needs to keep it.
 
 ## Design Constraints
 
