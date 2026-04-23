@@ -111,7 +111,7 @@ export async function provisionTenantThroughOperatorPortal(
     React.createElement<NonNullable<ComponentProps<typeof OperatorPortal>>>(
       OperatorPortal,
       {
-      keycloakClientFactory: createSmokeKeycloakClient(keycloakTokens),
+        keycloakClientFactory: createSmokeKeycloakClient(keycloakTokens),
       },
     ),
   )
