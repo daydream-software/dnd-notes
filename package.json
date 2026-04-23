@@ -52,7 +52,8 @@
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
     "test": "npm run test:portal-utils && npm run test:web && npm run test:api && npm run test:control-plane && npm run test:operator-portal && npm run test:customer-portal",
-    "prepare": "node ./scripts/prepare.mjs"
+    "prepare": "node ./scripts/prepare.mjs",
+    "postinstall": "npm run build --workspace packages/portal-utils"
   },
   "repository": {
     "type": "git",
