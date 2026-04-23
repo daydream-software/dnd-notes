@@ -5611,3 +5611,31 @@ Acceptance: Utility extracted; both sites import it; `npm run lint && npm test &
 - **Context:** PR #78 follow-up exposed that the operator portal had typed `CreateTenantRequest.initialAdminEmail` as required even though the control-plane `POST /internal/tenants` schema treats it as optional.
 - **Decision:** The operator portal should mirror backend optionality in shared request types. If the current form UX wants to collect an optional backend field, keep that requirement local to the form and allow the API helper/request type to omit the key when no value is supplied.
 - **Why it matters:** This keeps the portal's helper layer reusable for future flows that intentionally skip optional control-plane metadata and avoids frontend-only contract drift.
+# PR #81 local tenant-api JWKS override handling
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-23
+
+## Decision
+
+When the k3d tenant-api live override launcher reads tenant runtime config from
+Kubernetes, it must not pass an in-cluster-only `KEYCLOAK_JWKS_URL`
+(`*.svc` / `*.svc.cluster.local`) into the host-side `apps/api` process.
+Instead, the launcher should clear that override and let the local API fall back
+to `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`.
+
+## Why
+
+- Tenant pods and host-side overrides have different network paths to Keycloak.
+- The in-cluster Service hostname is correct for pods but unreachable from a
+  local process on the developer machine.
+- Reusing the runtime’s existing fallback behavior is lower-risk than inventing a
+  second rewrite scheme in the launcher.
+
+## Impact
+
+- `k3d:tenant-api-override` keeps bearer-token validation working during local
+  host overrides.
+- Tenant pods still keep the explicit in-cluster JWKS override they need.
+- Future host-side override tooling should treat in-cluster-only service URLs as
+  pod-scoped config, not universally reusable runtime settings.
