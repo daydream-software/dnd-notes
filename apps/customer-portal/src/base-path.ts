@@ -19,3 +19,9 @@ export function normalizeBasePath(
 
   return normalized.length > 0 ? normalized : fallback
 }
+
+export function joinBasePath(basePath: string, path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+
+  return basePath === '/' ? normalizedPath : `${basePath}${normalizedPath}`
+}

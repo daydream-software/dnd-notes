@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { normalizeBasePath } from './base-path'
+import { joinBasePath, normalizeBasePath } from './base-path'
 
 describe('normalizeBasePath', () => {
   it('falls back when unset or blank', () => {
@@ -15,6 +15,18 @@ describe('normalizeBasePath', () => {
   it('trims whitespace and removes trailing slashes', () => {
     expect(normalizeBasePath(' /portal-api/// ', '/fallback')).toBe(
       '/portal-api',
+    )
+  })
+})
+
+describe('joinBasePath', () => {
+  it('keeps root-mounted APIs same-origin', () => {
+    expect(joinBasePath('/', '/portal/catalog')).toBe('/portal/catalog')
+  })
+
+  it('prefixes non-root base paths without double slashes', () => {
+    expect(joinBasePath('/portal-api', '/portal/catalog')).toBe(
+      '/portal-api/portal/catalog',
     )
   })
 })

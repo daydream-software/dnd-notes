@@ -1,3 +1,4 @@
+import { joinBasePath } from './base-path'
 import { portalApiBasePath } from './config'
 import type {
   ErrorResponse,
@@ -59,7 +60,7 @@ async function postJson<TResponse>(
   authToken?: string,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(`${portalApiBasePath}${path}`, {
+  const response = await fetch(joinBasePath(portalApiBasePath, path), {
     method: 'POST',
     headers: createHeaders(authToken, 'application/json'),
     body: JSON.stringify(body),
@@ -70,7 +71,9 @@ async function postJson<TResponse>(
 }
 
 export async function fetchPortalCatalog(signal?: AbortSignal) {
-  const response = await fetch(`${portalApiBasePath}/portal/catalog`, { signal })
+  const response = await fetch(joinBasePath(portalApiBasePath, '/portal/catalog'), {
+    signal,
+  })
   return readJson<PortalCatalogResponse>(response)
 }
 
@@ -89,7 +92,7 @@ export async function fetchPortalDashboard(
   authToken: string,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(`${portalApiBasePath}/portal/me`, {
+  const response = await fetch(joinBasePath(portalApiBasePath, '/portal/me'), {
     headers: createHeaders(authToken),
     signal,
   })
