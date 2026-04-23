@@ -5529,3 +5529,85 @@ Do not split these into separate backlog items yet.
 - #79 is labeled `go:needs-research` because the live-override shape must be proven and unsupported cases documented with evidence.
 - Brand owns the issue because the primary work is platform glue: k3d orchestration, traffic redirection, and workflow scripting/docs.
 - The smoke lane should use the highest-level operator surface available at implementation time (portal if ready, otherwise control-plane API), and should not settle on a raw-manifest-only happy path.
+
+### 2026-04-23: Brand — PR #81 operator smoke DOM typing boundary
+
+## Context
+
+`scripts/k3d/operator-portal-smoke.ts` runs under the repo's root Node-focused `tsconfig.json`, but it bootstraps JSDOM and calls into the operator portal's TSX live-smoke helper. A naive fix would widen the whole root scripts project to DOM libs and JSX, which would also drag `apps/operator-portal/src/live-smoke.tsx` under the root compiler's `rootDir` and NodeNext rules.
+
+## Decision
+
+Keep the root `scripts` TypeScript project Node-only. Fix browser-ish smoke harnesses by:
+
+1. giving the script its own local loose types for DOM-ish globals and fetch inputs,
+2. adding direct root typings for packages the script imports itself (`@types/jsdom` here), and
+3. loading cross-workspace TSX helpers with runtime `import()` so each workspace keeps its own compiler settings.
+
+## Why
+
+- The root scripts project is infrastructure glue, not a browser app; widening it to DOM/JSX would blur that boundary for every script.
+- The operator portal already has a browser-oriented tsconfig; reusing that at runtime is fine, but re-typechecking it under the root NodeNext config creates avoidable extension/rootDir friction.
+- This keeps the fix surgical to PR #81 while still making `tsc -p tsconfig.json` green.
+
+## Impact
+
+- Future root smoke scripts that host JSDOM should stay Node-scoped unless the whole scripts project genuinely becomes browser-aware.
+- Cross-workspace UI harness imports should prefer runtime loading over static type-coupling when tsconfig expectations differ.
+
+### 2026-04-23: Brand — CI-safe namespace polling budget
+
+- **Decision:** Keep the control-plane namespace-deletion regression focused on eventual namespace termination, but stop using a 50ms wall-clock budget. The test should keep its short poll interval and fake namespace countdown, while using a small explicit timeout headroom (`deleteTimeoutMs = 200`) that survives normal CI variance.
+- **Why:** The behavior under test is that `deleteTenantResources()` keeps polling namespace reads until Kubernetes returns 404, not that three async reads plus sleeps always finish inside 50ms on shared runners.
+- **Scope:** `apps/control-plane/test/provisioning.test.ts` now carries the safer budget; production polling in `apps/control-plane/src/provisioning.ts` stays unchanged.
+
+### 2026-04-23: Copilot — supported k3d live override shape for issue #79
+
+**Context:** Issue #79 needed both a full-stack k3d smoke lane and one proven
+component-level live override workflow.
+
+**Decision:** The supported live override pattern is a **local front proxy**
+that keeps tenant document/static traffic on the k3d tenant host while routing
+`/api/*` to a locally running `apps/api` process. The full-stack smoke lane
+remains a separate script that deploys the control plane in-cluster and
+provisions through the operator portal surface.
+
+**Why:** The current tenant runtime is still shipped as one Kubernetes
+Service/Deployment backed by a single `web + api` image. Trying to "override one
+component" by editing in-cluster ingress or service wiring would invent a new
+topology the repo does not actually deploy. The front-proxy approach preserves
+same-origin browser behavior, proves the override with request evidence, and
+keeps the k3d contract boring.
+
+**Implications:**
+- `tenant-api` local override is supported and documented.
+- `tenant-web`-only override and arbitrary component swaps remain unsupported
+  until the runtime deployment topology changes.
+
+### 2026-04-22T19:50Z: Mikey — PR #78 Triage: Unresolved Review Comment Routing
+
+**PR:** #78 (feat(operator-portal): build the operator control portal)  
+**Issue Affected:** #68 (operator-portal completion)
+
+**Finding:** One unresolved review comment remains on PR #78:  
+Location: `apps/operator-portal/vite.config.ts:17`  
+Request: Extract duplicate `normalizeBasePath()` function into a shared utility module; avoid future drift between Vite config and runtime config normalization rules.
+
+**Scope:**
+- `apps/operator-portal/vite.config.ts` (lines 5–17): remove function, add import
+- `apps/operator-portal/src/config.ts` (lines 3–15): remove function, add import
+- **New:** `apps/operator-portal/src/normalize-base-path.ts` (small utility)
+
+**Routing Decision:** Assignee Brand (Platform Dev)  
+Reason: Brand owns operator-portal config and test harness; this is a local utility extraction with no cross-workspace dependencies.  
+Effort: ~5 minutes.  
+Acceptance: Utility extracted; both sites import it; `npm run lint && npm test && npm run build` green.
+
+**Note:** This is straightforward refactoring. No blocking decisions needed; Brand can execute directly.
+
+### 2026-04-22: Stef — optional create-tenant field alignment
+
+- **Date:** 2026-04-22
+- **Context:** PR #78 follow-up exposed that the operator portal had typed `CreateTenantRequest.initialAdminEmail` as required even though the control-plane `POST /internal/tenants` schema treats it as optional.
+- **Decision:** The operator portal should mirror backend optionality in shared request types. If the current form UX wants to collect an optional backend field, keep that requirement local to the form and allow the API helper/request type to omit the key when no value is supplied.
+- **Why it matters:** This keeps the portal's helper layer reusable for future flows that intentionally skip optional control-plane metadata and avoids frontend-only contract drift.

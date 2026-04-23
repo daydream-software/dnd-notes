@@ -21,7 +21,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as React from 'react'
 import { buildOperatorRedirectUri, operatorKeycloakConfig } from './config'
 import { fetchFleetStatus } from './control-plane-api'
 import {
@@ -39,8 +39,11 @@ import type {
   FleetStatusResponse,
   FleetTenantBackupStatus,
   FleetTenantStatus,
+  OperatorKeycloakConfig,
   TenantState,
 } from './types'
+
+const { useCallback, useEffect, useMemo, useRef, useState } = React
 
 const surfaceRadius = 6
 
@@ -175,7 +178,13 @@ function getMutationDisabledReason(fleetStatus: FleetStatusResponse | null) {
   return null
 }
 
-export default function OperatorPortal() {
+interface OperatorPortalProps {
+  keycloakClientFactory?: (config: OperatorKeycloakConfig) => RuntimeKeycloakClient
+}
+
+export default function OperatorPortal({
+  keycloakClientFactory = createRuntimeKeycloakClient,
+}: OperatorPortalProps = {}) {
   const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [fleetStatus, setFleetStatus] = useState<FleetStatusResponse | null>(null)
@@ -218,7 +227,7 @@ export default function OperatorPortal() {
 
   useEffect(() => {
     let cancelled = false
-    const keycloakClient = createRuntimeKeycloakClient(operatorKeycloakConfig)
+    const keycloakClient = keycloakClientFactory(operatorKeycloakConfig)
     keycloakClientRef.current = keycloakClient
 
     const bootstrapAuth = async () => {
@@ -258,7 +267,7 @@ export default function OperatorPortal() {
     return () => {
       cancelled = true
     }
-  }, [clearSession, loadFleet])
+  }, [clearSession, keycloakClientFactory, loadFleet])
 
   useEffect(() => {
     if (!authToken || !keycloakClientRef.current) {
@@ -442,13 +451,21 @@ export default function OperatorPortal() {
         </Alert>
 
         {notice ? (
-          <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+          <Alert
+            severity="success"
+            sx={{ borderRadius: surfaceRadius }}
+            data-testid="operator-portal-notice"
+          >
             {notice}
           </Alert>
         ) : null}
 
         {error ? (
-          <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
+          <Alert
+            severity="error"
+            sx={{ borderRadius: surfaceRadius }}
+            data-testid="operator-portal-error"
+          >
             {error}
           </Alert>
         ) : null}

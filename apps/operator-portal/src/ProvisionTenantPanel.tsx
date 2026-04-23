@@ -14,9 +14,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { useEffect, useMemo, useState } from 'react'
+import * as React from 'react'
 import { createTenant, provisionTenant } from './control-plane-api'
 import type { CreateTenantRequest } from './types'
+
+const { useEffect, useMemo, useState } = React
 
 interface ProvisionTenantPanelProps {
   actor: string

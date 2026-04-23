@@ -34,6 +34,11 @@ docker run -p 3000:3000 \
 
 The container serves both web and API on the same origin at port 3000.
 
+If you need a split-origin frontend build instead, set `VITE_API_BASE_URL` before
+building `apps/web`. When the variable is unset, production builds now default to
+same-origin `/api/*` requests while local Vite development still falls back to
+`http://localhost:3001`.
+
 For detailed runtime configuration, health endpoints, and Kubernetes deployment guidance, see [RUNTIME.md](./RUNTIME.md).
 
 ## Scripts
@@ -107,13 +112,20 @@ Issue `#63` formalizes the daily local Kubernetes lane for platform work.
 ```bash
 npm run k3d:bootstrap
 npm run k3d:smoke
+npm run k3d:full-stack-smoke
 ```
 
 - `k3d:bootstrap` creates the local cluster shape and deploys ingress-nginx,
   platform Postgres, and seeded Keycloak.
-- `k3d:smoke` builds/imports the tenant image, runs the control plane locally
-  against the live k3d kube context, provisions a tenant, and verifies both
-  tenant readiness and the live Keycloak-backed control-plane/tenant auth path.
+- `k3d:smoke` is still the fast provisioning/debug loop: it keeps the control
+  plane local and validates tenant readiness plus the live Keycloak-backed
+  control-plane/tenant auth seam.
+- `k3d:full-stack-smoke` is the issue `#79` full-stack rehearsal: it deploys the
+  control plane in k3d, provisions a tenant through the operator portal surface,
+  and verifies tenant requests through ingress.
+- `k3d:tenant-api-override` is the supported live override lane: it keeps tenant
+  web on k3d, runs `apps/api` locally in watch mode, and routes `/api/*` through
+  a same-origin front proxy.
 
 Issue `#43` also commits the in-cluster control-plane packaging lane without
 changing that fast smoke path:

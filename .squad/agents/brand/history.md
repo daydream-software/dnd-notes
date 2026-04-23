@@ -28,6 +28,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Learnings
 
+- **Local Override vs Pod-Network Auth Config:** For `scripts/k3d/tenant-api-override.sh`, treat `KEYCLOAK_JWKS_URL` from the tenant runtime ConfigMap as pod-scoped only when it points at `*.svc` / `*.svc.cluster.local`. The host-side `apps/api` override must clear that value and rely on the built-in `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs` fallback instead. Key files: `scripts/k3d/tenant-api-override.sh`, `apps/api/src/index.ts`, `apps/api/src/keycloak-auth.ts`, `platform/k3d/README.md`, `RUNTIME.md`.
+
 - **Config Surfaces:** Web: `VITE_API_BASE_URL` (Vite env, defaults to http://localhost:3001). API: `PORT` (dotenv, default 3001). Shared routes: per-link `frameAncestors` policy. CORS: blanket allow (no options).
 
 - **Same-Origin Recommendation:** Eliminates CORS config, simplifies frame-ancestors, improves deployment friction. Recommend strongly for production.
@@ -73,6 +75,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 - **CI-Safe Namespace Polling Tests:** For control-plane deletion tests that model repeated namespace reads before a terminal 404, keep the fake countdown/assertions and widen the explicit timeout budget instead of rewriting production polling. The current stable shape is `namespaceReadCountdown = 2`, `readyPollIntervalMs = 1`, and `deleteTimeoutMs = 200` in `apps/control-plane/test/provisioning.test.ts`, which preserves the namespace-termination intent while absorbing CI scheduler variance. Key files: `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
 
 - **Shared Operator Portal Base-Path Normalization:** Keep `VITE_OPERATOR_API_BASE_PATH` normalization in `apps/operator-portal/src/base-path.ts` and reuse it from both `apps/operator-portal/vite.config.ts` and `apps/operator-portal/src/config.ts`. A focused regression in `apps/operator-portal/src/base-path.test.ts` should lock the blank/root/trailing-slash cases so the dev proxy and runtime config cannot drift.
+
+- **Node-Only Script Type Boundaries:** Keep the root `scripts` TypeScript project Node-scoped (`types: ["node"]`) even when a smoke harness spins up JSDOM. For cross-workspace browser helpers like `scripts/k3d/operator-portal-smoke.ts`, prefer local loose browser-ish types plus a runtime `import()` of the TSX helper instead of widening the root tsconfig to DOM/JSX or pulling another workspace under `rootDir`. Pair that with a direct root `@types/jsdom` devDependency because the script owns the `jsdom` import even if npm hoists the runtime package from `apps/operator-portal`.
 
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 

@@ -29,9 +29,12 @@ import type {
   SharedMembershipClaimResponse,
   SharedSessionResponse,
 } from './types'
+import { resolveApiBaseUrl } from './api-base-url'
 
-const apiBaseUrl =
-  import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:3001'
+const apiBaseUrl = resolveApiBaseUrl(
+  import.meta.env.VITE_API_BASE_URL,
+  import.meta.env.DEV,
+)
 
 function createHeaders(authToken?: string, includeJson = false) {
   const headers = new Headers()

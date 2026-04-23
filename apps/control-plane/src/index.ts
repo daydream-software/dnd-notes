@@ -41,6 +41,12 @@ const ADMIN_TOKEN = process.env.CONTROL_PLANE_ADMIN_TOKEN
 const ENABLE_TENANT_PROVISIONING =
   process.env.CONTROL_PLANE_ENABLE_PROVISIONING === 'true'
 const CONTROL_PLANE_KEYCLOAK_URL = process.env.CONTROL_PLANE_KEYCLOAK_URL
+const rawControlPlaneKeycloakJwksUrl =
+  process.env.CONTROL_PLANE_KEYCLOAK_JWKS_URL?.trim()
+const CONTROL_PLANE_KEYCLOAK_JWKS_URL =
+  rawControlPlaneKeycloakJwksUrl === undefined || rawControlPlaneKeycloakJwksUrl === ''
+    ? undefined
+    : rawControlPlaneKeycloakJwksUrl
 const CONTROL_PLANE_KEYCLOAK_REALM = process.env.CONTROL_PLANE_KEYCLOAK_REALM
 const CONTROL_PLANE_KEYCLOAK_CLIENT_ID =
   process.env.CONTROL_PLANE_KEYCLOAK_CLIENT_ID
@@ -69,6 +75,11 @@ const TENANT_KEYCLOAK_JWKS_URL =
 const TENANT_KEYCLOAK_REALM = process.env.TENANT_KEYCLOAK_REALM
 const TENANT_KEYCLOAK_CLIENT_ID = process.env.TENANT_KEYCLOAK_CLIENT_ID
 const TENANT_BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN
+const rawTenantIngressClassName = process.env.TENANT_INGRESS_CLASS_NAME?.trim()
+const TENANT_INGRESS_CLASS_NAME =
+  rawTenantIngressClassName && rawTenantIngressClassName.length > 0
+    ? rawTenantIngressClassName
+    : 'nginx'
 const TENANT_IMAGE_REPOSITORY = process.env.TENANT_IMAGE_REPOSITORY
 const TENANT_DATABASE_ADMIN_URL = process.env.TENANT_DATABASE_ADMIN_URL
 const TENANT_DATABASE_RUNTIME_URL = process.env.TENANT_DATABASE_RUNTIME_URL
@@ -119,6 +130,7 @@ if (
 const adminAuth = createControlPlaneAdminAuth({
   mode: CONTROL_PLANE_AUTH_MODE,
   keycloakUrl: CONTROL_PLANE_KEYCLOAK_URL,
+  jwksUrl: CONTROL_PLANE_KEYCLOAK_JWKS_URL,
   keycloakRealm: CONTROL_PLANE_KEYCLOAK_REALM,
   clientId: CONTROL_PLANE_KEYCLOAK_CLIENT_ID,
   requiredRoles: CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES,
@@ -211,6 +223,7 @@ if (ENABLE_TENANT_PROVISIONING) {
   tenantProvisioningService = createLiveTenantProvisioningService({
     tenantRegistry,
     baseDomain: TENANT_BASE_DOMAIN,
+    ingressClassName: TENANT_INGRESS_CLASS_NAME,
     imageRepository: TENANT_IMAGE_REPOSITORY,
     databaseAdminUrl: TENANT_DATABASE_ADMIN_URL,
     databaseRuntimeUrl: TENANT_DATABASE_RUNTIME_URL,

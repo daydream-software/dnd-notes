@@ -8,6 +8,7 @@ data:
   TENANT_PUBLIC_SCHEME: http
   CONTROL_PLANE_AUTH_MODE: keycloak
   CONTROL_PLANE_KEYCLOAK_URL: http://keycloak.127.0.0.1.nip.io:8080
+  CONTROL_PLANE_KEYCLOAK_JWKS_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs
   CONTROL_PLANE_KEYCLOAK_REALM: dnd-notes-dev
   CONTROL_PLANE_KEYCLOAK_CLIENT_ID: dnd-notes-control-plane
   CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES: control-plane-admin,control-plane-workforce
@@ -16,3 +17,4 @@ data:
   TENANT_KEYCLOAK_JWKS_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs
   TENANT_KEYCLOAK_REALM: dnd-notes-dev
   TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app
+  TENANT_INGRESS_CLASS_NAME: nginx

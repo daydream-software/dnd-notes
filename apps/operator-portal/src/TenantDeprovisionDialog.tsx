@@ -11,9 +11,11 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
-import { useEffect, useMemo, useState } from 'react'
+import * as React from 'react'
 import { deprovisionTenant } from './control-plane-api'
 import type { FleetTenantStatus } from './types'
+
+const { useEffect, useMemo, useState } = React
 
 interface TenantDeprovisionDialogProps {
   actor: string

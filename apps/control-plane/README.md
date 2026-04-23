@@ -234,6 +234,7 @@ Environment variables:
 - `TENANT_KEYCLOAK_REALM` — tenant realm injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
 - `TENANT_KEYCLOAK_CLIENT_ID` — tenant web client ID injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
 - `TENANT_BASE_DOMAIN` — base domain for generated tenant hosts
+- `TENANT_INGRESS_CLASS_NAME` — ingress class used for generated tenant Ingress resources (`nginx` by default)
 - `TENANT_IMAGE_REPOSITORY` — tenant image repository used in generated Deployments
 - `TENANT_DATABASE_ADMIN_URL` — admin Postgres URL used to create/drop tenant databases, roles, and bootstrap schema
 - `TENANT_DATABASE_RUNTIME_URL` — optional runtime URL template; host/port/SSL options come from here, but user/password/database are replaced with tenant-scoped values for new tenants
