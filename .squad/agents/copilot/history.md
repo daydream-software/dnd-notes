@@ -176,3 +176,63 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - 2026-04-23T00:41:00Z Completed the tenth PR #80 Copilot review-fix batch for issue #70: `apps/customer-portal/src/base-path.ts` now preserves `VITE_PORTAL_API_BASE_PATH=/` instead of collapsing root back to the fallback path, with a new `apps/customer-portal/src/base-path.test.ts` mirroring the operator-portal blank/root/trailing-slash coverage. `TenantRegistry.createPortalSession()` now reuses a private portal-session lookup instead of calling the public getter from inside the insert transaction, so new session creation only runs the expired-session purge once per request. Re-ran `npm run lint --workspace apps/control-plane && npm run test --workspace apps/control-plane -- && npm run build --workspace apps/control-plane && npm run lint --workspace apps/customer-portal && npm run test --workspace apps/customer-portal -- && npm run build --workspace apps/customer-portal` successfully.
 - 2026-04-23T00:47:00Z Completed the eleventh PR #80 Copilot review-fix batch for issue #70: customer-portal API URL construction now uses a shared `joinBasePath()` helper so `VITE_PORTAL_API_BASE_PATH=/` still produces same-origin request paths like `/portal/catalog` instead of protocol-relative `//portal/catalog`. Added focused customer-portal regression coverage for root and non-root base-path joining in `apps/customer-portal/src/base-path.test.ts`, wired `apps/customer-portal/src/control-plane-api.ts` through the helper for all fetches, and re-ran `npm run lint --workspace apps/customer-portal && npm run test --workspace apps/customer-portal -- && npm run build --workspace apps/customer-portal` successfully.
 
+
+## 2026-04-23: Issue #97 Control-Plane Postgres Migration Decision
+
+**Decision:** Convert TenantRegistry to async Postgres-backed implementation.
+
+**Context:** Control-plane currently uses better-sqlite3 with a PVC-backed SQLite file. Goal is to migrate to shared Postgres instance to remove PVC dependency and enable stateless control-plane.
+
+**Options considered:**
+1. Dual-mode sync TenantRegistry (SQLite + Postgres) - rejected: no sync Postgres client exists
+2. SQLite-as-cache with Postgres backing - rejected: overengineered
+3. Init container syncing Postgres to SQLite - rejected: complicated
+4. **Convert TenantRegistry to async with Postgres** - **CHOSEN**: clean, correct solution
+
+**Implementation approach:**
+- Modify TenantRegistry to accept either DATABASE_PATH (SQLite) or CONTROL_PLANE_DATABASE_URL (Postgres)
+- Convert all TenantRegistry methods to async
+- Update Express app handlers to async/await
+- Add Postgres URL to control-plane Secret
+- Remove PVC from manifests
+- Update smoke scripts
+
+
+## 2026-04-23: Issue #97 Control-Plane Postgres Migration Decision
+
+**Decision:** Convert TenantRegistry to async Postgres-backed implementation.
+
+**Context:** Control-plane currently uses better-sqlite3 with a PVC-backed SQLite file. Goal is to migrate to shared Postgres instance to remove PVC dependency and enable stateless control-plane.
+
+**Options considered:**
+1. Dual-mode sync TenantRegistry (SQLite + Postgres) - rejected: no sync Postgres client exists
+2. SQLite-as-cache with Postgres backing - rejected: overengineered
+3. Init container syncing Postgres to SQLite - rejected: complicated
+4. **Convert TenantRegistry to async with Postgres** - **CHOSEN**: clean, correct solution
+
+**Implementation approach:**
+- Modify TenantRegistry to accept either DATABASE_PATH (SQLite) or CONTROL_PLANE_DATABASE_URL (Postgres)
+- Convert all TenantRegistry methods to async
+- Update Express app handlers to async/await
+- Add Postgres URL to control-plane Secret
+- Remove PVC from manifests
+- Update smoke scripts
+
+
+**REVISED approach:** After analysis, converting to async would require rewriting the entire Express app (40+ call sites). Instead, keeping SQLite but removing PVC dependency by using emptyDir or accepting data loss on pod restart. Control-plane is ephemeral registry for K8s-backed tenants - can rebuild state from K8s if needed.
+
+**FINAL approach:** Use CONTROL_PLANE_DATABASE_URL to connect to Postgres, convert TenantRegistry to async step-by-step.
+
+
+## Progress Update (2026-04-23, 1 hour in)
+
+**Status:** Analysis paralysis broken. Committing to async Postgres implementation.
+
+**Key insight:** There's no synchronous Postgres client for Node. Converting TenantRegistry to async is the only clean path forward.
+
+**Action:** Implementing async TenantRegistry with Postgres backing. Will update all 40+ call sites in app.ts to use async/await.
+
+**Timeline estimate:** 2-3 hours for full conversion + validation.
+
+
+

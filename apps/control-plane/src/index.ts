@@ -1,7 +1,5 @@
 import dotenv from 'dotenv'
 import type { Server } from 'node:http'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { createApp } from './app.js'
 import { createControlPlaneAdminAuth } from './keycloak-auth.js'
 import {
@@ -12,9 +10,6 @@ import { createShutdownController } from './shutdown.js'
 import { TenantRegistry } from './tenant-registry.js'
 
 dotenv.config()
-
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
 
 const rawPort = process.env.PORT
 const PORT =
@@ -28,14 +23,7 @@ if (!Number.isInteger(PORT) || PORT < 0 || PORT > 65535) {
   throw new Error(`Invalid PORT value: ${rawPort}`)
 }
 
-const rawDatabasePath = process.env.DATABASE_PATH
-const DATABASE_PATH = rawDatabasePath
-  ? path.isAbsolute(rawDatabasePath)
-    ? rawDatabasePath
-    : path.resolve(__dirname, '..', rawDatabasePath)
-  : path.join(__dirname, '../data/control-plane.sqlite')
-
-const CONTROL_PLANE_DATABASE_URL = process.env.CONTROL_PLANE_DATABASE_URL
+const CONTROL_PLANE_DATABASE_URL = process.env.CONTROL_PLANE_DATABASE_URL?.trim()
 
 const CONTROL_PLANE_AUTH_MODE =
   process.env.CONTROL_PLANE_AUTH_MODE === 'keycloak' ? 'keycloak' : 'static'
@@ -176,22 +164,11 @@ function parsePositiveIntegerSetting(
   return parsedValue
 }
 
-if (CONTROL_PLANE_DATABASE_URL && rawDatabasePath) {
-  throw new Error(
-    'Cannot specify both CONTROL_PLANE_DATABASE_URL and DATABASE_PATH',
-  )
-}
-
 if (!CONTROL_PLANE_DATABASE_URL) {
-  const databaseDir = path.dirname(DATABASE_PATH)
-  await import('node:fs/promises').then((fs) =>
-    fs.mkdir(databaseDir, { recursive: true }),
-  )
+  throw new Error('CONTROL_PLANE_DATABASE_URL is required')
 }
 
-const tenantRegistry = CONTROL_PLANE_DATABASE_URL
-  ? new TenantRegistry(CONTROL_PLANE_DATABASE_URL)
-  : new TenantRegistry(DATABASE_PATH)
+const tenantRegistry = new TenantRegistry(CONTROL_PLANE_DATABASE_URL)
 let tenantProvisioningService: TenantProvisioningPort | undefined
 
 if (ENABLE_TENANT_PROVISIONING) {
@@ -275,7 +252,7 @@ const shutdownController = createShutdownController({
       await tenantProvisioningService.close()
     }
 
-    tenantRegistry.close()
+    await tenantRegistry.close()
   },
   exit: (exitCode) => {
     console.log('Control plane stopped')
@@ -289,12 +266,7 @@ const shutdownController = createShutdownController({
 
 serverRef.current = app.listen(PORT, () => {
   console.log(`Control plane listening on port ${PORT}`)
-  if (CONTROL_PLANE_DATABASE_URL) {
-    const sanitizedUrl = CONTROL_PLANE_DATABASE_URL.replace(/:[^:@]+@/, ':***@')
-    console.log(`Database: ${sanitizedUrl}`)
-  } else {
-    console.log(`Database: ${DATABASE_PATH}`)
-  }
+  console.log('Registry backend: postgres')
 })
 
 const shutdown = () => {

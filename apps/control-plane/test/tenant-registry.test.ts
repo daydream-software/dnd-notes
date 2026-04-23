@@ -1,378 +1,176 @@
 import assert from 'node:assert/strict'
-import Database from 'better-sqlite3'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { describe, it } from 'node:test'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
-import { TenantRegistry } from '../src/tenant-registry.js'
+import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 
 describe('TenantRegistry', () => {
-  it('migrates a v1 registry database to v3 by adding subdomain and initial-admin columns', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
-    const databasePath = join(directory, 'registry.sqlite')
-    const rawDb = new Database(databasePath)
-
-    rawDb.exec(`
-      CREATE TABLE schema_metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-
-      CREATE TABLE tenants (
-        id TEXT PRIMARY KEY,
-        slug TEXT UNIQUE NOT NULL,
-        owner_id TEXT NOT NULL,
-        desired_state TEXT NOT NULL,
-        current_state TEXT NOT NULL,
-        version TEXT NOT NULL,
-        storage_reference TEXT,
-        backup_metadata TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE state_transitions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        from_state TEXT NOT NULL,
-        to_state TEXT NOT NULL,
-        triggered_by TEXT NOT NULL,
-        reason TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      INSERT INTO schema_metadata (key, value)
-      VALUES ('tenant_state_signature', 'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned');
-
-      INSERT INTO tenants (id, slug, owner_id, desired_state, current_state, version)
-      VALUES ('tenant-1', 'tenant-one', 'owner-1', 'ready', 'ready', '1.0.0');
-
-      PRAGMA user_version = 1;
-    `)
-    rawDb.close()
+  it('bootstraps the Postgres registry schema with the expected columns', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
 
     try {
-      const tenantRegistry = new TenantRegistry(databasePath)
-      const migratedTenant = tenantRegistry.getTenant('tenant-1')
-      const migratedDb = new Database(databasePath, { readonly: true })
-      const columns = migratedDb
-        .prepare(`PRAGMA table_info(tenants)`)
-        .all() as Array<{ name: string }>
-      const indexes = migratedDb
-        .prepare(`PRAGMA index_list(tenants)`)
-        .all() as Array<{ name: string }>
-      migratedDb.close()
-      tenantRegistry.close()
+      await tenantRegistry.checkHealth()
 
-      assert.equal(migratedTenant?.subdomain, null)
-      assert.equal(migratedTenant?.initialAdminEmail, null)
-      assert.ok(columns.some((column) => column.name === 'subdomain'))
-      assert.ok(columns.some((column) => column.name === 'initial_admin_email'))
-      assert.ok(indexes.some((index) => index.name === 'idx_tenants_subdomain'))
+      const tenantColumns = await pool.query<{ column_name: string }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_name = 'tenants'`,
+      )
+      const portalAccountColumns = await pool.query<{ column_name: string }>(
+        `SELECT column_name
+         FROM information_schema.columns
+         WHERE table_name = 'portal_accounts'`,
+      )
+
+      assert.equal(
+        tenantColumns.rows.some((column) => column.column_name === 'display_name'),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some((column) => column.column_name === 'plan_tier'),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some(
+          (column) => column.column_name === 'initial_admin_email',
+        ),
+        true,
+      )
+      assert.equal(
+        portalAccountColumns.rows.some(
+          (column) => column.column_name === 'password_hash',
+        ),
+        true,
+      )
     } finally {
-      await rm(directory, { recursive: true, force: true })
+      await cleanup()
     }
   })
 
-  it('reserves and persists an opaque subdomain while retrying on collisions', () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+  it('reserves and persists an opaque subdomain while retrying on collisions', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-1',
         slug: 'tenant-one',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-2',
         slug: 'tenant-two',
         ownerId: 'owner-2',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-1', 't-collision')
+      await tenantRegistry.updateTenantSubdomain('tenant-1', 't-collision')
 
       const candidates = ['t-collision', 't-fresh']
-      const reserved = tenantRegistry.reserveTenantSubdomain(
+      const reserved = await tenantRegistry.reserveTenantSubdomain(
         'tenant-2',
         () => candidates.shift() ?? 't-fallback',
       )
 
       assert.equal(reserved, 't-fresh')
-      assert.equal(tenantRegistry.getTenant('tenant-2')?.subdomain, 't-fresh')
+      assert.equal((await tenantRegistry.getTenant('tenant-2'))?.subdomain, 't-fresh')
     } finally {
-      tenantRegistry.close()
-    }
-  })
-
-  it('migrates a v2 registry database by adding initial-admin email and recreating the subdomain index', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
-    const databasePath = join(directory, 'registry.sqlite')
-    const rawDb = new Database(databasePath)
-
-    rawDb.exec(`
-      CREATE TABLE schema_metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-
-      CREATE TABLE tenants (
-        id TEXT PRIMARY KEY,
-        slug TEXT UNIQUE NOT NULL,
-        subdomain TEXT,
-        owner_id TEXT NOT NULL,
-        desired_state TEXT NOT NULL,
-        current_state TEXT NOT NULL,
-        version TEXT NOT NULL,
-        storage_reference TEXT,
-        backup_metadata TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE state_transitions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        from_state TEXT NOT NULL,
-        to_state TEXT NOT NULL,
-        triggered_by TEXT NOT NULL,
-        reason TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      INSERT INTO schema_metadata (key, value)
-      VALUES ('tenant_state_signature', 'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned');
-
-      PRAGMA user_version = 2;
-    `)
-    rawDb.close()
-
-    try {
-      const tenantRegistry = new TenantRegistry(databasePath)
-      const migratedDb = new Database(databasePath, { readonly: true })
-      const columns = migratedDb
-        .prepare(`PRAGMA table_info(tenants)`)
-        .all() as Array<{ name: string }>
-      const indexes = migratedDb
-        .prepare(`PRAGMA index_list(tenants)`)
-        .all() as Array<{ name: string }>
-      migratedDb.close()
-      tenantRegistry.close()
-
-      assert.ok(columns.some((column) => column.name === 'initial_admin_email'))
-      assert.ok(indexes.some((index) => index.name === 'idx_tenants_subdomain'))
-    } finally {
-      await rm(directory, { recursive: true, force: true })
+      await cleanup()
     }
   })
 
   it('preserves empty-string subdomains for inspection but rejects them for reservation', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
-    const databasePath = join(directory, 'registry.sqlite')
-    const tenantRegistry = new TenantRegistry(databasePath)
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-1',
         slug: 'tenant-one',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.close()
+      await pool.query(
+        `UPDATE tenants
+         SET subdomain = ''
+         WHERE id = $1`,
+        ['tenant-1'],
+      )
 
-      const rawDb = new Database(databasePath)
-      rawDb
-        .prepare(
-          `UPDATE tenants
-           SET subdomain = ''
-           WHERE id = ?`,
-        )
-        .run('tenant-1')
-      rawDb.close()
-
-      const reopenedRegistry = new TenantRegistry(databasePath)
-
-      try {
-        assert.equal(reopenedRegistry.getTenant('tenant-1')?.subdomain, '')
-        assert.throws(
-          () => reopenedRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
-          /invalid persisted subdomain ""/,
-        )
-      } finally {
-        reopenedRegistry.close()
-      }
+      assert.equal((await tenantRegistry.getTenant('tenant-1'))?.subdomain, '')
+      await assert.rejects(
+        () => tenantRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
+        /invalid persisted subdomain ""/i,
+      )
     } finally {
-      await rm(directory, { recursive: true, force: true })
+      await cleanup()
     }
   })
 
   it('rejects overly long persisted subdomains during reservation', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
-    const databasePath = join(directory, 'registry.sqlite')
-    const tenantRegistry = new TenantRegistry(databasePath)
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
     const invalidSubdomain = `t-${'a'.repeat(maxTenantSubdomainLength - 1)}`
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-1',
         slug: 'tenant-one',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.close()
+      await pool.query(
+        `UPDATE tenants
+         SET subdomain = $1
+         WHERE id = $2`,
+        [invalidSubdomain, 'tenant-1'],
+      )
 
-      const rawDb = new Database(databasePath)
-      rawDb
-        .prepare(
-          `UPDATE tenants
-           SET subdomain = ?
-           WHERE id = ?`,
-        )
-        .run(invalidSubdomain, 'tenant-1')
-      rawDb.close()
-
-      const reopenedRegistry = new TenantRegistry(databasePath)
-
-      try {
-        assert.equal(reopenedRegistry.getTenant('tenant-1')?.subdomain, invalidSubdomain)
-        assert.throws(
-          () => reopenedRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
-          /invalid persisted subdomain/,
-        )
-      } finally {
-        reopenedRegistry.close()
-      }
+      assert.equal(
+        (await tenantRegistry.getTenant('tenant-1'))?.subdomain,
+        invalidSubdomain,
+      )
+      await assert.rejects(
+        () => tenantRegistry.reserveTenantSubdomain('tenant-1', () => 't-fresh'),
+        /invalid persisted subdomain/i,
+      )
     } finally {
-      await rm(directory, { recursive: true, force: true })
+      await cleanup()
     }
   })
 
-  it('returns the latest recorded transition for each tenant in one snapshot', () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+  it('returns the latest recorded transition for each tenant in one snapshot', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-1',
         slug: 'tenant-one',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-2',
         slug: 'tenant-two',
         ownerId: 'owner-2',
         version: '1.0.0',
       })
 
-      tenantRegistry.updateTenantState('tenant-1', 'ready', 'test-suite')
-      tenantRegistry.updateTenantState('tenant-2', 'failed', 'test-suite')
-      tenantRegistry.updateTenantState('tenant-2', 'ready', 'test-suite')
+      await tenantRegistry.updateTenantState('tenant-1', 'ready', 'test-suite')
+      await tenantRegistry.updateTenantState('tenant-2', 'failed', 'test-suite')
+      await tenantRegistry.updateTenantState('tenant-2', 'ready', 'test-suite')
 
-      const latestTransitions = tenantRegistry.getLatestStateTransitions()
+      const latestTransitions = await tenantRegistry.getLatestStateTransitions()
 
       assert.equal(latestTransitions.size, 2)
       assert.equal(latestTransitions.get('tenant-1')?.toState, 'ready')
       assert.equal(latestTransitions.get('tenant-2')?.toState, 'ready')
     } finally {
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
-  it('migrates a v4 registry database to v5 by backfilling tenant dashboard columns and portal password hashes', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
-    const databasePath = join(directory, 'registry.sqlite')
-    const rawDb = new Database(databasePath)
-
-    rawDb.exec(`
-      CREATE TABLE schema_metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-
-      CREATE TABLE tenants (
-        id TEXT PRIMARY KEY,
-        slug TEXT UNIQUE NOT NULL,
-        subdomain TEXT,
-        owner_id TEXT NOT NULL,
-        initial_admin_email TEXT,
-        desired_state TEXT NOT NULL,
-        current_state TEXT NOT NULL,
-        version TEXT NOT NULL,
-        storage_reference TEXT,
-        backup_metadata TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE state_transitions (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        from_state TEXT NOT NULL,
-        to_state TEXT NOT NULL,
-        triggered_by TEXT NOT NULL,
-        reason TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE portal_accounts (
-        id TEXT PRIMARY KEY,
-        email TEXT NOT NULL UNIQUE,
-        display_name TEXT NOT NULL,
-        billing_email TEXT,
-        billing_provider TEXT,
-        auth_provider TEXT NOT NULL,
-        keycloak_sub TEXT,
-        created_at TEXT NOT NULL DEFAULT (datetime('now')),
-        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      CREATE TABLE portal_sessions (
-        id TEXT PRIMARY KEY,
-        account_id TEXT NOT NULL REFERENCES portal_accounts(id) ON DELETE CASCADE,
-        token_hash TEXT NOT NULL UNIQUE,
-        expires_at TEXT NOT NULL,
-        created_at TEXT NOT NULL DEFAULT (datetime('now'))
-      );
-
-      INSERT INTO schema_metadata (key, value)
-      VALUES ('tenant_state_signature', 'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned');
-
-      PRAGMA user_version = 4;
-    `)
-    rawDb.close()
+  it('persists initial admin email on the tenant record', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
-      const tenantRegistry = new TenantRegistry(databasePath)
-      const migratedDb = new Database(databasePath, { readonly: true })
-      const tenantColumns = migratedDb
-        .prepare(`PRAGMA table_info(tenants)`)
-        .all() as Array<{ name: string }>
-      const portalAccountColumns = migratedDb
-        .prepare(`PRAGMA table_info(portal_accounts)`)
-        .all() as Array<{ name: string }>
-      const tenantIndexes = migratedDb
-        .prepare(`PRAGMA index_list(tenants)`)
-        .all() as Array<{ name: string }>
-      migratedDb.close()
-      tenantRegistry.close()
-
-      assert.ok(tenantColumns.some((column) => column.name === 'display_name'))
-      assert.ok(tenantColumns.some((column) => column.name === 'plan_tier'))
-      assert.ok(
-        portalAccountColumns.some((column) => column.name === 'password_hash'),
-      )
-      assert.ok(tenantIndexes.some((index) => index.name === 'idx_tenants_owner_id'))
-    } finally {
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-
-  it('persists initial admin email on the tenant record', () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
-
-    try {
-      const tenant = tenantRegistry.createTenant({
+      const tenant = await tenantRegistry.createTenant({
         id: 'tenant-1',
         slug: 'tenant-one',
         ownerId: 'owner-1',
@@ -382,19 +180,19 @@ describe('TenantRegistry', () => {
 
       assert.equal(tenant.initialAdminEmail, 'admin@tenant-one.example')
       assert.equal(
-        tenantRegistry.getTenant('tenant-1')?.initialAdminEmail,
+        (await tenantRegistry.getTenant('tenant-1'))?.initialAdminEmail,
         'admin@tenant-one.example',
       )
     } finally {
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
-  it('persists portal accounts and bearer-token sessions', () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+  it('persists portal accounts and bearer-token sessions while purging expired sessions', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
-      const account = tenantRegistry.createPortalAccount({
+      const account = await tenantRegistry.createPortalAccount({
         id: 'account-1',
         email: 'owner@example.com',
         displayName: 'Alyx',
@@ -403,82 +201,48 @@ describe('TenantRegistry', () => {
         billingProvider: 'stripe',
       })
 
-      tenantRegistry.createPortalSession({
+      await tenantRegistry.createPortalSession({
+        id: 'session-expired',
+        accountId: account.id,
+        tokenHash: 'expired-token',
+        expiresAt: '2000-01-01T00:00:00.000Z',
+      })
+      await tenantRegistry.createPortalSession({
         id: 'session-1',
         accountId: account.id,
         tokenHash: 'hashed-token',
-        expiresAt: '2999-01-01 00:00:00',
+        expiresAt: '2999-01-01T00:00:00.000Z',
       })
 
-      const storedAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
-      const authRecord = tenantRegistry.getPortalAccountAuthByEmail('owner@example.com')
-      const storedSession = tenantRegistry.getPortalSessionByTokenHash('hashed-token')
+      const storedAccount = await tenantRegistry.getPortalAccountByEmail(
+        'owner@example.com',
+      )
+      const authRecord = await tenantRegistry.getPortalAccountAuthByEmail(
+        'owner@example.com',
+      )
+      const storedSession = await tenantRegistry.getPortalSessionByTokenHash(
+        'hashed-token',
+      )
 
       assert.ok(storedAccount)
       assert.equal(storedAccount.displayName, 'Alyx')
       assert.equal(storedAccount.billingProvider, 'stripe')
       assert.ok(authRecord)
       assert.equal(authRecord.passwordHash, 'salt:hash')
+      assert.equal(await tenantRegistry.getPortalSessionByTokenHash('expired-token'), null)
       assert.ok(storedSession)
       assert.equal(storedSession.accountId, account.id)
 
-      tenantRegistry.deletePortalSessionByTokenHash('hashed-token')
-      assert.equal(tenantRegistry.getPortalSessionByTokenHash('hashed-token'), null)
+      await tenantRegistry.deletePortalSessionByTokenHash('hashed-token')
+      assert.equal(
+        await tenantRegistry.getPortalSessionByTokenHash('hashed-token'),
+        null,
+      )
 
-      tenantRegistry.deletePortalAccount(account.id)
-      assert.equal(tenantRegistry.getPortalAccount(account.id), null)
+      await tenantRegistry.deletePortalAccount(account.id)
+      assert.equal(await tenantRegistry.getPortalAccount(account.id), null)
     } finally {
-      tenantRegistry.close()
-    }
-  })
-
-  it('creates an expression index for portal session expiry lookups', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
-    const databasePath = join(directory, 'registry.sqlite')
-    const tenantRegistry = new TenantRegistry(databasePath)
-
-    try {
-      const db = new Database(databasePath, { readonly: true })
-      const index = db
-        .prepare(
-          `SELECT sql
-           FROM sqlite_master
-           WHERE type = 'index'
-             AND name = 'idx_portal_sessions_expires_at_datetime'`,
-        )
-        .get() as { sql: string } | undefined
-      db.close()
-
-      assert.ok(index)
-      assert.match(index.sql, /datetime\(expires_at\)/)
-    } finally {
-      tenantRegistry.close()
-      await rm(directory, { recursive: true, force: true })
-    }
-  })
-
-  it('creates an owner index for owner-scoped tenant lookups', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
-    const databasePath = join(directory, 'registry.sqlite')
-    const tenantRegistry = new TenantRegistry(databasePath)
-
-    try {
-      const db = new Database(databasePath, { readonly: true })
-      const index = db
-        .prepare(
-          `SELECT sql
-           FROM sqlite_master
-           WHERE type = 'index'
-             AND name = 'idx_tenants_owner_id'`,
-        )
-        .get() as { sql: string } | undefined
-      db.close()
-
-      assert.ok(index)
-      assert.match(index.sql, /ON tenants\(owner_id\)/)
-    } finally {
-      tenantRegistry.close()
-      await rm(directory, { recursive: true, force: true })
+      await cleanup()
     }
   })
 })

@@ -252,35 +252,43 @@ const portalCreateTenantSchema = z.object({
   billingEmail: z.string().trim().email().optional(),
 })
 
-function isSqliteConstraintError(
+function isConstraintConflictError(
   error: unknown,
 ): error is Error & { code?: string } {
   if (!(error instanceof Error)) {
     return false
   }
 
-  const sqliteCode = (error as Error & { code?: string }).code
+  const errorCode = (error as Error & { code?: string }).code
 
   if (
-    sqliteCode === 'SQLITE_CONSTRAINT_UNIQUE' ||
-    sqliteCode === 'SQLITE_CONSTRAINT_PRIMARYKEY'
+    errorCode === '23505' ||
+    errorCode === 'SQLITE_CONSTRAINT_UNIQUE' ||
+    errorCode === 'SQLITE_CONSTRAINT_PRIMARYKEY'
   ) {
     return true
   }
 
   return (
-    (sqliteCode === 'SQLITE_CONSTRAINT' || typeof sqliteCode !== 'string') &&
+    (errorCode === 'SQLITE_CONSTRAINT' || typeof errorCode !== 'string') &&
     (error.message.includes('UNIQUE constraint failed') ||
-      error.message.includes('PRIMARY KEY constraint failed'))
+      error.message.includes('PRIMARY KEY constraint failed') ||
+      error.message.includes('duplicate key value violates unique constraint'))
   )
 }
 
 function getTenantConflictResponse(error: Error): ErrorResponse {
-  if (error.message.includes('tenants.id')) {
+  if (
+    error.message.includes('tenants.id') ||
+    error.message.includes('tenants_pkey')
+  ) {
     return { error: 'Tenant ID already exists' }
   }
 
-  if (error.message.includes('tenants.slug')) {
+  if (
+    error.message.includes('tenants.slug') ||
+    error.message.includes('tenants_slug_key')
+  ) {
     return { error: 'Tenant slug already exists' }
   }
 
@@ -288,7 +296,10 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
 }
 
 function getPortalSignupConflictResponse(error: Error): ErrorResponse {
-  if (error.message.includes('portal_accounts.email')) {
+  if (
+    error.message.includes('portal_accounts.email') ||
+    error.message.includes('portal_accounts_email_key')
+  ) {
     return {
       error: 'Portal account already exists',
       details:
@@ -347,16 +358,6 @@ function hashPortalSessionToken(token: string) {
   return createHash('sha256').update(token).digest('hex')
 }
 
-function formatSqliteUtcDateTime(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, '0')
-
-  return `${date.getUTCFullYear()}-${pad(date.getUTCMonth() + 1)}-${pad(
-    date.getUTCDate(),
-  )} ${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(
-    date.getUTCSeconds(),
-  )}`
-}
-
 function derivePortalPasswordKey(password: string, salt: string) {
   return new Promise<Buffer>((resolve, reject) => {
     scrypt(password, salt, 64, (error, derivedKey) => {
@@ -394,7 +395,7 @@ async function verifyPortalPassword(password: string, storedHash: string) {
 }
 
 function buildPortalSessionExpiry() {
-  return formatSqliteUtcDateTime(new Date(Date.now() + portalSessionLifetimeMs))
+  return new Date(Date.now() + portalSessionLifetimeMs).toISOString()
 }
 
 interface PortalAuthenticatedRequest extends Request {
@@ -446,7 +447,7 @@ function createAdminAuthMiddleware(
 function createPortalSessionMiddleware(
   tenantRegistry: TenantRegistry,
 ): express.RequestHandler {
-  return (request, response, next) => {
+  return async (request, response, next) => {
     const authorizationHeader = request.header('authorization')
 
     if (!authorizationHeader?.startsWith('Bearer ')) {
@@ -457,7 +458,7 @@ function createPortalSessionMiddleware(
 
     const rawToken = authorizationHeader.slice('Bearer '.length).trim()
     const tokenHash = hashPortalSessionToken(rawToken)
-    const portalSession = tenantRegistry.getPortalSessionByTokenHash(tokenHash)
+    const portalSession = await tenantRegistry.getPortalSessionByTokenHash(tokenHash)
 
     if (!portalSession) {
       request.resume()
@@ -465,7 +466,7 @@ function createPortalSessionMiddleware(
       return
     }
 
-    const portalAccount = tenantRegistry.getPortalAccount(portalSession.accountId)
+    const portalAccount = await tenantRegistry.getPortalAccount(portalSession.accountId)
 
     if (!portalAccount) {
       request.resume()
@@ -501,8 +502,8 @@ export function createApp({
     uptime: process.uptime(),
     version: appVersion,
   })
-  const buildFleetStatusResponse = (): FleetStatusResponse => {
-    const latestTransitionsByTenant = tenantRegistry.getLatestStateTransitions()
+  const buildFleetStatusResponse = async (): Promise<FleetStatusResponse> => {
+    const latestTransitionsByTenant = await tenantRegistry.getLatestStateTransitions()
     const tenantsByCurrentState = createTenantStateCounts()
     const tenantsByDesiredState = createTenantStateCounts()
     const tenantsByVersion: Record<string, number> = {}
@@ -510,7 +511,7 @@ export function createApp({
     let tenantsMissingBackupMetadata = 0
     let tenantsNeedingAttention = 0
 
-    const tenants = tenantRegistry.listTenants().map((tenant) => {
+    const tenants = (await tenantRegistry.listTenants()).map((tenant) => {
       tenantsByCurrentState[tenant.currentState] += 1
       tenantsByDesiredState[tenant.desiredState] += 1
       tenantsByVersion[tenant.version] = (tenantsByVersion[tenant.version] ?? 0) + 1
@@ -599,11 +600,11 @@ export function createApp({
 
     return `${tenantPublicScheme}://${subdomain}.${tenantBaseDomain}`
   }
-  const buildPortalTenantSummary = (
+  const buildPortalTenantSummary = async (
     tenantId: string,
-  ): PortalTenantSummary | null => {
-    const latestTransitionsByTenant = tenantRegistry.getLatestStateTransitions()
-    const tenant = tenantRegistry.getTenant(tenantId)
+  ): Promise<PortalTenantSummary | null> => {
+    const latestTransitionsByTenant = await tenantRegistry.getLatestStateTransitions()
+    const tenant = await tenantRegistry.getTenant(tenantId)
 
     if (!tenant) {
       return null
@@ -617,11 +618,11 @@ export function createApp({
       settingsPath: `/dashboard/tenants/${tenant.id}`,
     }
   }
-  const buildPortalDashboardResponse = (
+  const buildPortalDashboardResponse = async (
     account: PortalAccount,
-  ): PortalDashboardResponse => {
-    const latestTransitionsByTenant = tenantRegistry.getLatestStateTransitions()
-    const tenants = tenantRegistry.listTenantsByOwnerId(account.id).map((tenant) => ({
+  ): Promise<PortalDashboardResponse> => {
+    const latestTransitionsByTenant = await tenantRegistry.getLatestStateTransitions()
+    const tenants = (await tenantRegistry.listTenantsByOwnerId(account.id)).map((tenant) => ({
       tenant,
       latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
       backup: parseBackupMetadata(tenant.backupMetadata),
@@ -635,9 +636,11 @@ export function createApp({
       tenants,
     }
   }
-  const buildPortalSessionResponse = (account: PortalAccount): PortalSessionResponse => {
+  const buildPortalSessionResponse = async (
+    account: PortalAccount,
+  ): Promise<PortalSessionResponse> => {
     const token = createPortalSessionToken()
-    tenantRegistry.createPortalSession({
+    await tenantRegistry.createPortalSession({
       id: randomUUID(),
       accountId: account.id,
       tokenHash: hashPortalSessionToken(token),
@@ -646,7 +649,7 @@ export function createApp({
 
     return {
       token,
-      dashboard: buildPortalDashboardResponse(account),
+      dashboard: await buildPortalDashboardResponse(account),
     }
   }
   const isRateLimited = (
@@ -725,7 +728,7 @@ export function createApp({
     ownerId: string
     reason: string
   }) => {
-    const existingTenant = tenantRegistry.getTenant(params.tenantId)
+    const existingTenant = await tenantRegistry.getTenant(params.tenantId)
 
     if (!existingTenant) {
       return
@@ -746,8 +749,8 @@ export function createApp({
       }
     }
 
-    if (tenantRegistry.getTenant(params.tenantId)) {
-      tenantRegistry.deleteTenant(params.tenantId)
+    if (await tenantRegistry.getTenant(params.tenantId)) {
+      await tenantRegistry.deleteTenant(params.tenantId)
     }
 
     if (deprovisionError) {
@@ -763,13 +766,13 @@ export function createApp({
     paymentProvider: z.infer<typeof portalBillingProviderSchema>
   }): Promise<PortalTenantSummary> => {
     const { ownerId, ownerEmail, tenantName, tenantSlug, planTier, paymentProvider } = params
-    const existingSlug = tenantRegistry.getTenantBySlug(tenantSlug)
+    const existingSlug = await tenantRegistry.getTenantBySlug(tenantSlug)
 
     if (existingSlug) {
       throw new Error('Tenant slug already exists')
     }
 
-    const tenant = tenantRegistry.createTenant({
+    const tenant = await tenantRegistry.createTenant({
       id: `tenant-${randomBytes(8).toString('hex')}`,
       slug: tenantSlug,
       ownerId,
@@ -789,7 +792,7 @@ export function createApp({
         })
       }
 
-      const summary = buildPortalTenantSummary(tenant.id)
+      const summary = await buildPortalTenantSummary(tenant.id)
 
       if (!summary) {
         throw new Error('Failed to build portal tenant summary')
@@ -837,7 +840,7 @@ export function createApp({
     try {
       return {
         tenantSummary,
-        account: tenantRegistry.updatePortalAccount(account.id, {
+        account: await tenantRegistry.updatePortalAccount(account.id, {
           displayName: account.displayName,
           billingEmail: normalizedBillingEmail,
           billingProvider: paymentProvider,
@@ -860,12 +863,12 @@ export function createApp({
       throw error
     }
   }
-  const readinessHandler = (
+  const readinessHandler = async (
     _request: Request,
     response: Response<HealthResponse | ErrorResponse>,
   ) => {
     try {
-      tenantRegistry.checkHealth()
+      await tenantRegistry.checkHealth()
       response.json(buildHealthResponse())
     } catch {
       response.status(503).json({
@@ -932,7 +935,9 @@ export function createApp({
       let createdAccount: PortalAccount | null = null
 
       try {
-        const existingAccount = tenantRegistry.getPortalAccountByEmail(normalizedEmail)
+        const existingAccount = await tenantRegistry.getPortalAccountByEmail(
+          normalizedEmail,
+        )
         if (existingAccount) {
           response.status(409).json({
             error: 'Portal account already exists',
@@ -942,7 +947,7 @@ export function createApp({
           return
         }
 
-        createdAccount = tenantRegistry.createPortalAccount({
+        createdAccount = await tenantRegistry.createPortalAccount({
           id: randomUUID(),
           email: normalizedEmail,
           displayName: parseResult.data.displayName,
@@ -960,13 +965,13 @@ export function createApp({
           billingEmail: normalizedBillingEmail,
         })
 
-        response.status(201).json(buildPortalSessionResponse(account))
+        response.status(201).json(await buildPortalSessionResponse(account))
       } catch (error) {
         let effectiveError = error
 
         if (createdAccount) {
           try {
-            tenantRegistry.deletePortalAccount(createdAccount.id)
+            await tenantRegistry.deletePortalAccount(createdAccount.id)
           } catch (accountCleanupError) {
             effectiveError = new Error(
               `${getErrorMessage(error)}; account cleanup failed: ${getErrorMessage(accountCleanupError)}`,
@@ -976,7 +981,7 @@ export function createApp({
         }
 
         if (
-          isSqliteConstraintError(effectiveError) ||
+          isConstraintConflictError(effectiveError) ||
           (effectiveError instanceof Error && effectiveError.message.includes('already exists'))
         ) {
           response.status(409).json(getPortalSignupConflictResponse(effectiveError))
@@ -1018,7 +1023,9 @@ export function createApp({
       }
 
       const normalizedEmail = normalizePortalEmail(parseResult.data.email)
-      const authRecord = tenantRegistry.getPortalAccountAuthByEmail(normalizedEmail)
+      const authRecord = await tenantRegistry.getPortalAccountAuthByEmail(
+        normalizedEmail,
+      )
       const storedHash =
         authRecord?.account.authProvider === 'local' && authRecord.passwordHash
           ? authRecord.passwordHash
@@ -1040,14 +1047,14 @@ export function createApp({
         return
       }
 
-      response.json(buildPortalSessionResponse(authRecord.account))
+      response.json(await buildPortalSessionResponse(authRecord.account))
     },
   )
 
   app.get(
     `${portalRoutePrefix}/me`,
     createPortalSessionMiddleware(tenantRegistry),
-    (
+    async (
       request: Request,
       response: Response<PortalDashboardResponse | ErrorResponse>,
     ) => {
@@ -1059,7 +1066,7 @@ export function createApp({
         return
       }
 
-      response.json(buildPortalDashboardResponse(portalAccount))
+      response.json(await buildPortalDashboardResponse(portalAccount))
     },
   )
 
@@ -1099,17 +1106,19 @@ export function createApp({
           billingEmail: parseResult.data.billingEmail,
         })
 
-        const refreshedAccount = tenantRegistry.getPortalAccount(portalAccount.id)
+        const refreshedAccount = await tenantRegistry.getPortalAccount(
+          portalAccount.id,
+        )
 
         if (!refreshedAccount) {
           response.status(500).json({ error: 'Portal account not found' })
           return
         }
 
-        response.status(201).json(buildPortalDashboardResponse(refreshedAccount))
+        response.status(201).json(await buildPortalDashboardResponse(refreshedAccount))
       } catch (error) {
         if (
-          isSqliteConstraintError(error) ||
+          isConstraintConflictError(error) ||
           (error instanceof Error && error.message.includes('already exists'))
         ) {
           response.status(409).json(getPortalTenantConflictResponse())
@@ -1132,7 +1141,7 @@ export function createApp({
     `${portalRoutePrefix}/logout`,
     createPortalSessionMiddleware(tenantRegistry),
     portalJsonParser,
-    (
+    async (
       request: Request,
       response: Response<PortalLogoutResponse | ErrorResponse>,
     ) => {
@@ -1144,20 +1153,20 @@ export function createApp({
         return
       }
 
-      tenantRegistry.deletePortalSessionByTokenHash(portalSession.tokenHash)
+      await tenantRegistry.deletePortalSessionByTokenHash(portalSession.tokenHash)
       response.json({ signedOut: true })
     },
   )
 
   app.get(
     '/internal/fleet/status',
-    (
+    async (
       _request: Request,
       response: Response<FleetStatusResponse | ErrorResponse>,
     ) => {
       try {
-        tenantRegistry.checkHealth()
-        response.json(buildFleetStatusResponse())
+        await tenantRegistry.checkHealth()
+        response.json(await buildFleetStatusResponse())
       } catch {
         response.status(503).json({
           error: 'Tenant registry unavailable',
@@ -1168,20 +1177,20 @@ export function createApp({
 
   app.get(
     tenantRoutePrefix,
-    (_request: Request, response: Response<TenantListResponse>) => {
-      const tenants = tenantRegistry.listTenants()
+    async (_request: Request, response: Response<TenantListResponse>) => {
+      const tenants = await tenantRegistry.listTenants()
       response.json({ tenants })
     },
   )
 
   app.get(
     `${tenantRoutePrefix}/:tenantId`,
-    (
+    async (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
     ) => {
       const { tenantId } = request.params
-      const tenant = tenantRegistry.getTenant(tenantId)
+      const tenant = await tenantRegistry.getTenant(tenantId)
 
       if (!tenant) {
         response.status(404).json({ error: 'Tenant not found' })
@@ -1194,7 +1203,7 @@ export function createApp({
 
   app.post(
     tenantRoutePrefix,
-    (
+    async (
       request: Request,
       response: Response<TenantDetailResponse | ErrorResponse>,
     ) => {
@@ -1210,20 +1219,20 @@ export function createApp({
 
       const { id, slug, ownerId, initialAdminEmail, version } = parseResult.data
 
-      const existingTenant = tenantRegistry.getTenant(id)
+      const existingTenant = await tenantRegistry.getTenant(id)
       if (existingTenant) {
         response.status(409).json({ error: 'Tenant ID already exists' })
         return
       }
 
-      const existingSlug = tenantRegistry.getTenantBySlug(slug)
+      const existingSlug = await tenantRegistry.getTenantBySlug(slug)
       if (existingSlug) {
         response.status(409).json({ error: 'Tenant slug already exists' })
         return
       }
 
       try {
-        const tenant = tenantRegistry.createTenant({
+        const tenant = await tenantRegistry.createTenant({
           id,
           slug,
           ownerId,
@@ -1232,7 +1241,7 @@ export function createApp({
         })
         response.status(201).json({ tenant })
       } catch (error) {
-        if (isSqliteConstraintError(error)) {
+        if (isConstraintConflictError(error)) {
           response.status(409).json(getTenantConflictResponse(error))
           return
         }
@@ -1249,7 +1258,7 @@ export function createApp({
 
   app.patch(
     `${tenantRoutePrefix}/:tenantId/state`,
-    (
+    async (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
     ) => {
@@ -1266,7 +1275,7 @@ export function createApp({
 
       const { state, triggeredBy, reason } = parseResult.data
 
-      const tenant = tenantRegistry.getTenant(tenantId)
+      const tenant = await tenantRegistry.getTenant(tenantId)
 
       if (!tenant) {
         response.status(404).json({ error: 'Tenant not found' })
@@ -1274,14 +1283,14 @@ export function createApp({
       }
 
       try {
-        tenantRegistry.updateTenantState(
+        await tenantRegistry.updateTenantState(
           tenantId,
           state,
           triggeredBy,
           reason,
         )
 
-        const updatedTenant = tenantRegistry.getTenant(tenantId)
+        const updatedTenant = await tenantRegistry.getTenant(tenantId)
 
         if (!updatedTenant) {
           response.status(500).json({ error: 'Failed to retrieve updated tenant' })
@@ -1302,7 +1311,7 @@ export function createApp({
 
   app.patch(
     `${tenantRoutePrefix}/:tenantId/desired-state`,
-    (
+    async (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
     ) => {
@@ -1319,15 +1328,15 @@ export function createApp({
 
       const { desiredState } = parseResult.data
 
-      const existingTenant = tenantRegistry.getTenant(tenantId)
+      const existingTenant = await tenantRegistry.getTenant(tenantId)
       if (!existingTenant) {
         response.status(404).json({ error: 'Tenant not found' })
         return
       }
 
       try {
-        tenantRegistry.updateTenantDesiredState(tenantId, desiredState)
-        const tenant = tenantRegistry.getTenant(tenantId)
+        await tenantRegistry.updateTenantDesiredState(tenantId, desiredState)
+        const tenant = await tenantRegistry.getTenant(tenantId)
 
         if (!tenant) {
           response.status(404).json({ error: 'Tenant not found' })
@@ -1348,7 +1357,7 @@ export function createApp({
 
   app.patch(
     `${tenantRoutePrefix}/:tenantId/storage`,
-    (
+    async (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
     ) => {
@@ -1365,15 +1374,18 @@ export function createApp({
 
       const { storageReference } = parseResult.data
 
-      const existingTenant = tenantRegistry.getTenant(tenantId)
+      const existingTenant = await tenantRegistry.getTenant(tenantId)
       if (!existingTenant) {
         response.status(404).json({ error: 'Tenant not found' })
         return
       }
 
       try {
-        tenantRegistry.updateTenantStorageReference(tenantId, storageReference)
-        const tenant = tenantRegistry.getTenant(tenantId)
+        await tenantRegistry.updateTenantStorageReference(
+          tenantId,
+          storageReference,
+        )
+        const tenant = await tenantRegistry.getTenant(tenantId)
 
         if (!tenant) {
           response.status(404).json({ error: 'Tenant not found' })
@@ -1394,7 +1406,7 @@ export function createApp({
 
   app.patch(
     `${tenantRoutePrefix}/:tenantId/backup`,
-    (
+    async (
       request: Request<{ tenantId: string }>,
       response: Response<TenantDetailResponse | ErrorResponse>,
     ) => {
@@ -1411,15 +1423,15 @@ export function createApp({
 
       const { backupMetadata } = parseResult.data
 
-      const existingTenant = tenantRegistry.getTenant(tenantId)
+      const existingTenant = await tenantRegistry.getTenant(tenantId)
       if (!existingTenant) {
         response.status(404).json({ error: 'Tenant not found' })
         return
       }
 
       try {
-        tenantRegistry.updateTenantBackupMetadata(tenantId, backupMetadata)
-        const tenant = tenantRegistry.getTenant(tenantId)
+        await tenantRegistry.updateTenantBackupMetadata(tenantId, backupMetadata)
+        const tenant = await tenantRegistry.getTenant(tenantId)
 
         if (!tenant) {
           response.status(404).json({ error: 'Tenant not found' })
@@ -1440,19 +1452,19 @@ export function createApp({
 
   app.get(
     `${tenantRoutePrefix}/:tenantId/transitions`,
-    (
+    async (
       request: Request<{ tenantId: string }>,
       response: Response<StateTransitionHistoryResponse | ErrorResponse>,
     ) => {
       const { tenantId } = request.params
 
-      const tenant = tenantRegistry.getTenant(tenantId)
+      const tenant = await tenantRegistry.getTenant(tenantId)
       if (!tenant) {
         response.status(404).json({ error: 'Tenant not found' })
         return
       }
 
-      const transitions = tenantRegistry.getStateTransitions(tenantId)
+      const transitions = await tenantRegistry.getStateTransitions(tenantId)
       response.json({ transitions })
     },
   )
@@ -1481,7 +1493,7 @@ export function createApp({
         return
       }
 
-      const existingTenant = tenantRegistry.getTenant(tenantId)
+      const existingTenant = await tenantRegistry.getTenant(tenantId)
       if (!existingTenant) {
         response.status(404).json({ error: 'Tenant not found' })
         return
@@ -1562,7 +1574,7 @@ export function createApp({
         return
       }
 
-      const existingTenant = tenantRegistry.getTenant(tenantId)
+      const existingTenant = await tenantRegistry.getTenant(tenantId)
       if (!existingTenant) {
         response.status(404).json({ error: 'Tenant not found' })
         return

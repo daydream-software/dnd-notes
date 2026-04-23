@@ -8,7 +8,8 @@ import {
   TenantProvisioningValidationError,
   type TenantProvisioningPort,
 } from '../src/provisioning.js'
-import { TenantRegistry } from '../src/tenant-registry.js'
+import { type TenantRegistry } from '../src/tenant-registry.js'
+import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 
 const require = createRequire(import.meta.url)
 const { version: appVersion } = require('../package.json') as { version: string }
@@ -20,6 +21,7 @@ describe('Control Plane API', () => {
   let tenantRegistry: TenantRegistry
   let app: ReturnType<typeof createApp>
   let tenantProvisioningService: TenantProvisioningPort | undefined
+  let cleanupTenantRegistry: (() => Promise<void>) | undefined
 
   const authedGet = (path: string) =>
     request(app).get(path).set('Authorization', `Bearer ${adminToken}`)
@@ -31,13 +33,16 @@ describe('Control Plane API', () => {
     request(app).patch(path).set('Authorization', `Bearer ${adminToken}`)
 
   beforeEach(() => {
-    tenantRegistry = new TenantRegistry(':memory:')
+    const registry = createTestTenantRegistry()
+    tenantRegistry = registry.tenantRegistry
+    cleanupTenantRegistry = registry.cleanup
     tenantProvisioningService = undefined
     app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
   })
 
-  afterEach(() => {
-    tenantRegistry.close()
+  afterEach(async () => {
+    await cleanupTenantRegistry?.()
+    cleanupTenantRegistry = undefined
   })
 
   describe('GET /health', () => {
@@ -74,7 +79,8 @@ describe('Control Plane API', () => {
     })
 
     it('returns service unavailable when the tenant registry is closed', async () => {
-      tenantRegistry.close()
+      await cleanupTenantRegistry?.()
+      cleanupTenantRegistry = undefined
 
       const response = await request(app).get('/readyz').expect(503)
 
@@ -93,7 +99,8 @@ describe('Control Plane API', () => {
     })
 
     it('returns service unavailable when the tenant registry is closed', async () => {
-      tenantRegistry.close()
+      await cleanupTenantRegistry?.()
+      cleanupTenantRegistry = undefined
 
       const response = await request(app).get('/ready').expect(503)
 
@@ -160,16 +167,16 @@ describe('Control Plane API', () => {
         'owner@example.com',
       )
 
-      const account = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      const account = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
       assert.ok(account)
       assert.strictEqual(account.billingEmail, 'billing@example.com')
       assert.strictEqual(account.authProvider, 'local')
 
-      const authRecord = tenantRegistry.getPortalAccountAuthByEmail('owner@example.com')
+      const authRecord = await tenantRegistry.getPortalAccountAuthByEmail('owner@example.com')
       assert.ok(authRecord)
       assert.ok(authRecord.passwordHash)
 
-      const ownedTenants = tenantRegistry.listTenantsByOwnerId(account.id)
+      const ownedTenants = await tenantRegistry.listTenantsByOwnerId(account.id)
       assert.strictEqual(ownedTenants.length, 1)
       assert.strictEqual(ownedTenants[0].slug, 'misty-harbor')
     })
@@ -240,7 +247,7 @@ describe('Control Plane API', () => {
     })
 
     it('does not reserve an email address when signup fails before account creation', async () => {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-existing',
         slug: 'misty-harbor',
         ownerId: 'owner-existing',
@@ -263,7 +270,7 @@ describe('Control Plane API', () => {
         .expect(409)
 
       assert.strictEqual(failedSignup.body.error, 'Portal signup conflict')
-      assert.strictEqual(tenantRegistry.getPortalAccountByEmail('owner@example.com'), null)
+      assert.strictEqual(await tenantRegistry.getPortalAccountByEmail('owner@example.com'), null)
 
       const successfulSignup = await request(app)
         .post('/portal/signup')
@@ -301,8 +308,8 @@ describe('Control Plane API', () => {
 
       tenantProvisioningService = {
         async provisionTenant(request) {
-          tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
-          tenantRegistry.updateTenantStorageReference(
+          await tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
+          await tenantRegistry.updateTenantStorageReference(
             request.tenantId,
             'dnd-notes-data-t-misty-harbor',
           )
@@ -310,9 +317,9 @@ describe('Control Plane API', () => {
         },
         async deprovisionTenant(request) {
           deprovisionRequest = request
-          tenantRegistry.updateTenantStorageReference(request.tenantId, null)
-          tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
-          tenantRegistry.updateTenantState(
+          await tenantRegistry.updateTenantStorageReference(request.tenantId, null)
+          await tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
+          await tenantRegistry.updateTenantState(
             request.tenantId,
             'deprovisioned',
             request.triggeredBy,
@@ -320,7 +327,7 @@ describe('Control Plane API', () => {
           )
 
           return {
-            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            tenant: (await tenantRegistry.getTenant(request.tenantId))!,
             deprovisioned: true,
           }
         },
@@ -349,10 +356,10 @@ describe('Control Plane API', () => {
         'An unexpected error occurred while creating your account. Please try again later.',
       )
       assert.strictEqual(
-        tenantRegistry.getPortalAccountByEmail('owner@example.com'),
+        await tenantRegistry.getPortalAccountByEmail('owner@example.com'),
         null,
       )
-      assert.strictEqual(tenantRegistry.getTenantBySlug('misty-harbor'), null)
+      assert.strictEqual(await tenantRegistry.getTenantBySlug('misty-harbor'), null)
       assert.ok(deprovisionRequest)
       assert.match(deprovisionRequest.triggeredBy, /^portal:/)
       assert.strictEqual(
@@ -364,8 +371,8 @@ describe('Control Plane API', () => {
     it('deletes the portal account even when signup rollback deprovisioning fails', async () => {
       tenantProvisioningService = {
         async provisionTenant(request) {
-          tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
-          tenantRegistry.updateTenantStorageReference(
+          await tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
+          await tenantRegistry.updateTenantStorageReference(
             request.tenantId,
             'dnd-notes-data-t-misty-harbor',
           )
@@ -399,10 +406,10 @@ describe('Control Plane API', () => {
         'An unexpected error occurred while creating your account. Please try again later.',
       )
       assert.strictEqual(
-        tenantRegistry.getPortalAccountByEmail('owner@example.com'),
+        await tenantRegistry.getPortalAccountByEmail('owner@example.com'),
         null,
       )
-      assert.strictEqual(tenantRegistry.getTenantBySlug('misty-harbor'), null)
+      assert.strictEqual(await tenantRegistry.getTenantBySlug('misty-harbor'), null)
     })
 
     it('restores an owner-scoped dashboard, creates another tenant, and logs out', async () => {
@@ -422,21 +429,21 @@ describe('Control Plane API', () => {
         .expect(201)
 
       const sessionToken = signupResponse.body.token as string
-      const ownerAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      const ownerAccount = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
       assert.ok(ownerAccount)
 
-      const ownerTenant = tenantRegistry.listTenantsByOwnerId(ownerAccount.id)[0]
-      tenantRegistry.updateTenantSubdomain(ownerTenant.id, 't-misty-harbor')
-      tenantRegistry.updateTenantDesiredState(ownerTenant.id, 'ready')
-      tenantRegistry.updateTenantState(ownerTenant.id, 'ready', 'test-suite')
+      const ownerTenant = (await tenantRegistry.listTenantsByOwnerId(ownerAccount.id))[0]
+      await tenantRegistry.updateTenantSubdomain(ownerTenant.id, 't-misty-harbor')
+      await tenantRegistry.updateTenantDesiredState(ownerTenant.id, 'ready')
+      await tenantRegistry.updateTenantState(ownerTenant.id, 'ready', 'test-suite')
 
-      const otherAccount = tenantRegistry.createPortalAccount({
+      const otherAccount = await tenantRegistry.createPortalAccount({
         id: 'account-2',
         email: 'other@example.com',
         displayName: 'Other Owner',
         passwordHash: 'test-salt:test-hash',
       })
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-other',
         slug: 'other-tenant',
         ownerId: otherAccount.id,
@@ -490,7 +497,7 @@ describe('Control Plane API', () => {
       assert.ok(emberfallTenant)
       assert.strictEqual(emberfallTenant.tenant.planTier, 'guild')
       assert.strictEqual(
-        tenantRegistry.getPortalAccountByEmail('owner@example.com')?.billingEmail,
+        (await tenantRegistry.getPortalAccountByEmail('owner@example.com'))?.billingEmail,
         'billing@example.com',
       )
 
@@ -524,7 +531,7 @@ describe('Control Plane API', () => {
         .expect(201)
 
       const sessionToken = signupResponse.body.token as string
-      const ownerAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      const ownerAccount = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
       assert.ok(ownerAccount)
 
       const originalUpdatePortalAccount = tenantRegistry.updatePortalAccount.bind(
@@ -551,10 +558,13 @@ describe('Control Plane API', () => {
         'An unexpected error occurred while creating the tenant. Please try again later.',
       )
       assert.strictEqual(
-        tenantRegistry.getTenantBySlug('emberfall'),
+        await tenantRegistry.getTenantBySlug('emberfall'),
         null,
       )
-      assert.strictEqual(tenantRegistry.listTenantsByOwnerId(ownerAccount.id).length, 1)
+      assert.strictEqual(
+        (await tenantRegistry.listTenantsByOwnerId(ownerAccount.id)).length,
+        1,
+      )
     })
 
     it('returns 409 when tenant creation hits a sqlite constraint race', async () => {
@@ -608,16 +618,16 @@ describe('Control Plane API', () => {
 
       tenantProvisioningService = {
         async provisionTenant(request) {
-          tenantRegistry.updateTenantSubdomain(
+          await tenantRegistry.updateTenantSubdomain(
             request.tenantId,
             `t-${request.tenantId.slice(-8)}`,
           )
-          tenantRegistry.updateTenantStorageReference(
+          await tenantRegistry.updateTenantStorageReference(
             request.tenantId,
             `dnd-notes-data-${request.tenantId.slice(-8)}`,
           )
-          tenantRegistry.updateTenantDesiredState(request.tenantId, 'ready')
-          tenantRegistry.updateTenantState(
+          await tenantRegistry.updateTenantDesiredState(request.tenantId, 'ready')
+          await tenantRegistry.updateTenantState(
             request.tenantId,
             'ready',
             request.triggeredBy,
@@ -625,7 +635,7 @@ describe('Control Plane API', () => {
           )
 
           return {
-            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            tenant: (await tenantRegistry.getTenant(request.tenantId))!,
             resources: {
               namespace: `tenant-${request.tenantId.slice(-8)}`,
               deploymentName: 'dnd-notes',
@@ -641,9 +651,9 @@ describe('Control Plane API', () => {
         },
         async deprovisionTenant(request) {
           deprovisionRequest = request
-          tenantRegistry.updateTenantStorageReference(request.tenantId, null)
-          tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
-          tenantRegistry.updateTenantState(
+          await tenantRegistry.updateTenantStorageReference(request.tenantId, null)
+          await tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
+          await tenantRegistry.updateTenantState(
             request.tenantId,
             'deprovisioned',
             request.triggeredBy,
@@ -651,7 +661,7 @@ describe('Control Plane API', () => {
           )
 
           return {
-            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            tenant: (await tenantRegistry.getTenant(request.tenantId))!,
             deprovisioned: true,
           }
         },
@@ -675,7 +685,7 @@ describe('Control Plane API', () => {
         .expect(201)
 
       const sessionToken = signupResponse.body.token as string
-      const ownerAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      const ownerAccount = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
       assert.ok(ownerAccount)
 
       const originalUpdatePortalAccount = tenantRegistry.updatePortalAccount.bind(
@@ -701,14 +711,17 @@ describe('Control Plane API', () => {
         response.body.details,
         'An unexpected error occurred while creating the tenant. Please try again later.',
       )
-      assert.strictEqual(tenantRegistry.getTenantBySlug('emberfall'), null)
+      assert.strictEqual(await tenantRegistry.getTenantBySlug('emberfall'), null)
       assert.ok(deprovisionRequest)
       assert.match(deprovisionRequest.triggeredBy, /^portal:/)
       assert.strictEqual(
         deprovisionRequest.reason,
         'Portal rollback after failed account update',
       )
-      assert.strictEqual(tenantRegistry.listTenantsByOwnerId(ownerAccount.id).length, 1)
+      assert.strictEqual(
+        (await tenantRegistry.listTenantsByOwnerId(ownerAccount.id)).length,
+        1,
+      )
     })
 
     it('uses forwarded client IPs for portal rate limiting when trust proxy is enabled', async () => {
@@ -1024,22 +1037,22 @@ describe('Control Plane API', () => {
 
   describe('GET /internal/fleet/status', () => {
     it('returns a fleet summary with tenant health, backup details, and dependencies', async () => {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-ready',
         slug: 'tenant-ready',
         ownerId: 'owner-1',
         initialAdminEmail: 'admin@tenant-ready.example',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantDesiredState('tenant-ready', 'ready')
-      tenantRegistry.updateTenantStorageReference('tenant-ready', 'pvc-tenant-ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantDesiredState('tenant-ready', 'ready')
+      await tenantRegistry.updateTenantStorageReference('tenant-ready', 'pvc-tenant-ready')
+      await tenantRegistry.updateTenantState(
         'tenant-ready',
         'ready',
         'test-suite',
         'Provisioned in test',
       )
-      tenantRegistry.updateTenantBackupMetadata(
+      await tenantRegistry.updateTenantBackupMetadata(
         'tenant-ready',
         JSON.stringify({
           lastBackup: '2026-04-18T22:00:00Z',
@@ -1050,14 +1063,14 @@ describe('Control Plane API', () => {
         }),
       )
 
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-failed',
         slug: 'tenant-failed',
         ownerId: 'owner-2',
         version: '2.0.0',
       })
-      tenantRegistry.updateTenantDesiredState('tenant-failed', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantDesiredState('tenant-failed', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-failed',
         'failed',
         'test-suite',
@@ -1116,13 +1129,13 @@ describe('Control Plane API', () => {
     })
 
     it('keeps opaque backup metadata when it is not parseable JSON', async () => {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-opaque',
         slug: 'tenant-opaque',
         ownerId: 'owner-3',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantBackupMetadata('tenant-opaque', 'not-json')
+      await tenantRegistry.updateTenantBackupMetadata('tenant-opaque', 'not-json')
 
       const response = await authedGet('/internal/fleet/status').expect(200)
       const tenant = response.body.tenants.find(
@@ -1139,20 +1152,20 @@ describe('Control Plane API', () => {
     })
 
     it('treats blank backup metadata as missing and needing attention', async () => {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-blank',
         slug: 'tenant-blank',
         ownerId: 'owner-4',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantDesiredState('tenant-blank', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantDesiredState('tenant-blank', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-blank',
         'ready',
         'test-suite',
         'Provisioned in test',
       )
-      tenantRegistry.updateTenantBackupMetadata('tenant-blank', '   ')
+      await tenantRegistry.updateTenantBackupMetadata('tenant-blank', '   ')
 
       const response = await authedGet('/internal/fleet/status').expect(200)
       const tenant = response.body.tenants.find(
@@ -1384,13 +1397,13 @@ describe('Control Plane API', () => {
       tenantProvisioningService = {
         async provisionTenant(request) {
           receivedProvisionRequest = request
-          tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
-          tenantRegistry.updateTenantStorageReference(
+          await tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
+          await tenantRegistry.updateTenantStorageReference(
             'tenant-123',
             'dnd-notes-data-t-opaque123456',
           )
-          tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
-          tenantRegistry.updateTenantState(
+          await tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
+          await tenantRegistry.updateTenantState(
             'tenant-123',
             'ready',
             request.triggeredBy,
@@ -1398,7 +1411,7 @@ describe('Control Plane API', () => {
           )
 
           return {
-            tenant: tenantRegistry.getTenant('tenant-123')!,
+            tenant: (await tenantRegistry.getTenant('tenant-123'))!,
             resources: {
               namespace: 'tenant-t-opaque123456',
               deploymentName: 'dnd-notes',
@@ -1678,10 +1691,10 @@ describe('Control Plane API', () => {
         ownerId: 'owner-456',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
-      tenantRegistry.updateTenantStorageReference('tenant-123', 'tenant_db')
-      tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
+      await tenantRegistry.updateTenantStorageReference('tenant-123', 'tenant_db')
+      await tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-123',
         'ready',
         'test-suite',
@@ -1702,9 +1715,9 @@ describe('Control Plane API', () => {
         },
         async deprovisionTenant(request) {
           receivedDeprovisionRequest = request
-          tenantRegistry.updateTenantStorageReference('tenant-123', null)
-          tenantRegistry.updateTenantDesiredState('tenant-123', 'deprovisioned')
-          tenantRegistry.updateTenantState(
+          await tenantRegistry.updateTenantStorageReference('tenant-123', null)
+          await tenantRegistry.updateTenantDesiredState('tenant-123', 'deprovisioned')
+          await tenantRegistry.updateTenantState(
             'tenant-123',
             'deprovisioned',
             request.triggeredBy,
@@ -1712,7 +1725,7 @@ describe('Control Plane API', () => {
           )
 
           return {
-            tenant: tenantRegistry.getTenant('tenant-123')!,
+            tenant: (await tenantRegistry.getTenant('tenant-123'))!,
             deprovisioned: true,
           }
         },

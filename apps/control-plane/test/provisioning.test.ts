@@ -13,7 +13,7 @@ import {
   type TenantProvisioningPort,
 } from '../src/provisioning.js'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
-import { TenantRegistry } from '../src/tenant-registry.js'
+import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 import type { Tenant, TenantProvisioningResources } from '../src/types.js'
 
 class FakeDatabaseManager {
@@ -216,7 +216,7 @@ function createTenantRecord(overrides: Partial<Tenant> = {}): Tenant {
 
 describe('TenantProvisioningService', () => {
   it('provisions tenant resources, allocates an opaque subdomain, and marks tenant ready', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -229,7 +229,7 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
@@ -282,12 +282,12 @@ describe('TenantProvisioningService', () => {
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('injects tenant Keycloak runtime auth settings into provisioned tenant resources', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -307,7 +307,7 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
@@ -339,12 +339,12 @@ describe('TenantProvisioningService', () => {
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('uses a configurable ingress class for provisioned tenant routes', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -358,7 +358,7 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
@@ -374,12 +374,12 @@ describe('TenantProvisioningService', () => {
       assert.equal(infrastructureManager.bundles[0].ingressClassName, 'custom-nginx')
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('normalizes and reconciles a version override before building the rollout image', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -392,15 +392,15 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'ready',
         'control-plane',
@@ -425,8 +425,9 @@ describe('TenantProvisioningService', () => {
       assert.equal(result.tenant.subdomain, 't-existing123456')
       assert.equal(result.tenant.currentState, 'ready')
       assert.equal(
-        tenantRegistry.getStateTransitions('tenant-demo').some((transition) =>
-          transition.toState === 'upgrading'),
+        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).some(
+          (transition) => transition.toState === 'upgrading',
+        ),
         true,
       )
       assert.equal(
@@ -439,12 +440,12 @@ describe('TenantProvisioningService', () => {
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('rejects blank version overrides before starting a rollout', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -457,15 +458,15 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'ready',
         'control-plane',
@@ -481,21 +482,22 @@ describe('TenantProvisioningService', () => {
         /Tenant version must be a non-empty string/,
       )
 
-      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
       assert.equal(
-        tenantRegistry.getStateTransitions('tenant-demo').some((transition) =>
-          transition.toState === 'upgrading'),
+        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).some(
+          (transition) => transition.toState === 'upgrading',
+        ),
         false,
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('rejects version overrides that are not safe container image tags', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -508,15 +510,15 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'ready',
         'control-plane',
@@ -532,21 +534,22 @@ describe('TenantProvisioningService', () => {
         /Tenant version must be a valid container image tag/,
       )
 
-      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
       assert.equal(
-        tenantRegistry.getStateTransitions('tenant-demo').some((transition) =>
-          transition.toState === 'upgrading'),
+        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).some(
+          (transition) => transition.toState === 'upgrading',
+        ),
         false,
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('rejects rolling updates that target the tenant version already in service', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -559,15 +562,15 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'ready',
         'control-plane',
@@ -591,16 +594,16 @@ describe('TenantProvisioningService', () => {
         },
       )
 
-      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('rejects concurrent rolling updates when a tenant is already upgrading', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -613,15 +616,15 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'upgrading',
         'control-plane',
@@ -642,22 +645,22 @@ describe('TenantProvisioningService', () => {
         },
       )
 
-      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
+      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
       assert.equal(infrastructureManager.bundles.length, 0)
       assert.equal(
-        tenantRegistry.getStateTransitions('tenant-demo').filter((transition) =>
-          transition.toState === 'upgrading',
+        (await (await tenantRegistry.getStateTransitions('tenant-demo'))).filter(
+          (transition) => transition.toState === 'upgrading',
         ).length,
         1,
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('rejects rolling updates for tenants that are not ready', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -670,15 +673,15 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'maintenance')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'maintenance')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'maintenance',
         'control-plane',
@@ -702,17 +705,20 @@ describe('TenantProvisioningService', () => {
         },
       )
 
-      assert.equal(tenantRegistry.getTenant('tenant-demo')?.version, '1.0.0')
-      assert.equal(tenantRegistry.getTenant('tenant-demo')?.currentState, 'maintenance')
+      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.version, '1.0.0')
+      assert.equal(
+        (await (await tenantRegistry.getTenant('tenant-demo')))?.currentState,
+        'maintenance',
+      )
       assert.equal(infrastructureManager.bundles.length, 0)
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('marks tenant failed when infrastructure application throws', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     infrastructureManager.shouldThrow = true
@@ -726,7 +732,7 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
@@ -741,18 +747,18 @@ describe('TenantProvisioningService', () => {
         /synthetic infrastructure failure/,
       )
 
-      const tenant = tenantRegistry.getTenant('tenant-demo')
+      const tenant = await tenantRegistry.getTenant('tenant-demo')
       assert.equal(tenant?.currentState, 'failed')
       assert.equal(tenant?.desiredState, 'ready')
       assert.ok(tenant?.subdomain)
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('marks tenant failed when a persisted subdomain is invalid', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -765,13 +771,13 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', '')
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', '')
 
       await assert.rejects(
         provisioningService.provisionTenant({
@@ -781,19 +787,19 @@ describe('TenantProvisioningService', () => {
         /invalid persisted subdomain ""/,
       )
 
-      const tenant = tenantRegistry.getTenant('tenant-demo')
+      const tenant = await tenantRegistry.getTenant('tenant-demo')
       assert.equal(tenant?.currentState, 'failed')
       assert.equal(tenant?.desiredState, 'ready')
       assert.deepEqual(databaseManager.createdDatabaseNames, [])
       assert.equal(infrastructureManager.bundles.length, 0)
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('allows provisioning retry for tenants stuck in failed state with persisted subdomain but no runtime secret', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -806,14 +812,14 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-failed123456')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-failed123456')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'failed',
         'control-plane',
@@ -840,12 +846,12 @@ describe('TenantProvisioningService', () => {
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('deprovisions tenant resources and clears the storage reference', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -858,24 +864,24 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
-      tenantRegistry.updateTenantStorageReference(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-existing123456')
+      await tenantRegistry.updateTenantStorageReference(
         'tenant-demo',
         'dnd-notes-data-t-existing123456',
       )
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'ready',
         'control-plane',
         'Provisioned already',
       )
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
 
       const result = await provisioningService.deprovisionTenant({
         tenantId: 'tenant-demo',
@@ -888,7 +894,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(result.tenant.storageReference, null)
       assert.deepEqual(databaseManager.deletedDatabaseNames, [
         buildTenantResourceNames({
-          tenant: tenantRegistry.getTenant('tenant-demo')!,
+          tenant: (await (await tenantRegistry.getTenant('tenant-demo')))!,
           subdomain: 't-existing123456',
           baseDomain: 'dnd-notes.test',
           imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -901,12 +907,12 @@ describe('TenantProvisioningService', () => {
       )
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('fails deprovisioning when a persisted subdomain is invalid', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -919,21 +925,21 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      tenantRegistry.updateTenantSubdomain('tenant-demo', '')
-      tenantRegistry.updateTenantStorageReference('tenant-demo', 'broken-storage-handle')
-      tenantRegistry.updateTenantState(
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', '')
+      await tenantRegistry.updateTenantStorageReference('tenant-demo', 'broken-storage-handle')
+      await tenantRegistry.updateTenantState(
         'tenant-demo',
         'ready',
         'control-plane',
         'Provisioned already',
       )
-      tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
+      await tenantRegistry.updateTenantDesiredState('tenant-demo', 'ready')
 
       await assert.rejects(
         provisioningService.deprovisionTenant({
@@ -946,18 +952,18 @@ describe('TenantProvisioningService', () => {
       assert.equal(infrastructureManager.deletedResources.length, 0)
       assert.deepEqual(databaseManager.deletedDatabaseNames, [])
       assert.equal(
-        tenantRegistry.getTenant('tenant-demo')?.storageReference,
+        (await (await tenantRegistry.getTenant('tenant-demo')))?.storageReference,
         'broken-storage-handle',
       )
-      assert.equal(tenantRegistry.getTenant('tenant-demo')?.currentState, 'ready')
+      assert.equal((await (await tenantRegistry.getTenant('tenant-demo')))?.currentState, 'ready')
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('does not fabricate tenant resources when deprovisioning a tenant that was never provisioned', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
     const provisioningService: TenantProvisioningPort =
@@ -970,7 +976,7 @@ describe('TenantProvisioningService', () => {
       })
 
     try {
-      tenantRegistry.createTenant({
+      await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
@@ -988,15 +994,15 @@ describe('TenantProvisioningService', () => {
       assert.equal(result.tenant.subdomain, null)
     } finally {
       await provisioningService.close()
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
-  it('builds a tenant PVC and mounts it into the workload', () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+  it('builds a tenant PVC and mounts it into the workload', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
-      const tenant = tenantRegistry.createTenant({
+      const tenant = await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
@@ -1050,16 +1056,16 @@ describe('TenantProvisioningService', () => {
         ],
       )
     } finally {
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
-  it('keeps derived resource names within kubernetes limits for max-length subdomains', () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+  it('keeps derived resource names within kubernetes limits for max-length subdomains', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const maxLengthSubdomain = `t-${'a'.repeat(maxTenantSubdomainLength - 2)}`
 
     try {
-      const tenant = tenantRegistry.createTenant({
+      const tenant = await tenantRegistry.createTenant({
         id: 'tenant-demo',
         slug: 'demo',
         ownerId: 'owner-1',
@@ -1085,15 +1091,15 @@ describe('TenantProvisioningService', () => {
       assert.ok(bundle.resources.pvcName.length <= 63)
       assert.equal(bundle.resources.hostname, `${maxLengthSubdomain}.dnd-notes.test`)
     } finally {
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
-  it('normalizes tenant IDs before using them in kubernetes labels', () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
+  it('normalizes tenant IDs before using them in kubernetes labels', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
-      const tenant = tenantRegistry.createTenant({
+      const tenant = await tenantRegistry.createTenant({
         id: 'Tenant ID With Spaces / UPPERCASE / punctuation / '.repeat(3),
         slug: 'demo',
         ownerId: 'owner-1',
@@ -1129,7 +1135,7 @@ describe('TenantProvisioningService', () => {
         labelValue,
       )
     } finally {
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
@@ -1518,8 +1524,8 @@ class FakeKubernetesClient {
 
 describe('KubernetesTenantInfrastructureManager', () => {
   it('preserves service-assigned fields when replacing an existing Service', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
-    const tenant = tenantRegistry.createTenant({
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const tenant = await tenantRegistry.createTenant({
       id: 'tenant-demo',
       slug: 'demo',
       ownerId: 'owner-1',
@@ -1592,13 +1598,13 @@ describe('KubernetesTenantInfrastructureManager', () => {
       assert.equal(replacedService.spec?.clusterIP, '10.43.0.10')
       assert.deepEqual(replacedService.spec?.clusterIPs, ['10.43.0.10'])
     } finally {
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 
   it('preserves pvc-assigned fields when replacing an existing PersistentVolumeClaim', async () => {
-    const tenantRegistry = new TenantRegistry(':memory:')
-    const tenant = tenantRegistry.createTenant({
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const tenant = await tenantRegistry.createTenant({
       id: 'tenant-demo',
       slug: 'demo',
       ownerId: 'owner-1',
@@ -1672,7 +1678,7 @@ describe('KubernetesTenantInfrastructureManager', () => {
       assert.equal(replacedPvc.spec?.volumeMode, 'Filesystem')
       assert.equal(replacedPvc.spec?.volumeName, 'pvc-12345')
     } finally {
-      tenantRegistry.close()
+      await cleanup()
     }
   })
 

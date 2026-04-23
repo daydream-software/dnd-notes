@@ -122,7 +122,7 @@ This surface is intentionally separate from `/internal`:
 - `/portal/*` is the customer-facing contract for landing, signup, and instance management
 
 For this first slice, the portal stores a lightweight local customer account plus
-opaque bearer session in the control-plane SQLite database. The payload shape is
+opaque bearer session in the control-plane Postgres registry. The payload shape is
 already aligned with the future Keycloak migration plan:
 
 - `portal_accounts.keycloak_sub` is reserved for the eventual OIDC reconciliation key
@@ -218,7 +218,7 @@ updates without drain windows.
 Environment variables:
 
 - `PORT` — HTTP port (default: 3001)
-- `DATABASE_PATH` — SQLite database path (default: `data/control-plane.sqlite`; relative paths resolve from the app root)
+- `CONTROL_PLANE_DATABASE_URL` — required Postgres connection string for the control-plane registry pool
 - `CONTROL_PLANE_AUTH_MODE` — `static` (default) or `keycloak`
 - `CONTROL_PLANE_ADMIN_TOKEN` — required bearer token for `/internal` routes when `CONTROL_PLANE_AUTH_MODE=static`
 - `CONTROL_PLANE_KEYCLOAK_URL` — Keycloak base URL for workforce/admin JWT validation
@@ -265,7 +265,7 @@ npm run lint
 
 ## Persistence
 
-SQLite-backed for Phase 1. The database stores:
+Postgres-backed for this slice. The registry stores:
 - Tenant registry (primary source of truth for tenant metadata)
 - State transition audit log (full lifecycle history)
 
