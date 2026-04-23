@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "D&D note-taking app starter with React, Material UI, and Node.js",
   "workspaces": [
+    "packages/portal-utils",
     "apps/web",
     "apps/api",
     "apps/control-plane",
@@ -32,7 +33,8 @@
     "build:web": "npm run build --workspace apps/web",
     "build:operator-portal": "npm run build --workspace apps/operator-portal",
     "build:customer-portal": "npm run build --workspace apps/customer-portal",
-    "test:web": "npm run test --workspace apps/web --",
+    "test:portal-utils": "npm run test --workspace packages/portal-utils --",
+    "test:ci:portal-utils": "npm run test:ci --workspace packages/portal-utils --",
     "test:api": "npm run test --workspace apps/api --",
     "test:control-plane": "npm run test --workspace apps/control-plane --",
     "test:operator-portal": "npm run test --workspace apps/operator-portal --",
@@ -48,7 +50,7 @@
     "reset:data": "npm run reset:data --workspace apps/api",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test:web && npm run test:api && npm run test:control-plane && npm run test:operator-portal && npm run test:customer-portal",
+    "test": "npm run test:portal-utils && npm run test:web && npm run test:api && npm run test:control-plane && npm run test:operator-portal && npm run test:customer-portal",
     "prepare": "node ./scripts/prepare.mjs"
   },
   "repository": {
