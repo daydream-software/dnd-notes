@@ -41,6 +41,12 @@ const ADMIN_TOKEN = process.env.CONTROL_PLANE_ADMIN_TOKEN
 const ENABLE_TENANT_PROVISIONING =
   process.env.CONTROL_PLANE_ENABLE_PROVISIONING === 'true'
 const CONTROL_PLANE_KEYCLOAK_URL = process.env.CONTROL_PLANE_KEYCLOAK_URL
+const rawControlPlaneKeycloakJwksUrl =
+  process.env.CONTROL_PLANE_KEYCLOAK_JWKS_URL?.trim()
+const CONTROL_PLANE_KEYCLOAK_JWKS_URL =
+  rawControlPlaneKeycloakJwksUrl === undefined || rawControlPlaneKeycloakJwksUrl === ''
+    ? undefined
+    : rawControlPlaneKeycloakJwksUrl
 const CONTROL_PLANE_KEYCLOAK_REALM = process.env.CONTROL_PLANE_KEYCLOAK_REALM
 const CONTROL_PLANE_KEYCLOAK_CLIENT_ID =
   process.env.CONTROL_PLANE_KEYCLOAK_CLIENT_ID
@@ -119,6 +125,7 @@ if (
 const adminAuth = createControlPlaneAdminAuth({
   mode: CONTROL_PLANE_AUTH_MODE,
   keycloakUrl: CONTROL_PLANE_KEYCLOAK_URL,
+  jwksUrl: CONTROL_PLANE_KEYCLOAK_JWKS_URL,
   keycloakRealm: CONTROL_PLANE_KEYCLOAK_REALM,
   clientId: CONTROL_PLANE_KEYCLOAK_CLIENT_ID,
   requiredRoles: CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES,

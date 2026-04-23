@@ -8,6 +8,7 @@ data:
   TENANT_PUBLIC_SCHEME: https
   CONTROL_PLANE_AUTH_MODE: keycloak
   CONTROL_PLANE_KEYCLOAK_URL: https://auth.example.com
+  CONTROL_PLANE_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes-workforce/protocol/openid-connect/certs
   CONTROL_PLANE_KEYCLOAK_REALM: dnd-notes-workforce
   CONTROL_PLANE_KEYCLOAK_CLIENT_ID: dnd-notes-control-plane
   CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES: control-plane-admin,control-plane-workforce
