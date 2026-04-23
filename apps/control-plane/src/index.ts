@@ -35,6 +35,8 @@ const DATABASE_PATH = rawDatabasePath
     : path.resolve(__dirname, '..', rawDatabasePath)
   : path.join(__dirname, '../data/control-plane.sqlite')
 
+const CONTROL_PLANE_DATABASE_URL = process.env.CONTROL_PLANE_DATABASE_URL
+
 const CONTROL_PLANE_AUTH_MODE =
   process.env.CONTROL_PLANE_AUTH_MODE === 'keycloak' ? 'keycloak' : 'static'
 const ADMIN_TOKEN = process.env.CONTROL_PLANE_ADMIN_TOKEN
@@ -174,13 +176,22 @@ function parsePositiveIntegerSetting(
   return parsedValue
 }
 
-const databaseDir = path.dirname(DATABASE_PATH)
+if (CONTROL_PLANE_DATABASE_URL && rawDatabasePath) {
+  throw new Error(
+    'Cannot specify both CONTROL_PLANE_DATABASE_URL and DATABASE_PATH',
+  )
+}
 
-await import('node:fs/promises').then((fs) =>
-  fs.mkdir(databaseDir, { recursive: true }),
-)
+if (!CONTROL_PLANE_DATABASE_URL) {
+  const databaseDir = path.dirname(DATABASE_PATH)
+  await import('node:fs/promises').then((fs) =>
+    fs.mkdir(databaseDir, { recursive: true }),
+  )
+}
 
-const tenantRegistry = new TenantRegistry(DATABASE_PATH)
+const tenantRegistry = CONTROL_PLANE_DATABASE_URL
+  ? new TenantRegistry(CONTROL_PLANE_DATABASE_URL)
+  : new TenantRegistry(DATABASE_PATH)
 let tenantProvisioningService: TenantProvisioningPort | undefined
 
 if (ENABLE_TENANT_PROVISIONING) {
@@ -278,7 +289,12 @@ const shutdownController = createShutdownController({
 
 serverRef.current = app.listen(PORT, () => {
   console.log(`Control plane listening on port ${PORT}`)
-  console.log(`Database: ${DATABASE_PATH}`)
+  if (CONTROL_PLANE_DATABASE_URL) {
+    const sanitizedUrl = CONTROL_PLANE_DATABASE_URL.replace(/:[^:@]+@/, ':***@')
+    console.log(`Database: ${sanitizedUrl}`)
+  } else {
+    console.log(`Database: ${DATABASE_PATH}`)
+  }
 })
 
 const shutdown = () => {

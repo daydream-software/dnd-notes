@@ -208,3 +208,31 @@ Established QA gate for #68 operator portal first slice:
 **Next Move:**
 Waiting for Copilot to implement Slice 1. Will validate test coverage before approving each slice.
 
+
+**Work Completed (2026-04-23T21:00:00Z):**
+- Reviewed issue #97 scope (SQLite → Postgres control-plane registry migration)
+- Analyzed current SQLite-based tests: 115 passing, zero failures
+- Identified 5 high-risk parity gaps (schema idempotence, transaction semantics, constraint mapping, shutdown, type coercion)
+- Created detailed QA brief with acceptance gates, checkpoints, and approval criteria
+- Baseline validated: `npm test --workspace apps/control-plane` returns 115 pass / 0 fail
+- Committed QA preparation to worktree branch
+
+**Key Testing Strategy:**
+- All 115 existing tests must pass without assertion changes
+- Only database backend swaps from SQLite to Postgres
+- Constraint error mapping: SQLITE_CONSTRAINT_* → Postgres error codes (23505, 23503, etc.)
+- Schema migrations v1→v5 must be idempotent on real Postgres
+- Graceful shutdown path must remain unchanged
+
+**Recommended Slice Order (for Copilot):**
+1. Schema definition + test adapter (highest risk, must get 115 tests passing)
+2. Constraint error mapping in app.ts (must return 409, not 500)
+3. Connection pooling + env config (CONTROL_PLANE_DATABASE_URL)
+4. K3d provisioning + smoke integration
+5. PVC removal + docs cleanup
+
+**Next Actions:**
+- Waiting for Copilot to implement Slice 1
+- Will validate all test gates pass before approving each slice
+- Specific gate: `npm test --workspace apps/control-plane` must exit 0 with no assertion rewrites
+
