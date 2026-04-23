@@ -16,10 +16,11 @@ export function normalizeBasePath(
     ? trimmedValue
     : `/${trimmedValue}`
 
-  let normalized = withLeadingSlash
-  while (normalized.endsWith('/')) {
-    normalized = normalized.slice(0, -1)
+  let end = withLeadingSlash.length - 1
+  while (end > 0 && withLeadingSlash[end] === '/') {
+    end--
   }
+  const normalized = withLeadingSlash.slice(0, end + 1)
 
   return normalized.length > 0 ? normalized : fallback
 }
