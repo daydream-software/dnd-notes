@@ -103,6 +103,780 @@ describe('Control Plane API', () => {
     })
   })
 
+  describe('portal routes', () => {
+    const portalAuthedGet = (path: string, token: string) =>
+      request(app).get(path).set('Authorization', `Bearer ${token}`)
+
+    const portalAuthedPost = (path: string, token: string) =>
+      request(app).post(path).set('Authorization', `Bearer ${token}`)
+
+    it('returns the public portal catalog', async () => {
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        portalDefaultTenantVersion: '9.9.9',
+      })
+
+      const response = await request(app).get('/portal/catalog').expect(200)
+
+      assert.strictEqual(response.body.authMode, 'local')
+      assert.strictEqual(response.body.defaultTenantVersion, '9.9.9')
+      assert.strictEqual(response.body.provisioningConfigured, false)
+      assert.strictEqual(response.body.slugPolicy.example, 'misty-harbor')
+      assert.strictEqual(response.body.plans.length, 3)
+      assert.strictEqual(response.body.placeholders.billingStatus, 'placeholder')
+    })
+
+    it('creates a portal account, first tenant, and session via signup', async () => {
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'Owner@Example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          billingEmail: 'billing@example.com',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      assert.strictEqual(typeof response.body.token, 'string')
+      assert.ok(response.body.token.length > 0)
+      assert.strictEqual(response.body.dashboard.account.email, 'owner@example.com')
+      assert.strictEqual(response.body.dashboard.account.displayName, 'Alyx')
+      assert.strictEqual(response.body.dashboard.account.billingProvider, 'stripe')
+      assert.strictEqual(response.body.dashboard.tenants.length, 1)
+      assert.strictEqual(
+        response.body.dashboard.tenants[0].tenant.displayName,
+        'Misty Harbor',
+      )
+      assert.strictEqual(response.body.dashboard.tenants[0].tenant.planTier, 'guild')
+      assert.strictEqual(
+        response.body.dashboard.tenants[0].tenant.initialAdminEmail,
+        'owner@example.com',
+      )
+
+      const account = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      assert.ok(account)
+      assert.strictEqual(account.billingEmail, 'billing@example.com')
+      assert.strictEqual(account.authProvider, 'local')
+
+      const authRecord = tenantRegistry.getPortalAccountAuthByEmail('owner@example.com')
+      assert.ok(authRecord)
+      assert.ok(authRecord.passwordHash)
+
+      const ownedTenants = tenantRegistry.listTenantsByOwnerId(account.id)
+      assert.strictEqual(ownedTenants.length, 1)
+      assert.strictEqual(ownedTenants[0].slug, 'misty-harbor')
+    })
+
+    it('rejects signup when a portal account already exists for the email', async () => {
+      await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Mallory',
+          password: 'another-secret-passphrase',
+          paymentProvider: 'square',
+          tenantName: 'Other Tenant',
+          tenantSlug: 'other-tenant',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(409)
+
+      assert.strictEqual(response.body.error, 'Portal account already exists')
+    })
+
+    it('returns 409 when signup hits a portal account sqlite constraint race', async () => {
+      const originalCreatePortalAccount = tenantRegistry.createPortalAccount.bind(tenantRegistry)
+      tenantRegistry.createPortalAccount = () => {
+        const error = new Error('UNIQUE constraint failed: portal_accounts.email') as Error & {
+          code?: string
+        }
+        error.code = 'SQLITE_CONSTRAINT_UNIQUE'
+        throw error
+      }
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(409)
+
+      tenantRegistry.createPortalAccount = originalCreatePortalAccount
+
+      assert.strictEqual(response.body.error, 'Portal account already exists')
+      assert.match(
+        response.body.details,
+        /An account already exists for that email/i,
+      )
+    })
+
+    it('does not reserve an email address when signup fails before account creation', async () => {
+      tenantRegistry.createTenant({
+        id: 'tenant-existing',
+        slug: 'misty-harbor',
+        ownerId: 'owner-existing',
+        displayName: 'Existing Tenant',
+        version: '1.0.0',
+      })
+
+      const failedSignup = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(409)
+
+      assert.strictEqual(failedSignup.body.error, 'Portal signup conflict')
+      assert.strictEqual(tenantRegistry.getPortalAccountByEmail('owner@example.com'), null)
+
+      const successfulSignup = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Emberfall',
+          tenantSlug: 'emberfall',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      assert.strictEqual(
+        successfulSignup.body.dashboard.account.email,
+        'owner@example.com',
+      )
+      assert.strictEqual(successfulSignup.body.dashboard.tenants.length, 1)
+      assert.strictEqual(
+        successfulSignup.body.dashboard.tenants[0].tenant.slug,
+        'emberfall',
+      )
+    })
+
+    it('rolls back portal signup resources when provisioning fails after partial setup', async () => {
+      let deprovisionRequest:
+        | {
+            tenantId: string
+            triggeredBy: string
+            reason?: string
+          }
+        | undefined
+
+      tenantProvisioningService = {
+        async provisionTenant(request) {
+          tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
+          tenantRegistry.updateTenantStorageReference(
+            request.tenantId,
+            'dnd-notes-data-t-misty-harbor',
+          )
+          throw new Error('synthetic infrastructure failure')
+        },
+        async deprovisionTenant(request) {
+          deprovisionRequest = request
+          tenantRegistry.updateTenantStorageReference(request.tenantId, null)
+          tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
+          tenantRegistry.updateTenantState(
+            request.tenantId,
+            'deprovisioned',
+            request.triggeredBy,
+            request.reason,
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            deprovisioned: true,
+          }
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(500)
+
+      assert.strictEqual(response.body.error, 'Failed to complete portal signup')
+      assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating your account. Please try again later.',
+      )
+      assert.strictEqual(
+        tenantRegistry.getPortalAccountByEmail('owner@example.com'),
+        null,
+      )
+      assert.strictEqual(tenantRegistry.getTenantBySlug('misty-harbor'), null)
+      assert.ok(deprovisionRequest)
+      assert.match(deprovisionRequest.triggeredBy, /^portal:/)
+      assert.strictEqual(
+        deprovisionRequest.reason,
+        'Portal rollback after failed tenant provisioning (guild, stripe)',
+      )
+    })
+
+    it('deletes the portal account even when signup rollback deprovisioning fails', async () => {
+      tenantProvisioningService = {
+        async provisionTenant(request) {
+          tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
+          tenantRegistry.updateTenantStorageReference(
+            request.tenantId,
+            'dnd-notes-data-t-misty-harbor',
+          )
+          throw new Error('synthetic infrastructure failure')
+        },
+        async deprovisionTenant() {
+          throw new Error('synthetic deprovision failure')
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(500)
+
+      assert.strictEqual(response.body.error, 'Failed to complete portal signup')
+      assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating your account. Please try again later.',
+      )
+      assert.strictEqual(
+        tenantRegistry.getPortalAccountByEmail('owner@example.com'),
+        null,
+      )
+      assert.strictEqual(tenantRegistry.getTenantBySlug('misty-harbor'), null)
+    })
+
+    it('restores an owner-scoped dashboard, creates another tenant, and logs out', async () => {
+      const signupResponse = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          billingEmail: 'billing@example.com',
+          paymentProvider: 'manual-review',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'adventurer',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const sessionToken = signupResponse.body.token as string
+      const ownerAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      assert.ok(ownerAccount)
+
+      const ownerTenant = tenantRegistry.listTenantsByOwnerId(ownerAccount.id)[0]
+      tenantRegistry.updateTenantSubdomain(ownerTenant.id, 't-misty-harbor')
+      tenantRegistry.updateTenantDesiredState(ownerTenant.id, 'ready')
+      tenantRegistry.updateTenantState(ownerTenant.id, 'ready', 'test-suite')
+
+      const otherAccount = tenantRegistry.createPortalAccount({
+        id: 'account-2',
+        email: 'other@example.com',
+        displayName: 'Other Owner',
+        passwordHash: 'test-salt:test-hash',
+      })
+      tenantRegistry.createTenant({
+        id: 'tenant-other',
+        slug: 'other-tenant',
+        ownerId: otherAccount.id,
+        displayName: 'Other Tenant',
+        planTier: 'guild',
+        version: '1.0.0',
+      })
+
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        tenantBaseDomain: 'example.com',
+      })
+
+      const dashboardResponse = await portalAuthedGet('/portal/me', sessionToken).expect(
+        200,
+      )
+
+      assert.strictEqual(dashboardResponse.body.account.email, 'owner@example.com')
+      assert.strictEqual(dashboardResponse.body.tenants.length, 1)
+      assert.strictEqual(
+        dashboardResponse.body.tenants[0].tenant.slug,
+        'misty-harbor',
+      )
+      assert.strictEqual(
+        dashboardResponse.body.tenants[0].appUrl,
+        'https://t-misty-harbor.example.com',
+      )
+
+      const createTenantResponse = await portalAuthedPost(
+        '/portal/me/tenants',
+        sessionToken,
+      )
+        .send({
+          tenantName: 'Emberfall',
+          tenantSlug: 'emberfall',
+          planTier: 'guild',
+          paymentProvider: 'square',
+        })
+        .expect(201)
+
+      assert.strictEqual(createTenantResponse.body.tenants.length, 2)
+      assert.strictEqual(
+        createTenantResponse.body.account.billingEmail,
+        'billing@example.com',
+      )
+      const emberfallTenant = createTenantResponse.body.tenants.find(
+        (tenant: { tenant: { slug: string } }) => tenant.tenant.slug === 'emberfall',
+      )
+      assert.ok(emberfallTenant)
+      assert.strictEqual(emberfallTenant.tenant.planTier, 'guild')
+      assert.strictEqual(
+        tenantRegistry.getPortalAccountByEmail('owner@example.com')?.billingEmail,
+        'billing@example.com',
+      )
+
+      await portalAuthedPost('/portal/logout', sessionToken).send({}).expect(200)
+      await portalAuthedGet('/portal/me', sessionToken).expect(401)
+
+      const loginResponse = await request(app)
+        .post('/portal/login')
+        .send({
+          email: 'owner@example.com',
+          password: 'top-secret-passphrase',
+        })
+        .expect(200)
+
+      assert.strictEqual(loginResponse.body.dashboard.account.email, 'owner@example.com')
+    })
+
+    it('cleans up a portal tenant when account updates fail during self-serve tenant creation', async () => {
+      const signupResponse = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'manual-review',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'adventurer',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const sessionToken = signupResponse.body.token as string
+      const ownerAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      assert.ok(ownerAccount)
+
+      const originalUpdatePortalAccount = tenantRegistry.updatePortalAccount.bind(
+        tenantRegistry,
+      )
+      tenantRegistry.updatePortalAccount = () => {
+        throw new Error('Simulated portal account update failure')
+      }
+
+      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+        .send({
+          tenantName: 'Emberfall',
+          tenantSlug: 'emberfall',
+          planTier: 'guild',
+          paymentProvider: 'square',
+        })
+        .expect(500)
+
+      tenantRegistry.updatePortalAccount = originalUpdatePortalAccount
+
+      assert.strictEqual(response.body.error, 'Failed to create portal tenant')
+      assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating the tenant. Please try again later.',
+      )
+      assert.strictEqual(
+        tenantRegistry.getTenantBySlug('emberfall'),
+        null,
+      )
+      assert.strictEqual(tenantRegistry.listTenantsByOwnerId(ownerAccount.id).length, 1)
+    })
+
+    it('returns 409 when tenant creation hits a sqlite constraint race', async () => {
+      const signupResponse = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'manual-review',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'adventurer',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const sessionToken = signupResponse.body.token as string
+      const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
+      tenantRegistry.createTenant = () => {
+        const error = new Error('UNIQUE constraint failed: tenants.slug') as Error & {
+          code?: string
+        }
+        error.code = 'SQLITE_CONSTRAINT_UNIQUE'
+        throw error
+      }
+
+      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+        .send({
+          tenantName: 'Emberfall',
+          tenantSlug: 'emberfall',
+          planTier: 'guild',
+          paymentProvider: 'square',
+        })
+        .expect(409)
+
+      tenantRegistry.createTenant = originalCreateTenant
+
+      assert.strictEqual(response.body.error, 'Portal tenant conflict')
+      assert.match(response.body.details, /tenant already exists/i)
+    })
+
+    it('deprovisions portal tenant resources when account updates fail after provisioning succeeds', async () => {
+      let deprovisionRequest:
+        | {
+            tenantId: string
+            triggeredBy: string
+            reason?: string
+          }
+        | undefined
+
+      tenantProvisioningService = {
+        async provisionTenant(request) {
+          tenantRegistry.updateTenantSubdomain(
+            request.tenantId,
+            `t-${request.tenantId.slice(-8)}`,
+          )
+          tenantRegistry.updateTenantStorageReference(
+            request.tenantId,
+            `dnd-notes-data-${request.tenantId.slice(-8)}`,
+          )
+          tenantRegistry.updateTenantDesiredState(request.tenantId, 'ready')
+          tenantRegistry.updateTenantState(
+            request.tenantId,
+            'ready',
+            request.triggeredBy,
+            request.reason,
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            resources: {
+              namespace: `tenant-${request.tenantId.slice(-8)}`,
+              deploymentName: 'dnd-notes',
+              serviceName: 'dnd-notes',
+              pvcName: `dnd-notes-data-${request.tenantId.slice(-8)}`,
+              configMapName: 'dnd-notes-runtime',
+              secretName: 'dnd-notes-runtime-secret',
+              hostname: `${request.tenantId.slice(-8)}.dnd-notes.test`,
+              databaseName: 'tenant_db',
+              image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+            },
+          }
+        },
+        async deprovisionTenant(request) {
+          deprovisionRequest = request
+          tenantRegistry.updateTenantStorageReference(request.tenantId, null)
+          tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
+          tenantRegistry.updateTenantState(
+            request.tenantId,
+            'deprovisioned',
+            request.triggeredBy,
+            request.reason,
+          )
+
+          return {
+            tenant: tenantRegistry.getTenant(request.tenantId)!,
+            deprovisioned: true,
+          }
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const signupResponse = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'manual-review',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'adventurer',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const sessionToken = signupResponse.body.token as string
+      const ownerAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      assert.ok(ownerAccount)
+
+      const originalUpdatePortalAccount = tenantRegistry.updatePortalAccount.bind(
+        tenantRegistry,
+      )
+      tenantRegistry.updatePortalAccount = () => {
+        throw new Error('Simulated portal account update failure')
+      }
+
+      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+        .send({
+          tenantName: 'Emberfall',
+          tenantSlug: 'emberfall',
+          planTier: 'guild',
+          paymentProvider: 'square',
+        })
+        .expect(500)
+
+      tenantRegistry.updatePortalAccount = originalUpdatePortalAccount
+
+      assert.strictEqual(response.body.error, 'Failed to create portal tenant')
+      assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating the tenant. Please try again later.',
+      )
+      assert.strictEqual(tenantRegistry.getTenantBySlug('emberfall'), null)
+      assert.ok(deprovisionRequest)
+      assert.match(deprovisionRequest.triggeredBy, /^portal:/)
+      assert.strictEqual(
+        deprovisionRequest.reason,
+        'Portal rollback after failed account update',
+      )
+      assert.strictEqual(tenantRegistry.listTenantsByOwnerId(ownerAccount.id).length, 1)
+    })
+
+    it('uses forwarded client IPs for portal rate limiting when trust proxy is enabled', async () => {
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        trustProxy: true,
+      })
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app)
+          .post('/portal/signup')
+          .set('X-Forwarded-For', '203.0.113.10')
+          .send({})
+          .expect(400)
+      }
+
+      await request(app)
+        .post('/portal/signup')
+        .set('X-Forwarded-For', '198.51.100.24')
+        .send({})
+        .expect(400)
+    })
+
+    it('rejects local portal login with the wrong password', async () => {
+      await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const response = await request(app)
+        .post('/portal/login')
+        .send({
+          email: 'owner@example.com',
+          password: 'wrong-password',
+        })
+        .expect(401)
+
+      assert.strictEqual(response.body.error, 'Unauthorized')
+    })
+
+    it('rate limits repeated portal signup attempts', async () => {
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app).post('/portal/signup').send({}).expect(400)
+      }
+
+      const response = await request(app).post('/portal/signup').send({}).expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal signup attempts. Please wait before trying again.',
+      )
+      assert.strictEqual(typeof response.headers['retry-after'], 'string')
+    })
+
+    it('rate limits portal signup before parsing request bodies', async () => {
+      const agent = request.agent(app)
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await agent.post('/portal/signup').send({}).expect(400)
+      }
+
+      const response = await agent
+        .post('/portal/signup')
+        .set('Content-Type', 'application/json')
+        .send('{"broken":')
+        .expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal signup attempts. Please wait before trying again.',
+      )
+
+      await agent.get('/health').expect(200)
+    })
+
+    it('rate limits repeated portal login attempts', async () => {
+      await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await request(app)
+          .post('/portal/login')
+          .send({
+            email: 'owner@example.com',
+            password: 'wrong-password',
+          })
+          .expect(401)
+      }
+
+      const response = await request(app)
+        .post('/portal/login')
+        .send({
+          email: 'owner@example.com',
+          password: 'wrong-password',
+        })
+        .expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal login attempts. Please wait before trying again.',
+      )
+      assert.strictEqual(typeof response.headers['retry-after'], 'string')
+    })
+
+    it('rate limits portal login before parsing request bodies', async () => {
+      const agent = request.agent(app)
+
+      await agent
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        await agent
+          .post('/portal/login')
+          .send({
+            email: 'owner@example.com',
+            password: 'wrong-password',
+          })
+          .expect(401)
+      }
+
+      const response = await agent
+        .post('/portal/login')
+        .set('Content-Type', 'application/json')
+        .send('{"broken":')
+        .expect(429)
+
+      assert.strictEqual(
+        response.body.error,
+        'Too many portal login attempts. Please wait before trying again.',
+      )
+
+      await agent.get('/health').expect(200)
+    })
+  })
+
   describe('POST /internal/tenants', () => {
     it('rejects unauthenticated API requests', async () => {
       const response = await request(app).post(tenantsPath).send({

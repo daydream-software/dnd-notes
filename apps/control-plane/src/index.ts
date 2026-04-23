@@ -49,6 +49,15 @@ const CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES =
     ?.split(',')
     .map((role) => role.trim())
     .filter((role) => role.length > 0) ?? []
+const CUSTOMER_PORTAL_AUTH_MODE =
+  process.env.CUSTOMER_PORTAL_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
+const rawCustomerPortalDefaultTenantVersion =
+  process.env.CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION?.trim()
+const CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION =
+  rawCustomerPortalDefaultTenantVersion &&
+  rawCustomerPortalDefaultTenantVersion.length > 0
+    ? rawCustomerPortalDefaultTenantVersion
+    : undefined
 const TENANT_AUTH_MODE =
   process.env.TENANT_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
 const TENANT_KEYCLOAK_URL = process.env.TENANT_KEYCLOAK_URL
@@ -66,6 +75,31 @@ const TENANT_DATABASE_RUNTIME_URL = process.env.TENANT_DATABASE_RUNTIME_URL
 const TENANT_IMAGE_PULL_SECRET = process.env.TENANT_IMAGE_PULL_SECRET
 const TENANT_PUBLIC_SCHEME =
   process.env.TENANT_PUBLIC_SCHEME === 'http' ? 'http' : 'https'
+const rawControlPlaneTrustProxy = process.env.CONTROL_PLANE_TRUST_PROXY
+
+function parseTrustProxySetting(rawValue: string | undefined): boolean | number {
+  if (rawValue === undefined || rawValue.trim() === '') {
+    return false
+  }
+
+  const normalizedValue = rawValue.trim().toLowerCase()
+
+  if (normalizedValue === 'true') {
+    return true
+  }
+
+  if (normalizedValue === 'false') {
+    return false
+  }
+
+  if (/^\d+$/.test(normalizedValue)) {
+    return Number(normalizedValue)
+  }
+
+  throw new Error(`Invalid CONTROL_PLANE_TRUST_PROXY value: ${rawValue}`)
+}
+
+const CONTROL_PLANE_TRUST_PROXY = parseTrustProxySetting(rawControlPlaneTrustProxy)
 
 if (CONTROL_PLANE_AUTH_MODE === 'static' && !ADMIN_TOKEN) {
   throw new Error('CONTROL_PLANE_ADMIN_TOKEN is required')
@@ -202,6 +236,11 @@ const app = createApp({
   adminToken: ADMIN_TOKEN,
   adminAuth,
   tenantProvisioningService,
+  trustProxy: CONTROL_PLANE_TRUST_PROXY,
+  portalAuthMode: CUSTOMER_PORTAL_AUTH_MODE,
+  portalDefaultTenantVersion: CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION,
+  tenantBaseDomain: TENANT_BASE_DOMAIN,
+  tenantPublicScheme: TENANT_PUBLIC_SCHEME,
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000
 const serverRef: { current?: Server } = {}
