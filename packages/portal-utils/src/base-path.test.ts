@@ -10,6 +10,11 @@ describe('normalizeBasePath', () => {
     expect(normalizeBasePath('   ', '/operator-api')).toBe('/operator-api')
   })
 
+  it('treats all-slash inputs (e.g. "///") as blank and returns fallback', () => {
+    expect(normalizeBasePath('///', '/portal-api')).toBe('/portal-api')
+    expect(normalizeBasePath('/////', '/operator-api')).toBe('/operator-api')
+  })
+
   it('preserves the root path', () => {
     expect(normalizeBasePath('/', '/portal-api')).toBe('/')
     expect(normalizeBasePath('/', '/operator-api')).toBe('/')
