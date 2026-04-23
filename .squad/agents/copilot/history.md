@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Issue #79 follow-up (2026-04-23T02:06:40Z): User reported the new `k3d:full-stack-smoke` lane still fails in-cluster because the control-plane pod sets `runAsNonRoot: true` while the control-plane image used a named `USER appuser`, which kubelet cannot verify as non-root. Fix in progress is to align the image and deployment on numeric UID/GID `10001` before re-running the affected validation path. — Copilot
+
 📌 Issue #79 picked up (2026-04-23T01:10:40Z): Working on branch `squad/79-k3d-full-stack-smoke-live-override` as Brand’s platform lane. Current gap assessment: the existing `k3d:smoke` path still keeps the control plane local and verifies the tenant through a service port-forward, while the tenant runtime is deployed as a single `web + api` container. Planned slice is a distinct full-stack smoke lane with in-cluster control-plane + ingress-backed tenant proof, plus a supported live override path that keeps tenant web on k3d and routes `/api` to a local `apps/api` watch process through a local front proxy. Repo baseline validation passed before edits. — Copilot
 
 📌 issue #76 ready for PR handoff (2026-04-22T02:59:10Z): User reran `npm run k3d:smoke` after the final smoke-script JWKS fix and the lane finished green end-to-end (tenant rollout, control-plane Keycloak auth, tenant `/api/auth/session`, tenant `/api/campaigns`). Branch `squad/76-complete-runtime-keycloak-auth-integration` is now review-ready and being pushed for PR creation, with squad review still recommended because the slice is auth-sensitive. — Data (Agent)
