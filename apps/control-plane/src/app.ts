@@ -309,6 +309,20 @@ function getPortalTenantConflictResponse(): ErrorResponse {
   }
 }
 
+function getPortalSignupFailureResponse(): ErrorResponse {
+  return {
+    error: 'Failed to complete portal signup',
+    details: 'An unexpected error occurred while creating your account. Please try again later.',
+  }
+}
+
+function getPortalTenantFailureResponse(): ErrorResponse {
+  return {
+    error: 'Failed to create portal tenant',
+    details: 'An unexpected error occurred while creating the tenant. Please try again later.',
+  }
+}
+
 function buildRolloutFailureDetails(tenantId: string) {
   return `Rolling update failed for tenant ${tenantId}. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.`
 }
@@ -970,14 +984,13 @@ export function createApp({
         }
 
         if (effectiveError instanceof Error) {
-          response.status(500).json({
-            error: 'Failed to complete portal signup',
-            details: effectiveError.message,
-          })
+          console.error('Portal signup failed', effectiveError)
+          response.status(500).json(getPortalSignupFailureResponse())
           return
         }
 
-        response.status(500).json({ error: 'Failed to complete portal signup' })
+        console.error('Portal signup failed', effectiveError)
+        response.status(500).json(getPortalSignupFailureResponse())
       }
     },
   )
@@ -1104,14 +1117,13 @@ export function createApp({
         }
 
         if (error instanceof Error) {
-          response.status(500).json({
-            error: 'Failed to create portal tenant',
-            details: error.message,
-          })
+          console.error('Failed to create portal tenant', error)
+          response.status(500).json(getPortalTenantFailureResponse())
           return
         }
 
-        response.status(500).json({ error: 'Failed to create portal tenant' })
+        console.error('Failed to create portal tenant', error)
+        response.status(500).json(getPortalTenantFailureResponse())
       }
     },
   )

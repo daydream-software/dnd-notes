@@ -345,6 +345,10 @@ describe('Control Plane API', () => {
 
       assert.strictEqual(response.body.error, 'Failed to complete portal signup')
       assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating your account. Please try again later.',
+      )
+      assert.strictEqual(
         tenantRegistry.getPortalAccountByEmail('owner@example.com'),
         null,
       )
@@ -390,7 +394,10 @@ describe('Control Plane API', () => {
         .expect(500)
 
       assert.strictEqual(response.body.error, 'Failed to complete portal signup')
-      assert.match(response.body.details, /cleanup failed: synthetic deprovision failure/)
+      assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating your account. Please try again later.',
+      )
       assert.strictEqual(
         tenantRegistry.getPortalAccountByEmail('owner@example.com'),
         null,
@@ -540,6 +547,10 @@ describe('Control Plane API', () => {
 
       assert.strictEqual(response.body.error, 'Failed to create portal tenant')
       assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating the tenant. Please try again later.',
+      )
+      assert.strictEqual(
         tenantRegistry.getTenantBySlug('emberfall'),
         null,
       )
@@ -686,6 +697,10 @@ describe('Control Plane API', () => {
       tenantRegistry.updatePortalAccount = originalUpdatePortalAccount
 
       assert.strictEqual(response.body.error, 'Failed to create portal tenant')
+      assert.strictEqual(
+        response.body.details,
+        'An unexpected error occurred while creating the tenant. Please try again later.',
+      )
       assert.strictEqual(tenantRegistry.getTenantBySlug('emberfall'), null)
       assert.ok(deprovisionRequest)
       assert.match(deprovisionRequest.triggeredBy, /^portal:/)
