@@ -313,4 +313,61 @@ describe('provisionTenantThroughOperatorPortal', () => {
     expect(fleetFetchCount).toBeGreaterThanOrEqual(1)
     expect(notice.notice).toContain('Provisioned slow-fleet.')
   })
+
+  it('surfaces provisioning failures instead of waiting for a tenant that never appears', async () => {
+    let fleetFetchCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        fleetFetchCount += 1
+        return createJsonResponse(createFleetStatus())
+      }
+
+      if (path === '/operator-api/internal/tenants' && method === 'POST') {
+        return createJsonResponse({
+          tenant: {
+            id: 'failed-live-smoke',
+            slug: 'failed-live-smoke',
+            subdomain: 'failed-live-smoke',
+            ownerId: 'owner-8',
+            initialAdminEmail: 'owner@example.com',
+            desiredState: 'provisioning',
+            currentState: 'provisioning',
+            version: 'k3d',
+          },
+        }, 201)
+      }
+
+      if (
+        path === '/operator-api/internal/tenants/failed-live-smoke/provision' &&
+        method === 'POST'
+      ) {
+        return createJsonResponse({
+          error: 'Provisioning failed',
+          details: 'cluster bootstrap timed out',
+        }, 500)
+      }
+
+      throw new Error(`Unexpected fetch ${method} ${path}`)
+    })
+
+    await expect(
+      provisionTenantThroughOperatorPortal({
+        accessToken: createMockJwt({ email: 'failure-admin@example.com' }),
+        refreshToken: 'failure-refresh-token',
+        tenantId: 'failed-live-smoke',
+        tenantSlug: 'failed-live-smoke',
+        ownerId: 'owner-8',
+        initialAdminEmail: 'owner@example.com',
+        version: 'k3d',
+        reason: 'Surface the provisioning failure immediately',
+      }),
+    ).rejects.toThrow(
+      'Operator portal provisioning failed. Created failed-live-smoke, but provisioning failed: Provisioning failed cluster bootstrap timed out The tenant record stays visible for retry or triage.',
+    )
+
+    expect(fleetFetchCount).toBeGreaterThanOrEqual(2)
+  })
 })

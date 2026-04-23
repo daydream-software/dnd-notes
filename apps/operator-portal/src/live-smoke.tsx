@@ -42,17 +42,45 @@ function createSmokeKeycloakClient(tokens: StoredKeycloakTokens) {
   return () => new StaticRuntimeKeycloakClient(tokens)
 }
 
+function readPortalText(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent ?? ''
+  }
+
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return ''
+  }
+
+  const element = node as Element
+  const tagName = element.tagName.toLowerCase()
+
+  if (tagName === 'style' || tagName === 'script') {
+    return ''
+  }
+
+  return Array.from(element.childNodes)
+    .map((childNode) => readPortalText(childNode))
+    .join(' ')
+}
+
+function readPortalElementText(element: Element): string {
+  return readPortalText(element).replace(/\s+/g, ' ').trim()
+}
+
 function readPortalAlerts(view: ReturnType<typeof render>) {
+  const ignoredAlerts = new Set([
+    'Portal writes stay on the existing /internal/tenants control-plane contract. Provisioning creates real Kubernetes and database resources, while deprovisioning deletes live resources and requires explicit confirmation.',
+    'Confirmation creates a real tenant record immediately, then asks the control plane to create the namespace, deployment, service, PVC, runtime secret, and database. Failures after creation stay visible in the fleet list for retry/triage.',
+    'This will create the tenant record and trigger real platform work.',
+    'If the create call succeeds but provisioning fails, the new tenant stays in the fleet list so the operator can retry the existing /internal/tenants/:id/provision path instead of losing the audit trail. This slice records the initial admin email for later bootstrap work; it does not create the in-tenant admin account yet.',
+  ])
+
   return view
-    .queryAllByRole('alert')
-    .map((alert) => alert.textContent?.trim())
+    .queryAllByRole('alert', { hidden: true })
+    .map((alert) => readPortalElementText(alert))
     .filter(
       (text): text is string =>
-        Boolean(text) &&
-        text !==
-          'Portal writes stay on the existing /internal/tenants control-plane contract. Provisioning creates real Kubernetes and database resources, while deprovisioning deletes live resources and requires explicit confirmation.' &&
-        text !==
-          'Confirmation creates a real tenant record immediately, then asks the control plane to create the namespace, deployment, service, PVC, runtime secret, and database. Failures after creation stay visible in the fleet list for retry/triage.',
+        Boolean(text) && !ignoredAlerts.has(text),
     )
 }
 
@@ -138,11 +166,49 @@ export async function provisionTenantThroughOperatorPortal(
       view.getByRole('button', { name: 'Create and provision tenant' }),
     )
 
-    const notice = await view.findByText(
-      new RegExp(`^Provisioned ${options.tenantSlug}\\.`),
-    )
-    return {
-      notice: notice.textContent ?? '',
+    const successPrefix = `Provisioned ${options.tenantSlug}.`
+
+    try {
+      const outcome = await waitFor(() => {
+        const dynamicAlerts = readPortalAlerts(view)
+        const successNotice = dynamicAlerts.find((alert) => alert.includes(successPrefix))
+
+        if (successNotice) {
+          return { kind: 'success' as const, message: successNotice }
+        }
+
+        if (dynamicAlerts.length > 0) {
+          return { kind: 'error' as const, message: dynamicAlerts.join(' ') }
+        }
+
+        if (view.queryByRole('dialog', { name: 'Confirm tenant provisioning' })) {
+          throw new Error('Provision success notice not available yet.')
+        }
+
+        throw new Error('Provisioning result not available yet.')
+      }, { timeout: 10_000 })
+
+      if (outcome.kind === 'error') {
+        throw new Error(`Operator portal provisioning failed. ${outcome.message}`)
+      }
+
+      return {
+        notice: outcome.message,
+      }
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith('Operator portal provisioning failed.')
+      ) {
+        throw error
+      }
+
+      const alertSummary = readPortalAlerts(view).join(' ')
+      throw new Error(
+        alertSummary.length > 0
+          ? `Provisioning did not reach a successful outcome. ${alertSummary}`
+          : 'Provisioning did not reach a successful outcome.',
+      )
     }
   } finally {
     cleanup()
