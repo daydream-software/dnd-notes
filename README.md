@@ -85,14 +85,14 @@ only when you have a live kube context plus an admin Postgres connection string:
 - `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret name for private images
 
 When provisioning is enabled, the control plane reconciles a tenant namespace,
-runtime ConfigMap/Secret, PVC, Service, Deployment, and a per-tenant Postgres
-database. New tenants also get a dedicated Postgres runtime role with a random
-password, plus control-plane schema bootstrap before the tenant pod starts, so
-the pod can run on least-privilege `DATABASE_URL` credentials. The current
-hosted slice still keeps `/app/data` on a PVC for explicit tenant storage
-lifecycle plus SQLite-compatible fallback files, but issue `#95` changes the
-target hosted steady-state to per-tenant Postgres without a tenant PVC in the
-normal pod shape.
+runtime ConfigMap/Secret, PVC, Service, Deployment, generated per-tenant
+Ingress, and a per-tenant Postgres database. New tenants also get a dedicated
+Postgres runtime role with a random password, plus control-plane schema
+bootstrap before the tenant pod starts, so the pod can run on least-privilege
+`DATABASE_URL` credentials. The current hosted slice still keeps `/app/data` on
+a PVC for explicit tenant storage lifecycle plus SQLite-compatible fallback
+files, but issue `#95` changes the target hosted steady-state to per-tenant
+Postgres without a tenant PVC in the normal pod shape.
 
 Postgres-backed tenant upgrades reuse `POST /internal/tenants/:tenantId/provision`
 with a version override. The generated tenant Deployment currently makes the
