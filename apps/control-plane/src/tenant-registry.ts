@@ -1,4 +1,5 @@
 import { TenantRegistry as PostgresTenantRegistryBackend } from './tenant-registry-postgres.js'
+import { TenantRegistry as SqliteTenantRegistryBackend } from './tenant-registry-sqlite.js'
 import type {
   PortalAccount,
   PortalBillingProvider,
@@ -13,11 +14,21 @@ interface TenantRegistryOptions {
   pool?: TenantRegistryPoolLike
 }
 
-export class TenantRegistry {
-  private readonly backend: PostgresTenantRegistryBackend
+type TenantRegistryBackend = (
+  | PostgresTenantRegistryBackend
+  | SqliteTenantRegistryBackend
+)
 
-  constructor(connectionString: string, options: TenantRegistryOptions = {}) {
-    this.backend = new PostgresTenantRegistryBackend(connectionString, options)
+export class TenantRegistry {
+  private readonly backend: TenantRegistryBackend
+
+  constructor(
+    databasePathOrConnectionString: string,
+    options: TenantRegistryOptions = {},
+  ) {
+    this.backend = databasePathOrConnectionString.startsWith('postgresql://')
+      ? new PostgresTenantRegistryBackend(databasePathOrConnectionString, options)
+      : new SqliteTenantRegistryBackend(databasePathOrConnectionString)
   }
 
   async checkHealth(): Promise<void> {

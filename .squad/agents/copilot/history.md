@@ -236,3 +236,6 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 
 
+
+
+📌 Issue #97 registry dual-backend conversion complete (2026-04-23T00:00:00Z): Tenant registry persistence now supports both SQLite file paths and `postgresql://` connection strings. The public `TenantRegistry` API is async, Postgres migrations use a `schema_version` table with parameterized `pg` queries, SQLite behavior remains available for file-path tests, and `npm run build --workspace apps/control-plane` plus `npm test --workspace apps/control-plane` passed. — Copilot
