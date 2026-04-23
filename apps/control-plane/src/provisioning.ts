@@ -6,6 +6,7 @@ import {
   type V1ConfigMap,
   type V1DeleteOptions,
   type V1Deployment,
+  type V1Ingress,
   type V1Namespace,
   type V1PersistentVolumeClaim,
   type V1PersistentVolumeClaimSpec,
@@ -83,6 +84,7 @@ interface TenantInfrastructureBundle {
   secret: V1Secret
   persistentVolumeClaim: V1PersistentVolumeClaim
   service: V1Service
+  ingress: V1Ingress
   deployment: V1Deployment
   resources: TenantProvisioningResources
 }
@@ -127,6 +129,7 @@ interface TenantProvisioningServiceOptions {
   databaseManager: TenantDatabaseManager
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
   baseDomain: string
+  ingressClassName?: string
   imageRepository: string
   imagePullSecretName?: string
   publicScheme?: 'http' | 'https'
@@ -140,6 +143,7 @@ interface BuildTenantInfrastructureBundleOptions {
   database: TenantDatabase
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
   baseDomain: string
+  ingressClassName?: string
   imageRepository: string
   imagePullSecretName?: string
   publicScheme: 'http' | 'https'
@@ -205,6 +209,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly databaseManager: TenantDatabaseManager
   private readonly tenantRuntimeAuth: TenantRuntimeAuthConfig
   private readonly baseDomain: string
+  private readonly ingressClassName: string
   private readonly imageRepository: string
   private readonly imagePullSecretName?: string
   private readonly publicScheme: 'http' | 'https'
@@ -217,6 +222,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.databaseManager = options.databaseManager
     this.tenantRuntimeAuth = options.tenantRuntimeAuth ?? { mode: 'local' }
     this.baseDomain = options.baseDomain
+    this.ingressClassName = options.ingressClassName ?? 'nginx'
     this.imageRepository = options.imageRepository
     this.imagePullSecretName = options.imagePullSecretName
     this.publicScheme = options.publicScheme ?? 'https'
@@ -330,6 +336,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         database,
         tenantRuntimeAuth: this.tenantRuntimeAuth,
         baseDomain: this.baseDomain,
+        ingressClassName: this.ingressClassName,
         imageRepository: this.imageRepository,
         imagePullSecretName: this.imagePullSecretName,
         publicScheme: this.publicScheme,
@@ -647,6 +654,7 @@ export class KubernetesTenantInfrastructureManager
     await upsertKubernetesObject(this.client, bundle.secret)
     await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
     await upsertKubernetesObject(this.client, bundle.service)
+    await upsertKubernetesObject(this.client, bundle.ingress)
     await upsertKubernetesObject(this.client, bundle.deployment)
   }
 
@@ -799,6 +807,7 @@ export function createLiveTenantProvisioningService(params: {
   tenantRegistry: TenantRegistry
   baseDomain: string
   imageRepository: string
+  ingressClassName?: string
   databaseAdminUrl: string
   databaseRuntimeUrl?: string
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
@@ -816,6 +825,7 @@ export function createLiveTenantProvisioningService(params: {
     ),
     tenantRuntimeAuth: params.tenantRuntimeAuth,
     baseDomain: params.baseDomain,
+    ingressClassName: params.ingressClassName,
     imageRepository: params.imageRepository,
     imagePullSecretName: params.imagePullSecretName,
     publicScheme: params.publicScheme,
@@ -931,6 +941,39 @@ export function buildTenantInfrastructureBundle(
             name: 'http',
             port: options.tenantPort,
             targetPort: options.tenantPort,
+          },
+        ],
+      },
+    },
+    ingress: {
+      apiVersion: 'networking.k8s.io/v1',
+      kind: 'Ingress',
+      metadata: {
+        name: resources.serviceName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      spec: {
+        ingressClassName: options.ingressClassName ?? 'nginx',
+        rules: [
+          {
+            host: resources.hostname,
+            http: {
+              paths: [
+                {
+                  path: '/',
+                  pathType: 'Prefix',
+                  backend: {
+                    service: {
+                      name: resources.serviceName,
+                      port: {
+                        name: 'http',
+                      },
+                    },
+                  },
+                },
+              ],
+            },
           },
         ],
       },

@@ -17,6 +17,7 @@ This lane intentionally uses **k3d for daily iteration** and keeps the control p
 ```bash
 npm run k3d:bootstrap
 npm run k3d:smoke
+npm run k3d:full-stack-smoke
 ```
 
 The same smoke lane now runs in GitHub Actions via
@@ -96,6 +97,7 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
 The k3d overlay ConfigMap automatically injects:
 - `CONTROL_PLANE_AUTH_MODE=keycloak`
 - `CONTROL_PLANE_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `CONTROL_PLANE_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-dev`
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
 - `TENANT_AUTH_MODE=keycloak`
@@ -104,12 +106,15 @@ The k3d overlay ConfigMap automatically injects:
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
 - `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
 
-`TENANT_KEYCLOAK_JWKS_URL` is intentionally different from `TENANT_KEYCLOAK_URL` in
-k3d: the browser-facing hostname resolves to `127.0.0.1`, which tenant pods cannot
-use to fetch JWKS. The in-cluster Service URL keeps bearer-token validation working
+`CONTROL_PLANE_KEYCLOAK_JWKS_URL` and `TENANT_KEYCLOAK_JWKS_URL` are intentionally
+different from their browser-facing Keycloak URLs in k3d: the public hostname
+resolves to `127.0.0.1`, which in-cluster pods cannot use to fetch JWKS. The
+in-cluster Service URL keeps bearer-token validation working
 inside the workload while the frontend still points users at the public issuer URL.
 
-## What `k3d:smoke` proves
+## Supported workflows
+
+### 1. Fast provisioning/debug lane — `k3d:smoke`
 
 `k3d:smoke` reuses the bootstrap lane, then:
 
@@ -127,9 +132,62 @@ The tenant workload itself does **not** use the host port-forward. The smoke lan
 
 By default the smoke script deprovisions the tenant during cleanup. Set `KEEP_K3D_SMOKE_TENANT=true` if you want to keep the tenant namespace around for debugging.
 
-That means the smoke lane now proves the runtime JWT validation seam, not only cluster boot and readiness.
+That means the fast smoke lane proves the runtime JWT validation seam, not only
+cluster boot and readiness.
 
-## Why the control plane still runs locally here
+### 2. Full-stack platform lane — `k3d:full-stack-smoke`
+
+Issue `#79` adds a second lane for the full current platform shape.
+
+`k3d:full-stack-smoke` reuses the same tenant image/bootstrap inputs, then:
+
+1. builds/imports both the tenant and control-plane images
+2. deploys the control plane in-cluster from `platform/control-plane/overlays/k3d`
+3. provisions a tenant through the **operator portal** UI surface (via a small
+   jsdom-based harness that drives the actual portal component instead of
+   skipping straight to a raw manifest path)
+4. waits for the tenant rollout to finish
+5. verifies `GET /ready`, `GET /api/auth/session`, and `GET /api/campaigns`
+   through the tenant ingress host (`http://<subdomain>.127.0.0.1.nip.io:8080`)
+
+This lane is the supported answer for:
+
+- “does the current k3d platform actually work end to end?”
+- “did a change break the real operator → control-plane → tenant ingress path?”
+
+The script honors `KEEP_K3D_SMOKE_TENANT=true` just like the fast lane, and
+`K3D_SMOKE_OUTPUT=json` when another script needs a machine-readable tenant
+summary.
+
+### 3. Live component override lane — `k3d:tenant-api-override`
+
+The supported component-level override today is **tenant-api only**:
+
+1. start or reuse a tenant on k3d
+2. read that tenant’s runtime Secret/ConfigMap from Kubernetes
+3. run `apps/api` locally in watch mode against the live tenant database/runtime auth config
+4. expose a local same-origin front proxy
+5. keep browser/document traffic on the k3d tenant host while routing `/api/*`
+    (plus probe paths) to the local API process
+
+When that tenant ConfigMap carries an in-cluster `KEYCLOAK_JWKS_URL`
+(`*.svc.cluster.local`), the override launcher intentionally drops it for the
+host-side `apps/api` process so runtime auth falls back to
+`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`.
+
+The proxy adds `x-dnd-notes-override-target` so the workflow can prove which side
+served each request:
+
+| Path | Target |
+| --- | --- |
+| `/`, `/assets/*`, browser document routes | k3d tenant host |
+| `/api/*`, `/ready`, `/readyz`, `/health`, `/healthz` | local `apps/api` |
+
+The override launcher performs the proof automatically by comparing the proxied
+root document against the live k3d tenant host and comparing proxied `/api/*`
+responses against the local API process.
+
+## Why the fast lane still keeps the control plane local
 
 That is deliberate scope control, not a missing piece:
 
@@ -137,17 +195,13 @@ That is deliberate scope control, not a missing piece:
 - issue `#43` now carries the committed control-plane image + manifest lane under `platform/control-plane/`
 - the daily smoke path still keeps the control plane local because that is the fastest feedback loop for provisioning/debugging
 
-So the daily k3d loop today is still: **live cluster + local control-plane process**.
-When you need to rehearse the in-cluster artifact set itself, use:
-
-```bash
-npm run k3d:build-control-plane-image
-kubectl apply -k platform/control-plane/overlays/k3d
-```
+So the daily fast loop remains: **live cluster + local control-plane process**.
+Use `k3d:full-stack-smoke` when you specifically need the in-cluster artifact set
+plus ingress-backed tenant proof.
 
 ## Environment overrides
 
-Both scripts honor a few env overrides when you need a different local shape:
+All three scripts honor a few env overrides when you need a different local shape:
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
@@ -164,17 +218,42 @@ Both scripts honor a few env overrides when you need a different local shape:
 | `TENANT_DATABASE_RUNTIME_URL` | `postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres` | in-cluster Postgres URL injected into tenant pods |
 | `TENANT_LOCAL_PORT` | `38080` | local port-forward for the smoke tenant |
 | `KEEP_K3D_SMOKE_TENANT` | `false` | keep the provisioned tenant for debugging |
+| `K3D_SMOKE_OUTPUT` | `text` | set to `json` for machine-readable full-stack smoke output |
+| `K3D_TENANT_OVERRIDE_LOCAL_API_PORT` | `3001` | local `apps/api` port for tenant override |
+| `K3D_TENANT_OVERRIDE_LISTEN_PORT` | `38080` | public port for the tenant override front proxy |
+| `K3D_TENANT_OVERRIDE_NAMESPACE` | derived | reuse an existing tenant namespace for the override lane |
+| `K3D_TENANT_OVERRIDE_SUBDOMAIN` | derived | reuse an existing tenant subdomain for the override lane |
 
 ## k3d vs later k3s/stateful rehearsal scope
 
-The daily k3d loop **covers**:
+The k3d workflows in this repo now cover:
 
-- cluster-backed provisioning through the real control-plane API
+- fast local provisioning rehearsal through the real control-plane API
+- full-stack operator-portal-driven provisioning against the in-cluster control plane
 - tenant namespace/PVC/Service/Deployment creation in Kubernetes
 - per-tenant Postgres database creation
-- tenant readiness validation
-- ingress-nginx availability
+- ingress-backed tenant request validation
 - local Keycloak availability and realm seeding
+- tenant-api local override while tenant web stays on k3d
+
+## Supported vs unsupported override boundaries
+
+**Supported today**
+
+- `tenant-api` locally in watch mode while tenant web stays on k3d, using the
+  front-proxy workflow above
+
+**Not supported today**
+
+- swapping `tenant-web` alone while keeping the in-cluster API as the only live backend
+- hot-swapping arbitrary in-cluster services by editing ingress/controller state directly
+- control-plane live overrides through the tenant ingress hostname
+
+Those unsupported cases all hit the same current constraint: the shipped tenant
+runtime is still one Kubernetes Service/Deployment backed by a single `web + api`
+container image. The supported `tenant-api` override works because the front
+proxy splits traffic **in front of** that runtime without pretending the cluster
+topology has already been decomposed.
 
 The later k3s / managed-cluster rehearsals still own:
 

@@ -16,10 +16,12 @@ Use this when a Kubernetes platform already boots locally, but developers still 
 - Make the first override the API/backend component that gives the team the most leverage while clustered clients continue using the normal platform contract.
 - Drive smoke through the highest-level operator surface available; fall back to lower-level control-plane APIs only as a temporary seam.
 - Explicitly document supported versus unsupported overrides so the discovery slice closes with evidence.
+- When a host-side override reuses tenant runtime auth config, strip pod-only network overrides (for example `KEYCLOAK_JWKS_URL` pointing at `*.svc.cluster.local`) and let the local process fall back to the browser-reachable issuer path instead of copying unreachable cluster DNS verbatim.
 
 ## Examples
 - Epic #42 child issue #79 pairs a k3d full-stack smoke lane with `tenant-api` running locally while `tenant-web` stays on k3d.
 - #63 remains the earlier bootstrap/environment issue; the follow-up workflow contract belongs in a separate issue rather than being hand-waved as "more docs."
+- PR #81 follow-up: `scripts/k3d/tenant-api-override.sh` drops in-cluster `KEYCLOAK_JWKS_URL` before launching host-side `apps/api`, because the local process can resolve the public Keycloak issuer URL but not `platform-keycloak.*.svc.cluster.local`.
 
 ## Anti-Patterns
 - Splitting smoke and live overrides into separate issues before either path is proven.

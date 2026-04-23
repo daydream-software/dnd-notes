@@ -122,4 +122,31 @@ describe('Control Plane Keycloak auth', () => {
 
     assert.equal(response.body.error, 'Unauthorized')
   })
+
+  it('accepts an explicit jwksUrl override', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+    const jwksUrl = `${keycloak.baseUrl}/realms/${keycloakRealm}/protocol/openid-connect/certs`
+    const adminAuth = createControlPlaneAdminAuth({
+      mode: 'keycloak',
+      keycloakUrl: 'http://keycloak.127.0.0.1.nip.io:8080',
+      jwksUrl,
+      issuer: `${keycloak.baseUrl}/realms/${keycloakRealm}`,
+      keycloakRealm,
+      clientId,
+      requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
+    })
+    const app = createApp({ tenantRegistry, adminAuth })
+    const token = keycloak.issueToken({
+      audience: 'account',
+      clientId,
+      roles: ['control-plane-admin'],
+    })
+
+    const response = await request(app)
+      .get('/internal/fleet/status')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    assert.equal(response.body.controlPlane.status, 'healthy')
+  })
 })

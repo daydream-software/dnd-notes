@@ -28,9 +28,10 @@ COPY --from=build /app/apps/control-plane/package.json ./apps/control-plane/
 COPY package.json ./
 
 RUN mkdir -p /app/data && \
-    groupadd -r appuser && useradd -r -g appuser appuser && \
-    chown -R appuser:appuser /app
-USER appuser
+    groupadd --gid 10001 appuser && \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin appuser && \
+    chown -R 10001:10001 /app
+USER 10001:10001
 
 EXPOSE 3001
 

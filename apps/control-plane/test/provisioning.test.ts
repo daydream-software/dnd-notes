@@ -68,6 +68,10 @@ class FakeInfrastructureManager {
     resources: TenantProvisioningResources
     authMode: string | undefined
     deploymentReadinessPath: string | undefined
+    ingressBackendServiceName: string | undefined
+    ingressClassName: string | undefined
+    ingressHost: string | undefined
+    ingressPath: string | undefined
     keycloakClientId: string | undefined
     keycloakJwksUrl: string | undefined
     keycloakRealm: string | undefined
@@ -96,6 +100,24 @@ class FakeInfrastructureManager {
     secret?: {
       data?: {
         DATABASE_URL?: string
+      }
+    }
+    ingress?: {
+      spec?: {
+        ingressClassName?: string
+        rules?: Array<{
+          host?: string
+          http?: {
+            paths?: Array<{
+              path?: string
+              backend?: {
+                service?: {
+                  name?: string
+                }
+              }
+            }>
+          }
+        }>
       }
     }
     deployment: {
@@ -128,6 +150,11 @@ class FakeInfrastructureManager {
       deploymentReadinessPath:
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.readinessProbe
           ?.httpGet?.path,
+      ingressBackendServiceName:
+        bundle.ingress?.spec?.rules?.[0]?.http?.paths?.[0]?.backend?.service?.name,
+      ingressClassName: bundle.ingress?.spec?.ingressClassName,
+      ingressHost: bundle.ingress?.spec?.rules?.[0]?.host,
+      ingressPath: bundle.ingress?.spec?.rules?.[0]?.http?.paths?.[0]?.path,
       keycloakClientId: bundle.configMap?.data?.KEYCLOAK_TENANT_CLIENT_ID,
       keycloakJwksUrl: bundle.configMap?.data?.KEYCLOAK_JWKS_URL,
       keycloakRealm: bundle.configMap?.data?.KEYCLOAK_REALM,
@@ -223,6 +250,13 @@ describe('TenantProvisioningService', () => {
       )
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
+      assert.equal(infrastructureManager.bundles[0].ingressClassName, 'nginx')
+      assert.equal(
+        infrastructureManager.bundles[0].ingressBackendServiceName,
+        result.resources.serviceName,
+      )
+      assert.equal(infrastructureManager.bundles[0].ingressHost, result.resources.hostname)
+      assert.equal(infrastructureManager.bundles[0].ingressPath, '/')
       assert.equal(infrastructureManager.bundles[0].deploymentStrategyType, 'RollingUpdate')
       assert.equal(infrastructureManager.bundles[0].maxSurge, 0)
       assert.equal(infrastructureManager.bundles[0].maxUnavailable, 1)
@@ -303,6 +337,41 @@ describe('TenantProvisioningService', () => {
         infrastructureManager.bundles[0].keycloakClientId,
         'dnd-notes-tenant-app',
       )
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
+  it('uses a configurable ingress class for provisioned tenant routes', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        ingressClassName: 'custom-nginx',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(infrastructureManager.bundles.length, 1)
+      assert.equal(infrastructureManager.bundles[0].ingressClassName, 'custom-nginx')
     } finally {
       await provisioningService.close()
       tenantRegistry.close()
@@ -950,6 +1019,14 @@ describe('TenantProvisioningService', () => {
 
       assert.equal(bundle.resources.pvcName, 'dnd-notes-data-t-opaque123456')
       assert.equal(bundle.persistentVolumeClaim.metadata?.name, bundle.resources.pvcName)
+      assert.equal(bundle.ingress.metadata?.name, bundle.resources.serviceName)
+      assert.equal(bundle.ingress.spec?.ingressClassName, 'nginx')
+      assert.equal(bundle.ingress.spec?.rules?.[0]?.host, bundle.resources.hostname)
+      assert.equal(bundle.ingress.spec?.rules?.[0]?.http?.paths?.[0]?.path, '/')
+      assert.equal(
+        bundle.ingress.spec?.rules?.[0]?.http?.paths?.[0]?.backend?.service?.name,
+        bundle.resources.serviceName,
+      )
       assert.equal(
         bundle.configMap.data?.NOTES_DB_PATH,
         '/app/data/dnd-notes.sqlite',
@@ -1470,6 +1547,7 @@ describe('KubernetesTenantInfrastructureManager', () => {
         bundle.configMap,
         bundle.secret,
         bundle.persistentVolumeClaim,
+        bundle.ingress,
         bundle.deployment,
       ]) {
         client.seed({
@@ -1548,6 +1626,7 @@ describe('KubernetesTenantInfrastructureManager', () => {
         bundle.configMap,
         bundle.secret,
         bundle.service,
+        bundle.ingress,
         bundle.deployment,
       ]) {
         client.seed({
