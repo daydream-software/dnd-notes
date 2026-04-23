@@ -1,5 +1,44 @@
 import { JSDOM } from 'jsdom'
-import { provisionTenantThroughOperatorPortal } from '../../apps/operator-portal/src/live-smoke'
+
+type InstalledWindow = typeof globalThis & Record<string, any>
+type AnimationFrameCallback = (timestamp: number) => void
+type RequestLike = string | URL | Request
+type LegacyAttachEventElement = {
+  attachEvent?: () => void
+  detachEvent?: () => void
+}
+type ProvisionTenantThroughOperatorPortal = (options: OperatorPortalSmokeOptions) => Promise<{
+  notice: string
+}>
+
+interface OperatorPortalSmokeOptions {
+  accessToken: string
+  refreshToken: string
+  idToken?: string
+  tenantId: string
+  tenantSlug: string
+  ownerId: string
+  initialAdminEmail: string
+  version: string
+  reason: string
+  provisionTimeoutMs?: number
+}
+
+const operatorPortalLiveSmokeModulePath = '../../apps/operator-portal/src/live-smoke.tsx'
+
+async function loadProvisionTenantThroughOperatorPortal(): Promise<ProvisionTenantThroughOperatorPortal> {
+  const liveSmokeModule = (await import(operatorPortalLiveSmokeModulePath)) as {
+    provisionTenantThroughOperatorPortal?: ProvisionTenantThroughOperatorPortal
+  }
+
+  const provisionTenantThroughOperatorPortal = liveSmokeModule.provisionTenantThroughOperatorPortal
+
+  if (!provisionTenantThroughOperatorPortal) {
+    throw new Error('Operator portal live smoke helper is not available.')
+  }
+
+  return provisionTenantThroughOperatorPortal
+}
 
 function installGlobalProperty(name: string, value: unknown) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, name)
@@ -27,14 +66,15 @@ function installGlobalProperty(name: string, value: unknown) {
   )
 }
 
-function installDomGlobals(window: Window & typeof globalThis) {
+function installDomGlobals(window: InstalledWindow) {
   const requestAnimationFrame =
     window.requestAnimationFrame?.bind(window) ??
-    ((callback: FrameRequestCallback) =>
+    ((callback: AnimationFrameCallback) =>
       setTimeout(() => callback(Date.now()), 0) as unknown as number)
   const cancelAnimationFrame =
     window.cancelAnimationFrame?.bind(window) ??
     ((handle: number) => clearTimeout(handle))
+  const htmlElementPrototype = window.HTMLElement.prototype as LegacyAttachEventElement
 
   installGlobalProperty('window', window)
   installGlobalProperty('document', window.document)
@@ -82,16 +122,16 @@ function installDomGlobals(window: Window & typeof globalThis) {
     })
   }
 
-  if (!window.HTMLElement.prototype.attachEvent) {
-    Object.defineProperty(window.HTMLElement.prototype, 'attachEvent', {
+  if (!htmlElementPrototype.attachEvent) {
+    Object.defineProperty(htmlElementPrototype, 'attachEvent', {
       configurable: true,
       writable: true,
       value() {},
     })
   }
 
-  if (!window.HTMLElement.prototype.detachEvent) {
-    Object.defineProperty(window.HTMLElement.prototype, 'detachEvent', {
+  if (!htmlElementPrototype.detachEvent) {
+    Object.defineProperty(htmlElementPrototype, 'detachEvent', {
       configurable: true,
       writable: true,
       value() {},
@@ -99,7 +139,7 @@ function installDomGlobals(window: Window & typeof globalThis) {
   }
 }
 
-async function readRequestBody(input: RequestInfo | URL, init?: RequestInit) {
+async function readRequestBody(input: RequestLike, init?: RequestInit) {
   if (init?.body !== undefined) {
     return init.body
   }
@@ -114,7 +154,7 @@ async function readRequestBody(input: RequestInfo | URL, init?: RequestInit) {
 function createRelativeFetchProxy(controlPlaneBaseUrl: string, browserOrigin: string) {
   const nativeFetch = globalThis.fetch.bind(globalThis)
 
-  return async (input: RequestInfo | URL, init?: RequestInit) => {
+  return async (input: RequestLike, init?: RequestInit) => {
     const requestUrl =
       typeof input === 'string'
         ? input
@@ -182,9 +222,10 @@ async function main() {
     pretendToBeVisual: true,
     url: 'http://operator.127.0.0.1.nip.io/',
   })
-  installDomGlobals(dom.window)
+  installDomGlobals(dom.window as unknown as InstalledWindow)
   globalThis.fetch = createRelativeFetchProxy(controlPlaneBaseUrl, dom.window.location.origin)
 
+  const provisionTenantThroughOperatorPortal = await loadProvisionTenantThroughOperatorPortal()
   const result = await provisionTenantThroughOperatorPortal({
     accessToken,
     refreshToken,
