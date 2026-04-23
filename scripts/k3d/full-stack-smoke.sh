@@ -311,6 +311,10 @@ run_visible "${ROOT}/scripts/k3d/build-control-plane-image.sh"
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 
+run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"
+
+# The k3d overlay keeps placeholder Secret values in source control, so replace the
+# rendered Secret after apply before waiting on the deployment.
 kubectl create secret generic dnd-notes-control-plane-secrets \
   -n "${PLATFORM_NAMESPACE}" \
   --from-literal=CONTROL_PLANE_ADMIN_TOKEN='local-admin-token' \
@@ -319,7 +323,7 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
   --dry-run=client -o yaml \
   | kubectl apply -f - >/dev/null
 
-run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"
+run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane
 run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane --timeout=240s
 
 kubectl -n "${PLATFORM_NAMESPACE}" port-forward \
