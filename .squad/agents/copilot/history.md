@@ -239,3 +239,40 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 
 📌 Issue #97 registry dual-backend conversion complete (2026-04-23T00:00:00Z): Tenant registry persistence now supports both SQLite file paths and `postgresql://` connection strings. The public `TenantRegistry` API is async, Postgres migrations use a `schema_version` table with parameterized `pg` queries, SQLite behavior remains available for file-path tests, and `npm run build --workspace apps/control-plane` plus `npm test --workspace apps/control-plane` passed. — Copilot
+
+## Issue #97 Complete (2026-04-23)
+
+**Status:** ✅ Complete
+
+**What was done:**
+1. Converted TenantRegistry to support both SQLite (file path) and Postgres (connection string)
+   - Created `tenant-registry-postgres.ts` for Postgres backend
+   - Created `tenant-registry-sqlite.ts` for SQLite backend
+   - Made all methods async to support Postgres
+   - Updated all call sites in app.ts to use await
+
+2. Removed control-plane PVC dependency
+   - Removed `pvc.yaml` from base kustomization
+   - Removed volume mounts from control-plane Deployment
+   - Removed `DATABASE_PATH` from base ConfigMap
+
+3. Added Postgres support to manifests
+   - Added `CONTROL_PLANE_DATABASE_URL` to Secret
+   - Updated k3d secret-patch with example Postgres URL
+
+4. Updated smoke scripts
+   - Modified `bootstrap.sh` to create `control_plane` database in platform-postgres
+   - Modified `full-stack-smoke.sh` to wire CONTROL_PLANE_DATABASE_URL
+
+5. Validation
+   - `npm test --workspace apps/control-plane`: ✅ 111/111 pass
+   - `npm run platform:validate`: ✅ pass
+
+**Commits:**
+- `d9b96f8` - fix(control-plane): support dual tenant registry backends
+- `a5bb8f3` - feat(platform): migrate control-plane to Postgres registry
+
+**Next steps:**
+- Run `npm run k3d:full-stack-smoke` to validate end-to-end
+- Consider updating RUNTIME.md with control-plane database env var
+

@@ -135,3 +135,41 @@ Recovered orphaned commit `9cccb60` (k3d platform final fixes) after PR #81 squa
 
 **Commit:** `40c71f0` on main (recovery)  
 **Decision:** Locked in decisions.md for future post-merge orphan scenarios
+
+## Issue #97 — Control-Plane Postgres Migration (2026-04-23)
+
+**Context:** Control-plane used better-sqlite3 with PVC-backed SQLite file. Goal was to migrate to shared Postgres instance for stateless control-plane.
+
+**Challenge:** Node.js has no synchronous Postgres client, but TenantRegistry was built around synchronous better-sqlite3 calls. Converting to async required updating 40+ call sites.
+
+**Solution:** Refactored TenantRegistry into dual-mode implementation:
+- Created separate backend implementations (`tenant-registry-postgres.ts`, `tenant-registry-sqlite.ts`)
+- Made all TenantRegistry methods async
+- Updated Express app to use async/await (app already supported it for provisioning)
+- Kept SQLite support for local dev (via DATABASE_PATH)
+- Added Postgres support for k8s deployment (via CONTROL_PLANE_DATABASE_URL)
+
+**Platform changes:**
+- Removed control-plane PVC (`pvc.yaml`) and volume mounts from Deployment
+- Added CONTROL_PLANE_DATABASE_URL to Secret
+- Updated k3d bootstrap to create `control_plane` database in platform-postgres
+- Updated full-stack smoke to wire Postgres URL
+
+**Validation:** 
+- `npm test --workspace apps/control-plane`: 111/111 pass
+- `npm run platform:validate`: pass
+- Local SQLite tests still work (dual-mode preserved)
+
+**Key learnings:**
+- When migrating storage backends in Node, async conversion is often unavoidable
+- Express 5 handles async route handlers naturally - just add `await`
+- Platform PVC removal requires corresponding config/secret/bootstrap updates
+- Dual-mode implementations preserve local dev experience while enabling production Postgres
+
+**Files changed:**
+- `apps/control-plane/src/tenant-registry*.ts` (split into 3 files)
+- `apps/control-plane/src/app.ts` (added await to 40+ call sites)
+- `platform/control-plane/base/*.yaml` (removed PVC, updated config/secret)
+- `scripts/k3d/bootstrap.sh` (create control_plane database)
+- `scripts/k3d/full-stack-smoke.sh` (wire CONTROL_PLANE_DATABASE_URL)
+
