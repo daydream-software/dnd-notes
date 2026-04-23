@@ -15,7 +15,8 @@ TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 LOCAL_API_PORT="${K3D_TENANT_OVERRIDE_LOCAL_API_PORT:-3001}"
 PROXY_PORT="${K3D_TENANT_OVERRIDE_LISTEN_PORT:-38080}"
 CHECK_ONLY="${K3D_TENANT_API_OVERRIDE_CHECK_ONLY:-false}"
-WORK_DIR="${ROOT}/.k3d-tenant-api-override-work"
+WORK_DIR="${ROOT}/.k3d-smoke-work/tenant-api-override"
+previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
 api_pid=""
 proxy_pid=""
 
@@ -129,6 +130,10 @@ cleanup() {
     fi
   done
 
+  if [[ -n "${previous_kube_context}" ]]; then
+    kubectl config use-context "${previous_kube_context}" >/dev/null 2>&1
+  fi
+
   if (( exit_code == 0 )) && [[ "${CHECK_ONLY}" == "true" ]]; then
     rm -rf "${WORK_DIR}"
   else
@@ -173,10 +178,11 @@ proxy_origin="http://${tenant_hostname}:${PROXY_PORT}"
 
 kubectl -n "${tenant_namespace}" get configmap dnd-notes-runtime -o json \
   >"${WORK_DIR}/tenant-configmap.json"
-kubectl -n "${tenant_namespace}" get secret dnd-notes-runtime-secret -o json \
-  >"${WORK_DIR}/tenant-secret.json"
 
-database_url="$(decode_secret_value data.DATABASE_URL <"${WORK_DIR}/tenant-secret.json")"
+database_url="$(
+  kubectl -n "${tenant_namespace}" get secret dnd-notes-runtime-secret -o json \
+    | decode_secret_value data.DATABASE_URL
+)"
 auth_mode="$(json_get data.AUTH_MODE <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_url="$(json_get data.KEYCLOAK_URL <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_realm="$(json_get data.KEYCLOAK_REALM <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"

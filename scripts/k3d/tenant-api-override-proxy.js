@@ -122,7 +122,6 @@ async function main() {
   }
 
   const server = createTenantApiOverrideProxy({
-    listenPort,
     tenantOrigin,
     localApiOrigin,
   })

@@ -352,7 +352,7 @@ OPERATOR_PORTAL_OWNER_ID='smoke-owner' \
 OPERATOR_PORTAL_INITIAL_ADMIN_EMAIL='owner@example.com' \
 OPERATOR_PORTAL_TENANT_VERSION="${TENANT_IMAGE_TAG}" \
 OPERATOR_PORTAL_REASON='Run the k3d full-stack smoke workflow' \
-node --import tsx "${ROOT}/scripts/k3d/operator-portal-smoke.tsx" \
+node --import tsx "${ROOT}/scripts/k3d/operator-portal-smoke.ts" \
   >"${WORK_DIR}/operator-portal-smoke.json"
 
 curl -fsS \
