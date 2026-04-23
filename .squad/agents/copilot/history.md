@@ -179,113 +179,58 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## 2026-04-23: Issue #97 Control-Plane Postgres Migration Decision
 
-**Decision:** Convert TenantRegistry to async Postgres-backed implementation.
+**Decision:** Convert TenantRegistry to an async, Postgres-only implementation for the control-plane.
 
-**Context:** Control-plane currently uses better-sqlite3 with a PVC-backed SQLite file. Goal is to migrate to shared Postgres instance to remove PVC dependency and enable stateless control-plane.
-
-**Options considered:**
-1. Dual-mode sync TenantRegistry (SQLite + Postgres) - rejected: no sync Postgres client exists
-2. SQLite-as-cache with Postgres backing - rejected: overengineered
-3. Init container syncing Postgres to SQLite - rejected: complicated
-4. **Convert TenantRegistry to async with Postgres** - **CHOSEN**: clean, correct solution
-
-**Implementation approach:**
-- Modify TenantRegistry to accept either DATABASE_PATH (SQLite) or CONTROL_PLANE_DATABASE_URL (Postgres)
-- Convert all TenantRegistry methods to async
-- Update Express app handlers to async/await
-- Add Postgres URL to control-plane Secret
-- Remove PVC from manifests
-- Update smoke scripts
-
-
-## 2026-04-23: Issue #97 Control-Plane Postgres Migration Decision
-
-**Decision:** Convert TenantRegistry to async Postgres-backed implementation.
-
-**Context:** Control-plane currently uses better-sqlite3 with a PVC-backed SQLite file. Goal is to migrate to shared Postgres instance to remove PVC dependency and enable stateless control-plane.
+**Context:** The control-plane previously stored registry state in a PVC-backed SQLite file via `better-sqlite3`. Issue #97 moves that state to Postgres so the control-plane can run without a PVC-backed local database contract.
 
 **Options considered:**
-1. Dual-mode sync TenantRegistry (SQLite + Postgres) - rejected: no sync Postgres client exists
-2. SQLite-as-cache with Postgres backing - rejected: overengineered
-3. Init container syncing Postgres to SQLite - rejected: complicated
-4. **Convert TenantRegistry to async with Postgres** - **CHOSEN**: clean, correct solution
+1. Keep the synchronous SQLite/PVC model - rejected: it preserves the deployment coupling issue this slice is meant to remove.
+2. Dual backend support (SQLite + Postgres) - rejected: Node has no synchronous Postgres client, and keeping a SQLite runtime path caused review drift and runtime dependency risk.
+3. SQLite cache backed by Postgres - rejected: overengineered for the registry slice.
+4. **Async Postgres-only registry** - **CHOSEN**: matches the target runtime contract and keeps the implementation coherent.
 
 **Implementation approach:**
-- Modify TenantRegistry to accept either DATABASE_PATH (SQLite) or CONTROL_PLANE_DATABASE_URL (Postgres)
-- Convert all TenantRegistry methods to async
-- Update Express app handlers to async/await
-- Add Postgres URL to control-plane Secret
-- Remove PVC from manifests
-- Update smoke scripts
-
-
-**REVISED approach:** After analysis, converting to async would require rewriting the entire Express app (40+ call sites). Instead, keeping SQLite but removing PVC dependency by using emptyDir or accepting data loss on pod restart. Control-plane is ephemeral registry for K8s-backed tenants - can rebuild state from K8s if needed.
-
-**FINAL approach:** Use CONTROL_PLANE_DATABASE_URL to connect to Postgres, convert TenantRegistry to async step-by-step.
-
-
-## Progress Update (2026-04-23, 1 hour in)
-
-**Status:** Analysis paralysis broken. Committing to async Postgres implementation.
-
-**Key insight:** There's no synchronous Postgres client for Node. Converting TenantRegistry to async is the only clean path forward.
-
-**Action:** Implementing async TenantRegistry with Postgres backing. Will update all 40+ call sites in app.ts to use async/await.
-
-**Timeline estimate:** 2-3 hours for full conversion + validation.
-
-
-
-
-
-📌 Issue #97 registry dual-backend conversion complete (2026-04-23T00:00:00Z): Tenant registry persistence now supports both SQLite file paths and `postgresql://` connection strings. The public `TenantRegistry` API is async, Postgres migrations use a `schema_version` table with parameterized `pg` queries, SQLite behavior remains available for file-path tests, and `npm run build --workspace apps/control-plane` plus `npm test --workspace apps/control-plane` passed. — Copilot
+- Require `CONTROL_PLANE_DATABASE_URL` for the control-plane registry
+- Convert TenantRegistry methods and Express call sites to async/await
+- Re-export the Postgres registry directly from `tenant-registry.ts`
+- Remove the control-plane PVC and `DATABASE_PATH` runtime contract
+- Update k3d/bootstrap/smoke wiring to provision and pass the control-plane Postgres URL
 
 ## Issue #97 Complete (2026-04-23)
 
 **Status:** ✅ Complete
 
 **What was done:**
-1. Converted TenantRegistry to support both SQLite (file path) and Postgres (connection string)
-   - Created `tenant-registry-postgres.ts` for Postgres backend
-   - Created `tenant-registry-sqlite.ts` for SQLite backend
-   - Made all methods async to support Postgres
-   - Updated all call sites in app.ts to use await
+1. Converted the control-plane TenantRegistry to a Postgres-only async implementation
+   - `tenant-registry.ts` now re-exports the Postgres registry
+   - `tenant-registry-postgres.ts` owns schema/bootstrap and runtime access
+   - control-plane call sites now await registry operations
+2. Removed the control-plane PVC-backed runtime contract
+   - removed the PVC manifest from the base kustomization
+   - removed volume mounts from the control-plane Deployment
+   - removed `DATABASE_PATH` from the control-plane config path
+3. Added Postgres-backed platform wiring
+   - added `CONTROL_PLANE_DATABASE_URL` to the relevant manifests and overlays
+   - updated bootstrap and smoke scripts to create/use the `control_plane` database
+4. Closed follow-up review gaps
+   - removed the stray SQLite backend/runtime import path
+   - fixed shared-pool shutdown ownership
+   - made subdomain reservation race-safe with row locking
+   - aligned migration docs and handoff notes with the Postgres-only design
 
-2. Removed control-plane PVC dependency
-   - Removed `pvc.yaml` from base kustomization
-   - Removed volume mounts from control-plane Deployment
-   - Removed `DATABASE_PATH` from base ConfigMap
+**Validation:**
+- `npm test --workspace apps/control-plane` passes
+- `npm run platform:validate` passes
 
-3. Added Postgres support to manifests
-   - Added `CONTROL_PLANE_DATABASE_URL` to Secret
-   - Updated k3d secret-patch with example Postgres URL
-
-4. Updated smoke scripts
-   - Modified `bootstrap.sh` to create `control_plane` database in platform-postgres
-   - Modified `full-stack-smoke.sh` to wire CONTROL_PLANE_DATABASE_URL
-
-5. Validation
-   - `npm test --workspace apps/control-plane`: ✅ 111/111 pass
-   - `npm run platform:validate`: ✅ pass
-
-**Commits:**
-- `d9b96f8` - fix(control-plane): support dual tenant registry backends
+**Representative commits:**
+- `c37a12a` - feat(control-plane): migrate registry to postgres fixes #97
 - `a5bb8f3` - feat(platform): migrate control-plane to Postgres registry
+- `175bf29` - fix(control-plane): address #97 review feedback
+- `e6fcb3e` - chore(control-plane): align #97 follow-up docs and tests
 
 **Next steps:**
-- Run `npm run k3d:full-stack-smoke` to validate end-to-end
-- Consider updating RUNTIME.md with control-plane database env var
-
-
-**Final status:** All acceptance criteria met.
-
- Control-plane migrated to Postgres registry
- PVC removed from manifests  
- `npm test --workspace apps/control-plane` passes (111/111)
- `npm run platform:validate` passes
- Smoke scripts updated for Postgres
-
-**Ready for:** `npm run k3d:full-stack-smoke` validation
+- rely on CI or a permitted local environment for `npm run k3d:full-stack-smoke`
+- keep future handoff docs aligned with the Postgres-only control-plane contract
 
 - 2026-04-23T19:42:12Z Addressed PR #104 follow-up on `squad/97-control-plane-registry-postgres`: removed the stray SQLite tenant-registry backend so control-plane runtime is Postgres-only, made registry shutdown stop ending injected pools, switched subdomain reservation to a transaction + `SELECT ... FOR UPDATE` path so races return the persisted value without clobbering it, and fixed `scripts/k3d/smoke.sh` to start the control-plane with `CONTROL_PLANE_DATABASE_URL` instead of the removed `DATABASE_PATH`. Added focused registry regressions for the row-race and shared-pool shutdown cases; `npm test --workspace apps/control-plane` passed, while local `npm run k3d:smoke` remains blocked here by the Docker broker rejecting `rancher/k3s:v1.35.3-k3s1`.
 - 2026-04-23T18:03:32Z Picked up the new top-priority platform epic after backlog triage: issue #95 (per-tenant Postgres / zero-downtime updates) is now ahead of #87 and #82, so work started on the thinnest lead-owned slice #96 from branch `squad/96-document-tenant-postgres-decision`. Current focus is updating `.squad/decisions.md`, adding the Mikey inbox decision note, and refreshing first-level docs so the repo clearly marks SQLite-per-tenant as superseded without overstating the runtime cutover status.

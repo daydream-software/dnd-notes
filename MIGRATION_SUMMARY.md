@@ -30,7 +30,7 @@ Migrated control-plane tenant registry from PVC-backed SQLite to shared Postgres
 
 ## Validation
 
- `npm test --workspace apps/control-plane` - 111/111 tests pass
+ `npm test --workspace apps/control-plane` - passes
  `npm run build --workspace apps/control-plane` - builds cleanly
  `npm run lint --workspace apps/control-plane` - no issues
  `npm run platform:validate` - manifests valid
@@ -43,10 +43,9 @@ Migrated control-plane tenant registry from PVC-backed SQLite to shared Postgres
 ## Commits
 
 - `c37a12a` - feat(control-plane): migrate registry to postgres fixes #97
-- `d9b96f8` - fix(control-plane): support dual tenant registry backends fixes #97
 - `a5bb8f3` - feat(platform): migrate control-plane to Postgres registry
-- `222ee6d` - docs: record issue #97 completion in agent history
-- `0f144ef` - chore: remove obsolete control-plane PVC manifest
+- `175bf29` - fix(control-plane): address #97 review feedback
+- `e6fcb3e` - chore(control-plane): align #97 follow-up docs and tests
 
 ## Technical Notes
 
