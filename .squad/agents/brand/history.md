@@ -128,3 +128,10 @@ Tenant namespace tenant-t-opaque123456 did not terminate within 50ms
 3. Avoid: Logic rewrites; risks masking real async bugs
 
 The 200ms fix keeps the test validating K8s namespace polling + async termination semantics while eliminating CI timing variance.
+
+## Post-Merge Recovery (2026-04-23T16:19:10Z)
+
+Recovered orphaned commit `9cccb60` (k3d platform final fixes) after PR #81 squash merge. Pattern: fast-forward main, cherry-pick missing commit, push recovery commit only. Recorded in `.squad/decisions.md` as "Brand — Post-Merge Recovery Pattern" for reuse.
+
+**Commit:** `40c71f0` on main (recovery)  
+**Decision:** Locked in decisions.md for future post-merge orphan scenarios
