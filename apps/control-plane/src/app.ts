@@ -287,6 +287,28 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
   return { error: 'Tenant already exists' }
 }
 
+function getPortalSignupConflictResponse(error: Error): ErrorResponse {
+  if (error.message.includes('portal_accounts.email')) {
+    return {
+      error: 'Portal account already exists',
+      details:
+        'An account already exists for that email. Sign in instead of signing up again.',
+    }
+  }
+
+  return {
+    error: 'Portal signup conflict',
+    details: 'A portal account or tenant already exists for the supplied signup details.',
+  }
+}
+
+function getPortalTenantConflictResponse(): ErrorResponse {
+  return {
+    error: 'Portal tenant conflict',
+    details: 'A tenant already exists for the supplied tenant details.',
+  }
+}
+
 function buildRolloutFailureDetails(tenantId: string) {
   return `Rolling update failed for tenant ${tenantId}. The control plane marked the tenant failed; inspect the latest transition and control-plane logs before retrying.`
 }
@@ -939,15 +961,18 @@ export function createApp({
           }
         }
 
-        if (isSqliteConstraintError(effectiveError) || effectiveError instanceof Error) {
-          const errorMessage = effectiveError.message
-          const conflictStatus = errorMessage.includes('already exists') ? 409 : 500
-          response.status(conflictStatus).json({
-            error:
-              conflictStatus === 409
-                ? 'Portal signup conflict'
-                : 'Failed to complete portal signup',
-            details: errorMessage,
+        if (
+          isSqliteConstraintError(effectiveError) ||
+          (effectiveError instanceof Error && effectiveError.message.includes('already exists'))
+        ) {
+          response.status(409).json(getPortalSignupConflictResponse(effectiveError))
+          return
+        }
+
+        if (effectiveError instanceof Error) {
+          response.status(500).json({
+            error: 'Failed to complete portal signup',
+            details: effectiveError.message,
           })
           return
         }
@@ -1070,15 +1095,18 @@ export function createApp({
 
         response.status(201).json(buildPortalDashboardResponse(refreshedAccount))
       } catch (error) {
-        if (isSqliteConstraintError(error) || error instanceof Error) {
-          const errorMessage = error.message
-          const conflictStatus = errorMessage.includes('already exists') ? 409 : 500
-          response.status(conflictStatus).json({
-            error:
-              conflictStatus === 409
-                ? 'Portal tenant conflict'
-                : 'Failed to create portal tenant',
-            details: errorMessage,
+        if (
+          isSqliteConstraintError(error) ||
+          (error instanceof Error && error.message.includes('already exists'))
+        ) {
+          response.status(409).json(getPortalTenantConflictResponse())
+          return
+        }
+
+        if (error instanceof Error) {
+          response.status(500).json({
+            error: 'Failed to create portal tenant',
+            details: error.message,
           })
           return
         }

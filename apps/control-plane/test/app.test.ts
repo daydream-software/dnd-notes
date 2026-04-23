@@ -206,6 +206,39 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.error, 'Portal account already exists')
     })
 
+    it('returns 409 when signup hits a portal account sqlite constraint race', async () => {
+      const originalCreatePortalAccount = tenantRegistry.createPortalAccount.bind(tenantRegistry)
+      tenantRegistry.createPortalAccount = () => {
+        const error = new Error('UNIQUE constraint failed: portal_accounts.email') as Error & {
+          code?: string
+        }
+        error.code = 'SQLITE_CONSTRAINT_UNIQUE'
+        throw error
+      }
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(409)
+
+      tenantRegistry.createPortalAccount = originalCreatePortalAccount
+
+      assert.strictEqual(response.body.error, 'Portal account already exists')
+      assert.match(
+        response.body.details,
+        /An account already exists for that email/i,
+      )
+    })
+
     it('does not reserve an email address when signup fails before account creation', async () => {
       tenantRegistry.createTenant({
         id: 'tenant-existing',
@@ -511,6 +544,46 @@ describe('Control Plane API', () => {
         null,
       )
       assert.strictEqual(tenantRegistry.listTenantsByOwnerId(ownerAccount.id).length, 1)
+    })
+
+    it('returns 409 when tenant creation hits a sqlite constraint race', async () => {
+      const signupResponse = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'manual-review',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'adventurer',
+          acceptTerms: true,
+        })
+        .expect(201)
+
+      const sessionToken = signupResponse.body.token as string
+      const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
+      tenantRegistry.createTenant = () => {
+        const error = new Error('UNIQUE constraint failed: tenants.slug') as Error & {
+          code?: string
+        }
+        error.code = 'SQLITE_CONSTRAINT_UNIQUE'
+        throw error
+      }
+
+      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+        .send({
+          tenantName: 'Emberfall',
+          tenantSlug: 'emberfall',
+          planTier: 'guild',
+          paymentProvider: 'square',
+        })
+        .expect(409)
+
+      tenantRegistry.createTenant = originalCreateTenant
+
+      assert.strictEqual(response.body.error, 'Portal tenant conflict')
+      assert.match(response.body.details, /tenant already exists/i)
     })
 
     it('deprovisions portal tenant resources when account updates fail after provisioning succeeds', async () => {
