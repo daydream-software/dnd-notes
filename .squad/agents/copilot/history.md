@@ -276,3 +276,14 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 - Run `npm run k3d:full-stack-smoke` to validate end-to-end
 - Consider updating RUNTIME.md with control-plane database env var
 
+
+**Final status:** All acceptance criteria met.
+
+ Control-plane migrated to Postgres registry
+ PVC removed from manifests  
+ `npm test --workspace apps/control-plane` passes (111/111)
+ `npm run platform:validate` passes
+ Smoke scripts updated for Postgres
+
+**Ready for:** `npm run k3d:full-stack-smoke` validation
+
