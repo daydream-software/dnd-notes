@@ -4,6 +4,10 @@
 
 Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestration, deployment artifacts, and platform-layer integrations.
 
+## Recent Updates
+
+📌 Issue #97 control-plane manifest adaptation (2026-04-23T19:20:50Z): Adapted k3d control-plane manifests for Postgres backend migration. Removed PVC dependencies per issue #97 requirements. Updated smoke-test lane configuration. Coordinated with Data for database schema changes and Chunk for QA validation. Orchestration log at `.squad/orchestration-log/2026-04-23T19:20:50Z-brand.md`. Session log at `.squad/log/2026-04-23T19:20:50Z-issue-97-control-plane-postgres.md`. All changes committed to worktree branch. Ready for deployment validation. — Brand (Agent)
+
 **Historical Milestones (2026-04-11 to 2026-04-20):**
 - Executed Issue #28 handoff and branch cleanup after PR #37 merged (2026-04-12 to 2026-04-14)
 - Conducted origin/deployment config audit; recommended same-origin reverse proxy for production (2026-04-16)

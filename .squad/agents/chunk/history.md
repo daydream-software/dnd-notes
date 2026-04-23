@@ -6,6 +6,10 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
+## Recent Updates
+
+📌 Issue #97 acceptance bar & QA notes (2026-04-23T19:20:50Z): Reviewed acceptance bar for issue #97 control-plane registry Postgres migration. Added QA notes documenting validation expectations and test coverage requirements. Coordinated with Data and Brand on multi-agent delivery. Session log at `.squad/log/2026-04-23T19:20:50Z-issue-97-control-plane-postgres.md`. Unit tests passing in control-plane; full smoke test pending Docker broker image resolution. — Chunk (Agent)
+
 ## Core Context (Summarized 2026-04-22T18:24:34Z)
 
 Chunk is the QA/Tester for the squad, responsible for regression coverage, gate validation, and identifying high-risk parity gaps.
