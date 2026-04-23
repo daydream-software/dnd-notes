@@ -12,6 +12,7 @@ export interface OperatorPortalSmokeOptions extends StoredKeycloakTokens {
   initialAdminEmail: string
   version: string
   reason: string
+  provisionTimeoutMs?: number
 }
 
 class StaticRuntimeKeycloakClient implements RuntimeKeycloakClient {
@@ -84,10 +85,22 @@ function readPortalAlerts(view: ReturnType<typeof render>) {
     )
 }
 
+function readPortalOutcome(view: ReturnType<typeof render>, testId: string) {
+  const alert = view.queryByTestId(testId)
+
+  if (!alert) {
+    return null
+  }
+
+  const text = readPortalElementText(alert)
+  return text.length > 0 ? text : null
+}
+
 export async function provisionTenantThroughOperatorPortal(
   options: OperatorPortalSmokeOptions,
 ) {
   const user = userEvent.setup({ document: globalThis.document })
+  const provisionTimeoutMs = options.provisionTimeoutMs ?? 120_000
   const keycloakTokens: StoredKeycloakTokens = {
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
@@ -170,15 +183,16 @@ export async function provisionTenantThroughOperatorPortal(
 
     try {
       const outcome = await waitFor(() => {
-        const dynamicAlerts = readPortalAlerts(view)
-        const successNotice = dynamicAlerts.find((alert) => alert.includes(successPrefix))
+        const successNotice = readPortalOutcome(view, 'operator-portal-notice')
 
-        if (successNotice) {
+        if (successNotice?.includes(successPrefix)) {
           return { kind: 'success' as const, message: successNotice }
         }
 
-        if (dynamicAlerts.length > 0) {
-          return { kind: 'error' as const, message: dynamicAlerts.join(' ') }
+        const errorNotice = readPortalOutcome(view, 'operator-portal-error')
+
+        if (errorNotice) {
+          return { kind: 'error' as const, message: errorNotice }
         }
 
         if (view.queryByRole('dialog', { name: 'Confirm tenant provisioning' })) {
@@ -186,7 +200,7 @@ export async function provisionTenantThroughOperatorPortal(
         }
 
         throw new Error('Provisioning result not available yet.')
-      }, { timeout: 10_000 })
+      }, { timeout: provisionTimeoutMs })
 
       if (outcome.kind === 'error') {
         throw new Error(`Operator portal provisioning failed. ${outcome.message}`)
@@ -206,8 +220,8 @@ export async function provisionTenantThroughOperatorPortal(
       const alertSummary = readPortalAlerts(view).join(' ')
       throw new Error(
         alertSummary.length > 0
-          ? `Provisioning did not reach a successful outcome. ${alertSummary}`
-          : 'Provisioning did not reach a successful outcome.',
+          ? `Provisioning did not reach a successful outcome within ${provisionTimeoutMs}ms. ${alertSummary}`
+          : `Provisioning did not reach a successful outcome within ${provisionTimeoutMs}ms.`,
       )
     }
   } finally {

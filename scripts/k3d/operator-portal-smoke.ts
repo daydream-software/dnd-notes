@@ -158,6 +158,11 @@ async function main() {
   const version = process.env.OPERATOR_PORTAL_TENANT_VERSION ?? 'k3d'
   const reason =
     process.env.OPERATOR_PORTAL_REASON ?? 'Run the k3d full-stack smoke workflow'
+  const rawProvisionTimeoutMs = process.env.OPERATOR_PORTAL_PROVISION_TIMEOUT_MS?.trim()
+  const provisionTimeoutMs =
+    rawProvisionTimeoutMs && rawProvisionTimeoutMs.length > 0
+      ? Number(rawProvisionTimeoutMs)
+      : 120_000
 
   if (!accessToken) {
     throw new Error('OPERATOR_PORTAL_ACCESS_TOKEN is required.')
@@ -165,6 +170,12 @@ async function main() {
 
   if (!tenantId || !tenantSlug) {
     throw new Error('OPERATOR_PORTAL_TENANT_ID and OPERATOR_PORTAL_TENANT_SLUG are required.')
+  }
+
+  if (!Number.isFinite(provisionTimeoutMs) || provisionTimeoutMs <= 0) {
+    throw new Error(
+      'OPERATOR_PORTAL_PROVISION_TIMEOUT_MS must be a positive number when provided.',
+    )
   }
 
   const dom = new JSDOM('<!doctype html><html><body></body></html>', {
@@ -183,6 +194,7 @@ async function main() {
     initialAdminEmail,
     version,
     reason,
+    provisionTimeoutMs,
   })
 
   process.stdout.write(JSON.stringify(result))

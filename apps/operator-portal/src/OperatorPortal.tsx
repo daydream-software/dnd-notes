@@ -451,13 +451,21 @@ export default function OperatorPortal({
         </Alert>
 
         {notice ? (
-          <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
+          <Alert
+            severity="success"
+            sx={{ borderRadius: surfaceRadius }}
+            data-testid="operator-portal-notice"
+          >
             {notice}
           </Alert>
         ) : null}
 
         {error ? (
-          <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
+          <Alert
+            severity="error"
+            sx={{ borderRadius: surfaceRadius }}
+            data-testid="operator-portal-error"
+          >
             {error}
           </Alert>
         ) : null}

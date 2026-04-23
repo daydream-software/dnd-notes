@@ -370,4 +370,93 @@ describe('provisionTenantThroughOperatorPortal', () => {
 
     expect(fleetFetchCount).toBeGreaterThanOrEqual(2)
   })
+
+  it('waits longer than the short UI timeout for slow but successful provisioning', async () => {
+    let fleetFetchCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        fleetFetchCount += 1
+
+        return createJsonResponse({
+          ...createFleetStatus(),
+          summary: {
+            ...createFleetStatus().summary,
+            totalTenants: 2,
+            tenantsByCurrentState: {
+              ...createFleetStatus().summary.tenantsByCurrentState,
+              ready: 2,
+            },
+            tenantsByDesiredState: {
+              ...createFleetStatus().summary.tenantsByDesiredState,
+              ready: 2,
+            },
+            tenantsByVersion: {
+              '1.0.0': 1,
+              k3d: 1,
+            },
+          },
+        })
+      }
+
+      if (path === '/operator-api/internal/tenants' && method === 'POST') {
+        return createJsonResponse({
+          tenant: {
+            id: 'slow-success',
+            slug: 'slow-success',
+            subdomain: 'slow-success',
+            ownerId: 'owner-11',
+            initialAdminEmail: 'owner@example.com',
+            desiredState: 'provisioning',
+            currentState: 'provisioning',
+            version: 'k3d',
+          },
+        }, 201)
+      }
+
+      if (
+        path === '/operator-api/internal/tenants/slow-success/provision' &&
+        method === 'POST'
+      ) {
+        await new Promise((resolve) => setTimeout(resolve, 11_000))
+
+        return createJsonResponse({
+          tenant: {
+            id: 'slow-success',
+            slug: 'slow-success',
+            subdomain: 'slow-success',
+            ownerId: 'owner-11',
+            initialAdminEmail: 'owner@example.com',
+            desiredState: 'ready',
+            currentState: 'ready',
+            version: 'k3d',
+          },
+          resources: {
+            namespace: 'tenant-slow-success',
+            hostname: 'slow-success.example.test',
+            databaseName: 'tenant_slow_success',
+          },
+        })
+      }
+
+      throw new Error(`Unexpected fetch ${method} ${path}`)
+    })
+
+    const notice = await provisionTenantThroughOperatorPortal({
+      accessToken: createMockJwt({ email: 'slow-success-admin@example.com' }),
+      refreshToken: 'slow-success-refresh-token',
+      tenantId: 'slow-success',
+      tenantSlug: 'slow-success',
+      ownerId: 'owner-11',
+      initialAdminEmail: 'owner@example.com',
+      version: 'k3d',
+      reason: 'Wait for a slow but successful provisioning run',
+      provisionTimeoutMs: 20_000,
+    })
+
+    expect(fleetFetchCount).toBeGreaterThanOrEqual(2)
+    expect(notice.notice).toContain('Provisioned slow-success.')
+  }, 25_000)
 })
