@@ -6,6 +6,7 @@ import {
   type V1ConfigMap,
   type V1DeleteOptions,
   type V1Deployment,
+  type V1Ingress,
   type V1Namespace,
   type V1PersistentVolumeClaim,
   type V1PersistentVolumeClaimSpec,
@@ -83,6 +84,7 @@ interface TenantInfrastructureBundle {
   secret: V1Secret
   persistentVolumeClaim: V1PersistentVolumeClaim
   service: V1Service
+  ingress: V1Ingress
   deployment: V1Deployment
   resources: TenantProvisioningResources
 }
@@ -647,6 +649,7 @@ export class KubernetesTenantInfrastructureManager
     await upsertKubernetesObject(this.client, bundle.secret)
     await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
     await upsertKubernetesObject(this.client, bundle.service)
+    await upsertKubernetesObject(this.client, bundle.ingress)
     await upsertKubernetesObject(this.client, bundle.deployment)
   }
 
@@ -931,6 +934,39 @@ export function buildTenantInfrastructureBundle(
             name: 'http',
             port: options.tenantPort,
             targetPort: options.tenantPort,
+          },
+        ],
+      },
+    },
+    ingress: {
+      apiVersion: 'networking.k8s.io/v1',
+      kind: 'Ingress',
+      metadata: {
+        name: resources.serviceName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      spec: {
+        ingressClassName: 'nginx',
+        rules: [
+          {
+            host: resources.hostname,
+            http: {
+              paths: [
+                {
+                  path: '/',
+                  pathType: 'Prefix',
+                  backend: {
+                    service: {
+                      name: resources.serviceName,
+                      port: {
+                        name: 'http',
+                      },
+                    },
+                  },
+                },
+              ],
+            },
           },
         ],
       },
