@@ -279,6 +279,95 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('migrates a v4 registry database to v5 by backfilling tenant dashboard columns and portal password hashes', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const rawDb = new Database(databasePath)
+
+    rawDb.exec(`
+      CREATE TABLE schema_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL
+      );
+
+      CREATE TABLE tenants (
+        id TEXT PRIMARY KEY,
+        slug TEXT UNIQUE NOT NULL,
+        subdomain TEXT,
+        owner_id TEXT NOT NULL,
+        initial_admin_email TEXT,
+        desired_state TEXT NOT NULL,
+        current_state TEXT NOT NULL,
+        version TEXT NOT NULL,
+        storage_reference TEXT,
+        backup_metadata TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE state_transitions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+        from_state TEXT NOT NULL,
+        to_state TEXT NOT NULL,
+        triggered_by TEXT NOT NULL,
+        reason TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE portal_accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        billing_email TEXT,
+        billing_provider TEXT,
+        auth_provider TEXT NOT NULL,
+        keycloak_sub TEXT,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      CREATE TABLE portal_sessions (
+        id TEXT PRIMARY KEY,
+        account_id TEXT NOT NULL REFERENCES portal_accounts(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      INSERT INTO schema_metadata (key, value)
+      VALUES ('tenant_state_signature', 'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned');
+
+      PRAGMA user_version = 4;
+    `)
+    rawDb.close()
+
+    try {
+      const tenantRegistry = new TenantRegistry(databasePath)
+      const migratedDb = new Database(databasePath, { readonly: true })
+      const tenantColumns = migratedDb
+        .prepare(`PRAGMA table_info(tenants)`)
+        .all() as Array<{ name: string }>
+      const portalAccountColumns = migratedDb
+        .prepare(`PRAGMA table_info(portal_accounts)`)
+        .all() as Array<{ name: string }>
+      const tenantIndexes = migratedDb
+        .prepare(`PRAGMA index_list(tenants)`)
+        .all() as Array<{ name: string }>
+      migratedDb.close()
+      tenantRegistry.close()
+
+      assert.ok(tenantColumns.some((column) => column.name === 'display_name'))
+      assert.ok(tenantColumns.some((column) => column.name === 'plan_tier'))
+      assert.ok(
+        portalAccountColumns.some((column) => column.name === 'password_hash'),
+      )
+      assert.ok(tenantIndexes.some((index) => index.name === 'idx_tenants_owner_id'))
+    } finally {
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
   it('persists initial admin email on the tenant record', () => {
     const tenantRegistry = new TenantRegistry(':memory:')
 
@@ -298,6 +387,98 @@ describe('TenantRegistry', () => {
       )
     } finally {
       tenantRegistry.close()
+    }
+  })
+
+  it('persists portal accounts and bearer-token sessions', () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+
+    try {
+      const account = tenantRegistry.createPortalAccount({
+        id: 'account-1',
+        email: 'owner@example.com',
+        displayName: 'Alyx',
+        passwordHash: 'salt:hash',
+        billingEmail: 'billing@example.com',
+        billingProvider: 'stripe',
+      })
+
+      tenantRegistry.createPortalSession({
+        id: 'session-1',
+        accountId: account.id,
+        tokenHash: 'hashed-token',
+        expiresAt: '2999-01-01 00:00:00',
+      })
+
+      const storedAccount = tenantRegistry.getPortalAccountByEmail('owner@example.com')
+      const authRecord = tenantRegistry.getPortalAccountAuthByEmail('owner@example.com')
+      const storedSession = tenantRegistry.getPortalSessionByTokenHash('hashed-token')
+
+      assert.ok(storedAccount)
+      assert.equal(storedAccount.displayName, 'Alyx')
+      assert.equal(storedAccount.billingProvider, 'stripe')
+      assert.ok(authRecord)
+      assert.equal(authRecord.passwordHash, 'salt:hash')
+      assert.ok(storedSession)
+      assert.equal(storedSession.accountId, account.id)
+
+      tenantRegistry.deletePortalSessionByTokenHash('hashed-token')
+      assert.equal(tenantRegistry.getPortalSessionByTokenHash('hashed-token'), null)
+
+      tenantRegistry.deletePortalAccount(account.id)
+      assert.equal(tenantRegistry.getPortalAccount(account.id), null)
+    } finally {
+      tenantRegistry.close()
+    }
+  })
+
+  it('creates an expression index for portal session expiry lookups', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const tenantRegistry = new TenantRegistry(databasePath)
+
+    try {
+      const db = new Database(databasePath, { readonly: true })
+      const index = db
+        .prepare(
+          `SELECT sql
+           FROM sqlite_master
+           WHERE type = 'index'
+             AND name = 'idx_portal_sessions_expires_at_datetime'`,
+        )
+        .get() as { sql: string } | undefined
+      db.close()
+
+      assert.ok(index)
+      assert.match(index.sql, /datetime\(expires_at\)/)
+    } finally {
+      tenantRegistry.close()
+      await rm(directory, { recursive: true, force: true })
+    }
+  })
+
+  it('creates an owner index for owner-scoped tenant lookups', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'control-plane-registry-'))
+    const databasePath = join(directory, 'registry.sqlite')
+    const tenantRegistry = new TenantRegistry(databasePath)
+
+    try {
+      const db = new Database(databasePath, { readonly: true })
+      const index = db
+        .prepare(
+          `SELECT sql
+           FROM sqlite_master
+           WHERE type = 'index'
+             AND name = 'idx_tenants_owner_id'`,
+        )
+        .get() as { sql: string } | undefined
+      db.close()
+
+      assert.ok(index)
+      assert.match(index.sql, /ON tenants\(owner_id\)/)
+    } finally {
+      tenantRegistry.close()
+      await rm(directory, { recursive: true, force: true })
     }
   })
 })

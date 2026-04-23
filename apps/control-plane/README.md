@@ -107,6 +107,30 @@ fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`,
 metadata; otherwise it preserves the raw string and reports the parsed fields as
 `null`.
 
+### Customer portal surface (`#70`)
+
+- `GET /portal/catalog` — public landing-page catalog and portal capability flags
+- `POST /portal/signup` — local email signup + first tenant request
+- `POST /portal/login` — local email sign-in for an existing portal account
+- `GET /portal/me` — owner-scoped customer dashboard
+- `POST /portal/me/tenants` — create an additional tenant request for the signed-in owner
+- `POST /portal/logout` — invalidate the current portal bearer session
+
+This surface is intentionally separate from `/internal`:
+
+- `/internal/*` stays operator/admin-only
+- `/portal/*` is the customer-facing contract for landing, signup, and instance management
+
+For this first slice, the portal stores a lightweight local customer account plus
+opaque bearer session in the control-plane SQLite database. The payload shape is
+already aligned with the future Keycloak migration plan:
+
+- `portal_accounts.keycloak_sub` is reserved for the eventual OIDC reconciliation key
+- local email-based auth remains the Phase 1 bootstrap path
+- customer dashboards are always scoped by `ownerId = portalAccount.id`
+- tenant creation still hands off to the same control-plane provisioning lane when
+  provisioning is enabled
+
 ## Operator-portal contract notes (`#68`)
 
 - `POST /internal/tenants` now accepts an optional `initialAdminEmail` and
@@ -123,6 +147,24 @@ customer-facing `status.example.com`, the intended path is to publish a redacted
 read-only view derived from the same control-plane contract instead of creating a
 separate scrape-only status pipeline. Issue `#68` remains the richer operator
 portal and control surface.
+
+## Customer-portal contract notes (`#70`)
+
+- New self-serve tenants persist customer metadata on the existing tenant record:
+  - `displayName` — customer-facing tenant name shown in the portal dashboard
+  - `planTier` — selected catalog plan/tier
+  - `initialAdminEmail` — seeded from the portal account email as bootstrap metadata
+- `paymentProvider` is placeholder-only in this slice (`stripe`, `square`, or
+  `manual-review`); no real payment gateway integration happens here.
+- When provisioning is enabled, the portal route reuses the same provisioning port
+  as operators. When provisioning is disabled, the tenant record still exists so
+  customer intent and dashboard state are visible without pretending the runtime is
+  live.
+- `GET /portal/me` returns a customer-safe dashboard shape:
+  - owner account details
+  - plan catalog / placeholder roadmap flags
+  - owned tenant summaries only
+  - derived `appUrl` when a tenant subdomain exists and `TENANT_BASE_DOMAIN` is configured
 
 ## Postgres-backed rolling updates (`#55`)
 
@@ -183,6 +225,9 @@ Environment variables:
 - `CONTROL_PLANE_KEYCLOAK_REALM` — workforce/admin realm used for `/internal` JWT validation
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID` — Keycloak client ID accepted for `/internal` JWTs
 - `CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES` — comma-separated allowed workforce/admin roles (defaults to `control-plane-admin,control-plane-workforce`)
+- `CONTROL_PLANE_TRUST_PROXY` — `true`, `false`, or a trusted hop count for Express `trust proxy`; set this when `/portal` traffic arrives through an ingress/load balancer so per-client rate limiting uses forwarded client IPs
+- `CUSTOMER_PORTAL_AUTH_MODE` — `local` (default) or `keycloak` for the public `/portal` contract; only `local` is implemented in this slice
+- `CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION` — optional default version assigned to portal-created tenants (defaults to the control-plane package version)
 - `CONTROL_PLANE_ENABLE_PROVISIONING` — enables live Kubernetes/Postgres provisioning
 - `TENANT_AUTH_MODE` — `local` (default) or `keycloak` for provisioned tenant pods
 - `TENANT_KEYCLOAK_URL` — Keycloak base URL injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
