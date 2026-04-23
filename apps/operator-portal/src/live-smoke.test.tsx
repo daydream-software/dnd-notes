@@ -241,4 +241,76 @@ describe('provisionTenantThroughOperatorPortal', () => {
     expect(notice.notice).toContain('Namespace tenant-t-candlekeep')
     expect(notice.notice).toContain('host t-candlekeep.127.0.0.1.nip.io')
   })
+
+  it('waits for the initial fleet refresh before submitting provisioning', async () => {
+    let fleetFetchCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        fleetFetchCount += 1
+
+        if (fleetFetchCount === 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1500))
+        }
+
+        return createJsonResponse(createFleetStatus())
+      }
+
+      if (path === '/operator-api/internal/tenants' && method === 'POST') {
+        return createJsonResponse({
+          tenant: {
+            id: 'slow-fleet',
+            slug: 'slow-fleet',
+            subdomain: 'slow-fleet',
+            ownerId: 'owner-7',
+            initialAdminEmail: 'owner@example.com',
+            desiredState: 'provisioning',
+            currentState: 'provisioning',
+            version: 'k3d',
+          },
+        }, 201)
+      }
+
+      if (
+        path === '/operator-api/internal/tenants/slow-fleet/provision' &&
+        method === 'POST'
+      ) {
+        return createJsonResponse({
+          tenant: {
+            id: 'slow-fleet',
+            slug: 'slow-fleet',
+            subdomain: 'slow-fleet',
+            ownerId: 'owner-7',
+            initialAdminEmail: 'owner@example.com',
+            desiredState: 'ready',
+            currentState: 'ready',
+            version: 'k3d',
+          },
+          resources: {
+            namespace: 'tenant-slow-fleet',
+            hostname: 'slow-fleet.example.test',
+            databaseName: 'tenant_slow_fleet',
+          },
+        })
+      }
+
+      throw new Error(`Unexpected fetch ${method} ${path}`)
+    })
+
+    const notice = await provisionTenantThroughOperatorPortal({
+      accessToken: createMockJwt({ email: 'slow-admin@example.com' }),
+      refreshToken: 'slow-refresh-token',
+      tenantId: 'slow-fleet',
+      tenantSlug: 'slow-fleet',
+      ownerId: 'owner-7',
+      initialAdminEmail: 'owner@example.com',
+      version: 'k3d',
+      reason: 'Wait for fleet health before provisioning',
+    })
+
+    expect(fleetFetchCount).toBeGreaterThanOrEqual(1)
+    expect(notice.notice).toContain('Provisioned slow-fleet.')
+  })
 })
