@@ -8,7 +8,7 @@ import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 
 describe('TenantRegistry', () => {
   it('bootstraps the Postgres registry schema with the expected columns', async () => {
-    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+    const { db, tenantRegistry, pool, cleanup } = createTestTenantRegistry()
 
     try {
       await tenantRegistry.checkHealth()
@@ -43,6 +43,19 @@ describe('TenantRegistry', () => {
           (column) => column.column_name === 'password_hash',
         ),
         true,
+      )
+
+      const portalSessionTable = db.public.getTable('portal_sessions')
+
+      assert.equal(
+        portalSessionTable.constraintsByName.has('idx_portal_sessions_expires_at'),
+        true,
+      )
+      assert.equal(
+        portalSessionTable.constraintsByName.has(
+          'idx_portal_sessions_expires_at_datetime',
+        ),
+        false,
       )
     } finally {
       await cleanup()

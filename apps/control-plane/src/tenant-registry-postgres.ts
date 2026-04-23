@@ -14,7 +14,7 @@ import {
 } from './types.js'
 
 const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
-const CURRENT_SCHEMA_VERSION = 5
+const CURRENT_SCHEMA_VERSION = 6
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 const tenantSelectColumns = `id, slug, subdomain, owner_id, display_name, plan_tier,
   initial_admin_email, desired_state, current_state, version, storage_reference,
@@ -265,6 +265,7 @@ export class TenantRegistry {
       currentSchemaVersion !== 2 &&
       currentSchemaVersion !== 3 &&
       currentSchemaVersion !== 4 &&
+      currentSchemaVersion !== 5 &&
       currentSchemaVersion !== CURRENT_SCHEMA_VERSION
     ) {
       throw new Error(
@@ -273,6 +274,7 @@ export class TenantRegistry {
     }
 
     await this.bootstrap()
+    await this.migrateLegacySchema(currentSchemaVersion)
 
     if (currentSchemaVersion !== CURRENT_SCHEMA_VERSION) {
       await this.pool.query(
@@ -355,14 +357,6 @@ export class TenantRegistry {
       )
     `)
 
-    await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain TEXT`)
-    await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS display_name TEXT`)
-    await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_tier TEXT`)
-    await this.pool.query(
-      `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS initial_admin_email TEXT`,
-    )
-    await this.pool.query(`ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS password_hash TEXT`)
-
     await this.pool.query(`
       CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_subdomain
       ON tenants(subdomain)
@@ -390,12 +384,33 @@ export class TenantRegistry {
       ON portal_sessions(account_id)
     `)
     await this.pool.query(`
-      DROP INDEX IF EXISTS idx_portal_sessions_expires_at
-    `)
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at_datetime
+      CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at
       ON portal_sessions(expires_at)
     `)
+  }
+
+  private async migrateLegacySchema(currentSchemaVersion: number): Promise<void> {
+    if (currentSchemaVersion > 0 && currentSchemaVersion < 5) {
+      await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain TEXT`)
+      await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS display_name TEXT`)
+      await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_tier TEXT`)
+      await this.pool.query(
+        `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS initial_admin_email TEXT`,
+      )
+      await this.pool.query(
+        `ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS password_hash TEXT`,
+      )
+    }
+
+    if (currentSchemaVersion > 0 && currentSchemaVersion < 6) {
+      await this.pool.query(`
+        DROP INDEX IF EXISTS idx_portal_sessions_expires_at_datetime
+      `)
+      await this.pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at
+        ON portal_sessions(expires_at)
+      `)
+    }
   }
 
   private async withTransaction<Result>(

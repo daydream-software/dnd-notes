@@ -252,9 +252,21 @@ const portalCreateTenantSchema = z.object({
   billingEmail: z.string().trim().email().optional(),
 })
 
+type ConstraintConflictError = Error & { code?: string; constraint?: string }
+
+function readConstraintName(error: Error): string | undefined {
+  const constraint = (error as ConstraintConflictError).constraint
+  if (typeof constraint !== 'string') {
+    return undefined
+  }
+
+  const normalizedConstraint = constraint.trim()
+  return normalizedConstraint.length > 0 ? normalizedConstraint : undefined
+}
+
 function isConstraintConflictError(
   error: unknown,
-): error is Error & { code?: string } {
+): error is ConstraintConflictError {
   if (!(error instanceof Error)) {
     return false
   }
@@ -277,7 +289,17 @@ function isConstraintConflictError(
   )
 }
 
-function getTenantConflictResponse(error: Error): ErrorResponse {
+function getTenantConflictResponse(error: ConstraintConflictError): ErrorResponse {
+  const constraint = readConstraintName(error)
+
+  if (constraint === 'tenants_pkey') {
+    return { error: 'Tenant ID already exists' }
+  }
+
+  if (constraint === 'tenants_slug_key') {
+    return { error: 'Tenant slug already exists' }
+  }
+
   if (
     error.message.includes('tenants.id') ||
     error.message.includes('tenants_pkey')
@@ -295,7 +317,19 @@ function getTenantConflictResponse(error: Error): ErrorResponse {
   return { error: 'Tenant already exists' }
 }
 
-function getPortalSignupConflictResponse(error: Error): ErrorResponse {
+function getPortalSignupConflictResponse(
+  error: ConstraintConflictError,
+): ErrorResponse {
+  const constraint = readConstraintName(error)
+
+  if (constraint === 'portal_accounts_email_key') {
+    return {
+      error: 'Portal account already exists',
+      details:
+        'An account already exists for that email. Sign in instead of signing up again.',
+    }
+  }
+
   if (
     error.message.includes('portal_accounts.email') ||
     error.message.includes('portal_accounts_email_key')

@@ -246,6 +246,41 @@ describe('Control Plane API', () => {
       )
     })
 
+    it('returns 409 when signup hits a postgres constraint with a structured constraint name', async () => {
+      const originalCreatePortalAccount = tenantRegistry.createPortalAccount.bind(tenantRegistry)
+      tenantRegistry.createPortalAccount = () => {
+        const error = new Error('duplicate key') as Error & {
+          code?: string
+          constraint?: string
+        }
+        error.code = '23505'
+        error.constraint = 'portal_accounts_email_key'
+        throw error
+      }
+
+      const response = await request(app)
+        .post('/portal/signup')
+        .send({
+          email: 'owner@example.com',
+          displayName: 'Alyx',
+          password: 'top-secret-passphrase',
+          paymentProvider: 'stripe',
+          tenantName: 'Misty Harbor',
+          tenantSlug: 'misty-harbor',
+          planTier: 'guild',
+          acceptTerms: true,
+        })
+        .expect(409)
+
+      tenantRegistry.createPortalAccount = originalCreatePortalAccount
+
+      assert.strictEqual(response.body.error, 'Portal account already exists')
+      assert.match(
+        response.body.details,
+        /An account already exists for that email/i,
+      )
+    })
+
     it('does not reserve an email address when signup fails before account creation', async () => {
       await tenantRegistry.createTenant({
         id: 'tenant-existing',
@@ -987,6 +1022,58 @@ describe('Control Plane API', () => {
           version: '1.0.0',
         })
         .expect(409)
+
+      assert.strictEqual(response.body.error, 'Tenant slug already exists')
+    })
+
+    it('rejects duplicate tenant ID from a postgres structured constraint', async () => {
+      const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
+      tenantRegistry.createTenant = async () => {
+        const error = new Error('duplicate key') as Error & {
+          code?: string
+          constraint?: string
+        }
+        error.code = '23505'
+        error.constraint = 'tenants_pkey'
+        throw error
+      }
+
+      const response = await authedPost(tenantsPath)
+        .send({
+          id: 'tenant-789',
+          slug: 'structured-id',
+          ownerId: 'owner-456',
+          version: '1.0.0',
+        })
+        .expect(409)
+
+      tenantRegistry.createTenant = originalCreateTenant
+
+      assert.strictEqual(response.body.error, 'Tenant ID already exists')
+    })
+
+    it('rejects duplicate tenant slug from a postgres structured constraint', async () => {
+      const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
+      tenantRegistry.createTenant = async () => {
+        const error = new Error('duplicate key') as Error & {
+          code?: string
+          constraint?: string
+        }
+        error.code = '23505'
+        error.constraint = 'tenants_slug_key'
+        throw error
+      }
+
+      const response = await authedPost(tenantsPath)
+        .send({
+          id: 'tenant-790',
+          slug: 'structured-slug',
+          ownerId: 'owner-456',
+          version: '1.0.0',
+        })
+        .expect(409)
+
+      tenantRegistry.createTenant = originalCreateTenant
 
       assert.strictEqual(response.body.error, 'Tenant slug already exists')
     })
