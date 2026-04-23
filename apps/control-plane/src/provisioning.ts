@@ -333,13 +333,13 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       const bundle = buildTenantInfrastructureBundle({
         tenant: this.getExistingTenant(refreshedTenant.id),
         subdomain,
-      database,
-      tenantRuntimeAuth: this.tenantRuntimeAuth,
-      baseDomain: this.baseDomain,
-      ingressClassName: this.ingressClassName,
-      imageRepository: this.imageRepository,
-      imagePullSecretName: this.imagePullSecretName,
-      publicScheme: this.publicScheme,
+        database,
+        tenantRuntimeAuth: this.tenantRuntimeAuth,
+        baseDomain: this.baseDomain,
+        ingressClassName: this.ingressClassName,
+        imageRepository: this.imageRepository,
+        imagePullSecretName: this.imagePullSecretName,
+        publicScheme: this.publicScheme,
         tenantPort: this.tenantPort,
       })
       this.tenantRegistry.updateTenantStorageReference(
