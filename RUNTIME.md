@@ -88,6 +88,10 @@ need a tenant client secret in the pod environment. In local k3d, the browser-fa
 Keycloak URL resolves to `127.0.0.1`, which is not reachable from inside tenant pods,
 so tenant workloads should use `KEYCLOAK_JWKS_URL` to point at the in-cluster
 `platform-keycloak` Service while keeping `KEYCLOAK_URL` on the public issuer/origin.
+Host-side override workflows such as `scripts/k3d/tenant-api-override.sh` should
+leave `KEYCLOAK_JWKS_URL` unset when the tenant ConfigMap carries an in-cluster
+Service hostname, so the local `apps/api` process falls back to the public
+`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs` endpoint.
 
 #### Runtime Auth Flow (Keycloak mode)
 

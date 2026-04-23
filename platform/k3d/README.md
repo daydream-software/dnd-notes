@@ -168,7 +168,12 @@ The supported component-level override today is **tenant-api only**:
 3. run `apps/api` locally in watch mode against the live tenant database/runtime auth config
 4. expose a local same-origin front proxy
 5. keep browser/document traffic on the k3d tenant host while routing `/api/*`
-   (plus probe paths) to the local API process
+    (plus probe paths) to the local API process
+
+When that tenant ConfigMap carries an in-cluster `KEYCLOAK_JWKS_URL`
+(`*.svc.cluster.local`), the override launcher intentionally drops it for the
+host-side `apps/api` process so runtime auth falls back to
+`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`.
 
 The proxy adds `x-dnd-notes-override-target` so the workflow can prove which side
 served each request:

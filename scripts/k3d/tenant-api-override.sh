@@ -52,6 +52,38 @@ normalize_headers() {
   tr -d '\r' <"$1"
 }
 
+normalize_local_keycloak_jwks_url() {
+  local jwks_url="${1:-}"
+
+  if [[ -z "${jwks_url}" ]]; then
+    return 0
+  fi
+
+  if node -e '
+    const rawUrl = process.argv[1]?.trim()
+
+    if (!rawUrl) {
+      process.exit(1)
+    }
+
+    try {
+      const hostname = new URL(rawUrl).hostname.toLowerCase()
+      const isInClusterHostname =
+        hostname.endsWith(".svc") ||
+        hostname.includes(".svc.") ||
+        hostname.endsWith(".cluster.local")
+
+      process.exit(isInClusterHostname ? 0 : 1)
+    } catch {
+      process.exit(1)
+    }
+  ' "${jwks_url}"; then
+    return 0
+  fi
+
+  printf '%s' "${jwks_url}"
+}
+
 require_tool() {
   if ! command -v "$1" >/dev/null 2>&1; then
     log "Missing required tool: $1"
@@ -196,6 +228,7 @@ keycloak_url="$(json_get data.KEYCLOAK_URL <"${WORK_DIR}/tenant-configmap.json" 
 keycloak_realm="$(json_get data.KEYCLOAK_REALM <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_client_id="$(json_get data.KEYCLOAK_TENANT_CLIENT_ID <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_jwks_url="$(json_get data.KEYCLOAK_JWKS_URL <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
+keycloak_jwks_url_for_local_api="$(normalize_local_keycloak_jwks_url "${keycloak_jwks_url}")"
 
 env \
   PORT="${LOCAL_API_PORT}" \
@@ -206,7 +239,7 @@ env \
   KEYCLOAK_URL="${keycloak_url}" \
   KEYCLOAK_REALM="${keycloak_realm}" \
   KEYCLOAK_TENANT_CLIENT_ID="${keycloak_client_id}" \
-  KEYCLOAK_JWKS_URL="${keycloak_jwks_url}" \
+  KEYCLOAK_JWKS_URL="${keycloak_jwks_url_for_local_api}" \
   npm run dev --workspace apps/api \
   >"${WORK_DIR}/tenant-api.log" 2>&1 &
 api_pid=$!
