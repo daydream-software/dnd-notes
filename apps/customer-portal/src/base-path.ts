@@ -8,6 +8,10 @@ export function normalizeBasePath(
     return fallback
   }
 
+  if (trimmedValue === '/') {
+    return trimmedValue
+  }
+
   const withLeadingSlash = trimmedValue.startsWith('/')
     ? trimmedValue
     : `/${trimmedValue}`

@@ -653,7 +653,7 @@ export class TenantRegistry {
         )
         .run(id, accountId, tokenHash, expiresAt)
 
-      const session = this.getPortalSessionByTokenHash(tokenHash)
+      const session = this.findPortalSessionByTokenHash(tokenHash)
       if (!session) {
         throw new Error('Failed to retrieve created portal session')
       }
@@ -667,6 +667,10 @@ export class TenantRegistry {
   getPortalSessionByTokenHash(tokenHash: string): PortalSession | null {
     this.purgeExpiredPortalSessions()
 
+    return this.findPortalSessionByTokenHash(tokenHash)
+  }
+
+  private findPortalSessionByTokenHash(tokenHash: string): PortalSession | null {
     const row = this.db
       .prepare(
         `SELECT id, account_id, token_hash, expires_at, created_at
