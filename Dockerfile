@@ -4,7 +4,7 @@
 FROM node:22.21.1-bookworm-slim AS base
 WORKDIR /app
 COPY package*.json ./
-COPY scripts/prepare.mjs ./scripts/
+COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 
