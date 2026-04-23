@@ -21,6 +21,8 @@
     "k3d:build-image": "bash ./scripts/k3d/build-tenant-image.sh",
     "k3d:build-control-plane-image": "bash ./scripts/k3d/build-control-plane-image.sh",
     "k3d:smoke": "bash ./scripts/k3d/smoke.sh",
+    "k3d:full-stack-smoke": "bash ./scripts/k3d/full-stack-smoke.sh",
+    "k3d:tenant-api-override": "bash ./scripts/k3d/tenant-api-override.sh",
     "platform:validate": "bash ./scripts/platform/validate-manifests.sh",
     "copilot:yolo": "bash ./scripts/copilot-yolo.sh",
     "copilot:wait-review": "node --import tsx ./scripts/wait-copilot-review.ts",

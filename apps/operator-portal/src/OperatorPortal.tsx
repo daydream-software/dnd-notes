@@ -39,6 +39,7 @@ import type {
   FleetStatusResponse,
   FleetTenantBackupStatus,
   FleetTenantStatus,
+  OperatorKeycloakConfig,
   TenantState,
 } from './types'
 
@@ -175,7 +176,13 @@ function getMutationDisabledReason(fleetStatus: FleetStatusResponse | null) {
   return null
 }
 
-export default function OperatorPortal() {
+interface OperatorPortalProps {
+  keycloakClientFactory?: (config: OperatorKeycloakConfig) => RuntimeKeycloakClient
+}
+
+export default function OperatorPortal({
+  keycloakClientFactory = createRuntimeKeycloakClient,
+}: OperatorPortalProps = {}) {
   const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [fleetStatus, setFleetStatus] = useState<FleetStatusResponse | null>(null)
@@ -218,7 +225,7 @@ export default function OperatorPortal() {
 
   useEffect(() => {
     let cancelled = false
-    const keycloakClient = createRuntimeKeycloakClient(operatorKeycloakConfig)
+    const keycloakClient = keycloakClientFactory(operatorKeycloakConfig)
     keycloakClientRef.current = keycloakClient
 
     const bootstrapAuth = async () => {
@@ -258,7 +265,7 @@ export default function OperatorPortal() {
     return () => {
       cancelled = true
     }
-  }, [clearSession, loadFleet])
+  }, [clearSession, keycloakClientFactory, loadFleet])
 
   useEffect(() => {
     if (!authToken || !keycloakClientRef.current) {
