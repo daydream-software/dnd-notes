@@ -15,9 +15,19 @@ export function normalizeBasePath(
   const withLeadingSlash = trimmedValue.startsWith('/')
     ? trimmedValue
     : `/${trimmedValue}`
-  const normalized = withLeadingSlash.replace(/\/+$/, '')
 
-  return normalized.length > 0 ? normalized : fallback
+  let end = withLeadingSlash.length - 1
+  while (end > 0 && withLeadingSlash[end] === '/') {
+    end--
+  }
+
+  // end === 0 means every character was '/', i.e. input was something like
+  // '///' — treat the same as blank and return the fallback.
+  if (end === 0) {
+    return fallback
+  }
+
+  return withLeadingSlash.slice(0, end + 1)
 }
 
 export function joinBasePath(basePath: string, path: string): string {

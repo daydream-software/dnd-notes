@@ -1,0 +1,23 @@
+{
+  "name": "@dnd-notes/portal-utils",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
+    "test": "vitest run",
+    "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=../../reports/test-results/portal-utils.junit.xml --coverage.enabled --coverage.provider=v8 --coverage.reporter=text-summary --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reporter=cobertura --coverage.reportsDirectory=../../reports/coverage/portal-utils"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.1.4",
+    "typescript": "~6.0.2",
+    "vitest": "^4.1.4"
+  }
+}

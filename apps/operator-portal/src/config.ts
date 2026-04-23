@@ -1,5 +1,5 @@
 import type { OperatorKeycloakConfig } from './types'
-import { normalizeBasePath } from './base-path'
+import { normalizeBasePath } from '@dnd-notes/portal-utils'
 
 interface OperatorPortalViteEnv {
   VITE_OPERATOR_API_BASE_PATH?: string
