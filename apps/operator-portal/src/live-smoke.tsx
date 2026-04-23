@@ -1,5 +1,7 @@
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, render } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import * as React from 'react'
+import type { ComponentProps } from 'react'
 import OperatorPortal from './OperatorPortal'
 import type { RuntimeKeycloakClient, StoredKeycloakTokens } from './keycloak-client'
 
@@ -43,31 +45,34 @@ function createSmokeKeycloakClient(tokens: StoredKeycloakTokens) {
 export async function provisionTenantThroughOperatorPortal(
   options: OperatorPortalSmokeOptions,
 ) {
-  const user = userEvent.setup()
+  const user = userEvent.setup({ document: globalThis.document })
   const keycloakTokens: StoredKeycloakTokens = {
     accessToken: options.accessToken,
     refreshToken: options.refreshToken,
     ...(options.idToken ? { idToken: options.idToken } : {}),
   }
 
-  render(
-    <OperatorPortal
-      keycloakClientFactory={createSmokeKeycloakClient(keycloakTokens)}
-    />,
+  const view = render(
+    React.createElement<NonNullable<ComponentProps<typeof OperatorPortal>>>(
+      OperatorPortal,
+      {
+      keycloakClientFactory: createSmokeKeycloakClient(keycloakTokens),
+      },
+    ),
   )
 
   try {
-    await screen.findByText('Operator control portal')
-    const tenantIdInput = await screen.findByRole('textbox', { name: /Tenant ID/i })
-    const tenantSlugInput = screen.getByRole('textbox', { name: /Tenant slug/i })
-    const ownerIdInput = screen.getByRole('textbox', { name: /Owner ID/i })
-    const initialAdminEmailInput = screen.getByRole('textbox', {
+    await view.findByText('Operator control portal')
+    const tenantIdInput = await view.findByRole('textbox', { name: /Tenant ID/i })
+    const tenantSlugInput = view.getByRole('textbox', { name: /Tenant slug/i })
+    const ownerIdInput = view.getByRole('textbox', { name: /Owner ID/i })
+    const initialAdminEmailInput = view.getByRole('textbox', {
       name: /Initial admin email/i,
     })
-    const tenantVersionInput = screen.getByRole('textbox', {
+    const tenantVersionInput = view.getByRole('textbox', {
       name: /Tenant version/i,
     })
-    const operatorReasonInput = screen.getByRole('textbox', {
+    const operatorReasonInput = view.getByRole('textbox', {
       name: /Operator reason/i,
     })
 
@@ -83,14 +88,14 @@ export async function provisionTenantThroughOperatorPortal(
     await user.type(operatorReasonInput, options.reason)
 
     await user.click(
-      screen.getByRole('button', { name: 'Review and provision tenant' }),
+      view.getByRole('button', { name: 'Review and provision tenant' }),
     )
-    await screen.findByRole('dialog', { name: 'Confirm tenant provisioning' })
+    await view.findByRole('dialog', { name: 'Confirm tenant provisioning' })
     await user.click(
-      screen.getByRole('button', { name: 'Create and provision tenant' }),
+      view.getByRole('button', { name: 'Create and provision tenant' }),
     )
 
-    const notice = await screen.findByText(
+    const notice = await view.findByText(
       new RegExp(`^Provisioned ${options.tenantSlug}\\.`),
     )
     return {

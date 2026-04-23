@@ -21,7 +21,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import * as React from 'react'
 import { buildOperatorRedirectUri, operatorKeycloakConfig } from './config'
 import { fetchFleetStatus } from './control-plane-api'
 import {
@@ -42,6 +42,8 @@ import type {
   OperatorKeycloakConfig,
   TenantState,
 } from './types'
+
+const { useCallback, useEffect, useMemo, useRef, useState } = React
 
 const surfaceRadius = 6
 

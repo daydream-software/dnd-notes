@@ -1,27 +1,66 @@
 import { JSDOM } from 'jsdom'
 import { provisionTenantThroughOperatorPortal } from '../../apps/operator-portal/src/live-smoke'
 
+function installGlobalProperty(name: string, value: unknown) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, name)
+
+  if (!descriptor || descriptor.configurable) {
+    Object.defineProperty(globalThis, name, {
+      configurable: true,
+      writable: true,
+      value,
+    })
+    return
+  }
+
+  if (descriptor.set || descriptor.writable) {
+    Reflect.set(globalThis, name, value)
+    return
+  }
+
+  if (Reflect.get(globalThis, name) === value) {
+    return
+  }
+
+  throw new TypeError(
+    `Cannot install DOM global ${name}: existing global property is not writable.`,
+  )
+}
+
 function installDomGlobals(window: Window & typeof globalThis) {
-  Object.assign(globalThis, {
-    window,
-    document: window.document,
-    navigator: window.navigator,
-    localStorage: window.localStorage,
-    sessionStorage: window.sessionStorage,
-    HTMLElement: window.HTMLElement,
-    HTMLInputElement: window.HTMLInputElement,
-    HTMLButtonElement: window.HTMLButtonElement,
-    Node: window.Node,
-    Event: window.Event,
-    MouseEvent: window.MouseEvent,
-    KeyboardEvent: window.KeyboardEvent,
-    getComputedStyle: window.getComputedStyle.bind(window),
-    atob: window.atob.bind(window),
-    btoa: window.btoa.bind(window),
-  })
+  const requestAnimationFrame =
+    window.requestAnimationFrame?.bind(window) ??
+    ((callback: FrameRequestCallback) =>
+      setTimeout(() => callback(Date.now()), 0) as unknown as number)
+  const cancelAnimationFrame =
+    window.cancelAnimationFrame?.bind(window) ??
+    ((handle: number) => clearTimeout(handle))
+
+  installGlobalProperty('window', window)
+  installGlobalProperty('document', window.document)
+  installGlobalProperty('navigator', window.navigator)
+  installGlobalProperty('localStorage', window.localStorage)
+  installGlobalProperty('sessionStorage', window.sessionStorage)
+  installGlobalProperty('HTMLElement', window.HTMLElement)
+  installGlobalProperty('Element', window.Element)
+  installGlobalProperty('DocumentFragment', window.DocumentFragment)
+  installGlobalProperty('HTMLInputElement', window.HTMLInputElement)
+  installGlobalProperty('HTMLButtonElement', window.HTMLButtonElement)
+  installGlobalProperty('HTMLTextAreaElement', window.HTMLTextAreaElement)
+  installGlobalProperty('Node', window.Node)
+  installGlobalProperty('SVGElement', window.SVGElement)
+  installGlobalProperty('Event', window.Event)
+  installGlobalProperty('MouseEvent', window.MouseEvent)
+  installGlobalProperty('KeyboardEvent', window.KeyboardEvent)
+  installGlobalProperty('getComputedStyle', window.getComputedStyle.bind(window))
+  installGlobalProperty('requestAnimationFrame', requestAnimationFrame)
+  installGlobalProperty('cancelAnimationFrame', cancelAnimationFrame)
+  installGlobalProperty('atob', window.atob.bind(window))
+  installGlobalProperty('btoa', window.btoa.bind(window))
 
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', {
     configurable: true,
+    writable: true,
     value: true,
   })
 
@@ -40,6 +79,22 @@ function installDomGlobals(window: Window & typeof globalThis) {
           return false
         },
       }),
+    })
+  }
+
+  if (!window.HTMLElement.prototype.attachEvent) {
+    Object.defineProperty(window.HTMLElement.prototype, 'attachEvent', {
+      configurable: true,
+      writable: true,
+      value() {},
+    })
+  }
+
+  if (!window.HTMLElement.prototype.detachEvent) {
+    Object.defineProperty(window.HTMLElement.prototype, 'detachEvent', {
+      configurable: true,
+      writable: true,
+      value() {},
     })
   }
 }
