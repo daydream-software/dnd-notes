@@ -155,23 +155,6 @@ json_find_tenant_field() {
   ' "$tenant_id" "$path"
 }
 
-build_tenant_create_payload() {
-  local tenant_id="$1"
-  local tenant_slug="$2"
-  local tenant_image_tag="$3"
-
-  node -e '
-    const [tenantId, tenantSlug, tenantImageTag] = process.argv.slice(1)
-    process.stdout.write(JSON.stringify({
-      id: tenantId,
-      slug: tenantSlug,
-      ownerId: "smoke-owner",
-      initialAdminEmail: "owner@example.com",
-      version: tenantImageTag,
-    }))
-  ' "$tenant_id" "$tenant_slug" "$tenant_image_tag"
-}
-
 get_keycloak_token_response() {
   local base_url="$1"
   local realm="$2"
@@ -344,7 +327,7 @@ control_plane_token_response="$(get_keycloak_token_response \
   "${CONTROL_PLANE_KEYCLOAK_PASSWORD}")"
 control_plane_bearer_token="$(json_get access_token <<<"${control_plane_token_response}")"
 
-tenant_id="smoke-$(date +%s)"
+tenant_id="smoke-$(date +%s%N)-${RANDOM}"
 tenant_slug="${tenant_id}"
 
 OPERATOR_PORTAL_ACCESS_TOKEN="${control_plane_bearer_token}" \

@@ -75,6 +75,11 @@ const TENANT_KEYCLOAK_JWKS_URL =
 const TENANT_KEYCLOAK_REALM = process.env.TENANT_KEYCLOAK_REALM
 const TENANT_KEYCLOAK_CLIENT_ID = process.env.TENANT_KEYCLOAK_CLIENT_ID
 const TENANT_BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN
+const rawTenantIngressClassName = process.env.TENANT_INGRESS_CLASS_NAME?.trim()
+const TENANT_INGRESS_CLASS_NAME =
+  rawTenantIngressClassName && rawTenantIngressClassName.length > 0
+    ? rawTenantIngressClassName
+    : 'nginx'
 const TENANT_IMAGE_REPOSITORY = process.env.TENANT_IMAGE_REPOSITORY
 const TENANT_DATABASE_ADMIN_URL = process.env.TENANT_DATABASE_ADMIN_URL
 const TENANT_DATABASE_RUNTIME_URL = process.env.TENANT_DATABASE_RUNTIME_URL
@@ -218,6 +223,7 @@ if (ENABLE_TENANT_PROVISIONING) {
   tenantProvisioningService = createLiveTenantProvisioningService({
     tenantRegistry,
     baseDomain: TENANT_BASE_DOMAIN,
+    ingressClassName: TENANT_INGRESS_CLASS_NAME,
     imageRepository: TENANT_IMAGE_REPOSITORY,
     databaseAdminUrl: TENANT_DATABASE_ADMIN_URL,
     databaseRuntimeUrl: TENANT_DATABASE_RUNTIME_URL,

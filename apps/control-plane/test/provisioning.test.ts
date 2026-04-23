@@ -343,6 +343,41 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('uses a configurable ingress class for provisioned tenant routes', async () => {
+    const tenantRegistry = new TenantRegistry(':memory:')
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        ingressClassName: 'custom-nginx',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(infrastructureManager.bundles.length, 1)
+      assert.equal(infrastructureManager.bundles[0].ingressClassName, 'custom-nginx')
+    } finally {
+      await provisioningService.close()
+      tenantRegistry.close()
+    }
+  })
+
   it('normalizes and reconciles a version override before building the rollout image', async () => {
     const tenantRegistry = new TenantRegistry(':memory:')
     const databaseManager = new FakeDatabaseManager()

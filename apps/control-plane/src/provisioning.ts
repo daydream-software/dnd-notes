@@ -129,6 +129,7 @@ interface TenantProvisioningServiceOptions {
   databaseManager: TenantDatabaseManager
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
   baseDomain: string
+  ingressClassName?: string
   imageRepository: string
   imagePullSecretName?: string
   publicScheme?: 'http' | 'https'
@@ -142,6 +143,7 @@ interface BuildTenantInfrastructureBundleOptions {
   database: TenantDatabase
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
   baseDomain: string
+  ingressClassName?: string
   imageRepository: string
   imagePullSecretName?: string
   publicScheme: 'http' | 'https'
@@ -207,6 +209,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly databaseManager: TenantDatabaseManager
   private readonly tenantRuntimeAuth: TenantRuntimeAuthConfig
   private readonly baseDomain: string
+  private readonly ingressClassName: string
   private readonly imageRepository: string
   private readonly imagePullSecretName?: string
   private readonly publicScheme: 'http' | 'https'
@@ -219,6 +222,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.databaseManager = options.databaseManager
     this.tenantRuntimeAuth = options.tenantRuntimeAuth ?? { mode: 'local' }
     this.baseDomain = options.baseDomain
+    this.ingressClassName = options.ingressClassName ?? 'nginx'
     this.imageRepository = options.imageRepository
     this.imagePullSecretName = options.imagePullSecretName
     this.publicScheme = options.publicScheme ?? 'https'
@@ -329,12 +333,13 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       const bundle = buildTenantInfrastructureBundle({
         tenant: this.getExistingTenant(refreshedTenant.id),
         subdomain,
-        database,
-        tenantRuntimeAuth: this.tenantRuntimeAuth,
-        baseDomain: this.baseDomain,
-        imageRepository: this.imageRepository,
-        imagePullSecretName: this.imagePullSecretName,
-        publicScheme: this.publicScheme,
+      database,
+      tenantRuntimeAuth: this.tenantRuntimeAuth,
+      baseDomain: this.baseDomain,
+      ingressClassName: this.ingressClassName,
+      imageRepository: this.imageRepository,
+      imagePullSecretName: this.imagePullSecretName,
+      publicScheme: this.publicScheme,
         tenantPort: this.tenantPort,
       })
       this.tenantRegistry.updateTenantStorageReference(
@@ -802,6 +807,7 @@ export function createLiveTenantProvisioningService(params: {
   tenantRegistry: TenantRegistry
   baseDomain: string
   imageRepository: string
+  ingressClassName?: string
   databaseAdminUrl: string
   databaseRuntimeUrl?: string
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
@@ -819,6 +825,7 @@ export function createLiveTenantProvisioningService(params: {
     ),
     tenantRuntimeAuth: params.tenantRuntimeAuth,
     baseDomain: params.baseDomain,
+    ingressClassName: params.ingressClassName,
     imageRepository: params.imageRepository,
     imagePullSecretName: params.imagePullSecretName,
     publicScheme: params.publicScheme,
@@ -947,7 +954,7 @@ export function buildTenantInfrastructureBundle(
         labels: namespaceLabels,
       },
       spec: {
-        ingressClassName: 'nginx',
+        ingressClassName: options.ingressClassName ?? 'nginx',
         rules: [
           {
             host: resources.hostname,

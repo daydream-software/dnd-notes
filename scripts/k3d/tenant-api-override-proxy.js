@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 const http = require('node:http')
+const { pipeline } = require('node:stream/promises')
+const { Readable } = require('node:stream')
 
 const tenantApiOverrideHeaderName = 'x-dnd-notes-override-target'
 
@@ -95,8 +97,19 @@ function createTenantApiOverrideProxy(options) {
       reply.statusCode = response.status
       copyResponseHeaders(response, reply)
       reply.setHeader(tenantApiOverrideHeaderName, targetKind)
-      reply.end(Buffer.from(await response.arrayBuffer()))
+
+      if (!response.body) {
+        reply.end()
+        return
+      }
+
+      await pipeline(Readable.fromWeb(response.body), reply)
     } catch (error) {
+      if (reply.headersSent) {
+        reply.destroy(error instanceof Error ? error : undefined)
+        return
+      }
+
       reply.statusCode = 502
       reply.setHeader('Content-Type', 'application/json')
       reply.end(

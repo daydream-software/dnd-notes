@@ -10,7 +10,9 @@ interface OperatorPortalViteEnv {
 
 function normalizeUrl(value: string | undefined, fallback: string) {
   const trimmedValue = value?.trim()
-  return (trimmedValue ?? fallback).replace(/\/+$/, '')
+  const normalizedValue =
+    trimmedValue && trimmedValue.length > 0 ? trimmedValue : fallback
+  return normalizedValue.replace(/\/+$/, '')
 }
 
 function normalizeString(value: string | undefined, fallback: string) {
