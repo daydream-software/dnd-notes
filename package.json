@@ -35,6 +35,7 @@
     "build:customer-portal": "npm run build --workspace apps/customer-portal",
     "test:portal-utils": "npm run test --workspace packages/portal-utils --",
     "test:ci:portal-utils": "npm run test:ci --workspace packages/portal-utils --",
+    "test:web": "npm run test --workspace apps/web --",
     "test:api": "npm run test --workspace apps/api --",
     "test:control-plane": "npm run test --workspace apps/control-plane --",
     "test:operator-portal": "npm run test --workspace apps/operator-portal --",

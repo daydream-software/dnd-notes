@@ -10,7 +10,8 @@
     }
   },
   "scripts": {
-    "prepare": "tsc -p tsconfig.build.json",
+    "build": "tsc -p tsconfig.build.json",
+    "prepare": "npm run build",
     "test": "vitest run",
     "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=../../reports/test-results/portal-utils.junit.xml --coverage.enabled --coverage.provider=v8 --coverage.reporter=text-summary --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reporter=cobertura --coverage.reportsDirectory=../../reports/coverage/portal-utils"
   },
