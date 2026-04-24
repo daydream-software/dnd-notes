@@ -570,7 +570,28 @@ test('explicit sqlite dbPath beats an ambient DATABASE_URL', () => {
   )
 })
 
-test('runtime note store requires postgres configuration instead of falling back to sqlite', async () => {
+test('runtime note store requires postgres configuration instead of falling back to sqlite', async (t) => {
+  const originalDatabaseUrl = process.env.DATABASE_URL
+  const originalNotesDbPath = process.env.NOTES_DB_PATH
+  delete process.env.DATABASE_URL
+  process.env.NOTES_DB_PATH = join(
+    runtimeDirectory,
+    `runtime-fallback-${randomUUID()}.sqlite`,
+  )
+  t.after(() => {
+    if (originalDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL
+    } else {
+      process.env.DATABASE_URL = originalDatabaseUrl
+    }
+
+    if (originalNotesDbPath === undefined) {
+      delete process.env.NOTES_DB_PATH
+    } else {
+      process.env.NOTES_DB_PATH = originalNotesDbPath
+    }
+  })
+
   await assert.rejects(
     () => createRuntimeNoteStore(),
     /DATABASE_URL is required when the Postgres note store is selected\./,
@@ -581,9 +602,23 @@ test('runtime restore keeps the postgres-only runtime contract', async (t) => {
   await mkdir(runtimeDirectory, { recursive: true })
   const sourceDbPath = join(runtimeDirectory, `runtime-restore-source-${randomUUID()}.sqlite`)
   const backupPath = join(runtimeDirectory, `runtime-restore-backup-${randomUUID()}.sqlite`)
+  const originalDatabaseUrl = process.env.DATABASE_URL
+  const originalNotesDbPath = process.env.NOTES_DB_PATH
   t.after(async () => {
     await rm(sourceDbPath, { force: true })
     await rm(backupPath, { force: true })
+
+    if (originalDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL
+    } else {
+      process.env.DATABASE_URL = originalDatabaseUrl
+    }
+
+    if (originalNotesDbPath === undefined) {
+      delete process.env.NOTES_DB_PATH
+    } else {
+      process.env.NOTES_DB_PATH = originalNotesDbPath
+    }
   })
 
   const sourceStore = await createNoteStore({
@@ -596,6 +631,12 @@ test('runtime restore keeps the postgres-only runtime contract', async (t) => {
   } finally {
     await sourceStore.close()
   }
+
+  delete process.env.DATABASE_URL
+  process.env.NOTES_DB_PATH = join(
+    runtimeDirectory,
+    `runtime-restore-fallback-${randomUUID()}.sqlite`,
+  )
 
   await assert.rejects(
     () => restoreRuntimeNoteStoreFromBackup(backupPath),
