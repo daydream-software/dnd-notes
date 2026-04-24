@@ -46,6 +46,7 @@
 
 ## Learnings
 
+- PR-visible history for the backup runner must describe the implemented restore guardrail exactly: `apps/control-plane/src/tenant-backup-runner.ts` now blocks restore when active tenant connections exist, so history/docs should not claim it force-terminates sessions before `pg_restore`.
 - Issue #76 runtime Keycloak path keeps identity and authorization separate: `apps/api/src/keycloak-auth.ts` validates JWTs, while `apps/api/src/note-store.ts` reconciles `keycloak_sub` onto local `owner_accounts` and the existing `campaign_memberships` model still owns tenant authorization.
 - Keycloak owner-link conflicts should cross the `apps/api/src/note-store.ts` → `apps/api/src/route-support.ts` boundary as an explicit `OwnerKeycloakLinkConflictError`, not a parsed message string; regressions for the 409 mapping live in `apps/api/test/keycloak-runtime-auth.test.ts`.
 - The tenant web app must learn auth mode at runtime, not build time: `GET /api/auth/config` in `apps/api/src/routes/auth-routes.ts` plus `apps/web/src/keycloak-client.ts` let one built tenant image run in `AUTH_MODE=local` or `AUTH_MODE=keycloak` without per-tenant Vite rebuilds.
