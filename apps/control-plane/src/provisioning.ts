@@ -8,6 +8,7 @@ import {
   type V1Deployment,
   type V1Ingress,
   type V1Namespace,
+  type V1PodDisruptionBudget,
   type V1PersistentVolumeClaim,
   type V1PersistentVolumeClaimSpec,
   type V1Secret,
@@ -82,6 +83,7 @@ interface TenantInfrastructureBundle {
   namespace: V1Namespace
   configMap: V1ConfigMap
   secret: V1Secret
+  podDisruptionBudget?: V1PodDisruptionBudget
   persistentVolumeClaim?: V1PersistentVolumeClaim
   service: V1Service
   ingress: V1Ingress
@@ -663,6 +665,9 @@ export class KubernetesTenantInfrastructureManager
     await upsertKubernetesObject(this.client, bundle.namespace)
     await upsertKubernetesObject(this.client, bundle.configMap)
     await upsertKubernetesObject(this.client, bundle.secret)
+    if (bundle.podDisruptionBudget) {
+      await upsertKubernetesObject(this.client, bundle.podDisruptionBudget)
+    }
     if (bundle.persistentVolumeClaim) {
       await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
     }
@@ -896,6 +901,8 @@ export function buildTenantInfrastructureBundle(
     }
   }
 
+  const usesLegacyPvcShape = resources.pvcName !== null
+
   return {
     resources,
     namespace: {
@@ -927,6 +934,23 @@ export function buildTenantInfrastructureBundle(
       type: 'Opaque',
       data: secretData,
     },
+    podDisruptionBudget: !usesLegacyPvcShape
+      ? {
+          apiVersion: 'policy/v1',
+          kind: 'PodDisruptionBudget',
+          metadata: {
+            name: resources.deploymentName,
+            namespace: resources.namespace,
+            labels: namespaceLabels,
+          },
+          spec: {
+            minAvailable: 1,
+            selector: {
+              matchLabels: buildTenantSelectorLabels(options.tenant),
+            },
+          },
+        }
+      : undefined,
     persistentVolumeClaim: resources.pvcName
       ? {
           apiVersion: 'v1',
@@ -1012,8 +1036,8 @@ export function buildTenantInfrastructureBundle(
         strategy: {
           type: 'RollingUpdate',
           rollingUpdate: {
-            maxSurge: 0,
-            maxUnavailable: 1,
+            maxSurge: usesLegacyPvcShape ? 0 : 1,
+            maxUnavailable: usesLegacyPvcShape ? 1 : 0,
           },
         },
         selector: {

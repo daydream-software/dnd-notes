@@ -80,6 +80,8 @@ class FakeInfrastructureManager {
     maxSurge: number | string | undefined
     maxUnavailable: number | string | undefined
     minReadySeconds: number | undefined
+    podDisruptionBudgetMinAvailable: number | string | undefined
+    podDisruptionBudgetName: string | undefined
     runtimeConnectionString: string | undefined
   }> = []
   deletedResources: TenantProvisioningResources[] = []
@@ -100,6 +102,14 @@ class FakeInfrastructureManager {
     secret?: {
       data?: {
         DATABASE_URL?: string
+      }
+    }
+    podDisruptionBudget?: {
+      metadata?: {
+        name?: string
+      }
+      spec?: {
+        minAvailable?: number | string
       }
     }
     ingress?: {
@@ -164,6 +174,9 @@ class FakeInfrastructureManager {
       maxUnavailable:
         bundle.deployment.spec?.strategy?.rollingUpdate?.maxUnavailable,
       minReadySeconds: bundle.deployment.spec?.minReadySeconds,
+      podDisruptionBudgetMinAvailable:
+        bundle.podDisruptionBudget?.spec?.minAvailable,
+      podDisruptionBudgetName: bundle.podDisruptionBudget?.metadata?.name,
       runtimeConnectionString: bundle.secret?.data?.DATABASE_URL
         ? Buffer.from(bundle.secret.data.DATABASE_URL, 'base64').toString('utf8')
         : undefined,
@@ -261,9 +274,14 @@ describe('TenantProvisioningService', () => {
       assert.equal(infrastructureManager.bundles[0].ingressHost, result.resources.hostname)
       assert.equal(infrastructureManager.bundles[0].ingressPath, '/')
       assert.equal(infrastructureManager.bundles[0].deploymentStrategyType, 'RollingUpdate')
-      assert.equal(infrastructureManager.bundles[0].maxSurge, 0)
-      assert.equal(infrastructureManager.bundles[0].maxUnavailable, 1)
+      assert.equal(infrastructureManager.bundles[0].maxSurge, 1)
+      assert.equal(infrastructureManager.bundles[0].maxUnavailable, 0)
       assert.equal(infrastructureManager.bundles[0].minReadySeconds, 5)
+      assert.equal(infrastructureManager.bundles[0].podDisruptionBudgetName, 'dnd-notes')
+      assert.equal(
+        infrastructureManager.bundles[0].podDisruptionBudgetMinAvailable,
+        1,
+      )
       assert.equal(
         infrastructureManager.bundles[0].resources.hostname,
         `${result.tenant.subdomain}.dnd-notes.test`,
@@ -1027,6 +1045,8 @@ describe('TenantProvisioningService', () => {
       })
 
       assert.equal(bundle.resources.pvcName, null)
+      assert.equal(bundle.podDisruptionBudget?.metadata?.name, bundle.resources.deploymentName)
+      assert.equal(bundle.podDisruptionBudget?.spec?.minAvailable, 1)
       assert.equal(bundle.persistentVolumeClaim, undefined)
       assert.equal(bundle.ingress.metadata?.name, bundle.resources.serviceName)
       assert.equal(bundle.ingress.spec?.ingressClassName, 'nginx')
@@ -1080,6 +1100,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(bundle.resources.pvcName, 'dnd-notes-data-t-opaque123456')
       assert.equal(bundle.persistentVolumeClaim?.metadata?.name, bundle.resources.pvcName)
       assert.equal(bundle.configMap.data?.NOTES_DB_PATH, '/app/data/dnd-notes.sqlite')
+      assert.equal(bundle.podDisruptionBudget, undefined)
       assert.deepEqual(bundle.persistentVolumeClaim?.spec?.accessModes, ['ReadWriteOnce'])
       assert.deepEqual(bundle.deployment.spec?.template?.spec?.volumes, [
         {
@@ -1132,6 +1153,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(maxLengthSubdomain.length, maxTenantSubdomainLength)
       assert.ok(bundle.resources.namespace.length <= 63)
       assert.equal(bundle.resources.pvcName, null)
+      assert.equal(bundle.podDisruptionBudget?.metadata?.name, bundle.resources.deploymentName)
       assert.equal(bundle.resources.hostname, `${maxLengthSubdomain}.dnd-notes.test`)
     } finally {
       await cleanup()
