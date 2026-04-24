@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
@@ -10,9 +11,14 @@ const smokeScriptPath = fileURLToPath(
 
 const smokeScript = readFileSync(smokeScriptPath, 'utf8')
 const payloadBuilderMatch = smokeScript.match(/^build_tenant_create_payload\(\) \{\n[\s\S]*?^}/m)
+const requestJsonToFileMatch = smokeScript.match(/^request_json_to_file\(\) \{\n[\s\S]*?^}/m)
 
 if (!payloadBuilderMatch) {
   throw new Error('Expected build_tenant_create_payload() in scripts/k3d/smoke.sh')
+}
+
+if (!requestJsonToFileMatch) {
+  throw new Error('Expected request_json_to_file() in scripts/k3d/smoke.sh')
 }
 
 describe('k3d smoke tenant payload builder', () => {
@@ -43,3 +49,65 @@ describe('k3d smoke tenant payload builder', () => {
     })
   })
 })
+
+describe('k3d smoke request helper', () => {
+  it('avoids Bash 3.2-incompatible negative-offset expansion', () => {
+    assert.doesNotMatch(requestJsonToFileMatch[0], /\$\{\*:\s*-\d+\}/)
+  })
+
+  it('logs the failing request URL and response body for non-2xx responses', () => {
+    const outputPath = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.request-json-to-file-${process.pid}.json`,
+    )
+
+    const result = spawnSync(
+      'bash',
+      [
+        '-lc',
+        `${requestJsonToFileMatch[0]}
+curl() {
+  local output_path=""
+  while (( $# > 0 )); do
+    case "$1" in
+      -o)
+        output_path="$2"
+        shift 2
+        ;;
+      -w)
+        shift 2
+        ;;
+      *)
+        shift
+        ;;
+    esac
+  done
+
+  printf '%s' '{"error":"boom"}' > "$output_path"
+  printf '503'
+  return 0
+}
+
+request_json_to_file "$OUTPUT_PATH" -X POST -H 'Content-Type: application/json' -d '{}' 'https://example.test/internal/tenants'
+`,
+      ],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          OUTPUT_PATH: outputPath,
+        },
+      },
+    )
+
+    rmSync(outputPath, { force: true })
+
+    assert.strictEqual(result.status, 22)
+    assert.match(
+      result.stderr,
+      /HTTP 503 response while calling https:\/\/example\.test\/internal\/tenants:/,
+    )
+    assert.match(result.stderr, /\{"error":"boom"\}/)
+  })
+})
+

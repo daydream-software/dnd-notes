@@ -1418,11 +1418,10 @@ export function createApp({
           return
         }
 
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
+        logUnexpectedError('Failed to create tenant', error)
         response.status(500).json({
           error: 'Failed to create tenant',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },
@@ -1471,11 +1470,10 @@ export function createApp({
 
         response.json({ tenant: updatedTenant })
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
+        logUnexpectedError('Failed to update tenant state', error)
         response.status(500).json({
           error: 'Failed to update tenant state',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },
@@ -1517,11 +1515,10 @@ export function createApp({
 
         response.json({ tenant })
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
+        logUnexpectedError('Failed to update desired state', error)
         response.status(500).json({
           error: 'Failed to update desired state',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },
@@ -1566,11 +1563,10 @@ export function createApp({
 
         response.json({ tenant })
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
+        logUnexpectedError('Failed to update storage reference', error)
         response.status(500).json({
           error: 'Failed to update storage reference',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },
@@ -1612,11 +1608,10 @@ export function createApp({
 
         response.json({ tenant })
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
+        logUnexpectedError('Failed to update backup metadata', error)
         response.status(500).json({
           error: 'Failed to update backup metadata',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },
@@ -1761,11 +1756,10 @@ export function createApp({
           })
         response.json(deprovisionResult)
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
+        logUnexpectedError('Failed to deprovision tenant resources', error)
         response.status(500).json({
           error: 'Failed to deprovision tenant resources',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },

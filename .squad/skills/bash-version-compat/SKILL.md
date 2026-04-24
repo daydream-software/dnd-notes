@@ -18,6 +18,7 @@ Use this when a repo script intentionally depends on Bash, but contributors may 
 - Treat Bash 4.4+ options such as `shopt -s inherit_errexit` as optional hardening, not universal assumptions.
 - Guard version-specific setup with explicit `BASH_VERSINFO` checks so the compatibility rule is obvious in code review.
 - Prefer targeted guards over broad `|| true` fallbacks when newer shells should still fail loudly for real errors.
+- When a Bash helper needs the last positional argument, prefer `${!#}` or a dedicated variable over negative-offset `${*: -1}` so the script still runs on Bash 3.2.
 - Validate both parseability (`bash -n`) and a lightweight startup path (for example `bash script.sh --help`) after making portability changes.
 
 ## Examples
