@@ -54,12 +54,17 @@ docker build -f "${ROOT}/docker/control-plane/Dockerfile" -t "${IMAGE_REF}" "${R
 
 run_image_import() {
   local mode="$1"
+  local status=0
 
   echo "Importing ${IMAGE_REF} into k3d cluster ${CLUSTER_NAME} with mode ${mode}..."
   if command -v timeout >/dev/null 2>&1; then
-    timeout "${IMAGE_IMPORT_TIMEOUT_SECONDS}" \
-      k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"
-    return
+    if timeout "${IMAGE_IMPORT_TIMEOUT_SECONDS}" \
+      k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"; then
+      return 0
+    fi
+
+    status=$?
+    return "${status}"
   fi
 
   k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"
