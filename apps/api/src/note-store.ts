@@ -310,7 +310,11 @@ function resolveDatabaseUrl(
   options: CreateNoteStoreOptions,
   environment: NodeJS.ProcessEnv = process.env,
 ) {
-  return options.databaseUrl ?? environment.DATABASE_URL ?? null
+  const configuredDatabaseUrl = options.databaseUrl ?? environment.DATABASE_URL
+  const trimmedDatabaseUrl = configuredDatabaseUrl?.trim()
+  return trimmedDatabaseUrl && trimmedDatabaseUrl.length > 0
+    ? trimmedDatabaseUrl
+    : null
 }
 
 function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl = resolveDatabaseUrl(options)) {

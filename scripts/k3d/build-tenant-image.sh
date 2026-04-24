@@ -67,7 +67,12 @@ run_image_import() {
     return "${status}"
   fi
 
-  k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"
+  if k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"; then
+    return 0
+  fi
+
+  status=$?
+  return "${status}"
 }
 
 if ! run_image_import "${IMAGE_IMPORT_MODE}"; then

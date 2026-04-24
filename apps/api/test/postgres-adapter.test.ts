@@ -138,3 +138,22 @@ test('runtime note store requires postgres configuration', async (t) => {
     /DATABASE_URL is required unless a postgresPool is provided\./,
   )
 })
+
+test('runtime note store rejects whitespace-only DATABASE_URL values', async (t) => {
+  const originalDatabaseUrl = process.env.DATABASE_URL
+
+  t.after(() => {
+    if (originalDatabaseUrl === undefined) {
+      delete process.env.DATABASE_URL
+    } else {
+      process.env.DATABASE_URL = originalDatabaseUrl
+    }
+  })
+
+  process.env.DATABASE_URL = '   '
+
+  await assert.rejects(
+    () => createRuntimeNoteStore(),
+    /DATABASE_URL is required unless a postgresPool is provided\./,
+  )
+})
