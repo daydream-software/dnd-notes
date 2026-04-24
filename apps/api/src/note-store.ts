@@ -316,7 +316,7 @@ function resolveDatabaseUrl(
 
 function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl = resolveDatabaseUrl(options)) {
   if (!options.postgresPool && !databaseUrl) {
-    throw new Error('DATABASE_URL is required when the Postgres note store is selected.')
+    throw new Error('DATABASE_URL is required unless a postgresPool is provided.')
   }
 
   return databaseUrl

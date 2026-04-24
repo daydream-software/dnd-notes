@@ -118,3 +118,31 @@ test('createPostgresDatabase preserves BEGIN errors when rollback also fails', a
   assert.deepEqual(queries, ['BEGIN', 'ROLLBACK'])
   assert.equal(released, true)
 })
+
+test('createPostgresDatabase exec splits same-line multi-statement SQL outside quotes and comments', async () => {
+  const queries: string[] = []
+  const pool: PostgresPoolLike = {
+    async query(text) {
+      queries.push(text)
+      return { rows: [], rowCount: 0 }
+    },
+    async connect() {
+      throw new Error('connect should not be called')
+    },
+    async end() {
+      throw new Error('pool.end should not be called')
+    },
+  }
+
+  const database = createPostgresDatabase({ pool })
+  await database.exec(
+    "SELECT 1; SELECT 'two;still string'; SELECT $$three;still dollar$$; SELECT 4 /* keep ; inside comment */",
+  )
+
+  assert.deepEqual(queries, [
+    'SELECT 1',
+    "SELECT 'two;still string'",
+    'SELECT $$three;still dollar$$',
+    'SELECT 4 /* keep ; inside comment */',
+  ])
+})

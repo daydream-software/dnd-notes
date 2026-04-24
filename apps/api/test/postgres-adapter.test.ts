@@ -140,6 +140,6 @@ test('runtime note store requires postgres configuration', async (t) => {
 
   await assert.rejects(
     () => createRuntimeNoteStore(),
-    /DATABASE_URL is required when the Postgres note store is selected\./,
+    /DATABASE_URL is required unless a postgresPool is provided\./,
   )
 })

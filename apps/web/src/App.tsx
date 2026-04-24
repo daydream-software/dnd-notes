@@ -3023,7 +3023,6 @@ function App() {
                 overview={adminOverview}
                 isLoading={isLoadingAdminOverview}
                 error={adminError}
-                notice={null}
                 onRefresh={() => void handleRefreshAdminOverview()}
                 surfaceRadius={surfaceRadius}
               />
@@ -3231,7 +3230,6 @@ function App() {
               overview={adminOverview}
               isLoading={isLoadingAdminOverview}
               error={adminError}
-              notice={null}
               onRefresh={() => void handleRefreshAdminOverview()}
               surfaceRadius={surfaceRadius}
             />

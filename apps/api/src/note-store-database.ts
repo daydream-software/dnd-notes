@@ -143,11 +143,148 @@ function resolvePostgresPool(options: {
   }
 }
 
+function readDollarQuoteTag(sql: string, index: number) {
+  const match = sql.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)
+  return match?.[0] ?? null
+}
+
 function splitSqlStatements(sql: string) {
-  return sql
-    .split(/;\s*(?:\r?\n|$)/)
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0)
+  const statements: string[] = []
+  let current = ''
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  let inLineComment = false
+  let inBlockComment = false
+  let dollarQuoteTag: string | null = null
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]
+    const nextChar = sql[index + 1]
+
+    if (inLineComment) {
+      current += char
+
+      if (char === '\n') {
+        inLineComment = false
+      }
+
+      continue
+    }
+
+    if (inBlockComment) {
+      current += char
+
+      if (char === '*' && nextChar === '/') {
+        current += nextChar
+        index += 1
+        inBlockComment = false
+      }
+
+      continue
+    }
+
+    if (dollarQuoteTag) {
+      if (sql.startsWith(dollarQuoteTag, index)) {
+        current += dollarQuoteTag
+        index += dollarQuoteTag.length - 1
+        dollarQuoteTag = null
+        continue
+      }
+
+      current += char
+      continue
+    }
+
+    if (inSingleQuote) {
+      current += char
+
+      if (char === '\'') {
+        if (nextChar === '\'') {
+          current += nextChar
+          index += 1
+        } else {
+          inSingleQuote = false
+        }
+      }
+
+      continue
+    }
+
+    if (inDoubleQuote) {
+      current += char
+
+      if (char === '"') {
+        if (nextChar === '"') {
+          current += nextChar
+          index += 1
+        } else {
+          inDoubleQuote = false
+        }
+      }
+
+      continue
+    }
+
+    if (char === '-' && nextChar === '-') {
+      current += char
+      current += nextChar
+      index += 1
+      inLineComment = true
+      continue
+    }
+
+    if (char === '/' && nextChar === '*') {
+      current += char
+      current += nextChar
+      index += 1
+      inBlockComment = true
+      continue
+    }
+
+    if (char === '\'') {
+      current += char
+      inSingleQuote = true
+      continue
+    }
+
+    if (char === '"') {
+      current += char
+      inDoubleQuote = true
+      continue
+    }
+
+    if (char === '$') {
+      const tag = readDollarQuoteTag(sql, index)
+
+      if (tag) {
+        current += tag
+        index += tag.length - 1
+        dollarQuoteTag = tag
+        continue
+      }
+    }
+
+    if (char === ';') {
+      const statement = current.trim()
+
+      if (statement.length > 0) {
+        statements.push(statement)
+      }
+
+      current = ''
+      continue
+    }
+
+    current += char
+  }
+
+  const statement = current.trim()
+
+  if (statement.length > 0) {
+    statements.push(statement)
+  }
+
+  return statements
 }
 
 export function createPostgresDatabase(options: {

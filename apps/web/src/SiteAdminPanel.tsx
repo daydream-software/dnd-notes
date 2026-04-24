@@ -17,7 +17,6 @@ interface SiteAdminPanelProps {
   overview: AdminOverview | null
   isLoading: boolean
   error: string | null
-  notice: string | null
   onRefresh: () => void
   surfaceRadius: number | string
 }
@@ -79,7 +78,6 @@ export default function SiteAdminPanel({
   overview,
   isLoading,
   error,
-  notice,
   onRefresh,
   surfaceRadius,
 }: SiteAdminPanelProps) {
@@ -122,12 +120,6 @@ export default function SiteAdminPanel({
               </Button>
             </Stack>
           </Stack>
-
-          {notice ? (
-            <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
-              {notice}
-            </Alert>
-          ) : null}
 
           {error ? (
             <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
