@@ -132,6 +132,11 @@ request_json_to_file() {
 
   local http_code=""
   local curl_exit_code=0
+  local request_url="<unknown url>"
+
+  if (( $# > 0 )); then
+    request_url="${!#}"
+  fi
 
   set +e
   http_code="$(curl -sS -o "${output_path}" -w '%{http_code}' "$@")"
@@ -146,7 +151,7 @@ request_json_to_file() {
     return 0
   fi
 
-  echo "HTTP ${http_code} response while calling ${*: -1}:" >&2
+  echo "HTTP ${http_code} response while calling ${request_url}:" >&2
   if [[ -s "${output_path}" ]]; then
     cat "${output_path}" >&2
   else

@@ -972,6 +972,30 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.tenant.desiredState, 'provisioning')
     })
 
+    it('formats unexpected tenant creation errors consistently', async () => {
+      const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
+      tenantRegistry.createTenant = async () => {
+        throw { message: 'registry write failed', code: 'REGISTRY_WRITE_FAILED' }
+      }
+
+      const response = await authedPost(tenantsPath)
+        .send({
+          id: 'tenant-123',
+          slug: 'test-tenant',
+          ownerId: 'owner-456',
+          version: '1.0.0',
+        })
+        .expect(500)
+
+      tenantRegistry.createTenant = originalCreateTenant
+
+      assert.strictEqual(response.body.error, 'Failed to create tenant')
+      assert.strictEqual(
+        response.body.details,
+        'Object: registry write failed (code: REGISTRY_WRITE_FAILED)',
+      )
+    })
+
     it('validates initial admin email format when provided', async () => {
       const response = await authedPost(tenantsPath)
         .send({
@@ -1966,6 +1990,38 @@ describe('Control Plane API', () => {
       assert.strictEqual(
         transitions.body.transitions[0].reason,
         'Decommission the retired tenant',
+      )
+    })
+    it('formats unexpected deprovisioning errors consistently', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      tenantProvisioningService = {
+        async provisionTenant() {
+          throw new Error('not used')
+        },
+        async deprovisionTenant() {
+          throw { message: 'drain failed', code: 'DRAIN_FAILED' }
+        },
+        async close() {},
+      }
+
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+
+      const response = await authedPost(`${tenantPath('tenant-123')}/deprovision`)
+        .send({
+          triggeredBy: 'operator@example.com',
+        })
+        .expect(500)
+
+      assert.strictEqual(response.body.error, 'Failed to deprovision tenant resources')
+      assert.strictEqual(
+        response.body.details,
+        'Object: drain failed (code: DRAIN_FAILED)',
       )
     })
   })
