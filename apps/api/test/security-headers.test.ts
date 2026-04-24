@@ -44,7 +44,6 @@ async function createTestApp(
   } = {},
 ) {
   return createSharedTestApp({
-    directoryPrefix: 'dnd-notes-api-security-',
     siteAdminEmails: options.siteAdminEmails,
     publicWebUrl: options.publicWebUrl,
     allowedOrigins: options.allowedOrigins ?? defaultSecurityTestOrigins,

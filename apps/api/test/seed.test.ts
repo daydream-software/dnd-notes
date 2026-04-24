@@ -1,7 +1,4 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import test from 'node:test'
 import { defaultCampaignId } from '../src/campaign.js'
 import { createNoteStore } from '../src/note-store.js'
@@ -11,17 +8,17 @@ import {
   seedStarterNotes,
   starterNotes,
 } from '../src/seed-data.js'
+import { createTestPgMemPool } from './test-helpers.js'
 
 async function createTestStore() {
-  const directory = await mkdtemp(join(tmpdir(), 'dnd-notes-seed-'))
-  const dbPath = join(directory, 'notes.sqlite')
-  const noteStore = await createNoteStore({ dbPath })
+  const { pool } = createTestPgMemPool()
+  const noteStore = await createNoteStore({ postgresPool: pool })
 
   return {
     noteStore,
     async cleanup() {
       await noteStore.close()
-      await rm(directory, { recursive: true, force: true })
+      await pool.end()
     },
   }
 }
@@ -91,27 +88,33 @@ test('seed target uses postgres when DATABASE_URL is configured', () => {
   assert.deepEqual(
     resolveSeedTarget({
       DATABASE_URL: 'postgresql://db.example/dnd-notes',
-      NOTES_DB_PATH: '/unused/notes.sqlite',
     } as NodeJS.ProcessEnv),
     {
-      backend: 'postgres',
-      noteStoreOptions: {},
+      noteStoreOptions: {
+        databaseUrl: 'postgresql://db.example/dnd-notes',
+      },
       label: 'postgres',
     },
   )
 })
 
-test('seed target preserves sqlite dbPath when postgres is not configured', () => {
+test('seed target trims DATABASE_URL before passing it to the note store', () => {
   assert.deepEqual(
     resolveSeedTarget({
-      NOTES_DB_PATH: '/worktree/apps/api/data/custom.sqlite',
+      DATABASE_URL: '  postgresql://db.example/dnd-notes  ',
     } as NodeJS.ProcessEnv),
     {
-      backend: 'sqlite',
       noteStoreOptions: {
-        dbPath: '/worktree/apps/api/data/custom.sqlite',
+        databaseUrl: 'postgresql://db.example/dnd-notes',
       },
-      label: '/worktree/apps/api/data/custom.sqlite',
+      label: 'postgres',
     },
+  )
+})
+
+test('seed target requires DATABASE_URL in the postgres-only runtime', () => {
+  assert.throws(
+    () => resolveSeedTarget({} as NodeJS.ProcessEnv),
+    /DATABASE_URL is required for seed workflows in the Postgres-only API runtime\./,
   )
 })

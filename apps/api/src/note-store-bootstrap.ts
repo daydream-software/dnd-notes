@@ -1,8 +1,5 @@
 import type { NoteStoreDatabase } from './note-store-database.js'
 
-const pragmaTableNames = ['notes', 'owner_accounts', 'campaign_share_links'] as const
-type PragmaTableName = (typeof pragmaTableNames)[number]
-const pragmaTableNameSet = new Set<string>(pragmaTableNames)
 const requiredPostgresTableNames = [
   'owner_accounts',
   'owner_sessions',
@@ -128,31 +125,17 @@ export interface InitializeNoteStoreDatabaseOptions {
   allowSchemaChanges?: boolean
 }
 
-async function tableExists(database: NoteStoreDatabase, tableName: string) {
-  return database
-    .prepare(`
-      SELECT 1
-      FROM sqlite_master
-      WHERE type = 'table' AND name = ?
-    `)
-    .get(tableName)
-}
+type PostgresSchemaMode =
+  | 'schema-capable'
+  | 'least-privilege'
+  | 'pg-mem-fallback'
 
-async function listTableColumns(database: NoteStoreDatabase, tableName: PragmaTableName) {
-  if (!pragmaTableNameSet.has(tableName)) {
-    throw new Error(`Unsupported PRAGMA table lookup for "${tableName}".`)
-  }
-
-  return new Set(
-    ((await database.prepare(`
-        PRAGMA table_info("${tableName}")
-      `).all()) as Array<{ name: string }>).map((column) => column.name),
-  )
-}
-
-async function canManagePostgresSchema(database: NoteStoreDatabase) {
-  if (database.kind !== 'postgres') {
-    return true
+async function determinePostgresSchemaMode(
+  database: NoteStoreDatabase,
+  options: InitializeNoteStoreDatabaseOptions,
+): Promise<PostgresSchemaMode> {
+  if (options.allowSchemaChanges !== undefined) {
+    return options.allowSchemaChanges ? 'schema-capable' : 'least-privilege'
   }
 
   try {
@@ -163,27 +146,25 @@ async function canManagePostgresSchema(database: NoteStoreDatabase) {
       .get()
 
     return privileges?.can_create === true || privileges?.can_create === 't'
+      ? 'schema-capable'
+      : 'least-privilege'
   } catch (error) {
     if (
       error instanceof Error &&
       /function has_schema_privilege\(text,text\) does not exist/i.test(error.message)
     ) {
-      return true
+      return 'pg-mem-fallback'
     }
 
     console.error(
       '[note-store-bootstrap] Failed to check schema privileges; assuming least-privilege mode:',
       error,
     )
-    return false
+    return 'least-privilege'
   }
 }
 
-async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
-  if (database.kind !== 'postgres') {
-    return
-  }
-
+async function listMissingRequiredPostgresTables(database: NoteStoreDatabase) {
   const missingTables: string[] = []
 
   for (const tableName of requiredPostgresTableNames) {
@@ -201,6 +182,12 @@ async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
     }
   }
 
+  return missingTables
+}
+
+async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
+  const missingTables = await listMissingRequiredPostgresTables(database)
+
   if (missingTables.length > 0) {
     throw new Error(
       `Postgres note store requires a pre-initialized schema for least-privilege runtime credentials; missing tables: ${missingTables.join(', ')}`,
@@ -209,10 +196,6 @@ async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
 }
 
 async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
-  if (database.kind !== 'postgres') {
-    return
-  }
-
   const ownerEmailIndex = await database
     .prepare<{ indexdef: string }>(`
       SELECT indexdef
@@ -238,10 +221,6 @@ async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
 async function ensureRequiredPostgresOwnerAccountKeycloakSub(
   database: NoteStoreDatabase,
 ) {
-  if (database.kind !== 'postgres') {
-    return
-  }
-
   const keycloakSubColumn = await database
     .prepare<{ column_name: string }>(`
       SELECT column_name
@@ -298,132 +277,23 @@ async function ensureRequiredPostgresOwnerAccountKeycloakSub(
   }
 }
 
-async function ensureNotesAttributionColumns(database: NoteStoreDatabase) {
-  if (database.kind !== 'sqlite') {
-    return
-  }
-
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'notes'))) {
-      return
-    }
-
-    const noteColumns = await listTableColumns(database, 'notes')
-
-    if (!noteColumns.has('created_by_membership_id')) {
-      await database.exec(`
-        ALTER TABLE notes
-        ADD COLUMN created_by_membership_id TEXT REFERENCES campaign_memberships(id)
-      `)
-    }
-
-    if (!noteColumns.has('last_edited_by_membership_id')) {
-      await database.exec(`
-        ALTER TABLE notes
-        ADD COLUMN last_edited_by_membership_id TEXT REFERENCES campaign_memberships(id)
-      `)
-    }
-
-    if (!noteColumns.has('linked_notes_json')) {
-      await database.exec(`
-        ALTER TABLE notes
-        ADD COLUMN linked_notes_json TEXT NOT NULL DEFAULT '[]'
-      `)
-    }
-  })
-
-  await transaction()
-}
-
-async function ensureOwnerSiteAdminColumn(database: NoteStoreDatabase) {
-  if (database.kind !== 'sqlite') {
-    return
-  }
-
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'owner_accounts'))) {
-      return
-    }
-
-    const ownerColumns = await listTableColumns(database, 'owner_accounts')
-
-    if (!ownerColumns.has('is_site_admin')) {
-      await database.exec(`
-        ALTER TABLE owner_accounts
-        ADD COLUMN is_site_admin INTEGER NOT NULL DEFAULT 0
-      `)
-    }
-  })
-
-  await transaction()
-}
-
 async function ensureOwnerKeycloakSubColumn(
   database: NoteStoreDatabase,
   options: { allowSchemaChanges: boolean },
 ) {
-  if (database.kind === 'postgres') {
-    if (!options.allowSchemaChanges) {
-      return
-    }
-
-    await database.exec(`
-      ALTER TABLE owner_accounts
-      ADD COLUMN IF NOT EXISTS keycloak_sub TEXT
-    `)
-    await database.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
-      ON owner_accounts(keycloak_sub)
-      WHERE keycloak_sub IS NOT NULL
-    `)
+  if (!options.allowSchemaChanges) {
     return
   }
 
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'owner_accounts'))) {
-      return
-    }
-
-    const ownerColumns = await listTableColumns(database, 'owner_accounts')
-
-    if (!ownerColumns.has('keycloak_sub')) {
-      await database.exec(`
-        ALTER TABLE owner_accounts
-        ADD COLUMN keycloak_sub TEXT
-      `)
-    }
-
-    await database.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
-      ON owner_accounts(keycloak_sub)
-      WHERE keycloak_sub IS NOT NULL
-    `)
-  })
-
-  await transaction()
-}
-
-async function ensureShareLinkRevealTokens(database: NoteStoreDatabase) {
-  if (database.kind !== 'sqlite') {
-    return
-  }
-
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'campaign_share_links'))) {
-      return
-    }
-
-    const shareLinkColumns = await listTableColumns(database, 'campaign_share_links')
-
-    if (!shareLinkColumns.has('token_plaintext')) {
-      await database.exec(`
-        ALTER TABLE campaign_share_links
-        ADD COLUMN token_plaintext TEXT
-      `)
-    }
-  })
-
-  await transaction()
+  await database.exec(`
+    ALTER TABLE owner_accounts
+    ADD COLUMN IF NOT EXISTS keycloak_sub TEXT
+  `)
+  await database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+    ON owner_accounts(keycloak_sub)
+    WHERE keycloak_sub IS NOT NULL
+  `)
 }
 
 async function elevateConfiguredSiteAdminAccounts(
@@ -501,20 +371,23 @@ export async function initializeNoteStoreDatabase(
   configuredSiteAdminEmails: ReadonlySet<string>,
   options: InitializeNoteStoreDatabaseOptions = {},
 ) {
-  const allowSchemaChanges =
-    options.allowSchemaChanges ?? (await canManagePostgresSchema(database))
+  const schemaMode = await determinePostgresSchemaMode(database, options)
+  const allowSchemaChanges = schemaMode !== 'least-privilege'
 
-  if (allowSchemaChanges) {
+  if (schemaMode === 'schema-capable') {
     await database.exec(noteStoreSchemaSql)
+  } else if (schemaMode === 'pg-mem-fallback') {
+    const missingTables = await listMissingRequiredPostgresTables(database)
+
+    if (missingTables.length > 0) {
+      await database.exec(noteStoreSchemaSql)
+    }
   } else {
     await ensureRequiredPostgresTables(database)
     await ensureRequiredPostgresOwnerAccountKeycloakSub(database)
   }
 
-  await ensureOwnerSiteAdminColumn(database)
   await ensureOwnerKeycloakSubColumn(database, { allowSchemaChanges })
-  await ensureNotesAttributionColumns(database)
-  await ensureShareLinkRevealTokens(database)
   await ensureOwnerEmailUniqueness(database, { allowSchemaChanges })
   await elevateConfiguredSiteAdminAccounts(database, configuredSiteAdminEmails)
 }

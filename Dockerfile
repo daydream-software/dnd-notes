@@ -38,9 +38,6 @@ COPY --from=build /app/apps/web/package.json ./apps/web/
 # Copy root package.json for workspace resolution
 COPY package.json ./
 
-# Create data directory for SQLite (Postgres fallback for local dev)
-RUN mkdir -p /app/data
-
 # Run as non-root user
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     chown -R appuser:appuser /app
@@ -49,7 +46,6 @@ USER appuser
 EXPOSE 3000
 
 ENV NODE_ENV=production \
-    PORT=3000 \
-    NOTES_DB_PATH=/app/data/dnd-notes.sqlite
+    PORT=3000
 
 CMD ["node", "apps/api/dist/index.js"]

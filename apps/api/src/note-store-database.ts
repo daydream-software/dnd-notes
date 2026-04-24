@@ -1,11 +1,7 @@
-import Database from 'better-sqlite3'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { mkdirSync } from 'node:fs'
-import { dirname } from 'node:path'
 import {
   Pool,
   type PoolConfig,
-  type QueryResult,
   type QueryResultRow,
 } from 'pg'
 
@@ -16,25 +12,20 @@ export interface DatabaseStatement<Row> {
 }
 
 export interface NoteStoreDatabase {
-  kind: 'sqlite' | 'postgres'
+  kind: 'postgres'
   prepare<Row extends QueryResultRow = QueryResultRow>(sql: string): DatabaseStatement<Row>
   exec(sql: string): Promise<void>
   transaction<Args extends unknown[], Result>(
     callback: (...args: Args) => Promise<Result>,
   ): (...args: Args) => Promise<Result>
   close(): Promise<void>
-  backup?(destinationPath: string): Promise<void>
-}
-
-export interface CreateSqliteDatabaseOptions {
-  readonly?: boolean
 }
 
 export interface PostgresQueryable {
   query<Row extends QueryResultRow = QueryResultRow>(
     text: string,
     values?: readonly unknown[],
-  ): Promise<QueryResult<Row>>
+  ): Promise<{ rows: Row[]; rowCount: number | null }>
 }
 
 export interface PostgresPoolLike extends PostgresQueryable {
@@ -44,14 +35,6 @@ export interface PostgresPoolLike extends PostgresQueryable {
 
 export interface PostgresClientLike extends PostgresQueryable {
   release(): void
-}
-
-interface SqliteTransactionContext {
-  readonly holdsExclusiveAccess: true
-}
-
-function isNamedParameterObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function normalizeStatementParameters(args: unknown[]) {
@@ -64,6 +47,10 @@ function normalizeStatementParameters(args: unknown[]) {
   }
 
   return args
+}
+
+function isNamedParameterObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function compileNamedParameters(sql: string, values: Record<string, unknown>) {
@@ -104,153 +91,13 @@ function compilePostgresQuery(sql: string, params?: unknown[] | Record<string, u
   return compileNamedParameters(sql, params)
 }
 
-export function createSqliteDatabase(
-  dbPath: string,
-  options: CreateSqliteDatabaseOptions = {},
-): NoteStoreDatabase {
-  if (!options.readonly && dbPath !== ':memory:') {
-    mkdirSync(dirname(dbPath), { recursive: true })
+function parseIntegerSetting(rawValue: string | undefined, defaultValue: number) {
+  if (!rawValue) {
+    return defaultValue
   }
 
-  const database = options.readonly
-    ? new Database(dbPath, {
-        readonly: true,
-        fileMustExist: true,
-      })
-    : new Database(dbPath)
-
-  if (!options.readonly) {
-    if (dbPath !== ':memory:') {
-      const journalMode = String(
-        database.pragma('journal_mode = DELETE', { simple: true }) ?? '',
-      ).toLowerCase()
-      if (journalMode !== 'delete') {
-        throw new Error(
-          `Failed to set SQLite journal_mode to DELETE for ${dbPath}; current mode is ${journalMode || 'unknown'}`,
-        )
-      }
-    }
-    database.pragma('foreign_keys = ON')
-  }
-  const transactionExecutor = new AsyncLocalStorage<SqliteTransactionContext>()
-  let operationQueue = Promise.resolve()
-
-  async function runSerialized<Result>(operation: () => Result | Promise<Result>) {
-    const activeTransaction = transactionExecutor.getStore()
-    if (activeTransaction?.holdsExclusiveAccess) {
-      return operation()
-    }
-
-    let releaseQueue = () => {}
-    const previousOperation = operationQueue
-    operationQueue = new Promise<void>((resolve) => {
-      releaseQueue = resolve
-    })
-
-    await previousOperation
-
-    try {
-      // SQLite shares one connection here. Keep the queue lease until the full async
-      // operation settles so other requests cannot observe half-finished transaction work.
-      return await operation()
-    } finally {
-      releaseQueue()
-    }
-  }
-
-  return {
-    kind: 'sqlite',
-    prepare<Row>(sql: string): DatabaseStatement<Row> {
-      const statement = database.prepare(sql)
-
-      return {
-        async get(...args: unknown[]) {
-          const params = normalizeStatementParameters(args)
-
-          return runSerialized(() => {
-            if (params === undefined) {
-              return statement.get() as Row | undefined
-            }
-
-            return statement.get(params as never) as Row | undefined
-          })
-        },
-        async all(...args: unknown[]) {
-          const params = normalizeStatementParameters(args)
-
-          return runSerialized(() => {
-            if (params === undefined) {
-              return statement.all() as Row[]
-            }
-
-            return statement.all(params as never) as Row[]
-          })
-        },
-        async run(...args: unknown[]) {
-          const params = normalizeStatementParameters(args)
-
-          return runSerialized(() => {
-            const result =
-              params === undefined
-                ? statement.run()
-                : statement.run(params as never)
-
-            return { changes: result.changes }
-          })
-        },
-      }
-    },
-    async exec(sql: string) {
-      await runSerialized(() => {
-        database.exec(sql)
-      })
-    },
-    transaction<Args extends unknown[], Result>(
-      callback: (...args: Args) => Promise<Result>,
-    ) {
-      return async (...args: Args) => {
-        return runSerialized(async () => {
-          if (transactionExecutor.getStore()) {
-            return callback(...args)
-          }
-
-          database.exec('BEGIN IMMEDIATE')
-
-          try {
-            const result = await transactionExecutor.run(
-              { holdsExclusiveAccess: true },
-              () => callback(...args),
-            )
-            database.exec('COMMIT')
-            return result
-          } catch (error) {
-            if (database.inTransaction) {
-              database.exec('ROLLBACK')
-            }
-
-            throw error
-          }
-        })
-      }
-    },
-    async close() {
-      await runSerialized(() => {
-        database.close()
-      })
-    },
-    async backup(destinationPath: string) {
-      await runSerialized(() => database.backup(destinationPath))
-    },
-  }
-}
-
-function parseIntegerSetting(value: string | undefined, fallback: number) {
-  if (!value) {
-    return fallback
-  }
-
-  const parsed = Number.parseInt(value, 10)
-  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
+  const parsed = Number.parseInt(rawValue, 10)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : defaultValue
 }
 
 function createOwnedPostgresPool(connectionString: string): PostgresPoolLike {
@@ -296,6 +143,150 @@ function resolvePostgresPool(options: {
   }
 }
 
+function readDollarQuoteTag(sql: string, index: number) {
+  const match = sql.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/)
+  return match?.[0] ?? null
+}
+
+function splitSqlStatements(sql: string) {
+  const statements: string[] = []
+  let current = ''
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  let inLineComment = false
+  let inBlockComment = false
+  let dollarQuoteTag: string | null = null
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]
+    const nextChar = sql[index + 1]
+
+    if (inLineComment) {
+      current += char
+
+      if (char === '\n') {
+        inLineComment = false
+      }
+
+      continue
+    }
+
+    if (inBlockComment) {
+      current += char
+
+      if (char === '*' && nextChar === '/') {
+        current += nextChar
+        index += 1
+        inBlockComment = false
+      }
+
+      continue
+    }
+
+    if (dollarQuoteTag) {
+      if (sql.startsWith(dollarQuoteTag, index)) {
+        current += dollarQuoteTag
+        index += dollarQuoteTag.length - 1
+        dollarQuoteTag = null
+        continue
+      }
+
+      current += char
+      continue
+    }
+
+    if (inSingleQuote) {
+      current += char
+
+      if (char === '\'') {
+        if (nextChar === '\'') {
+          current += nextChar
+          index += 1
+        } else {
+          inSingleQuote = false
+        }
+      }
+
+      continue
+    }
+
+    if (inDoubleQuote) {
+      current += char
+
+      if (char === '"') {
+        if (nextChar === '"') {
+          current += nextChar
+          index += 1
+        } else {
+          inDoubleQuote = false
+        }
+      }
+
+      continue
+    }
+
+    if (char === '-' && nextChar === '-') {
+      current += char
+      current += nextChar
+      index += 1
+      inLineComment = true
+      continue
+    }
+
+    if (char === '/' && nextChar === '*') {
+      current += char
+      current += nextChar
+      index += 1
+      inBlockComment = true
+      continue
+    }
+
+    if (char === '\'') {
+      current += char
+      inSingleQuote = true
+      continue
+    }
+
+    if (char === '"') {
+      current += char
+      inDoubleQuote = true
+      continue
+    }
+
+    if (char === '$') {
+      const tag = readDollarQuoteTag(sql, index)
+
+      if (tag) {
+        current += tag
+        index += tag.length - 1
+        dollarQuoteTag = tag
+        continue
+      }
+    }
+
+    if (char === ';') {
+      const statement = current.trim()
+
+      if (statement.length > 0) {
+        statements.push(statement)
+      }
+
+      current = ''
+      continue
+    }
+
+    current += char
+  }
+
+  const statement = current.trim()
+
+  if (statement.length > 0) {
+    statements.push(statement)
+  }
+
+  return statements
+}
+
 export function createPostgresDatabase(options: {
   connectionString?: string
   pool?: PostgresPoolLike
@@ -314,19 +305,13 @@ export function createPostgresDatabase(options: {
         async get(...args: unknown[]) {
           const params = normalizeStatementParameters(args)
           const compiled = compilePostgresQuery(sql, params)
-          const result = await getExecutor().query<Row>(
-            compiled.text,
-            compiled.values,
-          )
+          const result = await getExecutor().query<Row>(compiled.text, compiled.values)
           return result.rows[0]
         },
         async all(...args: unknown[]) {
           const params = normalizeStatementParameters(args)
           const compiled = compilePostgresQuery(sql, params)
-          const result = await getExecutor().query<Row>(
-            compiled.text,
-            compiled.values,
-          )
+          const result = await getExecutor().query<Row>(compiled.text, compiled.values)
           return result.rows
         },
         async run(...args: unknown[]) {
@@ -338,10 +323,7 @@ export function createPostgresDatabase(options: {
       }
     },
     async exec(sql: string) {
-      const statements = sql
-        .split(/;\s*(?:\r?\n|$)/)
-        .map((statement) => statement.trim())
-        .filter((statement) => statement.length > 0)
+      const statements = splitSqlStatements(sql)
 
       for (const statement of statements) {
         await getExecutor().query(statement)
@@ -355,9 +337,7 @@ export function createPostgresDatabase(options: {
 
         try {
           await client.query('BEGIN')
-
           const result = await transactionExecutor.run(client, () => callback(...args))
-
           await client.query('COMMIT')
           return result
         } catch (error) {

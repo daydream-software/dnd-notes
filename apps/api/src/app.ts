@@ -27,7 +27,6 @@ interface CreateAppOptions {
   publicWebUrl?: string
   allowedOrigins?: string
   runtimeAuth?: TenantRuntimeAuth
-  restoreNoteStore?: (sourcePath: string) => Promise<NoteStore>
   isShuttingDown?: () => boolean
   serveWeb?: boolean
   webDistPath?: string
@@ -42,13 +41,12 @@ export function createApp({
   publicWebUrl: configuredPublicWebUrl,
   allowedOrigins: configuredAllowedOrigins,
   runtimeAuth = createTenantRuntimeAuth({ mode: 'local' }),
-  restoreNoteStore,
   isShuttingDown = () => false,
   serveWeb = false,
   webDistPath,
 }: CreateAppOptions): Express {
   const app = express()
-  let noteStore = initialNoteStore
+  const noteStore = initialNoteStore
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
   const publicWebUrl = normalizePublicWebUrl(configuredPublicWebUrl)
 
@@ -97,12 +95,8 @@ export function createApp({
 
   const routeContext = {
     getNoteStore: () => noteStore,
-    setNoteStore: (restoredNoteStore: NoteStore) => {
-      noteStore = restoredNoteStore
-    },
     publicWebUrl,
     runtimeAuth,
-    restoreNoteStore,
     isRateLimited,
   }
 

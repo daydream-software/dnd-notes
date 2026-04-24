@@ -45,7 +45,6 @@ import {
   createCampaign,
   createCampaignShareLink,
   createNote,
-  downloadAdminBackup,
   fetchAuthConfig,
   fetchAdminAccounts,
   createSharedNote,
@@ -67,7 +66,6 @@ import {
   joinSharedCampaign,
   loginOwner,
   logoutOwner,
-  restoreAdminBackup,
   revealCampaignShareLink,
   registerOwner,
   revokeCampaignShareLink,
@@ -736,8 +734,6 @@ function App() {
   const [isSavingCampaign, setIsSavingCampaign] = useState(false)
   const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
   const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
-  const [isDownloadingAdminBackup, setIsDownloadingAdminBackup] = useState(false)
-  const [isRestoringAdminBackup, setIsRestoringAdminBackup] = useState(false)
   const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
     useState(false)
   const [isApplyingMembershipConsolidation, setIsApplyingMembershipConsolidation] =
@@ -755,7 +751,6 @@ function App() {
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
-  const [adminNotice, setAdminNotice] = useState<string | null>(null)
   const [adminError, setAdminError] = useState<string | null>(null)
   const [revealedShareLinks, setRevealedShareLinks] = useState<
     Record<string, RevealedShareLink>
@@ -1219,7 +1214,6 @@ function App() {
     setOverview(null)
     setAdminAccounts([])
     setAdminOverview(null)
-    setAdminNotice(null)
     setAdminError(null)
     setNotes([])
     setNoteBrowseMode('notes')
@@ -1478,92 +1472,6 @@ function App() {
     }
   }, [authToken])
 
-  const handleDownloadAdminBackup = useCallback(async () => {
-    if (!authToken) {
-      return
-    }
-
-    setIsDownloadingAdminBackup(true)
-    setAdminNotice(null)
-    setAdminError(null)
-
-    try {
-      const backup = await downloadAdminBackup(authToken)
-      const downloadUrl = window.URL.createObjectURL(backup.blob)
-      const link = document.createElement('a')
-
-      link.href = downloadUrl
-      link.download = backup.fileName
-      document.body.append(link)
-      link.click()
-      link.remove()
-      window.URL.revokeObjectURL(downloadUrl)
-      setAdminNotice(`Backup ready: ${backup.fileName}`)
-    } catch (downloadError) {
-      setAdminError(
-        downloadError instanceof Error
-          ? downloadError.message
-          : 'Could not download the site backup.',
-      )
-    } finally {
-      setIsDownloadingAdminBackup(false)
-    }
-  }, [authToken])
-
-  const handleRestoreAdminBackup = useCallback(
-    async (backupFile: File) => {
-      if (!authToken) {
-        return
-      }
-
-      const confirmed = window.confirm(
-        `Restore "${backupFile.name}"? This will replace the current SQLite database.`,
-      )
-
-      if (!confirmed) {
-        return
-      }
-
-      setIsRestoringAdminBackup(true)
-      setAdminNotice(null)
-      setAdminError(null)
-
-      try {
-        const restore = await restoreAdminBackup(authToken, backupFile)
-        setAdminNotice(restore.message)
-
-        try {
-          const session = await fetchOwnerSession(authToken)
-          setOwner(session.owner)
-          await loadCampaigns(authToken)
-
-          const [nextOverview, nextAccounts] = await Promise.all([
-            fetchAdminOverview(authToken),
-            fetchAdminAccounts(authToken),
-          ])
-
-          setAdminOverview(nextOverview)
-          setAdminAccounts(nextAccounts)
-          setAdminError(null)
-          setError(null)
-        } catch {
-          clearSession()
-          setIsRegisterMode(false)
-          setError('Backup restored successfully. Sign in again to continue.')
-        }
-      } catch (restoreError) {
-        setAdminError(
-          restoreError instanceof Error
-            ? restoreError.message
-            : 'Could not restore the site backup.',
-        )
-      } finally {
-        setIsRestoringAdminBackup(false)
-      }
-    },
-    [authToken, clearSession, loadCampaigns],
-  )
-
   useEffect(() => {
     let cancelled = false
 
@@ -1693,7 +1601,6 @@ function App() {
     if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
       setAdminAccounts([])
       setAdminOverview(null)
-      setAdminNotice(null)
       setAdminError(null)
       setIsLoadingAdminOverview(false)
       return
@@ -3115,13 +3022,8 @@ function App() {
                 accounts={adminAccounts}
                 overview={adminOverview}
                 isLoading={isLoadingAdminOverview}
-                isDownloadingBackup={isDownloadingAdminBackup}
-                isRestoringBackup={isRestoringAdminBackup}
                 error={adminError}
-                notice={adminNotice}
                 onRefresh={() => void handleRefreshAdminOverview()}
-                onDownloadBackup={() => void handleDownloadAdminBackup()}
-                onRestoreBackup={(backupFile) => void handleRestoreAdminBackup(backupFile)}
                 surfaceRadius={surfaceRadius}
               />
             ) : null}
@@ -3327,13 +3229,8 @@ function App() {
               accounts={adminAccounts}
               overview={adminOverview}
               isLoading={isLoadingAdminOverview}
-              isDownloadingBackup={isDownloadingAdminBackup}
-              isRestoringBackup={isRestoringAdminBackup}
               error={adminError}
-              notice={adminNotice}
               onRefresh={() => void handleRefreshAdminOverview()}
-              onDownloadBackup={() => void handleDownloadAdminBackup()}
-              onRestoreBackup={(backupFile) => void handleRestoreAdminBackup(backupFile)}
               surfaceRadius={surfaceRadius}
             />
           ) : null}

@@ -1,7 +1,6 @@
 import type {
   AdminAccountsResponse,
   AuthConfigResponse,
-  AdminRestoreResponse,
   AdminOverviewResponse,
   AuthSessionResponse,
   CampaignInput,
@@ -165,58 +164,6 @@ export async function fetchAdminAccounts(authToken: string, signal?: AbortSignal
 
   const data = await readJson<AdminAccountsResponse>(response)
   return data.accounts
-}
-
-function readAttachmentFilename(contentDisposition: string | null, fallback: string) {
-  if (!contentDisposition) {
-    return fallback
-  }
-
-  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
-
-  if (utf8Match) {
-    return decodeURIComponent(utf8Match[1])
-  }
-
-  const quotedMatch = contentDisposition.match(/filename="([^"]+)"/i)
-
-  if (quotedMatch) {
-    return quotedMatch[1]
-  }
-
-  const plainMatch = contentDisposition.match(/filename=([^;]+)/i)
-  return plainMatch ? plainMatch[1].trim() : fallback
-}
-
-export async function downloadAdminBackup(authToken: string) {
-  const response = await fetch(`${apiBaseUrl}/api/admin/backup`, {
-    headers: createHeaders(authToken),
-  })
-
-  if (!response.ok) {
-    await readJson(response)
-  }
-
-  return {
-    blob: await response.blob(),
-    fileName: readAttachmentFilename(
-      response.headers.get('content-disposition'),
-      'dnd-notes-backup.sqlite',
-    ),
-  }
-}
-
-export async function restoreAdminBackup(authToken: string, backupFile: Blob) {
-  const headers = createHeaders(authToken)
-  headers.set('Content-Type', backupFile.type || 'application/octet-stream')
-
-  const response = await fetch(`${apiBaseUrl}/api/admin/restore`, {
-    method: 'POST',
-    headers,
-    body: backupFile,
-  })
-
-  return readJson<AdminRestoreResponse>(response)
 }
 
 export async function fetchCampaignMemberships(

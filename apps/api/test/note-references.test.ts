@@ -1,20 +1,9 @@
 import assert from 'node:assert/strict'
-import { randomUUID } from 'node:crypto'
-import { mkdir, rm } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
-import Database from 'better-sqlite3'
 import { defaultCampaignId } from '../src/campaign.js'
 import { parseInlineNoteReferences } from '../src/note-references.js'
 import { createNoteStore } from '../src/note-store.js'
-
-const runtimeDirectory = join(dirname(fileURLToPath(import.meta.url)), '.runtime')
-
-async function createPersistentDbPath() {
-  await mkdir(runtimeDirectory, { recursive: true })
-  return join(runtimeDirectory, `${randomUUID()}.sqlite`)
-}
+import { createTestPgMemPool } from './test-helpers.js'
 
 test('parseInlineNoteReferences supports canonical note syntaxes', () => {
   const references = parseInlineNoteReferences(
@@ -45,8 +34,12 @@ test('parseInlineNoteReferences supports canonical note syntaxes', () => {
 })
 
 test('note store extracts structured references while preserving linkedNoteIds compatibility', async (t) => {
-  const noteStore = await createNoteStore({ dbPath: ':memory:' })
-  t.after(async () => noteStore.close())
+  const { pool } = createTestPgMemPool()
+  const noteStore = await createNoteStore({ postgresPool: pool })
+  t.after(async () => {
+    await noteStore.close()
+    await pool.end()
+  })
 
   const ruins = await noteStore.createNote({
     title: 'Ancient Ruins',
@@ -159,7 +152,8 @@ test('note store extracts structured references while preserving linkedNoteIds c
 })
 
 test('note store rejects malformed, missing, and cross-campaign inline references', async () => {
-  const noteStore = await createNoteStore({ dbPath: ':memory:' })
+  const { pool } = createTestPgMemPool()
+  const noteStore = await createNoteStore({ postgresPool: pool })
   const owner = await noteStore.createOwnerAccount({
     displayName: 'Data',
     email: 'data@example.com',
@@ -228,15 +222,16 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
   )
 
   await noteStore.close()
+  await pool.end()
 })
 
 test('persistent stores backfill references from note bodies and linkedNoteIds on startup', async (t) => {
-  const dbPath = await createPersistentDbPath()
-  let noteStore = await createNoteStore({ dbPath })
+  const { pool } = createTestPgMemPool()
+  let noteStore = await createNoteStore({ postgresPool: pool })
 
   t.after(async () => {
     await noteStore.close()
-    await rm(dbPath, { force: true })
+    await pool.end()
   })
 
   const target = await noteStore.createNote({
@@ -267,11 +262,9 @@ test('persistent stores backfill references from note bodies and linkedNoteIds o
 
   await noteStore.close()
 
-  const database = new Database(dbPath)
-  database.exec('DROP TABLE note_references')
-  database.close()
+  await pool.query('DELETE FROM note_references')
 
-  noteStore = await createNoteStore({ dbPath })
+  noteStore = await createNoteStore({ postgresPool: pool })
 
   const reloadedLegacy = await noteStore.getNote(legacyLinked.id)
   const reloadedInline = await noteStore.getNote(inlineLinked.id)

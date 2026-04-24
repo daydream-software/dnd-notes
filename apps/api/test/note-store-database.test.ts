@@ -1,137 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { chmod, mkdir, rm } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
-import { dirname, join } from 'node:path'
-import { fileURLToPath } from 'node:url'
-import Database from 'better-sqlite3'
 import {
   createPostgresDatabase,
-  createSqliteDatabase,
   type PostgresPoolLike,
 } from '../src/note-store-database.js'
-
-function createDeferred() {
-  let resolve!: () => void
-  const promise = new Promise<void>((promiseResolve) => {
-    resolve = promiseResolve
-  })
-
-  return { promise, resolve }
-}
-
-const runtimeDirectory = join(dirname(fileURLToPath(import.meta.url)), '.runtime')
-
-test('sqlite async transactions keep unrelated reads and writes queued until commit', async () => {
-  const database = createSqliteDatabase(':memory:')
-
-  try {
-    await database.exec(`
-      CREATE TABLE notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL
-      )
-    `)
-
-    const insertNote = database.prepare<{ id: number; title: string }>(
-      'INSERT INTO notes (title) VALUES (?) RETURNING id, title',
-    )
-    const listNotes = database.prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC')
-    const releaseTransaction = createDeferred()
-    const transactionEntered = createDeferred()
-
-    const createNotesInTransaction = database.transaction(async () => {
-      await insertNote.get('before-await')
-      transactionEntered.resolve()
-      await releaseTransaction.promise
-      await insertNote.get('after-await')
-    })
-
-    const transactionPromise = createNotesInTransaction()
-    await transactionEntered.promise
-
-    let queuedReadResolved = false
-    let queuedReadTitles: string[] = []
-    const queuedReadPromise = listNotes.all().then((rows) => {
-      queuedReadResolved = true
-      queuedReadTitles = rows.map((row) => row.title)
-    })
-
-    let queuedInsertResolved = false
-    const queuedInsertPromise = insertNote.get('outside').then(() => {
-      queuedInsertResolved = true
-    })
-
-    await Promise.resolve()
-    await Promise.resolve()
-    assert.equal(queuedReadResolved, false)
-    assert.equal(queuedInsertResolved, false)
-
-    releaseTransaction.resolve()
-    await transactionPromise
-    await queuedReadPromise
-    await queuedInsertPromise
-
-    assert.deepEqual(queuedReadTitles, ['before-await', 'after-await'])
-    const notes = await listNotes.all()
-    assert.deepEqual(
-      notes.map((note) => note.title),
-      ['before-await', 'after-await', 'outside'],
-    )
-  } finally {
-    await database.close()
-  }
-})
-
-test('sqlite async transactions roll back before queued readers resume', async () => {
-  const database = createSqliteDatabase(':memory:')
-
-  try {
-    await database.exec(`
-      CREATE TABLE notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL
-      )
-    `)
-
-    const insertNote = database.prepare('INSERT INTO notes (title) VALUES (?)')
-    const listNotes = database.prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC')
-    const releaseTransaction = createDeferred()
-    const transactionEntered = createDeferred()
-    const rollbackError = new Error('rollback requested')
-
-    const createNotesInTransaction = database.transaction(async () => {
-      await insertNote.run('before-rollback')
-      transactionEntered.resolve()
-      await releaseTransaction.promise
-      throw rollbackError
-    })
-
-    const transactionPromise = createNotesInTransaction()
-    await transactionEntered.promise
-
-    let queuedReadResolved = false
-    let queuedReadTitles: string[] = []
-    const queuedReadPromise = listNotes.all().then((rows) => {
-      queuedReadResolved = true
-      queuedReadTitles = rows.map((row) => row.title)
-    })
-
-    await Promise.resolve()
-    await Promise.resolve()
-    assert.equal(queuedReadResolved, false)
-
-    releaseTransaction.resolve()
-    await assert.rejects(() => transactionPromise, rollbackError)
-    await queuedReadPromise
-
-    assert.deepEqual(queuedReadTitles, [])
-    const notes = await listNotes.all()
-    assert.deepEqual(notes, [])
-  } finally {
-    await database.close()
-  }
-})
 
 test('createPostgresDatabase rejects missing pool and connection string', () => {
   assert.throws(
@@ -247,88 +119,30 @@ test('createPostgresDatabase preserves BEGIN errors when rollback also fails', a
   assert.equal(released, true)
 })
 
-test('createSqliteDatabase can open a read-only snapshot without write access', async (t) => {
-  await mkdir(runtimeDirectory, { recursive: true })
-  const dbPath = join(runtimeDirectory, `readonly-snapshot-${randomUUID()}.sqlite`)
-  t.after(async () => {
-    await chmod(dbPath, 0o666).catch(() => undefined)
-    await rm(dbPath, { force: true })
-  })
-
-  const writableDatabase = createSqliteDatabase(dbPath)
-
-  try {
-    await writableDatabase.exec(`
-      CREATE TABLE notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL
-      )
-    `)
-    await writableDatabase.prepare('INSERT INTO notes (title) VALUES (?)').run('Snapshot note')
-  } finally {
-    await writableDatabase.close()
+test('createPostgresDatabase exec splits same-line multi-statement SQL outside quotes and comments', async () => {
+  const queries: string[] = []
+  const pool: PostgresPoolLike = {
+    async query(text) {
+      queries.push(text)
+      return { rows: [], rowCount: 0 }
+    },
+    async connect() {
+      throw new Error('connect should not be called')
+    },
+    async end() {
+      throw new Error('pool.end should not be called')
+    },
   }
 
-  await chmod(dbPath, 0o444)
+  const database = createPostgresDatabase({ pool })
+  await database.exec(
+    "SELECT 1; SELECT 'two;still string'; SELECT $$three;still dollar$$; SELECT 4 /* keep ; inside comment */",
+  )
 
-  const readonlyDatabase = createSqliteDatabase(dbPath, { readonly: true })
-
-  try {
-    const notes = await readonlyDatabase
-      .prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC')
-      .all()
-    assert.deepEqual(notes.map((note) => note.title), ['Snapshot note'])
-    await assert.rejects(
-      () => readonlyDatabase.prepare('INSERT INTO notes (title) VALUES (?)').run('Nope'),
-      /readonly/i,
-    )
-  } finally {
-    await readonlyDatabase.close()
-  }
-})
-
-test('createSqliteDatabase keeps writable file-backed stores on rollback journals', async (t) => {
-  await mkdir(runtimeDirectory, { recursive: true })
-  const dbPath = join(runtimeDirectory, `journal-mode-${randomUUID()}.sqlite`)
-  t.after(async () => {
-    await rm(dbPath, { force: true })
-    await rm(`${dbPath}-wal`, { force: true })
-    await rm(`${dbPath}-shm`, { force: true })
-  })
-
-  const seededDatabase = new Database(dbPath)
-  try {
-    const seededJournalMode = seededDatabase.pragma('journal_mode = WAL', { simple: true })
-    assert.equal(String(seededJournalMode).toLowerCase(), 'wal')
-    seededDatabase.exec(`
-      CREATE TABLE notes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        title TEXT NOT NULL
-      );
-
-      INSERT INTO notes (title) VALUES ('WAL seed');
-    `)
-  } finally {
-    seededDatabase.close()
-  }
-
-  const writableDatabase = createSqliteDatabase(dbPath)
-  try {
-    const journalMode = await writableDatabase
-      .prepare<{ journal_mode: string }>('PRAGMA journal_mode')
-      .get()
-    assert.equal(journalMode?.journal_mode, 'delete')
-  } finally {
-    await writableDatabase.close()
-  }
-
-  const readonlyDatabase = createSqliteDatabase(dbPath, { readonly: true })
-  try {
-    const journalMode = await readonlyDatabase
-      .prepare<{ journal_mode: string }>('PRAGMA journal_mode')
-      .get()
-    assert.equal(journalMode?.journal_mode, 'delete')
-  } finally {
-    await readonlyDatabase.close()
-  }
+  assert.deepEqual(queries, [
+    'SELECT 1',
+    "SELECT 'two;still string'",
+    'SELECT $$three;still dollar$$',
+    'SELECT 4 /* keep ; inside comment */',
+  ])
 })
