@@ -1,14 +1,10 @@
 import assert from 'node:assert/strict'
-import Database from 'better-sqlite3'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
-import { createNoteStore } from '../src/note-store.js'
 import {
   createTestApp,
   registerOwner,
@@ -60,10 +56,16 @@ test('GET /healthz, /ready, and /readyz return probe metadata while the database
 })
 
 test('GET /readyz returns 503 when the database is unavailable', async (t) => {
-  const { app, cleanup, closeNoteStore } = await createTestApp()
+  const { app, cleanup, noteStore } = await createTestApp()
   t.after(cleanup)
 
-  await closeNoteStore()
+  const originalCheckHealth = noteStore.checkHealth
+  noteStore.checkHealth = async () => {
+    throw new Error('Database unavailable')
+  }
+  t.after(() => {
+    noteStore.checkHealth = originalCheckHealth
+  })
 
   const response = await request(app).get('/readyz')
 
@@ -111,141 +113,6 @@ test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
 
   assert.equal(apiRootResponse.status, 404)
   assert.doesNotMatch(apiRootResponse.text, /Fixture dnd-notes app/)
-})
-
-test('site admins can download a SQLite backup and non-admins cannot', async (t) => {
-  const { app, cleanup } = await createTestApp({
-    siteAdminEmails: ['site-admin@example.com'],
-  })
-  t.after(cleanup)
-
-  const nonAdmin = await registerOwner(request(app), {
-    email: 'not-admin@example.com',
-  })
-  const nonAdminBackupResponse = await withAuth(request(app), nonAdmin.token).get(
-    '/api/admin/backup',
-  )
-  assert.equal(nonAdminBackupResponse.status, 403)
-  assert.equal(nonAdminBackupResponse.body.error, 'Site-admin access is required.')
-
-  const siteAdmin = await registerOwner(request(app), {
-    displayName: 'Site Admin',
-    email: 'site-admin@example.com',
-  })
-  assert.equal(siteAdmin.owner.isSiteAdmin, true)
-
-  const backupResponse = await withAuth(request(app), siteAdmin.token).get('/api/admin/backup')
-  assert.equal(backupResponse.status, 200)
-  assert.match(
-    backupResponse.headers['content-disposition'],
-    /^attachment; filename="dnd-notes-backup-.+\.sqlite"$/,
-  )
-  assert.equal(backupResponse.headers['content-type'], 'application/octet-stream')
-  assert.ok(Buffer.isBuffer(backupResponse.body))
-  assert.equal(backupResponse.body.subarray(0, 15).toString('utf8'), 'SQLite format 3')
-})
-
-test('site admins can restore a SQLite backup and invalid uploads are rejected', async (t) => {
-  const { app, cleanup } = await createTestApp({
-    siteAdminEmails: ['site-admin@example.com'],
-  })
-  t.after(cleanup)
-
-  const nonAdmin = await registerOwner(request(app), {
-    email: 'not-admin@example.com',
-  })
-  const forbiddenRestoreResponse = await withAuth(request(app), nonAdmin.token)
-    .post('/api/admin/restore')
-    .set('Content-Type', 'application/octet-stream')
-    .send(Buffer.from('SQLite format 3\0forbidden'))
-  assert.equal(forbiddenRestoreResponse.status, 403)
-  assert.equal(
-    forbiddenRestoreResponse.body.error,
-    'Site-admin access is required.',
-  )
-
-  const siteAdmin = await registerOwner(request(app), {
-    displayName: 'Site Admin',
-    email: 'site-admin@example.com',
-    password: 'current-password',
-  })
-  const siteAdminAuthed = withAuth(request(app), siteAdmin.token)
-
-  const invalidRestoreResponse = await siteAdminAuthed
-    .post('/api/admin/restore')
-    .set('Content-Type', 'application/octet-stream')
-    .send(Buffer.from('not-a-sqlite-backup'))
-  assert.equal(invalidRestoreResponse.status, 400)
-  assert.equal(
-    invalidRestoreResponse.body.error,
-    'The uploaded file is not a valid SQLite backup.',
-  )
-
-  const sourceDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-restore-source-'))
-  t.after(async () => {
-    await rm(sourceDirectory, { recursive: true, force: true })
-  })
-
-  const sourceDbPath = join(sourceDirectory, 'notes.sqlite')
-  const sourceBackupPath = join(sourceDirectory, 'restore.sqlite')
-  const sourceStore = await createNoteStore({
-    dbPath: sourceDbPath,
-    siteAdminEmails: ['site-admin@example.com'],
-  })
-
-  try {
-    const restoredOwner = await sourceStore.createOwnerAccount({
-      displayName: 'Restored Admin',
-      email: 'site-admin@example.com',
-      password: 'restored-password',
-    })
-    assert.ok(restoredOwner)
-
-    await sourceStore.createNote({
-      title: 'Restored note',
-      body: 'Loaded from a restored admin backup.',
-      tags: ['restore'],
-      status: 'active',
-      sessionName: null,
-      linkedNoteIds: [],
-      campaignId: defaultCampaignId,
-    })
-
-    await sourceStore.backupDatabase(sourceBackupPath)
-  } finally {
-    await sourceStore.close()
-  }
-
-  const restoreSnapshot = await readFile(sourceBackupPath)
-  const restoreResponse = await siteAdminAuthed
-    .post('/api/admin/restore')
-    .set('Content-Type', 'application/octet-stream')
-    .send(restoreSnapshot)
-  assert.equal(restoreResponse.status, 200)
-  assert.equal(restoreResponse.body.message, 'Backup restored successfully.')
-  assert.equal(restoreResponse.body.overview.notes.total, 1)
-  assert.equal(restoreResponse.body.overview.accounts.siteAdmins, 1)
-
-  const expiredSessionResponse = await siteAdminAuthed.get('/api/auth/session')
-  assert.equal(expiredSessionResponse.status, 401)
-  assert.equal(
-    expiredSessionResponse.body.error,
-    'Owner session is invalid or expired.',
-  )
-
-  const restoredLoginResponse = await request(app).post('/api/auth/login').send({
-    email: 'site-admin@example.com',
-    password: 'restored-password',
-  })
-  assert.equal(restoredLoginResponse.status, 200)
-  assert.equal(restoredLoginResponse.body.owner.displayName, 'Restored Admin')
-
-  const restoredOverviewResponse = await withAuth(
-    request(app),
-    restoredLoginResponse.body.token as string,
-  ).get('/api/admin/overview')
-  assert.equal(restoredOverviewResponse.status, 200)
-  assert.equal(restoredOverviewResponse.body.overview.notes.total, 1)
 })
 
 test('site admins can read admin overview metrics and non-admins cannot', async (t) => {
@@ -604,28 +471,63 @@ test('owner auth normalizes email casing for registration, duplicate checks, and
   assert.equal(sessionResponse.body.owner.keycloakSub, null)
 })
 
-test('owner email lookups are backed by a unique lower(email) index', async (t) => {
-  const { dbPath, closeNoteStore, cleanup } = await createTestApp()
+test('owner email lookups enforce unique lower(email) semantics', async (t) => {
+  const { pool, cleanup } = await createTestApp()
   t.after(cleanup)
 
-  await closeNoteStore()
+  await pool.query(
+    `
+      INSERT INTO owner_accounts (
+        id,
+        email,
+        display_name,
+        password_hash,
+        is_site_admin,
+        keycloak_sub,
+        created_at,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `,
+    [
+      'owner-one',
+      'owner@example.com',
+      'Owner One',
+      'hash',
+      0,
+      null,
+      '2026-04-24T00:00:00.000Z',
+      '2026-04-24T00:00:00.000Z',
+    ],
+  )
 
-  const database = new Database(dbPath, { readonly: true, fileMustExist: true })
-  t.after(() => {
-    database.close()
-  })
-
-  const indexRow = database
-    .prepare(`
-      SELECT sql
-      FROM sqlite_master
-      WHERE type = 'index' AND name = 'idx_owner_accounts_email_lower'
-    `)
-    .get() as { sql: string } | undefined
-
-  assert.ok(indexRow)
-  assert.match(indexRow.sql, /CREATE UNIQUE INDEX/i)
-  assert.match(indexRow.sql, /LOWER\(email\)/i)
+  await assert.rejects(
+    () =>
+      pool.query(
+        `
+          INSERT INTO owner_accounts (
+            id,
+            email,
+            display_name,
+            password_hash,
+            is_site_admin,
+            keycloak_sub,
+            created_at,
+            updated_at
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        `,
+        [
+          'owner-two',
+          'OWNER@example.com',
+          'Owner Two',
+          'hash',
+          0,
+          null,
+          '2026-04-24T00:00:00.000Z',
+          '2026-04-24T00:00:00.000Z',
+        ],
+      ),
+    /duplicate|unique/i,
+  )
 })
 
 test('authenticated owners can run the note CRUD workflow in a selected campaign', async (t) => {
@@ -683,7 +585,7 @@ test('authenticated owners can run the note CRUD workflow in a selected campaign
 
 test('configured site-admin emails are promoted through registration and login', async (t) => {
   const siteAdminEmail = 'admin@example.com'
-  const { app, closeNoteStore, dbPath, cleanup } = await createTestApp({
+  const { app, reopenNoteStore, cleanup } = await createTestApp({
     siteAdminEmails: [siteAdminEmail],
   })
   t.after(cleanup)
@@ -698,9 +600,7 @@ test('configured site-admin emails are promoted through registration and login',
   assert.equal(sessionResponse.status, 200)
   assert.equal(sessionResponse.body.owner.isSiteAdmin, true)
 
-  await closeNoteStore()
-
-  const reopenedStore = await createNoteStore({ dbPath, siteAdminEmails: [siteAdminEmail] })
+  const reopenedStore = await reopenNoteStore()
   t.after(async () => reopenedStore.close())
 
   const reopenedApp = createApp({ noteStore: reopenedStore })

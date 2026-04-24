@@ -177,14 +177,6 @@ export function setupAppFetchMock() {
       return createJsonResponse({ accounts: adminAccounts })
     }
 
-    if (path === '/api/admin/restore' && method === 'POST') {
-      return createJsonResponse({
-        message: 'Backup restored successfully.',
-        restoredAt: '2026-04-16T18:00:00.000Z',
-        overview: adminOverview,
-      })
-    }
-
     if (path === '/api/overview' && method === 'GET') {
       return createJsonResponse({
         campaign,

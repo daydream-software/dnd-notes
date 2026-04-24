@@ -2,10 +2,7 @@ import 'dotenv/config'
 import type { Server } from 'node:http'
 import { createApp } from './app.js'
 import { createTenantRuntimeAuth } from './keycloak-auth.js'
-import {
-  createRuntimeNoteStore,
-  restoreRuntimeNoteStoreFromBackup,
-} from './note-store.js'
+import { createRuntimeNoteStore } from './note-store.js'
 import { createShutdownController } from './shutdown.js'
 
 const port = Number(process.env.PORT ?? 3001)
@@ -25,7 +22,7 @@ const runtimeAuth = createTenantRuntimeAuth({
 const shutdownGracePeriodMs = 30_000
 const siteAdminEmails =
   process.env.SITE_ADMIN_EMAILS?.split(',').map((email) => email.trim()) ?? []
-let noteStore = await createRuntimeNoteStore({ siteAdminEmails })
+const noteStore = await createRuntimeNoteStore({ siteAdminEmails })
 const serverRef: { current?: Server } = {}
 const shutdownController = createShutdownController({
   getServer: () => serverRef.current,
@@ -37,12 +34,6 @@ const app = createApp({
   noteStore,
   publicWebUrl: process.env.PUBLIC_WEB_URL,
   runtimeAuth,
-  async restoreNoteStore(sourcePath) {
-    noteStore = await restoreRuntimeNoteStoreFromBackup(sourcePath, {
-      siteAdminEmails,
-    })
-    return noteStore
-  },
   isShuttingDown: shutdownController.isShuttingDown,
   serveWeb,
 })

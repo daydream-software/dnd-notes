@@ -2,12 +2,15 @@
 
 This document defines the environment variables and runtime expectations for the dnd-notes tenant container.
 
-Issue #95 makes per-tenant Postgres the hosted steady-state target. SQLite
-remains the local fallback and snapshot interchange path during the cutover.
+Issue #95 makes per-tenant Postgres the hosted steady-state target. The tenant
+runtime is Postgres-only.
 
 ## Required Environment Variables
 
-None. The application will start with defaults.
+- **`DATABASE_URL`**  
+  Postgres connection string for the tenant runtime database.  
+  Format: `postgresql://user:pass@host:5432/dbname`  
+  **Behavior:** Required by the main runtime entrypoint (`apps/api/src/index.ts`).
 
 ## Optional Environment Variables
 
@@ -23,14 +26,8 @@ None. The application will start with defaults.
 
 ### Database Configuration
 
-- **`NOTES_DB_PATH`** (default: `/app/data/dnd-notes.sqlite`)  
-  Path to the SQLite database file (Phase 0 local dev fallback).  
-  **Behavior:** Used automatically whenever `DATABASE_URL` is unset.
-
-- **`DATABASE_URL`**  
-  Postgres connection string for production tenant databases.  
-  Format: `postgresql://user:pass@host:5432/dbname`  
-  **Behavior:** When set, the API uses `node-postgres` with connection pooling. In control-plane provisioned environments this should be a tenant-scoped least-privilege role, not a shared fleet credential.
+`DATABASE_URL` remains the required runtime database connection string documented
+above. The variables below tune that Postgres connection.
 
 - **`NOTES_DB_POOL_MIN`** (default: `0`)  
   Minimum pooled Postgres connections.
@@ -178,46 +175,20 @@ readinessProbe:
 
 ## Persistent Storage
 
-### SQLite (local fallback and transitional runtime scratch)
-- **Mount point:** `/app/data`  
-- **File:** `/app/data/dnd-notes.sqlite`  
-- **Volume type:** Local bind mount, or in the current hosted transition a
-  Kubernetes `PersistentVolumeClaim`
-
-The control-plane provisioning slice for issue #54 now keeps this mount present
-even when the tenant runs primarily against `DATABASE_URL`, so the container
-retains a writable runtime volume for SQLite-compatible fallback files and
-operator-managed storage lifecycle. Issue #95 supersedes that PVC-backed tenant
-shape for hosted steady state.
-
-**Kubernetes example:**
-```yaml
-volumeMounts:
-  - name: data
-    mountPath: /app/data
-volumes:
-  - name: data
-    persistentVolumeClaim:
-      claimName: tenant-abc123-data
-```
-
-### Postgres (hosted steady-state target)
+### Postgres
 - **Connection:** Via `DATABASE_URL` environment variable  
 - **Least-privilege boundary:** Newly provisioned tenants receive a dedicated
   Postgres role and randomized password from the control plane. The control
   plane bootstraps the note-store schema before the tenant pod starts, so the
   runtime user does not need schema-creation rights.
-- **Persistence:** Managed by Postgres for note data. During the current
-  transition the control plane may still mount `/app/data` for
-  runtime scratch/fallback storage, but #95 removes that tenant PVC from the
-  normal hosted pod shape.  
+- **Persistence:** Managed by Postgres for note data.
 - **Backup:** Control-plane orchestrated `pg_dump` to object storage
 
 ## Container Lifecycle
 
 ### Startup
 1. Resolve environment variables
-2. Initialize database connection (`DATABASE_URL` when set, otherwise `NOTES_DB_PATH`)
+2. Initialize the Postgres connection from `DATABASE_URL`
 3. Run compatible startup upgrades (if needed). Least-privilege Postgres runtime
    users verify the pre-initialized schema instead of creating it.
 4. Start HTTP server on `PORT`
@@ -258,7 +229,7 @@ The container runs as a non-root user (`appuser:appuser`, UID/GID assigned at bu
 
 **Security posture:**
 - No root privileges required at runtime
-- Write access only to `/app/data` (local fallback / scratch volume)
+- Write access only to runtime-owned temporary paths when needed by the process
 - Read-only for application code (`/app/apps/api`, `/app/apps/web`)
 
 ## Build & Deployment
@@ -271,46 +242,21 @@ docker build -t ghcr.io/daydream-software/dnd-notes:latest .
 ### Run (local test)
 ```bash
 docker run -p 3000:3000 \
+  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd-notes \
   -e SERVE_WEB=true \
   -e PUBLIC_WEB_URL=http://localhost:3000 \
-  -v $(pwd)/data:/app/data \
   ghcr.io/daydream-software/dnd-notes:latest
 ```
 
 ### Kubernetes Deployment (Phase 1 shape)
 See issue #43 for full manifest examples after Phase 0 validation.
 
-## Hosted persistence transition notes
+## Hosted persistence contract
 
-**Current state in code:**
 - Hosted path: Postgres via `DATABASE_URL`
-- Local fallback: SQLite at `/app/data/dnd-notes.sqlite`
-- Backup via admin API (`GET /api/admin/backup`) using SQLite-compatible snapshots
-
-**Current hosted rollout contract:**
-- Postgres via `DATABASE_URL`, with newly provisioned tenants using
-  tenant-scoped runtime credentials
-- PVC may stay mounted at `/app/data` for fallback/runtime files, but it is not
-  the primary hosted write path
-- Rolling updates use drain-first replacement (`maxSurge: 0`, `maxUnavailable: 1`)
-  to prevent pod overlap while the RWO PVC remains, plus readiness + shutdown
-  drain instead of SQLite single-writer handoff
-- Backup via control-plane `pg_dump` CronJob remains a later slice
-
-**Target hosted steady state (`#95`):**
 - One Postgres database plus one least-privilege runtime role per tenant
-- No tenant PVC in the normal hosted pod shape
-- Rolling updates switch to overlapping `maxSurge: 1` / `maxUnavailable: 0`
-  once the pod no longer depends on SQLite handoff semantics
-- Backup/restore orchestration pivots to per-tenant `pg_dump` / `pg_restore`
-  while the SQLite-compatible admin snapshot bridge is phased out deliberately
-
-**Migration:**
-1. Download a fresh SQLite-compatible admin backup from the old SQLite-backed tenant.
-2. Create or provision the target Postgres tenant so the control plane can
-   pre-initialize the schema and emit tenant-scoped runtime credentials.
-3. Restore the backup through the admin restore flow; the API imports the snapshot into Postgres.
-4. Keep SQLite support for local development when `DATABASE_URL` is unset.
+- No tenant filesystem database fallback in the runtime contract
+- Backup/restore orchestration is control-plane owned and uses Postgres-native tooling
 
 Existing hosted tenants that already run on a shared runtime Postgres user are a
 deliberate migration boundary. This slice does not silently rotate those live
@@ -335,12 +281,8 @@ The first supported hosted upgrade path assumes the tenant is already using
    fully complete (`observedGeneration` matches, `updatedReplicas` and
    `availableReplicas` equal `spec.replicas`, no unavailable replicas remain).
 
-The `/app/data` PVC remains mounted but causes no multi-attach contention since
-the rollout strategy prevents pod overlap.
-
-**Target under #95:** Once the tenant PVC leaves the normal pod shape, the
-rollout strategy can switch to `maxSurge: 1` / `maxUnavailable: 0` for
-overlapping zero-downtime updates without drain windows.
+Postgres-only tenants can use overlapping `maxSurge: 1` / `maxUnavailable: 0`
+updates without filesystem handoff concerns.
 
 ## Exclusive maintenance work
 
@@ -358,15 +300,14 @@ rolling image update.
 
 These are reserved for Phase 1 control-plane orchestration and are **not** exposed via public ingress.
 
-## Postgres Notes (Phase 1 preparation)
+## Postgres Notes
 
 When `DATABASE_URL` is set, the application will:
 1. Use `node-postgres` for async database access (issue #58)
 2. Respect Postgres connection pooling and timeout settings
 3. Drain the pool on shutdown before process exit
-4. Keep exporting/importing SQLite-compatible admin snapshots for backup + migration workflows
 
-**Connection pool defaults (to be tuned in Phase 1):**
+**Connection pool defaults:**
 - Max connections: 20
 - Idle timeout: 30s
 - Connection timeout: 10s
@@ -393,7 +334,6 @@ Phase 0 scope: health endpoints only.
 - **Phase 1:** NetworkPolicy restricts `/internal/*` to control-plane namespace
 
 ### Database Credentials
-- **SQLite:** No credentials (file-based)
 - **Postgres:** Connection string via `DATABASE_URL` (Kubernetes Secret)
 
 ### TLS
@@ -409,6 +349,7 @@ docker build -t dnd-notes:test .
 
 # Run
 docker run -d -p 3000:3000 \
+  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd-notes \
   -e SERVE_WEB=true \
   -e ALLOWED_ORIGINS=http://localhost:3000 \
   --name dnd-notes-test \
@@ -438,6 +379,6 @@ To be defined in issue #58 after the Postgres adapter lands.
 
 - Issue #52 - Containerize dnd-notes for per-tenant Kubernetes deployment (this work)
 - Issue #42 - Epic: build the multi-tenant Kubernetes platform
-- Issue #58 - Port NoteStore adapter from SQLite to Postgres
+- Issue #58 - Port NoteStore adapter to Postgres
 - Issue #43 - Track deployment artifacts (manifests, after Postgres)
 - Epic 42 Phase 0 decisions - `.squad/decisions.md`

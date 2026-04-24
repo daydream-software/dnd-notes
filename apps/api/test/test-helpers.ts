@@ -1,37 +1,47 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { newDb } from 'pg-mem'
+import type { IMemoryDb } from 'pg-mem'
 import type { SuperTest, Test } from 'supertest'
 import { createApp } from '../src/app.js'
 import type { TenantRuntimeAuth } from '../src/keycloak-auth.js'
 import {
   createNoteStore,
-  restoreNoteStoreFromBackup,
   type NoteStore,
 } from '../src/note-store.js'
+import type { PostgresPoolLike } from '../src/note-store-database.js'
 
 export interface CreateTestAppOptions {
   siteAdminEmails?: readonly string[]
   publicWebUrl?: string
   allowedOrigins?: string | readonly string[]
-  directoryPrefix?: string
   isShuttingDown?: () => boolean
   runtimeAuth?: TenantRuntimeAuth
   serveWeb?: boolean
   webDistPath?: string
 }
 
+export function createTestPgMemDb(): IMemoryDb {
+  return newDb({
+    autoCreateForeignKeyIndices: true,
+  })
+}
+
+export function createTestPgMemPool() {
+  const db = createTestPgMemDb()
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool() as PostgresPoolLike
+
+  return { db, pool }
+}
+
 export async function createTestApp(options: CreateTestAppOptions = {}) {
-  const directory = await mkdtemp(
-    join(tmpdir(), options.directoryPrefix ?? 'dnd-notes-api-'),
-  )
-  const dbPath = join(directory, 'notes.sqlite')
+  const { db, pool } = createTestPgMemPool()
   let noteStore = await createNoteStore({
-    dbPath,
+    postgresPool: pool,
     siteAdminEmails: options.siteAdminEmails,
   })
   let noteStoreClosed = false
+  let poolClosed = false
 
   const app = createApp({
     noteStore,
@@ -44,14 +54,6 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     isShuttingDown: options.isShuttingDown,
     serveWeb: options.serveWeb,
     webDistPath: options.webDistPath,
-    async restoreNoteStore(sourcePath) {
-      noteStore = await restoreNoteStoreFromBackup(sourcePath, {
-        dbPath,
-        siteAdminEmails: options.siteAdminEmails,
-      })
-      noteStoreClosed = false
-      return noteStore
-    },
   })
 
   const closeNoteStore = async () => {
@@ -63,16 +65,36 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     noteStoreClosed = true
   }
 
+  const closePool = async () => {
+    if (poolClosed) {
+      return
+    }
+
+    await pool.end()
+    poolClosed = true
+  }
+
   return {
     app,
-    dbPath,
+    db,
+    pool,
     get noteStore(): NoteStore {
       return noteStore
     },
     closeNoteStore,
+    closePool,
+    async reopenNoteStore() {
+      await closeNoteStore()
+      noteStore = await createNoteStore({
+        postgresPool: pool,
+        siteAdminEmails: options.siteAdminEmails,
+      })
+      noteStoreClosed = false
+      return noteStore
+    },
     async cleanup() {
       await closeNoteStore()
-      await rm(directory, { recursive: true, force: true })
+      await closePool()
     },
   }
 }
@@ -124,19 +146,19 @@ export function withAuth(app: SuperTest<Test>, token: string) {
   }
 }
 
-export function withGuest(app: SuperTest<Test>, token: string) {
+export function withGuest(app: SuperTest<Test>, guestToken: string) {
   return {
     get(path: string) {
-      return app.get(path).set('X-Guest-Token', token)
+      return app.get(path).set('X-Guest-Token', guestToken)
     },
     post(path: string) {
-      return app.post(path).set('X-Guest-Token', token)
+      return app.post(path).set('X-Guest-Token', guestToken)
     },
     put(path: string) {
-      return app.put(path).set('X-Guest-Token', token)
+      return app.put(path).set('X-Guest-Token', guestToken)
     },
     delete(path: string) {
-      return app.delete(path).set('X-Guest-Token', token)
+      return app.delete(path).set('X-Guest-Token', guestToken)
     },
   }
 }

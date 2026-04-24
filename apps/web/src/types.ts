@@ -195,12 +195,6 @@ export interface AdminAccountsResponse {
   accounts: AdminAccountSummary[]
 }
 
-export interface AdminRestoreResponse {
-  message: string
-  restoredAt: string
-  overview: AdminOverview
-}
-
 export interface AuthSessionResponse {
   token: string
   owner: OwnerAccount
