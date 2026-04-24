@@ -333,9 +333,9 @@ export class PostgresTenantBackupRunner {
         location: backupLocation,
         destinationPath: restorePath,
       })
+      await this.assertNoActiveConnections(databaseName, tenant.id)
       const safetySnapshot = await this.backupTenant(tenant)
       const restoredAt = this.now().toISOString()
-      await this.terminateActiveConnections(databaseName)
       await this.commandExecutor.run(
         'pg_restore',
         [
@@ -367,17 +367,30 @@ export class PostgresTenantBackupRunner {
     await this.pool.end()
   }
 
-  private async terminateActiveConnections(databaseName: string): Promise<void> {
+  private async assertNoActiveConnections(
+    databaseName: string,
+    tenantId: string,
+  ): Promise<void> {
     const client = await this.pool.connect()
 
     try {
-      await client.query(
-        `SELECT pg_terminate_backend(pid)
+      const result = await client.query<{ active_connection_count: number | string }>(
+        `SELECT COUNT(*)::integer AS active_connection_count
            FROM pg_stat_activity
           WHERE datname = $1
             AND pid <> pg_backend_pid()`,
         [databaseName],
       )
+
+      const activeConnectionCount = Number(
+        result.rows[0]?.active_connection_count ?? 0,
+      )
+
+      if (activeConnectionCount > 0) {
+        throw new TenantBackupValidationError(
+          `Tenant ${tenantId} restore requires an exclusive maintenance window; found ${activeConnectionCount} active database connection(s).`,
+        )
+      }
     } finally {
       client.release()
     }
@@ -409,6 +422,11 @@ function sanitizePathComponent(value: string): string {
     throw new TenantBackupValidationError(
       `Invalid backup path component ${JSON.stringify(value)}.`,
     )
+  }
+
+  if (sanitized !== value) {
+    const hashSuffix = createHash('sha256').update(value).digest('hex').slice(0, 12)
+    return `${sanitized}-${hashSuffix}`
   }
 
   return sanitized

@@ -111,11 +111,11 @@ metadata; otherwise it preserves the raw string and reports the parsed fields as
 
 Issue `#100` now also has a direct Postgres runner seam in
 `src/tenant-backup-runner.ts`: it can create `pg_dump --format=custom`
-artifacts, take a mandatory pre-restore safety snapshot, terminate active tenant
-database connections, and run `pg_restore --clean --if-exists` against the
-tenant database. This first slice uses a filesystem-backed artifact store for
-local/dev flows; the control-plane catalog/API dispatch owned by `#89` remains a
-separate follow-up.
+artifacts, require an exclusive no-traffic restore window, take a mandatory
+pre-restore safety snapshot, and run `pg_restore --clean --if-exists` against
+the tenant database. This first slice uses a filesystem-backed artifact store
+for local/dev flows; the control-plane catalog/API dispatch owned by `#89`
+remains a separate follow-up.
 
 The dedicated tenant-storage endpoint adds the next cutover-focused layer on
 top: it exposes the persisted storage mode, storage-migration status, the last

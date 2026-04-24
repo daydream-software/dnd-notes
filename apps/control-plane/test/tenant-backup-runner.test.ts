@@ -58,11 +58,17 @@ class FakeCommandExecutor {
 
 class FakePool {
   queries: Array<{ text: string; values?: readonly unknown[] }> = []
+  activeConnectionCount = 0
 
   async connect() {
     return {
       query: async (text: string, values?: readonly unknown[]) => {
         this.queries.push({ text, values })
+        if (text.includes('COUNT(*)::integer AS active_connection_count')) {
+          return {
+            rows: [{ active_connection_count: this.activeConnectionCount }],
+          }
+        }
         return { rows: [] }
       },
       release() {},
@@ -245,7 +251,7 @@ describe('PostgresTenantBackupRunner', () => {
         ['pg_dump', 'pg_restore'],
       )
       assert.equal(pool.queries.length, 1)
-      assert.match(pool.queries[0]?.text ?? '', /pg_terminate_backend/)
+      assert.match(pool.queries[0]?.text ?? '', /COUNT\(\*\)::integer AS active_connection_count/)
       assert.deepEqual(pool.queries[0]?.values, ['tenant_demo_t_demo'])
       assert.equal(result.tenantId, 'tenant-demo')
       assert.equal(result.databaseName, 'tenant_demo_t_demo')
@@ -319,6 +325,57 @@ describe('PostgresTenantBackupRunner', () => {
       assert.equal(pool.queries.length, 0)
     } finally {
       await runner.close()
+      await rm(artifactRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses restore when tenant database connections are still active', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+    const executor = new FakeCommandExecutor()
+    const pool = new FakePool()
+    pool.activeConnectionCount = 2
+    const runner = new PostgresTenantBackupRunner({
+      adminDatabaseUrl: 'postgresql://postgres:postgres@postgres.default:5432/postgres',
+      artifactStore,
+      commandExecutor: executor,
+      pool,
+      now: () => new Date('2026-04-24T01:10:00.000Z'),
+    })
+
+    let sourceDirectory: string | undefined
+    try {
+      sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
+      const sourcePath = join(sourceDirectory, 'incoming.dump')
+      await writeFile(sourcePath, 'restore-payload')
+      const storedBackup = await artifactStore.storeBackup({
+        tenantId: 'tenant-demo',
+        sourcePath,
+        capturedAt: '2026-04-24T01:00:00.000Z',
+      })
+
+      await assert.rejects(
+        () =>
+          runner.restoreTenant({
+            tenant: createTenant({
+              currentState: 'restoring',
+            }),
+            backupLocation: storedBackup.location,
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /exclusive maintenance window; found 2 active database connection/i.test(
+            error.message,
+          ),
+      )
+
+      assert.equal(executor.calls.length, 0)
+      assert.equal(pool.queries.length, 1)
+    } finally {
+      await runner.close()
+      if (sourceDirectory) {
+        await rm(sourceDirectory, { recursive: true, force: true })
+      }
       await rm(artifactRoot, { recursive: true, force: true })
     }
   })
@@ -409,6 +466,38 @@ describe('FileSystemTenantBackupArtifactStore', () => {
             /invalid backup path component/i.test(error.message),
         )
       }
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
+      await rm(sourceDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it('adds a hash suffix when sanitizing tenant IDs would otherwise collide', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
+    const sourcePath = join(sourceDirectory, 'artifact.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+
+    try {
+      await writeFile(sourcePath, 'backup-artifact')
+
+      const firstArtifact = await artifactStore.storeBackup({
+        tenantId: 'tenant/a',
+        sourcePath,
+        capturedAt: '2026-04-24T01:00:00.000Z',
+      })
+      const secondArtifact = await artifactStore.storeBackup({
+        tenantId: 'tenant?a',
+        sourcePath,
+        capturedAt: '2026-04-24T01:00:00.000Z',
+      })
+
+      const firstDirectory = dirname(fileURLToPath(firstArtifact.location))
+      const secondDirectory = dirname(fileURLToPath(secondArtifact.location))
+
+      assert.notEqual(firstDirectory, secondDirectory)
+      assert.match(firstDirectory, /tenant-a-[0-9a-f]{12}$/)
+      assert.match(secondDirectory, /tenant-a-[0-9a-f]{12}$/)
     } finally {
       await rm(artifactRoot, { recursive: true, force: true })
       await rm(sourceDirectory, { recursive: true, force: true })
