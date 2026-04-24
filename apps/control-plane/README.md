@@ -184,10 +184,12 @@ with a version override:
 2. If the tenant is already `ready`, the control plane records `upgrading`,
    reapplies the tenant manifests, and updates the Deployment image tag while
    preserving any existing tenant runtime secret.
-3. Kubernetes performs a single-replica drain-first rollout (`RollingUpdate`,
-   `maxSurge: 0`, `maxUnavailable: 1`) with `minReadySeconds: 5` and
-   `terminationGracePeriodSeconds: 30`. The old pod is terminated before the new
-   pod becomes ready.
+3. For stateless Postgres-only tenants, Kubernetes now performs an overlapping
+   rollout (`RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0`) with
+   `minReadySeconds: 5`, `terminationGracePeriodSeconds: 30`, and a per-tenant
+   `PodDisruptionBudget` (`minAvailable: 1`). Legacy PVC-backed tenants remain on
+   the older drain-first replacement shape until the cutover work removes that
+   transitional storage path.
 4. The old pod flips `/ready` to `503` on `SIGTERM`, drains in-flight HTTP
    work, closes idle keep-alives, and only then closes the Postgres pool.
 5. When the new pod is fully rolled out (observedGeneration matches,
@@ -198,17 +200,15 @@ This path assumes tenant note traffic is Postgres-backed via `DATABASE_URL`.
 New tenants receive least-privilege runtime credentials after the control plane
 pre-initializes the note-store schema; already-deployed tenants that still use a
 shared runtime Postgres user remain on that credential until an explicit
-migration. The `/app/data` PVC remains mounted but causes no multi-attach
-contention since the rollout strategy prevents pod overlap.
-
-**Future:** Once the PVC is removed from the normal pod shape, the rollout
-strategy can switch to `maxSurge: 1` / `maxUnavailable: 0` for zero-downtime
-updates without drain windows.
+migration. Existing PVC-backed tenants keep the `/app/data` mount and do not
+receive the overlapping rollout/PDB contract until their cutover lands.
 
 ### Operator notes
 
-- Rolling updates use a drain-first replacement: one pod is terminated before
-  the new one becomes ready. No connection overlap occurs.
+- Postgres-only/stateless tenants now surge a temporary second pod during
+  rollouts; steady state remains 1 replica.
+- Legacy PVC-backed tenants still use a drain-first replacement until the
+  storage cutover work completes.
 - Use a separate maintenance window for exclusive operations such as restore
   drills or incompatible schema work. The future maintenance endpoints stay
   reserved for that narrower path; ordinary image rollouts should use the

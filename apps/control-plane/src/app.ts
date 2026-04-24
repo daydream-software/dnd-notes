@@ -23,6 +23,7 @@ import {
   TenantProvisioningValidationError,
   type TenantProvisioningPort,
 } from './provisioning.js'
+import { formatUnknownError } from './error-formatting.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import { tenantStates } from './types.js'
 import type {
@@ -483,7 +484,16 @@ function buildRolloutFailureDetails(tenantId: string) {
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : 'Unknown error'
+  return formatUnknownError(error)
+}
+
+function logUnexpectedError(message: string, error: unknown) {
+  if (error instanceof Error) {
+    console.error(message, error)
+    return
+  }
+
+  console.error(`${message}: ${getErrorMessage(error)}`)
 }
 
 function readRateLimitClientId(request: Request) {
@@ -1694,6 +1704,7 @@ export function createApp({
         }
 
         if (isRolloutRequest) {
+          logUnexpectedError('Tenant rolling update failed', error)
           response.status(500).json({
             code: 'tenant_rollout_failed',
             error: 'Tenant rolling update failed',
@@ -1702,11 +1713,10 @@ export function createApp({
           return
         }
 
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
+        logUnexpectedError('Failed to provision tenant resources', error)
         response.status(500).json({
           error: 'Failed to provision tenant resources',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },
