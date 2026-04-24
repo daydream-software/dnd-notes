@@ -32,6 +32,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Learnings
 
+- **Backup Artifact Path Components:** When a filesystem-backed backup store derives directory/file names from tenant-controlled IDs, normalize with `NFKC` before sanitizing for readability, but hash the raw ID whenever normalization, sanitization, or case-folding changes the component. That keeps lowercase-safe IDs readable while preventing cross-tenant collisions on case-insensitive or Unicode-normalizing filesystems. Lock it with regressions for both unsafe-character collisions and case-only collisions in `apps/control-plane/test/tenant-backup-runner.test.ts`.
+
 - **Postgres Nullable Parameter Casts:** Real Postgres can reject nullable placeholders used across `SET`, `CASE`, and `IS NULL` / `IS NOT NULL` branches with `could not determine data type of parameter $N` even when pg-mem stays green. In `apps/control-plane/src/tenant-registry-postgres.ts`, cast the nullable placeholder explicitly (for example `CAST($3 AS TEXT)`) everywhere that branch logic inspects `storage_migration_failure_reason`, and keep a regression that asserts the generated SQL includes those casts.
 
 - **Smoke Harness Failure Artifacts:** When `scripts/k3d/smoke.sh` fails, copy the preserved `.k3d-smoke-work/` contents into `reports/k3d-smoke/live-workdir/` and print grep-filtered control-plane error lines before the raw tail. The workflow artifact upload already collects `reports/k3d-smoke`, so this keeps the full `control-plane.log` and request/response scraps available for CI-only failures instead of truncating the real exception behind a huge tail dump.
@@ -89,6 +91,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 - **Shared Operator Portal Base-Path Normalization:** Keep `VITE_OPERATOR_API_BASE_PATH` normalization in `apps/operator-portal/src/base-path.ts` and reuse it from both `apps/operator-portal/vite.config.ts` and `apps/operator-portal/src/config.ts`. A focused regression in `apps/operator-portal/src/base-path.test.ts` should lock the blank/root/trailing-slash cases so the dev proxy and runtime config cannot drift.
 
 - **Node-Only Script Type Boundaries:** Keep the root `scripts` TypeScript project Node-scoped (`types: ["node"]`) even when a smoke harness spins up JSDOM. For cross-workspace browser helpers like `scripts/k3d/operator-portal-smoke.ts`, prefer local loose browser-ish types plus a runtime `import()` of the TSX helper instead of widening the root tsconfig to DOM/JSX or pulling another workspace under `rootDir`. Pair that with a direct root `@types/jsdom` devDependency because the script owns the `jsdom` import even if npm hoists the runtime package from `apps/operator-portal`.
+
+- **Backup Restore Guardrails:** For `apps/control-plane/src/tenant-backup-runner.ts`, a restore flow that refuses active sessions must check `pg_stat_activity` both before the safety snapshot and immediately before `pg_restore`; the snapshot window otherwise reintroduces a TOCTOU gap. Treat the filesystem artifact store as hostile input too: reject symlinks on every path segment for both stored tenant directories and inbound artifact locations, and make `scripts/k3d/smoke.sh` print non-2xx response bodies so CI failures surface the real control-plane error instead of only a log tail.
 
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 

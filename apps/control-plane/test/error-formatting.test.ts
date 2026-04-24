@@ -5,12 +5,12 @@ import {
   normalizeUnknownError,
 } from '../src/error-formatting.js'
 
-describe('error formatting', () => {
-  it('trims non-empty string errors', () => {
-    assert.equal(formatUnknownError('  spaced failure  '), 'spaced failure')
+describe('formatUnknownError', () => {
+  it('trims string errors before returning them', () => {
+    assert.equal(formatUnknownError('  synthetic failure  '), 'synthetic failure')
   })
 
-  it('falls back for blank string errors', () => {
+  it('falls back to Unknown error for blank string errors', () => {
     assert.equal(formatUnknownError('   '), 'Unknown error')
     assert.equal(
       normalizeUnknownError('   ', 'Tenant registry operation failed').message,

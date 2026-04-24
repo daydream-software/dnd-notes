@@ -126,6 +126,41 @@ wait_for_http() {
   return 1
 }
 
+request_json_to_file() {
+  local output_path="$1"
+  shift
+
+  local http_code=""
+  local curl_exit_code=0
+  local request_url="<unknown url>"
+
+  if (( $# > 0 )); then
+    request_url="${!#}"
+  fi
+
+  set +e
+  http_code="$(curl -sS -o "${output_path}" -w '%{http_code}' "$@")"
+  curl_exit_code=$?
+  set -e
+
+  if (( curl_exit_code != 0 )); then
+    return "${curl_exit_code}"
+  fi
+
+  if [[ "${http_code}" =~ ^2[0-9][0-9]$ ]]; then
+    return 0
+  fi
+
+  echo "HTTP ${http_code} response while calling ${request_url}:" >&2
+  if [[ -s "${output_path}" ]]; then
+    cat "${output_path}" >&2
+  else
+    echo "<empty response body>" >&2
+  fi
+
+  return 22
+}
+
 json_get() {
   local path="$1"
 
@@ -314,21 +349,21 @@ control_plane_bearer_token="$(get_keycloak_access_token \
 tenant_id="smoke-$(date +%s)"
 tenant_slug="${tenant_id}"
 
-curl -fsS \
+request_json_to_file \
+  "${WORK_DIR}/tenant-create.json" \
   -X POST \
   -H "Authorization: Bearer ${control_plane_bearer_token}" \
   -H 'Content-Type: application/json' \
   -d "$(build_tenant_create_payload "${tenant_id}" "${tenant_slug}" "${TENANT_IMAGE_TAG}")" \
-  "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants" \
-  >"${WORK_DIR}/tenant-create.json"
+  "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants"
 
-curl -fsS \
+request_json_to_file \
+  "${WORK_DIR}/tenant-provision.json" \
   -X POST \
   -H "Authorization: Bearer ${control_plane_bearer_token}" \
   -H 'Content-Type: application/json' \
   -d '{"triggeredBy":"k3d-smoke","reason":"live k3d smoke"}' \
-  "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${tenant_id}/provision" \
-  >"${WORK_DIR}/tenant-provision.json"
+  "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${tenant_id}/provision"
 
 tenant_namespace="$(json_get resources.namespace <"${WORK_DIR}/tenant-provision.json")"
 tenant_subdomain="$(json_get tenant.subdomain <"${WORK_DIR}/tenant-provision.json")"
