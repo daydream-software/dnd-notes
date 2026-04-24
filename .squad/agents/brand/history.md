@@ -32,6 +32,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Learnings
 
+- **Control-Plane Unknown Error Strings:** `apps/control-plane/src/error-formatting.ts` should trim string throwables before surfacing them in logs or HTTP details, and whitespace-only strings should collapse to `Unknown error` instead of producing blank diagnostics. Keep the regression in `apps/control-plane/test/error-formatting.test.ts` so future error-handling changes cannot reintroduce empty operator messages.
+
 - **Local Override vs Pod-Network Auth Config:** For `scripts/k3d/tenant-api-override.sh`, treat `KEYCLOAK_JWKS_URL` from the tenant runtime ConfigMap as pod-scoped only when it points at `*.svc` / `*.svc.cluster.local`. The host-side `apps/api` override must clear that value and rely on the built-in `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs` fallback instead. Key files: `scripts/k3d/tenant-api-override.sh`, `apps/api/src/index.ts`, `apps/api/src/keycloak-auth.ts`, `platform/k3d/README.md`, `RUNTIME.md`.
 
 - **Post-Merge Orphan Recovery:** If a PR branch has a local-only follow-up docs/decision commit after the PR is already merged, recover it from `main` by fast-forwarding `main`, cherry-picking the missing commit, and pushing only the new recovery commit. Do not rewrite the merged branch or touch unrelated worktrees. Key paths: `.squad/decisions.md`, `.squad/agents/brand/history.md`; current example: recovered `9cccb60` from `squad/79-k3d-full-stack-smoke-live-override` onto `main` as `40c71f0`.

@@ -3,8 +3,12 @@ export function formatUnknownError(error: unknown): string {
     return error.message
   }
 
-  if (typeof error === 'string' && error.length > 0) {
-    return error
+  if (typeof error === 'string') {
+    const trimmedError = error.trim()
+
+    if (trimmedError.length > 0) {
+      return trimmedError
+    }
   }
 
   if (
