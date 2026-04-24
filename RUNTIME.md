@@ -28,14 +28,9 @@ during the cutover.
 
 ### Database Configuration
 
-- **`DATABASE_URL`**  
-  Postgres connection string for tenant databases.  
-  Format: `postgresql://user:pass@host:5432/dbname`  
-  **Behavior:** Required by the main runtime entrypoint; when provided there, the
-  API uses `node-postgres` with connection pooling. In control-plane
-  provisioned environments this should be a tenant-scoped least-privilege role,
-  not a shared fleet credential. Helper tooling that intentionally uses the
-  SQLite snapshot bridge may instead rely on `NOTES_DB_PATH`.
+`DATABASE_URL` remains the required runtime database connection string documented
+above. The variables below either tune that Postgres connection or support
+helper tooling that intentionally uses the non-runtime SQLite snapshot bridge.
 
 - **`NOTES_DB_PATH`**  
   Path to a SQLite snapshot file for helper tooling that intentionally targets
