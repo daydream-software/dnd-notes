@@ -26,7 +26,7 @@ Build and run the production container:
 ```bash
 docker build -t dnd-notes:latest .
 docker run -p 3000:3000 \
-  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd_notes \
+  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd-notes \
   -e SERVE_WEB=true \
   -e PUBLIC_WEB_URL=http://localhost:3000 \
   dnd-notes:latest

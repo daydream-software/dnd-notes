@@ -14,7 +14,6 @@ export interface CreateTestAppOptions {
   siteAdminEmails?: readonly string[]
   publicWebUrl?: string
   allowedOrigins?: string | readonly string[]
-  directoryPrefix?: string
   isShuttingDown?: () => boolean
   runtimeAuth?: TenantRuntimeAuth
   serveWeb?: boolean

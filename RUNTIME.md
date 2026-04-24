@@ -242,7 +242,7 @@ docker build -t ghcr.io/daydream-software/dnd-notes:latest .
 ### Run (local test)
 ```bash
 docker run -p 3000:3000 \
-  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd_notes \
+  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd-notes \
   -e SERVE_WEB=true \
   -e PUBLIC_WEB_URL=http://localhost:3000 \
   ghcr.io/daydream-software/dnd-notes:latest
@@ -349,7 +349,7 @@ docker build -t dnd-notes:test .
 
 # Run
 docker run -d -p 3000:3000 \
-  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd_notes \
+  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd-notes \
   -e SERVE_WEB=true \
   -e ALLOWED_ORIGINS=http://localhost:3000 \
   --name dnd-notes-test \

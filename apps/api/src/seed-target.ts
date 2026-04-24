@@ -1,7 +1,6 @@
 import { type CreateNoteStoreOptions } from './note-store.js'
 
 export interface SeedTarget {
-  backend: 'postgres'
   noteStoreOptions: CreateNoteStoreOptions
   label: string
 }
@@ -16,7 +15,6 @@ export function resolveSeedTarget(
   }
 
   return {
-    backend: 'postgres',
     noteStoreOptions: { databaseUrl },
     label: 'postgres',
   }

@@ -8,7 +8,6 @@ import {
   createNoteStore,
   createRuntimeNoteStore,
   initializeDatabaseOrClose,
-  resolveNoteStoreBackend,
 } from '../src/note-store.js'
 import { registerOwner, withAuth } from './test-helpers.js'
 
@@ -119,10 +118,6 @@ test('initializeDatabaseOrClose closes the database before rethrowing init failu
   )
 
   assert.equal(closeCalls, 1)
-})
-
-test('resolveNoteStoreBackend always returns postgres in the postgres-only runtime', () => {
-  assert.equal(resolveNoteStoreBackend(), 'postgres')
 })
 
 test('runtime note store requires postgres configuration', async (t) => {

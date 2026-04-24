@@ -159,12 +159,11 @@ type MembershipConsolidationResult =
 
 export interface CreateNoteStoreOptions {
   databaseUrl?: string
-  backend?: 'postgres'
   postgresPool?: PostgresPoolLike
   siteAdminEmails?: readonly string[]
 }
 
-export type RuntimeNoteStoreOptions = Omit<CreateNoteStoreOptions, 'backend'>
+export type RuntimeNoteStoreOptions = CreateNoteStoreOptions
 export const ownerKeycloakLinkConflictCode = 'OWNER_KEYCLOAK_LINK_CONFLICT'
 
 export class OwnerKeycloakLinkConflictError extends Error {
@@ -320,10 +319,6 @@ function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl
   }
 
   return databaseUrl
-}
-
-export function resolveNoteStoreBackend(): 'postgres' {
-  return 'postgres'
 }
 
 export async function initializeDatabaseOrClose(

@@ -90,7 +90,6 @@ test('seed target uses postgres when DATABASE_URL is configured', () => {
       DATABASE_URL: 'postgresql://db.example/dnd-notes',
     } as NodeJS.ProcessEnv),
     {
-      backend: 'postgres',
       noteStoreOptions: {
         databaseUrl: 'postgresql://db.example/dnd-notes',
       },
@@ -105,7 +104,6 @@ test('seed target trims DATABASE_URL before passing it to the note store', () =>
       DATABASE_URL: '  postgresql://db.example/dnd-notes  ',
     } as NodeJS.ProcessEnv),
     {
-      backend: 'postgres',
       noteStoreOptions: {
         databaseUrl: 'postgresql://db.example/dnd-notes',
       },
