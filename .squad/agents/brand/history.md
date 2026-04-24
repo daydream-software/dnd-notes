@@ -32,6 +32,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Learnings
 
+- **Backup Artifact Path Components:** When a filesystem-backed backup store derives directory/file names from tenant-controlled IDs, normalize with `NFKC` before sanitizing for readability, but hash the raw ID whenever normalization, sanitization, or case-folding changes the component. That keeps lowercase-safe IDs readable while preventing cross-tenant collisions on case-insensitive or Unicode-normalizing filesystems. Lock it with regressions for both unsafe-character collisions and case-only collisions in `apps/control-plane/test/tenant-backup-runner.test.ts`.
+
 - **Postgres Nullable Parameter Casts:** Real Postgres can reject nullable placeholders used across `SET`, `CASE`, and `IS NULL` / `IS NOT NULL` branches with `could not determine data type of parameter $N` even when pg-mem stays green. In `apps/control-plane/src/tenant-registry-postgres.ts`, cast the nullable placeholder explicitly (for example `CAST($3 AS TEXT)`) everywhere that branch logic inspects `storage_migration_failure_reason`, and keep a regression that asserts the generated SQL includes those casts.
 
 - **Smoke Harness Failure Artifacts:** When `scripts/k3d/smoke.sh` fails, copy the preserved `.k3d-smoke-work/` contents into `reports/k3d-smoke/live-workdir/` and print grep-filtered control-plane error lines before the raw tail. The workflow artifact upload already collects `reports/k3d-smoke`, so this keeps the full `control-plane.log` and request/response scraps available for CI-only failures instead of truncating the real exception behind a huge tail dump.

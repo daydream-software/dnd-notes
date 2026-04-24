@@ -566,6 +566,38 @@ describe('FileSystemTenantBackupArtifactStore', () => {
     }
   })
 
+  it('adds a hash suffix when tenant IDs only differ by case', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
+    const sourcePath = join(sourceDirectory, 'artifact.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+
+    try {
+      await writeFile(sourcePath, 'backup-artifact')
+
+      const lowercaseArtifact = await artifactStore.storeBackup({
+        tenantId: 'tenant-a',
+        sourcePath,
+        capturedAt: '2026-04-24T01:00:00.000Z',
+      })
+      const uppercaseArtifact = await artifactStore.storeBackup({
+        tenantId: 'Tenant-A',
+        sourcePath,
+        capturedAt: '2026-04-24T01:00:00.000Z',
+      })
+
+      const lowercaseDirectory = dirname(fileURLToPath(lowercaseArtifact.location))
+      const uppercaseDirectory = dirname(fileURLToPath(uppercaseArtifact.location))
+
+      assert.notEqual(lowercaseDirectory, uppercaseDirectory)
+      assert.match(lowercaseDirectory, /tenant-a$/)
+      assert.match(uppercaseDirectory, /Tenant-A-[0-9a-f]{12}$/)
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
+      await rm(sourceDirectory, { recursive: true, force: true })
+    }
+  })
+
   it('rejects backup locations that do not reference a regular file', async () => {
     const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
     const destinationDirectory = await mkdtemp(

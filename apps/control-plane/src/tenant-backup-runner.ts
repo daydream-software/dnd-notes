@@ -428,7 +428,8 @@ export function resolveTenantDatabaseName(tenant: Tenant): string {
 }
 
 function sanitizePathComponent(value: string): string {
-  const sanitized = value.replace(/[^A-Za-z0-9._-]+/g, '-')
+  const normalizedValue = value.normalize('NFKC')
+  const sanitized = normalizedValue.replace(/[^A-Za-z0-9._-]+/g, '-')
 
   if (sanitized.length === 0 || sanitized === '.' || sanitized === '..') {
     throw new TenantBackupValidationError(
@@ -436,7 +437,12 @@ function sanitizePathComponent(value: string): string {
     )
   }
 
-  if (sanitized !== value) {
+  const requiresHashSuffix =
+    normalizedValue !== value ||
+    sanitized !== normalizedValue ||
+    sanitized !== sanitized.toLowerCase()
+
+  if (requiresHashSuffix) {
     const hashSuffix = createHash('sha256').update(value).digest('hex').slice(0, 12)
     return `${sanitized}-${hashSuffix}`
   }
