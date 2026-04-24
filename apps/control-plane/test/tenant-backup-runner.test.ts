@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, it } from 'node:test'
 import type { Tenant } from '../src/types.js'
 import {
@@ -14,12 +14,20 @@ import {
 } from '../src/tenant-backup-runner.js'
 
 class FakeCommandExecutor {
-  calls: Array<{ command: string; args: string[] }> = []
+  calls: Array<{
+    command: string
+    args: string[]
+    env?: NodeJS.ProcessEnv
+  }> = []
   dumpPayload = Buffer.from('synthetic-pg-dump-artifact')
   restoredPayloads: string[] = []
 
-  async run(command: string, args: string[]): Promise<void> {
-    this.calls.push({ command, args })
+  async run(
+    command: string,
+    args: string[],
+    options?: { env?: NodeJS.ProcessEnv },
+  ): Promise<void> {
+    this.calls.push({ command, args, env: options?.env })
 
     if (command === 'pg_dump') {
       const fileIndex = args.indexOf('--file')
@@ -110,8 +118,9 @@ describe('PostgresTenantBackupRunner', () => {
       assert.equal(executor.calls[0]?.args[4], '--dbname')
       assert.equal(
         executor.calls[0]?.args.at(-1),
-        'postgresql://postgres:postgres@postgres.default:5432/tenant_demo_t_demo',
+        'postgresql://postgres@postgres.default:5432/tenant_demo_t_demo',
       )
+      assert.equal(executor.calls[0]?.env?.PGPASSWORD, 'postgres')
       assert.equal(artifact.tenantId, tenant.id)
       assert.equal(artifact.databaseName, 'tenant_demo_t_demo')
       assert.equal(artifact.format, 'custom')
@@ -169,8 +178,9 @@ describe('PostgresTenantBackupRunner', () => {
       now: () => new Date('2026-04-24T01:10:00.000Z'),
     })
 
+    let sourceDirectory: string | undefined
     try {
-      const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
+      sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
       const sourcePath = join(sourceDirectory, 'incoming.dump')
       await writeFile(sourcePath, 'restore-payload')
       const storedBackup = await artifactStore.storeBackup({
@@ -201,10 +211,13 @@ describe('PostgresTenantBackupRunner', () => {
       assert.equal(result.safetySnapshot.format, 'custom')
       assert.equal(result.safetySnapshot.databaseName, 'tenant_demo_t_demo')
       assert.deepEqual(executor.restoredPayloads, ['restore-payload'])
-
-      await rm(sourceDirectory, { recursive: true, force: true })
+      assert.equal(executor.calls[0]?.env?.PGPASSWORD, 'postgres')
+      assert.equal(executor.calls[1]?.env?.PGPASSWORD, 'postgres')
     } finally {
       await runner.close()
+      if (sourceDirectory) {
+        await rm(sourceDirectory, { recursive: true, force: true })
+      }
       await rm(artifactRoot, { recursive: true, force: true })
     }
   })
@@ -232,6 +245,35 @@ describe('PostgresTenantBackupRunner', () => {
     } finally {
       await runner.close()
       await rm(artifactRoot, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('FileSystemTenantBackupArtifactStore', () => {
+  it('accepts file URLs rooted at / when the artifact store root is /', async () => {
+    const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-root-source-'))
+    const destinationDirectory = await mkdtemp(
+      join(tmpdir(), 'tenant-backup-root-destination-'),
+    )
+    const sourcePath = join(sourceDirectory, 'artifact.dump')
+    const destinationPath = join(destinationDirectory, 'copied.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore('/')
+
+    try {
+      await writeFile(sourcePath, 'root-visible-artifact')
+
+      await artifactStore.materializeBackup({
+        location: pathToFileURL(sourcePath).toString(),
+        destinationPath,
+      })
+
+      assert.equal(
+        await readFile(destinationPath, 'utf8'),
+        'root-visible-artifact',
+      )
+    } finally {
+      await rm(sourceDirectory, { recursive: true, force: true })
+      await rm(destinationDirectory, { recursive: true, force: true })
     }
   })
 })

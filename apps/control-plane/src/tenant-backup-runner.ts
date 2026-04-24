@@ -9,7 +9,15 @@ import {
   stat,
 } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { basename, dirname, join, resolve } from 'node:path'
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Pool } from 'pg'
 import { buildTenantDatabaseConnectionString } from './provisioning.js'
@@ -47,8 +55,16 @@ export interface TenantRestoreResult {
   safetySnapshot: TenantBackupArtifact
 }
 
+interface CommandExecutionOptions {
+  env?: NodeJS.ProcessEnv
+}
+
 export interface CommandExecutor {
-  run(command: string, args: string[]): Promise<void>
+  run(
+    command: string,
+    args: string[],
+    options?: CommandExecutionOptions,
+  ): Promise<void>
 }
 
 export interface TenantBackupArtifactStore {
@@ -71,9 +87,17 @@ export class TenantBackupValidationError extends Error {
 }
 
 class SpawnCommandExecutor implements CommandExecutor {
-  async run(command: string, args: string[]): Promise<void> {
+  async run(
+    command: string,
+    args: string[],
+    options?: CommandExecutionOptions,
+  ): Promise<void> {
     await new Promise<void>((resolvePromise, rejectPromise) => {
       const child = spawn(command, args, {
+        env: {
+          ...process.env,
+          ...options?.env,
+        },
         stdio: ['ignore', 'ignore', 'pipe'],
       })
       let stderr = ''
@@ -160,9 +184,12 @@ export class FileSystemTenantBackupArtifactStore
       )
     }
 
+    const relativePath = relative(this.rootDirectory, filePath)
     if (
-      filePath !== this.rootDirectory &&
-      !filePath.startsWith(`${this.rootDirectory}/`)
+      relativePath !== '' &&
+      (relativePath === '..' ||
+        relativePath.startsWith(`..${sep}`) ||
+        isAbsolute(relativePath))
     ) {
       throw new TenantBackupValidationError(
         `Backup location ${JSON.stringify(location)} is outside the configured artifact store.`,
@@ -202,6 +229,9 @@ export class PostgresTenantBackupRunner {
   async backupTenant(tenant: Tenant): Promise<TenantBackupArtifact> {
     const databaseName = resolveTenantDatabaseName(tenant)
     const capturedAt = this.now().toISOString()
+    const connectionTarget = buildPgCommandConnectionTarget(
+      buildTenantDatabaseConnectionString(this.adminDatabaseUrl, databaseName),
+    )
     const backupDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-tenant-backup-'))
     const backupPath = join(
       backupDirectory,
@@ -209,14 +239,20 @@ export class PostgresTenantBackupRunner {
     )
 
     try {
-      await this.commandExecutor.run('pg_dump', [
-        '--format=custom',
-        '--no-owner',
-        '--file',
-        backupPath,
-        '--dbname',
-        buildTenantDatabaseConnectionString(this.adminDatabaseUrl, databaseName),
-      ])
+      await this.commandExecutor.run(
+        'pg_dump',
+        [
+          '--format=custom',
+          '--no-owner',
+          '--file',
+          backupPath,
+          '--dbname',
+          connectionTarget.connectionString,
+        ],
+        {
+          env: connectionTarget.env,
+        },
+      )
 
       const [fileStats, sha256, storedArtifact] = await Promise.all([
         stat(backupPath),
@@ -248,6 +284,9 @@ export class PostgresTenantBackupRunner {
   }): Promise<TenantRestoreResult> {
     const { tenant, backupLocation } = params
     const databaseName = resolveTenantDatabaseName(tenant)
+    const connectionTarget = buildPgCommandConnectionTarget(
+      buildTenantDatabaseConnectionString(this.adminDatabaseUrl, databaseName),
+    )
 
     if (tenant.currentState !== 'restoring') {
       throw new TenantBackupValidationError(
@@ -266,14 +305,20 @@ export class PostgresTenantBackupRunner {
         destinationPath: restorePath,
       })
       await this.terminateActiveConnections(databaseName)
-      await this.commandExecutor.run('pg_restore', [
-        '--clean',
-        '--if-exists',
-        '--no-owner',
-        '--dbname',
-        buildTenantDatabaseConnectionString(this.adminDatabaseUrl, databaseName),
-        restorePath,
-      ])
+      await this.commandExecutor.run(
+        'pg_restore',
+        [
+          '--clean',
+          '--if-exists',
+          '--no-owner',
+          '--dbname',
+          connectionTarget.connectionString,
+          restorePath,
+        ],
+        {
+          env: connectionTarget.env,
+        },
+      )
 
       return {
         tenantId: tenant.id,
@@ -349,4 +394,19 @@ async function calculateSha256(filePath: string): Promise<string> {
   })
 
   return hash.digest('hex')
+}
+
+function buildPgCommandConnectionTarget(connectionString: string): {
+  connectionString: string
+  env?: NodeJS.ProcessEnv
+} {
+  const url = new URL(connectionString)
+  const password = decodeURIComponent(url.password)
+
+  url.password = ''
+
+  return {
+    connectionString: url.toString(),
+    env: password.length > 0 ? { PGPASSWORD: password } : undefined,
+  }
 }
