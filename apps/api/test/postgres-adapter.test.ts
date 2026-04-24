@@ -122,15 +122,7 @@ test('initializeDatabaseOrClose closes the database before rethrowing init failu
 })
 
 test('resolveNoteStoreBackend always returns postgres in the postgres-only runtime', () => {
-  assert.equal(
-    resolveNoteStoreBackend(
-      { databaseUrl: 'postgresql://db.example/dnd-notes' },
-      {
-        DATABASE_URL: 'postgresql://db.example/dnd-notes',
-      } as NodeJS.ProcessEnv,
-    ),
-    'postgres',
-  )
+  assert.equal(resolveNoteStoreBackend(), 'postgres')
 })
 
 test('runtime note store requires postgres configuration', async (t) => {
