@@ -12,9 +12,11 @@ import { defaultCampaignId } from '../src/campaign.js'
 import {
   copySnapshotTables,
   createNoteStore,
+  createRuntimeNoteStore,
   initializeDatabaseOrClose,
   resolveNoteStoreBackend,
   restoreNoteStoreFromBackup,
+  restoreRuntimeNoteStoreFromBackup,
 } from '../src/note-store.js'
 import { createSqliteDatabase } from '../src/note-store-database.js'
 import { registerOwner, withAuth } from './test-helpers.js'
@@ -565,5 +567,38 @@ test('explicit sqlite dbPath beats an ambient DATABASE_URL', () => {
       { DATABASE_URL: 'postgresql://ambient.example/dnd-notes' } as NodeJS.ProcessEnv,
     ),
     'sqlite',
+  )
+})
+
+test('runtime note store requires postgres configuration instead of falling back to sqlite', async () => {
+  await assert.rejects(
+    () => createRuntimeNoteStore(),
+    /DATABASE_URL is required when the Postgres note store is selected\./,
+  )
+})
+
+test('runtime restore keeps the postgres-only runtime contract', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const sourceDbPath = join(runtimeDirectory, `runtime-restore-source-${randomUUID()}.sqlite`)
+  const backupPath = join(runtimeDirectory, `runtime-restore-backup-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await rm(sourceDbPath, { force: true })
+    await rm(backupPath, { force: true })
+  })
+
+  const sourceStore = await createNoteStore({
+    backend: 'sqlite',
+    dbPath: sourceDbPath,
+  })
+
+  try {
+    await sourceStore.backupDatabase(backupPath)
+  } finally {
+    await sourceStore.close()
+  }
+
+  await assert.rejects(
+    () => restoreRuntimeNoteStoreFromBackup(backupPath),
+    /DATABASE_URL is required when the Postgres note store is selected\./,
   )
 })
