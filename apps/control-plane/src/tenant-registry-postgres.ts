@@ -1,4 +1,6 @@
+import { setTimeout as delay } from 'node:timers/promises'
 import { Pool, type PoolConfig, type QueryResultRow } from 'pg'
+import { normalizeUnknownError } from './error-formatting.js'
 import {
   assertGeneratedTenantSubdomain,
   assertPersistedTenantSubdomain,
@@ -24,7 +26,10 @@ const tenantStorageMigrationStatusSqlList = tenantStorageMigrationStatuses
   .map((status) => `'${status}'`)
   .join(', ')
 const CURRENT_SCHEMA_VERSION = 7
+const tenantLockNamespaceKey = 101
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
+const defaultTenantLockAcquireTimeoutMs = 30_000
+const defaultTenantLockRetryDelayMs = 250
 const tenantSelectColumns = `id, slug, subdomain, owner_id, display_name, plan_tier,
   initial_admin_email, desired_state, current_state, version, storage_reference,
   backup_metadata, created_at, updated_at`
@@ -51,11 +56,13 @@ export interface TenantRegistryPoolLike extends TenantRegistryQueryable {
 }
 
 export interface TenantRegistryClientLike extends TenantRegistryQueryable {
-  release(): void
+  release(error?: Error): void
 }
 
 interface TenantRegistryOptions {
   pool?: TenantRegistryPoolLike
+  tenantLockAcquireTimeoutMs?: number
+  tenantLockRetryDelayMs?: number
 }
 
 interface SchemaVersionRow {
@@ -156,6 +163,38 @@ function parsePositiveIntegerSetting(
   return parsedValue
 }
 
+function normalizePositiveIntegerOption(
+  name: string,
+  value: number | undefined,
+  defaultValue: number,
+): number {
+  if (value === undefined) {
+    return defaultValue
+  }
+
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`Invalid ${name} value: ${value}`)
+  }
+
+  return value
+}
+
+function normalizeNonNegativeIntegerOption(
+  name: string,
+  value: number | undefined,
+  defaultValue: number,
+): number {
+  if (value === undefined) {
+    return defaultValue
+  }
+
+  if (!Number.isInteger(value) || value < 0) {
+    throw new Error(`Invalid ${name} value: ${value}`)
+  }
+
+  return value
+}
+
 export function createTenantRegistryPoolConfig(
   connectionString: string,
   env: NodeJS.ProcessEnv = process.env,
@@ -242,16 +281,78 @@ function isUniqueConstraintError(error: unknown): error is Error & { code?: stri
   return error instanceof Error && (error as Error & { code?: string }).code === '23505'
 }
 
+function hashTenantLockKey(tenantId: string): bigint {
+  const hashInput = `${tenantLockNamespaceKey}:${tenantId}`
+  let hash = 0xcbf29ce484222325n
+
+  for (let index = 0; index < hashInput.length; index += 1) {
+    hash ^= BigInt(hashInput.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
+  }
+
+  return hash
+}
+
+function createTenantLockKeys(tenantId: string): readonly [number, number] {
+  const hash = hashTenantLockKey(tenantId)
+  return [
+    Number(BigInt.asIntN(32, hash >> 32n)),
+    Number(BigInt.asIntN(32, hash & 0xffff_ffffn)),
+  ] as const
+}
+
+function toCleanupReleaseError(error: unknown): Error | undefined {
+  if (error === undefined) {
+    return undefined
+  }
+
+  return error instanceof Error
+    ? error
+    : new Error('Tenant registry session cleanup failed', { cause: error })
+}
+
+function isTenantRegistryClientLike(
+  executor: TenantRegistryPoolLike | TenantRegistryClientLike,
+): executor is TenantRegistryClientLike {
+  return 'release' in executor && typeof executor.release === 'function'
+}
+
+export class TenantRegistryLockTimeoutError extends Error {
+  readonly tenantId: string
+  readonly timeoutMs: number
+
+  constructor(tenantId: string, timeoutMs: number) {
+    super(
+      `Timed out after ${timeoutMs}ms while waiting for the tenant lock for ${tenantId}.`,
+    )
+    this.name = 'TenantRegistryLockTimeoutError'
+    this.tenantId = tenantId
+    this.timeoutMs = timeoutMs
+  }
+}
+
 export class TenantRegistry {
   private readonly pool: TenantRegistryPoolLike
   private readonly ownsPool: boolean
   private readonly ready: Promise<void>
+  private readonly tenantLockAcquireTimeoutMs: number
+  private readonly tenantLockRetryDelayMs: number
   private closed = false
 
   constructor(connectionString: string, options: TenantRegistryOptions = {}) {
     const { pool, ownedPool } = resolveTenantRegistryPool(connectionString, options)
     this.pool = pool
     this.ownsPool = ownedPool !== undefined
+    this.tenantLockAcquireTimeoutMs = normalizePositiveIntegerOption(
+      'tenantLockAcquireTimeoutMs',
+      options.tenantLockAcquireTimeoutMs,
+      defaultTenantLockAcquireTimeoutMs,
+    )
+    this.tenantLockRetryDelayMs = normalizeNonNegativeIntegerOption(
+      'tenantLockRetryDelayMs',
+      options.tenantLockRetryDelayMs,
+      defaultTenantLockRetryDelayMs,
+    )
     this.ready = this.migrateSchema()
   }
 
@@ -467,10 +568,13 @@ export class TenantRegistry {
 
   private async withTransaction<Result>(
     operation: (client: TenantRegistryClientLike) => Promise<Result>,
+    executor: TenantRegistryPoolLike | TenantRegistryClientLike = this.pool,
   ): Promise<Result> {
     this.assertOpen()
     await this.ready
-    const client = await this.pool.connect()
+    const ownsClient = !isTenantRegistryClientLike(executor)
+    const client = ownsClient ? await executor.connect() : executor
+    let releaseError: Error | undefined
 
     try {
       await client.query('BEGIN')
@@ -480,12 +584,14 @@ export class TenantRegistry {
     } catch (error) {
       try {
         await client.query('ROLLBACK')
-      } catch {
-        // Ignore rollback failures and keep the original error.
+      } catch (rollbackError) {
+        releaseError = toCleanupReleaseError(rollbackError)
       }
       throw error
     } finally {
-      client.release()
+      if (ownsClient) {
+        client.release(releaseError)
+      }
     }
   }
 
@@ -501,6 +607,105 @@ export class TenantRegistry {
 
   async checkHealth(): Promise<void> {
     await this.run('SELECT 1')
+  }
+
+  async withTenantLock<Result>(
+    tenantId: string,
+    operation: (executor: TenantRegistryClientLike) => Promise<Result>,
+  ): Promise<Result> {
+    this.assertOpen()
+    await this.ready
+
+    const client = await this.pool.connect()
+    const lockValues = createTenantLockKeys(tenantId)
+    let result: Result | undefined
+    let operationError: unknown
+    let lockAcquired = false
+    let unlockError: unknown
+
+    try {
+      await this.acquireTenantLock(client, tenantId, lockValues)
+      lockAcquired = true
+
+      if ((await this.getTenant(tenantId, client)) === null) {
+        throw new Error(`Tenant ${tenantId} not found`)
+      }
+
+      result = await operation(client)
+    } catch (error) {
+      operationError = error
+    } finally {
+      if (lockAcquired) {
+        try {
+          const unlockResult = await client.query<{ unlocked: boolean }>(
+            'SELECT pg_advisory_unlock($1::integer, $2::integer) AS unlocked',
+            lockValues,
+          )
+
+          if (!unlockResult.rows[0]?.unlocked) {
+            unlockError = new Error(`Tenant ${tenantId} advisory unlock did not succeed`)
+          }
+        } catch (error) {
+          unlockError = error
+        }
+      }
+
+      const cleanupError = toCleanupReleaseError(unlockError)
+      client.release(cleanupError)
+    }
+
+    const errors = [
+      operationError === undefined
+        ? undefined
+        : normalizeUnknownError(operationError, 'Tenant registry operation failed'),
+      unlockError === undefined
+        ? undefined
+        : normalizeUnknownError(unlockError, 'Tenant registry advisory unlock failed'),
+    ].filter((error): error is NonNullable<typeof error> => error !== undefined)
+
+    if (errors.length === 1) {
+      throw errors[0]
+    }
+
+    if (errors.length > 1) {
+      throw new AggregateError(
+        errors,
+        'Tenant registry operation failed and one or more session cleanup steps also failed',
+      )
+    }
+
+    return result as Result
+  }
+
+  private async acquireTenantLock(
+    executor: TenantRegistryQueryable,
+    tenantId: string,
+    lockValues: readonly [number, number],
+  ): Promise<void> {
+    const startedAt = Date.now()
+
+    while (true) {
+      const result = await executor.query<{ locked: boolean }>(
+        'SELECT pg_try_advisory_lock($1::integer, $2::integer) AS locked',
+        lockValues,
+      )
+
+      if (result.rows[0]?.locked) {
+        return
+      }
+
+      const elapsedMs = Date.now() - startedAt
+      const remainingMs = this.tenantLockAcquireTimeoutMs - elapsedMs
+
+      if (remainingMs <= 0) {
+        throw new TenantRegistryLockTimeoutError(
+          tenantId,
+          this.tenantLockAcquireTimeoutMs,
+        )
+      }
+
+      await delay(Math.min(this.tenantLockRetryDelayMs, remainingMs))
+    }
   }
 
   async listTenants(): Promise<Tenant[]> {
@@ -525,45 +730,61 @@ export class TenantRegistry {
     return rows.rows.map((row) => this.mapRowToTenant(row))
   }
 
-  async getTenant(tenantId: string): Promise<Tenant | null> {
+  async getTenant(
+    tenantId: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<Tenant | null> {
     const row = await this.run<TenantRow>(
       `SELECT ${tenantSelectColumns}
        FROM tenants
        WHERE id = $1`,
       [tenantId],
+      executor,
     )
 
     return row.rows[0] ? this.mapRowToTenant(row.rows[0]) : null
   }
 
-  async getTenantBySlug(slug: string): Promise<Tenant | null> {
+  async getTenantBySlug(
+    slug: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<Tenant | null> {
     const row = await this.run<TenantRow>(
       `SELECT ${tenantSelectColumns}
        FROM tenants
        WHERE slug = $1`,
       [slug],
+      executor,
     )
 
     return row.rows[0] ? this.mapRowToTenant(row.rows[0]) : null
   }
 
-  async getTenantBySubdomain(subdomain: string): Promise<Tenant | null> {
+  async getTenantBySubdomain(
+    subdomain: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<Tenant | null> {
     const row = await this.run<TenantRow>(
       `SELECT ${tenantSelectColumns}
        FROM tenants
        WHERE subdomain = $1`,
       [subdomain],
+      executor,
     )
 
     return row.rows[0] ? this.mapRowToTenant(row.rows[0]) : null
   }
 
-  async getTenantStorageSnapshot(tenantId: string): Promise<TenantStorageSnapshot | null> {
+  async getTenantStorageSnapshot(
+    tenantId: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<TenantStorageSnapshot | null> {
     const row = await this.run<TenantStorageRow>(
       `SELECT ${tenantStorageSelectColumns}
        FROM tenants
        WHERE id = $1`,
       [tenantId],
+      executor,
     )
 
     return row.rows[0] ? this.mapRowToTenantStorageSnapshot(row.rows[0]) : null
@@ -573,10 +794,11 @@ export class TenantRegistry {
     tenantId: string,
     createCandidate: () => string,
     maxAttempts = 10,
+    executor: TenantRegistryPoolLike | TenantRegistryClientLike = this.pool,
   ): Promise<string> {
     this.assertOpen()
     await this.ready
-    const existingTenant = await this.getTenant(tenantId)
+    const existingTenant = await this.getTenant(tenantId, executor)
 
     if (!existingTenant) {
       throw new Error(`Tenant ${tenantId} not found`)
@@ -592,7 +814,7 @@ export class TenantRegistry {
 
     for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
       const candidate = assertGeneratedTenantSubdomain(createCandidate())
-      const conflictingTenant = await this.getTenantBySubdomain(candidate)
+      const conflictingTenant = await this.getTenantBySubdomain(candidate, executor)
 
       if (conflictingTenant && conflictingTenant.id !== tenantId) {
         continue
@@ -635,7 +857,7 @@ export class TenantRegistry {
           }
 
           return updatedTenant.rows[0].subdomain
-        })
+        }, executor)
       } catch (error) {
         if (isUniqueConstraintError(error)) {
           continue
@@ -906,6 +1128,7 @@ export class TenantRegistry {
     newState: TenantState,
     triggeredBy: string,
     reason?: string,
+    executor: TenantRegistryPoolLike | TenantRegistryClientLike = this.pool,
   ): Promise<void> {
     await this.withTransaction(async (client) => {
       const existingTenant = await client.query<{ current_state: TenantState }>(
@@ -940,19 +1163,21 @@ export class TenantRegistry {
         },
         client,
       )
-    })
+    }, executor)
   }
 
   async updateTenantDesiredState(
     tenantId: string,
     desiredState: TenantState,
+    executor: TenantRegistryQueryable = this.pool,
   ): Promise<void> {
     const result = await this.run(
       `UPDATE tenants
        SET desired_state = $1,
-           updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [desiredState, tenantId],
+      executor,
     )
 
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
@@ -961,13 +1186,15 @@ export class TenantRegistry {
   async updateTenantStorageReference(
     tenantId: string,
     storageReference: string | null,
+    executor: TenantRegistryQueryable = this.pool,
   ): Promise<void> {
     const result = await this.run(
       `UPDATE tenants
        SET storage_reference = $1,
-           updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [storageReference, tenantId],
+      executor,
     )
 
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
@@ -980,45 +1207,76 @@ export class TenantRegistry {
       migrationStatus: TenantStorageMigrationStatus
       failureReason?: string | null
     },
+    executor: TenantRegistryQueryable = this.pool,
   ): Promise<void> {
+    const nextFailureReason = params.failureReason ?? null
     const result = await this.run(
       `UPDATE tenants
        SET storage_mode = $1,
            storage_migration_status = $2,
-           storage_migration_failure_reason = $3,
-           storage_migration_updated_at = CURRENT_TIMESTAMP,
+           storage_migration_failure_reason = CAST($3 AS TEXT),
+           storage_migration_updated_at = COALESCE(
+             CASE
+               WHEN current_profile.storage_migration_status <> $2
+                 OR (
+                    current_profile.storage_migration_failure_reason IS NULL
+                    AND CAST($3 AS TEXT) IS NOT NULL
+                  )
+                  OR (
+                    current_profile.storage_migration_failure_reason IS NOT NULL
+                    AND CAST($3 AS TEXT) IS NULL
+                  )
+                  OR current_profile.storage_migration_failure_reason <> CAST($3 AS TEXT)
+               THEN CAST(CURRENT_TIMESTAMP AS TIMESTAMPTZ)
+               ELSE CAST(NULL AS TIMESTAMPTZ)
+             END,
+             current_profile.storage_migration_updated_at
+            ),
            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
+       FROM tenants AS current_profile
+       WHERE tenants.id = $4
+         AND current_profile.id = tenants.id`,
       [
         params.mode,
         params.migrationStatus,
-        params.failureReason ?? null,
+        nextFailureReason,
         tenantId,
       ],
+      executor,
     )
 
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
   }
 
-  async updateTenantSubdomain(tenantId: string, subdomain: string): Promise<void> {
+  async updateTenantSubdomain(
+    tenantId: string,
+    subdomain: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<void> {
     const result = await this.run(
       `UPDATE tenants
        SET subdomain = $1,
-           updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [subdomain, tenantId],
+      executor,
     )
 
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
   }
 
-  async updateTenantVersion(tenantId: string, version: string): Promise<void> {
+  async updateTenantVersion(
+    tenantId: string,
+    version: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<void> {
     const result = await this.run(
       `UPDATE tenants
        SET version = $1,
-           updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [version, tenantId],
+      executor,
     )
 
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
@@ -1027,13 +1285,15 @@ export class TenantRegistry {
   async updateTenantBackupMetadata(
     tenantId: string,
     metadata: string,
+    executor: TenantRegistryQueryable = this.pool,
   ): Promise<void> {
     const result = await this.run(
       `UPDATE tenants
        SET backup_metadata = $1,
-           updated_at = CURRENT_TIMESTAMP
+            updated_at = CURRENT_TIMESTAMP
        WHERE id = $2`,
       [metadata, tenantId],
+      executor,
     )
 
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)

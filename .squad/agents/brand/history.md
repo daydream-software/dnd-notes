@@ -32,6 +32,12 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Learnings
 
+- **Postgres Nullable Parameter Casts:** Real Postgres can reject nullable placeholders used across `SET`, `CASE`, and `IS NULL` / `IS NOT NULL` branches with `could not determine data type of parameter $N` even when pg-mem stays green. In `apps/control-plane/src/tenant-registry-postgres.ts`, cast the nullable placeholder explicitly (for example `CAST($3 AS TEXT)`) everywhere that branch logic inspects `storage_migration_failure_reason`, and keep a regression that asserts the generated SQL includes those casts.
+
+- **Smoke Harness Failure Artifacts:** When `scripts/k3d/smoke.sh` fails, copy the preserved `.k3d-smoke-work/` contents into `reports/k3d-smoke/live-workdir/` and print grep-filtered control-plane error lines before the raw tail. The workflow artifact upload already collects `reports/k3d-smoke`, so this keeps the full `control-plane.log` and request/response scraps available for CI-only failures instead of truncating the real exception behind a huge tail dump.
+
+- **Control-Plane Unknown Error Strings:** `apps/control-plane/src/error-formatting.ts` should trim string throwables before surfacing them in logs or HTTP details, and whitespace-only strings should collapse to `Unknown error` instead of producing blank diagnostics. Keep the regression in `apps/control-plane/test/error-formatting.test.ts` so future error-handling changes cannot reintroduce empty operator messages.
+
 - **Local Override vs Pod-Network Auth Config:** For `scripts/k3d/tenant-api-override.sh`, treat `KEYCLOAK_JWKS_URL` from the tenant runtime ConfigMap as pod-scoped only when it points at `*.svc` / `*.svc.cluster.local`. The host-side `apps/api` override must clear that value and rely on the built-in `${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs` fallback instead. Key files: `scripts/k3d/tenant-api-override.sh`, `apps/api/src/index.ts`, `apps/api/src/keycloak-auth.ts`, `platform/k3d/README.md`, `RUNTIME.md`.
 
 - **Post-Merge Orphan Recovery:** If a PR branch has a local-only follow-up docs/decision commit after the PR is already merged, recover it from `main` by fast-forwarding `main`, cherry-picking the missing commit, and pushing only the new recovery commit. Do not rewrite the merged branch or touch unrelated worktrees. Key paths: `.squad/decisions.md`, `.squad/agents/brand/history.md`; current example: recovered `9cccb60` from `squad/79-k3d-full-stack-smoke-live-override` onto `main` as `40c71f0`.

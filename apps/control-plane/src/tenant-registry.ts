@@ -1,1 +1,6 @@
-export { TenantRegistry } from './tenant-registry-postgres.js'
+export {
+  TenantRegistry,
+  type TenantRegistryClientLike,
+  type TenantRegistryQueryable,
+  TenantRegistryLockTimeoutError,
+} from './tenant-registry-postgres.js'

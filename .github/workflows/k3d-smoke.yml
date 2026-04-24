@@ -67,6 +67,13 @@ jobs:
           node-version: '22.21.1'
           cache: 'npm'
 
+      - name: Ensure Python is available for native npm fallbacks
+        run: |
+          command -v python3 >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y python3
+          }
+
       - name: Install kubectl
         run: |
           curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"

@@ -32,6 +32,13 @@ jobs:
           node-version: '22.21.1'
           cache: 'npm'
 
+      - name: Ensure Python is available for native npm fallbacks
+        run: |
+          command -v python3 >/dev/null 2>&1 || {
+            sudo apt-get update
+            sudo apt-get install -y python3
+          }
+
       - name: Install dependencies
         run: npm ci
 

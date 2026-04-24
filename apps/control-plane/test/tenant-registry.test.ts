@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { newDb } from 'pg-mem'
+import { DataType, newDb } from 'pg-mem'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
-import { createTenantRegistryPoolConfig } from '../src/tenant-registry-postgres.js'
+import {
+  createTenantRegistryPoolConfig,
+  TenantRegistryLockTimeoutError,
+} from '../src/tenant-registry-postgres.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 
@@ -147,8 +150,8 @@ describe('TenantRegistry', () => {
 
             return await client.query(text, values as unknown[])
           },
-          release() {
-            client.release()
+          release(error?: Error) {
+            client.release(error)
           },
         }
       },
@@ -295,6 +298,440 @@ describe('TenantRegistry', () => {
       assert.equal(storage.migrationStatus, 'failed')
       assert.equal(storage.lastMigrationFailure, 'Synthetic cutover failure')
       assert.ok(storage.migrationUpdatedAt)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('preserves the migration timestamp when only the storage mode is refreshed', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+    const pinnedMigrationTimestamp = '2026-04-24T00:00:00.000Z'
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'sqlite-pvc',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+
+      const initialStorage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
+
+      assert.ok(initialStorage?.migrationUpdatedAt)
+      await pool.query(
+        `UPDATE tenants
+         SET storage_migration_updated_at = $1
+         WHERE id = $2`,
+        [pinnedMigrationTimestamp, 'tenant-1'],
+      )
+
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'postgres-dedicated-user',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+
+      const refreshedStorage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
+
+      assert.ok(refreshedStorage)
+      assert.equal(refreshedStorage.mode, 'postgres-dedicated-user')
+      assert.equal(
+        refreshedStorage.migrationUpdatedAt,
+        pinnedMigrationTimestamp,
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('casts nullable storage failure reasons to text in the profile update SQL', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let capturedUpdateSql = ''
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        if (text.includes('storage_migration_failure_reason')) {
+          capturedUpdateSql = text
+        }
+
+        return await pool.query(text, values as unknown[])
+      },
+      async connect() {
+        return await pool.connect()
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: wrappedPool,
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'postgres-dedicated-user',
+        migrationStatus: 'not-required',
+        failureReason: null,
+      })
+
+      assert.match(capturedUpdateSql, /storage_migration_failure_reason = CAST\(\$3 AS TEXT\)/)
+      assert.match(capturedUpdateSql, /CAST\(\$3 AS TEXT\) IS NOT NULL/)
+      assert.match(capturedUpdateSql, /CAST\(\$3 AS TEXT\) IS NULL/)
+      assert.match(
+        capturedUpdateSql,
+        /storage_migration_failure_reason <> CAST\(\$3 AS TEXT\)/,
+      )
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('reuses the locked registry session for tenant work without extra pool checkouts', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let connectCount = 0
+    let observedTenantLock = false
+    let observedTenantUnlock = false
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        return await pool.query(text, values as unknown[])
+      },
+      async connect() {
+        connectCount += 1
+        const client = await pool.connect()
+
+        return {
+          async query(text: string, values?: readonly unknown[]) {
+            if (text.includes('pg_try_advisory_lock')) {
+              observedTenantLock = true
+            }
+            if (text.includes('pg_advisory_unlock')) {
+              observedTenantUnlock = true
+            }
+
+            return await client.query(text, values as unknown[])
+          },
+          release(error?: Error) {
+            client.release(error)
+          },
+        }
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: wrappedPool,
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      connectCount = 0
+
+      let operationRan = false
+      await tenantRegistry.withTenantLock('tenant-1', async (registryClient) => {
+        operationRan = true
+        assert.equal(observedTenantLock, true)
+        assert.equal(observedTenantUnlock, false)
+        assert.equal(
+          (await tenantRegistry.getTenant('tenant-1', registryClient))?.currentState,
+          'provisioning',
+        )
+
+        await tenantRegistry.updateTenantDesiredState(
+          'tenant-1',
+          'ready',
+          registryClient,
+        )
+        await tenantRegistry.updateTenantState(
+          'tenant-1',
+          'ready',
+          'test-suite',
+          undefined,
+          registryClient,
+        )
+
+        const updatedTenant = await tenantRegistry.getTenant('tenant-1', registryClient)
+        assert.equal(updatedTenant?.desiredState, 'ready')
+        assert.equal(updatedTenant?.currentState, 'ready')
+        assert.equal(connectCount, 1)
+      })
+
+      assert.equal(operationRan, true)
+      assert.equal(observedTenantUnlock, true)
+      assert.equal(connectCount, 1)
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('fails fast when a tenant advisory lock stays busy', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => false,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool,
+      tenantLockAcquireTimeoutMs: 20,
+      tenantLockRetryDelayMs: 1,
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.withTenantLock('tenant-1', async () => {
+            throw new Error('locked operation should not run')
+          }),
+        (error) => {
+          assert.ok(error instanceof TenantRegistryLockTimeoutError)
+          assert.equal(error.tenantId, 'tenant-1')
+          assert.equal(error.timeoutMs, 20)
+          return true
+        },
+      )
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('discards the client and surfaces cleanup failures when a locked operation also fails', async () => {
+    const operationFailure = new Error('synthetic operation failure')
+    const unlockFailure = new Error('synthetic unlock failure')
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let releasedWithError: Error | undefined
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: {
+        async query(text: string, values?: readonly unknown[]) {
+          return await pool.query(text, values as unknown[])
+        },
+        async connect() {
+          const client = await pool.connect()
+
+          return {
+            async query(text: string, values?: readonly unknown[]) {
+              if (text.includes('pg_advisory_unlock')) {
+                throw unlockFailure
+              }
+
+              return await client.query(text, values as unknown[])
+            },
+            release(error?: Error) {
+              releasedWithError = error
+              client.release(error)
+            },
+          }
+        },
+        async end() {
+          await pool.end()
+        },
+      },
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.withTenantLock('tenant-1', async () => {
+            throw operationFailure
+          }),
+        (error) => {
+          assert.ok(error instanceof AggregateError)
+          assert.equal(error.errors.length, 2)
+          assert.equal(error.errors[0], operationFailure)
+          assert.equal(error.errors[1], unlockFailure)
+          return true
+        },
+      )
+      assert.equal(releasedWithError, unlockFailure)
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('discards the client when rollback fails after a transaction error', async () => {
+    const rollbackFailure = new Error('synthetic rollback failure')
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let releasedWithError: Error | undefined
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: {
+        async query(text: string, values?: readonly unknown[]) {
+          return await pool.query(text, values as unknown[])
+        },
+        async connect() {
+          const client = await pool.connect()
+
+          return {
+            async query(text: string, values?: readonly unknown[]) {
+              if (text === 'ROLLBACK') {
+                throw rollbackFailure
+              }
+
+              return await client.query(text, values as unknown[])
+            },
+            release(error?: Error) {
+              releasedWithError = error
+              client.release(error)
+            },
+          }
+        },
+        async end() {
+          await pool.end()
+        },
+      },
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.createTenant({
+            id: 'tenant-1',
+            slug: 'tenant-duplicate',
+            ownerId: 'owner-1',
+            version: '1.0.0',
+          }),
+        /duplicate key value/i,
+      )
+      assert.equal(releasedWithError, rollbackFailure)
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('wraps non-Error tenant lock failures before rethrowing them', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const thrownValue = {
+      client: 'synthetic-client',
+      queryable: false,
+    }
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.withTenantLock('tenant-1', async () => {
+            throw thrownValue
+          }),
+        (error) => {
+          assert.ok(error instanceof Error)
+          assert.match(
+            error.message,
+            /Tenant registry operation failed: Object with keys: client, queryable/,
+          )
+          assert.equal(error.cause, thrownValue)
+          return true
+        },
+      )
     } finally {
       await cleanup()
     }
@@ -483,6 +920,15 @@ describe('TenantRegistry', () => {
         }),
       /Invalid CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS value: fast/,
     )
+
+    const singleConnectionConfig = createTenantRegistryPoolConfig(
+      'postgres://control-plane.test/tenant-registry',
+      {
+        CONTROL_PLANE_DATABASE_POOL_MAX: '1',
+      },
+    )
+
+    assert.equal(singleConnectionConfig.max, 1)
   })
 
   it('persists portal accounts and bearer-token sessions while purging expired sessions', async () => {
