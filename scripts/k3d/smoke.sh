@@ -219,8 +219,16 @@ cleanup() {
       fi
     fi
     echo >&2
+    echo "Control-plane log (matched error lines):" >&2
+    grep -nE 'Error|Failed|AggregateError|Unhandled|Tenant registry|Exception' \
+      "${WORK_DIR}/control-plane.log" \
+      >&2 || true
+    echo >&2
     echo "Control-plane log (tail):" >&2
     tail -n 200 "${WORK_DIR}/control-plane.log" >&2
+
+    mkdir -p "${ROOT}/reports/k3d-smoke/live-workdir"
+    cp -R "${WORK_DIR}/." "${ROOT}/reports/k3d-smoke/live-workdir/" 2>/dev/null || true
   fi
 
   if [[ -n "${previous_kube_context}" ]]; then
