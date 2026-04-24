@@ -228,7 +228,11 @@ cleanup() {
     tail -n 200 "${WORK_DIR}/control-plane.log" >&2
 
     mkdir -p "${ROOT}/reports/k3d-smoke/live-workdir"
-    cp -R "${WORK_DIR}/." "${ROOT}/reports/k3d-smoke/live-workdir/" 2>/dev/null || true
+    for log_file in "${WORK_DIR}"/*.log; do
+      if [[ -f "${log_file}" ]]; then
+        cp "${log_file}" "${ROOT}/reports/k3d-smoke/live-workdir/" 2>/dev/null || true
+      fi
+    done
   fi
 
   if [[ -n "${previous_kube_context}" ]]; then

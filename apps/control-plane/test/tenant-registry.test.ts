@@ -641,6 +641,67 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('discards the client when rollback fails after a transaction error', async () => {
+    const rollbackFailure = new Error('synthetic rollback failure')
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let releasedWithError: Error | undefined
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: {
+        async query(text: string, values?: readonly unknown[]) {
+          return await pool.query(text, values as unknown[])
+        },
+        async connect() {
+          const client = await pool.connect()
+
+          return {
+            async query(text: string, values?: readonly unknown[]) {
+              if (text === 'ROLLBACK') {
+                throw rollbackFailure
+              }
+
+              return await client.query(text, values as unknown[])
+            },
+            release(error?: Error) {
+              releasedWithError = error
+              client.release(error)
+            },
+          }
+        },
+        async end() {
+          await pool.end()
+        },
+      },
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.createTenant({
+            id: 'tenant-1',
+            slug: 'tenant-duplicate',
+            ownerId: 'owner-1',
+            version: '1.0.0',
+          }),
+        /duplicate key value/i,
+      )
+      assert.equal(releasedWithError, rollbackFailure)
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
   it('wraps non-Error tenant lock failures before rethrowing them', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const thrownValue = {

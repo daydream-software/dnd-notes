@@ -574,6 +574,7 @@ export class TenantRegistry {
     await this.ready
     const ownsClient = !isTenantRegistryClientLike(executor)
     const client = ownsClient ? await executor.connect() : executor
+    let releaseError: Error | undefined
 
     try {
       await client.query('BEGIN')
@@ -583,13 +584,13 @@ export class TenantRegistry {
     } catch (error) {
       try {
         await client.query('ROLLBACK')
-      } catch {
-        // Ignore rollback failures and keep the original error.
+      } catch (rollbackError) {
+        releaseError = toCleanupReleaseError(rollbackError)
       }
       throw error
     } finally {
       if (ownsClient) {
-        client.release()
+        client.release(releaseError)
       }
     }
   }
