@@ -10,6 +10,26 @@ export const tenantStates = [
 
 export type TenantState = (typeof tenantStates)[number]
 
+export const tenantStorageModes = [
+  'unknown',
+  'sqlite-pvc',
+  'postgres-shared-user',
+  'postgres-dedicated-user',
+] as const
+
+export type TenantStorageMode = (typeof tenantStorageModes)[number]
+
+export const tenantStorageMigrationStatuses = [
+  'not-started',
+  'in-progress',
+  'failed',
+  'completed',
+  'not-required',
+] as const
+
+export type TenantStorageMigrationStatus =
+  (typeof tenantStorageMigrationStatuses)[number]
+
 export interface Tenant {
   id: string
   slug: string
@@ -111,6 +131,41 @@ export interface FleetStatusResponse {
   }
   summary: FleetStatusSummary
   tenants: FleetTenantStatus[]
+}
+
+export interface TenantStorageSnapshot {
+  tenantId: string
+  currentState: TenantState
+  desiredState: TenantState
+  storageReference: string | null
+  backupMetadata: string | null
+  mode: TenantStorageMode
+  migrationStatus: TenantStorageMigrationStatus
+  lastMigrationFailure: string | null
+  migrationUpdatedAt: string | null
+}
+
+export interface TenantStorageBackupReadiness extends FleetTenantBackupStatus {
+  status: 'missing' | 'invalid' | 'ready'
+  details: string
+}
+
+export interface TenantStorageStatus {
+  tenantId: string
+  currentState: TenantState
+  desiredState: TenantState
+  storageReference: string | null
+  mode: TenantStorageMode
+  migrationStatus: TenantStorageMigrationStatus
+  lastMigrationFailure: string | null
+  migrationUpdatedAt: string | null
+  cutoverReady: boolean
+  blockers: string[]
+  backup: TenantStorageBackupReadiness
+}
+
+export interface TenantStorageStatusResponse {
+  storage: TenantStorageStatus
 }
 
 export const portalBillingProviders = ['stripe', 'square', 'manual-review'] as const

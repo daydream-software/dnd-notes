@@ -39,6 +39,28 @@ describe('TenantRegistry', () => {
         true,
       )
       assert.equal(
+        tenantColumns.rows.some((column) => column.column_name === 'storage_mode'),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some(
+          (column) => column.column_name === 'storage_migration_status',
+        ),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some(
+          (column) => column.column_name === 'storage_migration_failure_reason',
+        ),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some(
+          (column) => column.column_name === 'storage_migration_updated_at',
+        ),
+        true,
+      )
+      assert.equal(
         portalAccountColumns.rows.some(
           (column) => column.column_name === 'password_hash',
         ),
@@ -243,6 +265,36 @@ describe('TenantRegistry', () => {
       assert.equal(latestTransitions.size, 2)
       assert.equal(latestTransitions.get('tenant-1')?.toState, 'ready')
       assert.equal(latestTransitions.get('tenant-2')?.toState, 'ready')
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('persists tenant storage mode and migration status separately from the storage reference', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference('tenant-1', 'pvc-tenant-one')
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'sqlite-pvc',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+
+      const storage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
+
+      assert.ok(storage)
+      assert.equal(storage.storageReference, 'pvc-tenant-one')
+      assert.equal(storage.mode, 'sqlite-pvc')
+      assert.equal(storage.migrationStatus, 'failed')
+      assert.equal(storage.lastMigrationFailure, 'Synthetic cutover failure')
+      assert.ok(storage.migrationUpdatedAt)
     } finally {
       await cleanup()
     }

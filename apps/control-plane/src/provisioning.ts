@@ -346,6 +346,17 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         refreshedTenant.id,
         bundle.resources.pvcName ?? bundle.resources.databaseName,
       )
+      await this.tenantRegistry.updateTenantStorageProfile(refreshedTenant.id, {
+        mode:
+          database.roleName === null
+            ? 'postgres-shared-user'
+            : 'postgres-dedicated-user',
+        migrationStatus:
+          database.roleName !== null && bundle.resources.pvcName === null
+            ? 'not-required'
+            : 'not-started',
+        failureReason: null,
+      })
 
       await this.infrastructureManager.applyTenantResources(bundle)
       await this.infrastructureManager.waitForTenantReady(

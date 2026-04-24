@@ -1290,6 +1290,90 @@ describe('Control Plane API', () => {
     })
   })
 
+  describe('GET /internal/tenants/:tenantId/storage', () => {
+    it('returns cutover readiness for a tenant with resumable failed storage migration state', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
+      await tenantRegistry.updateTenantState(
+        'tenant-123',
+        'ready',
+        'provisioner',
+        'Provisioned successfully',
+      )
+      await tenantRegistry.updateTenantStorageReference('tenant-123', 'pvc-tenant-123')
+      await tenantRegistry.updateTenantStorageProfile('tenant-123', {
+        mode: 'sqlite-pvc',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+      await tenantRegistry.updateTenantBackupMetadata(
+        'tenant-123',
+        JSON.stringify({
+          lastBackupAt: '2026-04-24T00:00:00Z',
+          lastBackupStatus: 'succeeded',
+          location: 'blob://backups/tenant-123',
+        }),
+      )
+
+      const response = await authedGet(`${tenantPath('tenant-123')}/storage`).expect(200)
+
+      assert.strictEqual(response.body.storage.tenantId, 'tenant-123')
+      assert.strictEqual(response.body.storage.mode, 'sqlite-pvc')
+      assert.strictEqual(response.body.storage.migrationStatus, 'failed')
+      assert.strictEqual(
+        response.body.storage.lastMigrationFailure,
+        'Synthetic cutover failure',
+      )
+      assert.strictEqual(response.body.storage.cutoverReady, true)
+      assert.deepStrictEqual(response.body.storage.blockers, [])
+      assert.strictEqual(response.body.storage.backup.status, 'ready')
+      assert.strictEqual(
+        response.body.storage.backup.location,
+        'blob://backups/tenant-123',
+      )
+    })
+
+    it('blocks cutover readiness when backup metadata is missing or tenant mode is unknown', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-456',
+        slug: 'second-tenant',
+        ownerId: 'owner-789',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantDesiredState('tenant-456', 'ready')
+      await tenantRegistry.updateTenantState(
+        'tenant-456',
+        'ready',
+        'provisioner',
+        'Provisioned successfully',
+      )
+
+      const response = await authedGet(`${tenantPath('tenant-456')}/storage`).expect(200)
+
+      assert.strictEqual(response.body.storage.mode, 'unknown')
+      assert.strictEqual(response.body.storage.migrationStatus, 'not-started')
+      assert.strictEqual(response.body.storage.cutoverReady, false)
+      assert.strictEqual(response.body.storage.backup.status, 'missing')
+      assert.match(
+        response.body.storage.blockers.join(' '),
+        /unknown|backup/i,
+      )
+    })
+
+    it('returns 404 for non-existent tenants', async () => {
+      const response = await authedGet(`${tenantPath('non-existent')}/storage`).expect(
+        404,
+      )
+
+      assert.strictEqual(response.body.error, 'Tenant not found')
+    })
+  })
+
   describe('PATCH /internal/tenants/:tenantId/state', () => {
     it('updates tenant state and records transition', async () => {
       await authedPost(tenantsPath).send({

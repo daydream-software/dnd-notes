@@ -10,15 +10,27 @@ import {
   type PortalSession,
   type StateTransition,
   type Tenant,
+  type TenantStorageMigrationStatus,
+  type TenantStorageMode,
+  type TenantStorageSnapshot,
   type TenantState,
+  tenantStorageMigrationStatuses,
+  tenantStorageModes,
 } from './types.js'
 
 const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
-const CURRENT_SCHEMA_VERSION = 6
+const tenantStorageModeSqlList = tenantStorageModes.map((mode) => `'${mode}'`).join(', ')
+const tenantStorageMigrationStatusSqlList = tenantStorageMigrationStatuses
+  .map((status) => `'${status}'`)
+  .join(', ')
+const CURRENT_SCHEMA_VERSION = 7
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 const tenantSelectColumns = `id, slug, subdomain, owner_id, display_name, plan_tier,
   initial_admin_email, desired_state, current_state, version, storage_reference,
   backup_metadata, created_at, updated_at`
+const tenantStorageSelectColumns = `id, desired_state, current_state, storage_reference,
+  backup_metadata, storage_mode, storage_migration_status,
+  storage_migration_failure_reason, storage_migration_updated_at`
 const portalAccountSelectColumns = `id, email, display_name, billing_email,
   billing_provider, password_hash, auth_provider, keycloak_sub, created_at, updated_at`
 const portalSessionSelectColumns = `id, account_id, token_hash, expires_at, created_at`
@@ -69,6 +81,18 @@ interface TenantRow {
   backup_metadata: string | null
   created_at: Date | string
   updated_at: Date | string
+}
+
+interface TenantStorageRow {
+  id: string
+  desired_state: TenantState
+  current_state: TenantState
+  storage_reference: string | null
+  backup_metadata: string | null
+  storage_mode: TenantStorageMode
+  storage_migration_status: TenantStorageMigrationStatus
+  storage_migration_failure_reason: string | null
+  storage_migration_updated_at: Date | string | null
 }
 
 interface PortalAccountRow {
@@ -318,6 +342,12 @@ export class TenantRegistry {
         version TEXT NOT NULL,
         storage_reference TEXT,
         backup_metadata TEXT,
+        storage_mode TEXT NOT NULL DEFAULT 'unknown'
+          CHECK (storage_mode IN (${tenantStorageModeSqlList})),
+        storage_migration_status TEXT NOT NULL DEFAULT 'not-started'
+          CHECK (storage_migration_status IN (${tenantStorageMigrationStatusSqlList})),
+        storage_migration_failure_reason TEXT,
+        storage_migration_updated_at TIMESTAMPTZ,
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       )
@@ -409,6 +439,36 @@ export class TenantRegistry {
       await this.pool.query(`
         CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at
         ON portal_sessions(expires_at)
+      `)
+    }
+
+    if (currentSchemaVersion > 0 && currentSchemaVersion < 7) {
+      await this.pool.query(`
+        ALTER TABLE tenants
+        ADD COLUMN IF NOT EXISTS storage_mode TEXT NOT NULL DEFAULT 'unknown'
+          CHECK (storage_mode IN (${tenantStorageModeSqlList}))
+      `)
+      await this.pool.query(`
+        ALTER TABLE tenants
+        ADD COLUMN IF NOT EXISTS storage_migration_status TEXT NOT NULL DEFAULT 'not-started'
+          CHECK (storage_migration_status IN (${tenantStorageMigrationStatusSqlList}))
+      `)
+      await this.pool.query(`
+        ALTER TABLE tenants
+        ADD COLUMN IF NOT EXISTS storage_migration_failure_reason TEXT
+      `)
+      await this.pool.query(`
+        ALTER TABLE tenants
+        ADD COLUMN IF NOT EXISTS storage_migration_updated_at TIMESTAMPTZ
+      `)
+      await this.pool.query(`
+        UPDATE tenants
+        SET storage_mode = 'postgres-dedicated-user',
+            storage_migration_status = 'not-required',
+            storage_migration_updated_at = COALESCE(storage_migration_updated_at, updated_at)
+        WHERE storage_mode = 'unknown'
+          AND storage_reference IS NOT NULL
+          AND storage_reference LIKE 'tenant\\_%' ESCAPE '\\'
       `)
     }
   }
@@ -504,6 +564,17 @@ export class TenantRegistry {
     )
 
     return row.rows[0] ? this.mapRowToTenant(row.rows[0]) : null
+  }
+
+  async getTenantStorageSnapshot(tenantId: string): Promise<TenantStorageSnapshot | null> {
+    const row = await this.run<TenantStorageRow>(
+      `SELECT ${tenantStorageSelectColumns}
+       FROM tenants
+       WHERE id = $1`,
+      [tenantId],
+    )
+
+    return row.rows[0] ? this.mapRowToTenantStorageSnapshot(row.rows[0]) : null
   }
 
   async reserveTenantSubdomain(
@@ -910,6 +981,33 @@ export class TenantRegistry {
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
   }
 
+  async updateTenantStorageProfile(
+    tenantId: string,
+    params: {
+      mode: TenantStorageMode
+      migrationStatus: TenantStorageMigrationStatus
+      failureReason?: string | null
+    },
+  ): Promise<void> {
+    const result = await this.run(
+      `UPDATE tenants
+       SET storage_mode = $1,
+           storage_migration_status = $2,
+           storage_migration_failure_reason = $3,
+           storage_migration_updated_at = CURRENT_TIMESTAMP,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE id = $4`,
+      [
+        params.mode,
+        params.migrationStatus,
+        params.failureReason ?? null,
+        tenantId,
+      ],
+    )
+
+    this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
+  }
+
   async updateTenantSubdomain(tenantId: string, subdomain: string): Promise<void> {
     const result = await this.run(
       `UPDATE tenants
@@ -1056,6 +1154,22 @@ export class TenantRegistry {
       backupMetadata: row.backup_metadata ?? null,
       createdAt: normalizeTimestamp(row.created_at),
       updatedAt: normalizeTimestamp(row.updated_at),
+    }
+  }
+
+  private mapRowToTenantStorageSnapshot(row: TenantStorageRow): TenantStorageSnapshot {
+    return {
+      tenantId: row.id,
+      currentState: row.current_state,
+      desiredState: row.desired_state,
+      storageReference: row.storage_reference ?? null,
+      backupMetadata: row.backup_metadata ?? null,
+      mode: row.storage_mode,
+      migrationStatus: row.storage_migration_status,
+      lastMigrationFailure: row.storage_migration_failure_reason ?? null,
+      migrationUpdatedAt: row.storage_migration_updated_at
+        ? normalizeTimestamp(row.storage_migration_updated_at)
+        : null,
     }
   }
 

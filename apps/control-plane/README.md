@@ -83,6 +83,7 @@ Every state change is logged with:
 
 - `GET /internal/tenants` — List all tenants
 - `GET /internal/tenants/:tenantId` — Get tenant details
+- `GET /internal/tenants/:tenantId/storage` — Inspect storage mode, migration status, and cutover readiness
 - `POST /internal/tenants` — Create a new tenant
 - `PATCH /internal/tenants/:tenantId/state` — Update current state (records transition)
 - `PATCH /internal/tenants/:tenantId/desired-state` — Update desired state
@@ -107,6 +108,12 @@ fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`,
 `lastRestoreDrillStatus`, and `location` when they already exist in JSON
 metadata; otherwise it preserves the raw string and reports the parsed fields as
 `null`.
+
+The dedicated tenant-storage endpoint adds the next cutover-focused layer on
+top: it exposes the persisted storage mode, storage-migration status, the last
+cutover failure reason when one exists, and a simple cutover-readiness gate that
+checks tenant state plus backup metadata quality before a future cutover run is
+allowed.
 
 ### Customer portal surface (`#70`)
 
