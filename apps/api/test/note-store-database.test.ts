@@ -132,6 +132,52 @@ test('sqlite async transactions roll back before queued readers resume', async (
   }
 })
 
+test('sqlite close waits for queued work before closing the database', async () => {
+  const database = createSqliteDatabase(':memory:')
+
+  try {
+    await database.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL
+      )
+    `)
+
+    const insertNote = database.prepare('INSERT INTO notes (title) VALUES (?)')
+    const listNotes = database.prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC')
+    const releaseTransaction = createDeferred()
+    const transactionEntered = createDeferred()
+
+    const createNotesInTransaction = database.transaction(async () => {
+      await insertNote.run('before-close')
+      transactionEntered.resolve()
+      await releaseTransaction.promise
+      await insertNote.run('after-close')
+    })
+
+    const transactionPromise = createNotesInTransaction()
+    await transactionEntered.promise
+
+    const queuedReadPromise = listNotes.all()
+    const closePromise = database.close()
+
+    await Promise.resolve()
+    await Promise.resolve()
+
+    releaseTransaction.resolve()
+
+    await transactionPromise
+    assert.deepEqual(
+      (await queuedReadPromise).map((row) => row.title),
+      ['before-close', 'after-close'],
+    )
+    await closePromise
+  } finally {
+    await database.close()
+  }
+})
+
+
 test('createPostgresDatabase rejects missing pool and connection string', () => {
   assert.throws(
     () => createPostgresDatabase({ connectionString: '   ' }),
@@ -331,5 +377,82 @@ test('createSqliteDatabase keeps writable file-backed stores on rollback journal
     assert.equal(journalMode?.journal_mode, 'delete')
   } finally {
     await readonlyDatabase.close()
+  }
+})
+
+test('sqlite close handles multiple concurrent close() calls safely', async () => {
+  const database = createSqliteDatabase(':memory:')
+  
+  await database.exec(`
+    CREATE TABLE notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL
+    )
+  `)
+  
+  // Call close multiple times concurrently - should be idempotent
+  await Promise.all([
+    database.close(),
+    database.close(),
+    database.close()
+  ])
+  
+  // All should complete without error (test passes if no exception thrown)
+})
+
+test('sqlite operations after close throw appropriate error', async () => {
+  const database = createSqliteDatabase(':memory:')
+  
+  await database.exec(`
+    CREATE TABLE notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      title TEXT NOT NULL
+    )
+  `)
+  
+  await database.close()
+  
+  await assert.rejects(
+    async () => await database.exec(`INSERT INTO notes (title) VALUES ('test')`),
+    { message: 'SQLite database is closed.' }
+  )
+})
+
+test('sqlite close called from within a transaction should wait', async () => {
+  const database = createSqliteDatabase(':memory:')
+  
+  try {
+    await database.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL
+      )
+    `)
+    
+    const insertNote = database.prepare('INSERT INTO notes (title) VALUES (?)')
+    let closeCalled = false
+    let transactionCompleted = false
+    
+    const transactionFn = database.transaction(async () => {
+      await insertNote.run('test-note')
+      
+      // Try to close the database from within the transaction
+      const closePromise = database.close()
+      closeCalled = true
+      
+      // Do more work after calling close
+      await insertNote.run('after-close-call')
+      transactionCompleted = true
+      
+      // Wait for close to complete
+      await closePromise
+    })
+    
+    await transactionFn()
+    
+    assert.ok(closeCalled, 'close should have been called')
+    assert.ok(transactionCompleted, 'transaction should have completed')
+  } finally {
+    await database.close()
   }
 })

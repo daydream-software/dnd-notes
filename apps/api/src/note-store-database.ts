@@ -84,6 +84,7 @@ interface LoadedSqliteDatabase {
   dbPath: string
   readonly: boolean
   closed: boolean
+  closeRequested: boolean
   persistedBytes: Buffer | null
 }
 
@@ -275,6 +276,7 @@ async function loadSqliteDatabase(
     dbPath,
     readonly: Boolean(options.readonly),
     closed: false,
+    closeRequested: false,
     persistedBytes: data ? Buffer.from(data) : null,
   }
 
@@ -319,6 +321,19 @@ async function refreshSqliteDatabaseFromDisk(state: LoadedSqliteDatabase) {
   state.database.close()
   state.database = nextDatabase
   state.persistedBytes = nextBytes ? Buffer.from(nextBytes) : null
+}
+
+function finalizeSqliteClose(state: LoadedSqliteDatabase) {
+  if (state.closed) {
+    return
+  }
+
+  if (!state.readonly) {
+    persistSqliteDatabase(state)
+  }
+
+  state.database.close()
+  state.closed = true
 }
 
 export function createSqliteDatabase(
@@ -491,27 +506,36 @@ export function createSqliteDatabase(
               }
 
               throw error
+            } finally {
+              if (state.closeRequested) {
+                finalizeSqliteClose(state)
+              }
             }
           })
         })
       }
     },
     async close() {
-      await databaseStatePromise.then(
-        (state) => {
-          if (state.closed) {
-            return
-          }
+      if (transactionExecutor.getStore()?.holdsExclusiveAccess) {
+        await databaseStatePromise.then(
+          (state) => {
+            if (!state.closed) {
+              state.closeRequested = true
+            }
+          },
+          () => undefined,
+        )
+        return
+      }
 
-          if (!state.readonly) {
-            persistSqliteDatabase(state)
-          }
-
-          state.database.close()
-          state.closed = true
-        },
-        () => undefined,
-      )
+      await runSerialized(async () => {
+        await databaseStatePromise.then(
+          (state) => {
+            finalizeSqliteClose(state)
+          },
+          () => undefined,
+        )
+      })
     },
     async backup(destinationPath: string) {
       await runSerialized(async () => {
