@@ -140,6 +140,46 @@ describe('PostgresTenantBackupRunner', () => {
     }
   })
 
+  it('decodes encoded database passwords exactly once for PGPASSWORD', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
+    const executor = new FakeCommandExecutor()
+    const runner = new PostgresTenantBackupRunner({
+      adminDatabaseUrl: 'postgresql://postgres:pa%25ss@postgres.default:5432/postgres',
+      artifactStore: new FileSystemTenantBackupArtifactStore(artifactRoot),
+      commandExecutor: executor,
+      now: () => new Date('2026-04-24T01:02:03.456Z'),
+    })
+
+    try {
+      await runner.backupTenant(createTenant())
+
+      assert.equal(executor.calls[0]?.env?.PGPASSWORD, 'pa%ss')
+    } finally {
+      await runner.close()
+      await rm(artifactRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves literal percent characters in unescaped database passwords', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
+    const executor = new FakeCommandExecutor()
+    const runner = new PostgresTenantBackupRunner({
+      adminDatabaseUrl: 'postgresql://postgres:pa%ss@postgres.default:5432/postgres',
+      artifactStore: new FileSystemTenantBackupArtifactStore(artifactRoot),
+      commandExecutor: executor,
+      now: () => new Date('2026-04-24T01:02:03.456Z'),
+    })
+
+    try {
+      await runner.backupTenant(createTenant())
+
+      assert.equal(executor.calls[0]?.env?.PGPASSWORD, 'pa%ss')
+    } finally {
+      await runner.close()
+      await rm(artifactRoot, { recursive: true, force: true })
+    }
+  })
+
   it('rejects backup attempts for PVC-backed tenants that have not cut over yet', async () => {
     const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
     const runner = new PostgresTenantBackupRunner({

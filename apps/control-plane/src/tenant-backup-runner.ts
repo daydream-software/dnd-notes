@@ -424,7 +424,7 @@ function buildPgCommandConnectionTarget(connectionString: string): {
   env?: NodeJS.ProcessEnv
 } {
   const url = new URL(connectionString)
-  const password = decodeURIComponent(url.password)
+  const password = decodePgConnectionPassword(url.password)
 
   url.password = ''
 
@@ -432,4 +432,12 @@ function buildPgCommandConnectionTarget(connectionString: string): {
     connectionString: url.toString(),
     env: password.length > 0 ? { PGPASSWORD: password } : undefined,
   }
+}
+
+function decodePgConnectionPassword(password: string): string {
+  if (!password.includes('%') || /%(?![0-9A-Fa-f]{2})/.test(password)) {
+    return password
+  }
+
+  return decodeURIComponent(password)
 }
