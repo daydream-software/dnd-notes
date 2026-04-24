@@ -182,6 +182,11 @@ export interface CreateNoteStoreOptions {
   siteAdminEmails?: readonly string[]
 }
 
+export type RuntimeNoteStoreOptions = Omit<
+  CreateNoteStoreOptions,
+  'backend' | 'dbPath'
+>
+
 export class InvalidBackupDatabaseError extends Error {}
 export const ownerKeycloakLinkConflictCode = 'OWNER_KEYCLOAK_LINK_CONFLICT'
 
@@ -824,7 +829,6 @@ function mapCampaignShareLinkRow(row: CampaignShareLinkRow): CampaignShareLink {
 export async function createNoteStore(
   options: CreateNoteStoreOptions = {},
 ): Promise<NoteStore> {
-  const dbPath = resolveNoteDbPath(options)
   const backend = resolveNoteStoreBackend(options)
   const databaseUrl = backend === 'postgres' ? requirePostgresDatabaseUrl(options) : null
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
@@ -834,7 +838,7 @@ export async function createNoteStore(
           connectionString: databaseUrl ?? undefined,
           pool: options.postgresPool,
         })
-      : createSqliteDatabase(dbPath)
+      : createSqliteDatabase(resolveNoteDbPath(options))
 
   await initializeDatabaseOrClose(database, () =>
     initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
@@ -2787,7 +2791,7 @@ export async function restoreNoteStoreFromBackup(
   options: CreateNoteStoreOptions = {},
 ): Promise<NoteStore> {
   const backend = resolveNoteStoreBackend(options)
-  const dbPath = resolveNoteDbPath(options)
+  const dbPath = backend === 'sqlite' ? resolveNoteDbPath(options) : null
 
   if (dbPath === ':memory:') {
     throw new Error('Admin restore is not supported for in-memory note stores.')
@@ -2795,7 +2799,7 @@ export async function restoreNoteStoreFromBackup(
 
   const { directory: workingCopyDirectory, path: workingCopyPath } = createRestoreWorkingCopy(
     backend,
-    dbPath,
+    dbPath ?? defaultDbPath,
   )
 
   const validationDatabase = new Database(sourcePath, {
@@ -2855,6 +2859,9 @@ export async function restoreNoteStoreFromBackup(
     }
 
     if (backend === 'sqlite') {
+      if (!dbPath) {
+        throw new Error('SQLite restore requires a target dbPath.')
+      }
       mkdirSync(dirname(dbPath), { recursive: true })
       copyFileSync(workingCopyPath, dbPath)
       tightenSqliteFilePermissions(dbPath)
@@ -2899,4 +2906,23 @@ export async function restoreNoteStoreFromBackup(
       rmSync(workingCopyDirectory, { recursive: true, force: true })
     }
   }
+}
+
+export async function createRuntimeNoteStore(
+  options: RuntimeNoteStoreOptions = {},
+): Promise<NoteStore> {
+  return createNoteStore({
+    ...options,
+    backend: 'postgres',
+  })
+}
+
+export async function restoreRuntimeNoteStoreFromBackup(
+  sourcePath: string,
+  options: RuntimeNoteStoreOptions = {},
+): Promise<NoteStore> {
+  return restoreNoteStoreFromBackup(sourcePath, {
+    ...options,
+    backend: 'postgres',
+  })
 }
