@@ -2,7 +2,10 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { DataType, newDb } from 'pg-mem'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
-import { createTenantRegistryPoolConfig } from '../src/tenant-registry-postgres.js'
+import {
+  createTenantRegistryPoolConfig,
+  TenantRegistryLockTimeoutError,
+} from '../src/tenant-registry-postgres.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 
@@ -346,13 +349,12 @@ describe('TenantRegistry', () => {
     }
   })
 
-  it('takes a tenant advisory lock before running serialized work', async () => {
+  it('reuses the locked registry session for tenant work without extra pool checkouts', async () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
-    let statementTimeout = '30s'
     db.public.registerFunction({
-      name: 'pg_advisory_lock',
+      name: 'pg_try_advisory_lock',
       args: [DataType.integer, DataType.integer],
       returns: DataType.bool,
       implementation: () => true,
@@ -363,62 +365,26 @@ describe('TenantRegistry', () => {
       returns: DataType.bool,
       implementation: () => true,
     })
-    db.public.registerFunction({
-      name: 'current_setting',
-      args: [DataType.text],
-      returns: DataType.text,
-      implementation: (settingName: string) => {
-        if (settingName === 'statement_timeout') {
-          return statementTimeout
-        }
-
-        throw new Error(`Unsupported current_setting(${settingName}) in test`)
-      },
-    })
-    db.public.registerFunction({
-      name: 'set_config',
-      args: [DataType.text, DataType.text, DataType.bool],
-      returns: DataType.text,
-      implementation: (
-        settingName: string,
-        settingValue: string,
-        isLocal: boolean,
-      ) => {
-        if (settingName === 'statement_timeout' && isLocal === false) {
-          statementTimeout = settingValue
-          return statementTimeout
-        }
-
-        throw new Error(`Unsupported set_config(${settingName}) in test`)
-      },
-    })
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
+    let connectCount = 0
     let observedTenantLock = false
     let observedTenantUnlock = false
-    let observedStatementTimeoutDisable = false
-    let observedStatementTimeoutRestore = false
     const wrappedPool = {
       async query(text: string, values?: readonly unknown[]) {
         return await pool.query(text, values as unknown[])
       },
       async connect() {
+        connectCount += 1
         const client = await pool.connect()
 
         return {
           async query(text: string, values?: readonly unknown[]) {
-            if (text.includes('pg_advisory_lock')) {
+            if (text.includes('pg_try_advisory_lock')) {
               observedTenantLock = true
             }
             if (text.includes('pg_advisory_unlock')) {
               observedTenantUnlock = true
-            }
-            if (text.includes('set_config') && values?.[0] === 'statement_timeout') {
-              if (values[1] === '0') {
-                observedStatementTimeoutDisable = true
-              } else if (values[1] === '30s') {
-                observedStatementTimeoutRestore = true
-              }
             }
 
             return await client.query(text, values as unknown[])
@@ -443,19 +409,90 @@ describe('TenantRegistry', () => {
         ownerId: 'owner-1',
         version: '1.0.0',
       })
+      connectCount = 0
 
       let operationRan = false
-      await tenantRegistry.withTenantLock('tenant-1', async () => {
+      await tenantRegistry.withTenantLock('tenant-1', async (registryClient) => {
         operationRan = true
         assert.equal(observedTenantLock, true)
         assert.equal(observedTenantUnlock, false)
-        assert.equal(observedStatementTimeoutDisable, true)
-        assert.equal(observedStatementTimeoutRestore, false)
+        assert.equal(
+          (await tenantRegistry.getTenant('tenant-1', registryClient))?.currentState,
+          'provisioning',
+        )
+
+        await tenantRegistry.updateTenantDesiredState(
+          'tenant-1',
+          'ready',
+          registryClient,
+        )
+        await tenantRegistry.updateTenantState(
+          'tenant-1',
+          'ready',
+          'test-suite',
+          undefined,
+          registryClient,
+        )
+
+        const updatedTenant = await tenantRegistry.getTenant('tenant-1', registryClient)
+        assert.equal(updatedTenant?.desiredState, 'ready')
+        assert.equal(updatedTenant?.currentState, 'ready')
+        assert.equal(connectCount, 1)
       })
 
       assert.equal(operationRan, true)
       assert.equal(observedTenantUnlock, true)
-      assert.equal(observedStatementTimeoutRestore, true)
+      assert.equal(connectCount, 1)
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('fails fast when a tenant advisory lock stays busy', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => false,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool,
+      tenantLockAcquireTimeoutMs: 20,
+      tenantLockRetryDelayMs: 1,
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.withTenantLock('tenant-1', async () => {
+            throw new Error('locked operation should not run')
+          }),
+        (error) => {
+          assert.ok(error instanceof TenantRegistryLockTimeoutError)
+          assert.equal(error.tenantId, 'tenant-1')
+          assert.equal(error.timeoutMs, 20)
+          return true
+        },
+      )
     } finally {
       await tenantRegistry.close()
       await pool.end()
@@ -468,9 +505,8 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
-    let statementTimeout = '30s'
     db.public.registerFunction({
-      name: 'pg_advisory_lock',
+      name: 'pg_try_advisory_lock',
       args: [DataType.integer, DataType.integer],
       returns: DataType.bool,
       implementation: () => true,
@@ -480,35 +516,6 @@ describe('TenantRegistry', () => {
       args: [DataType.integer, DataType.integer],
       returns: DataType.bool,
       implementation: () => true,
-    })
-    db.public.registerFunction({
-      name: 'current_setting',
-      args: [DataType.text],
-      returns: DataType.text,
-      implementation: (settingName: string) => {
-        if (settingName === 'statement_timeout') {
-          return statementTimeout
-        }
-
-        throw new Error(`Unsupported current_setting(${settingName}) in test`)
-      },
-    })
-    db.public.registerFunction({
-      name: 'set_config',
-      args: [DataType.text, DataType.text, DataType.bool],
-      returns: DataType.text,
-      implementation: (
-        settingName: string,
-        settingValue: string,
-        isLocal: boolean,
-      ) => {
-        if (settingName === 'statement_timeout' && isLocal === false) {
-          statementTimeout = settingValue
-          return statementTimeout
-        }
-
-        throw new Error(`Unsupported set_config(${settingName}) in test`)
-      },
     })
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
@@ -788,13 +795,14 @@ describe('TenantRegistry', () => {
       /Invalid CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS value: fast/,
     )
 
-    assert.throws(
-      () =>
-        createTenantRegistryPoolConfig('postgres://control-plane.test/tenant-registry', {
-          CONTROL_PLANE_DATABASE_POOL_MAX: '1',
-        }),
-      /CONTROL_PLANE_DATABASE_POOL_MAX \(1\) must be at least 2/,
+    const singleConnectionConfig = createTenantRegistryPoolConfig(
+      'postgres://control-plane.test/tenant-registry',
+      {
+        CONTROL_PLANE_DATABASE_POOL_MAX: '1',
+      },
     )
+
+    assert.equal(singleConnectionConfig.max, 1)
   })
 
   it('persists portal accounts and bearer-token sessions while purging expired sessions', async () => {

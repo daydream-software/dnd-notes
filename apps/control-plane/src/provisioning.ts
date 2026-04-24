@@ -31,7 +31,7 @@ import type {
   TenantProvisioningResources,
   TenantProvisioningResponse,
 } from './types.js'
-import type { TenantRegistry } from './tenant-registry.js'
+import type { TenantRegistry, TenantRegistryClientLike } from './tenant-registry.js'
 
 const opaqueSubdomainPrefix = 't'
 const defaultTenantPort = 3000
@@ -242,8 +242,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     version?: string
   }): Promise<TenantProvisioningResponse> {
     const requestedVersion = normalizeTenantVersionOverride(params.version)
-    return this.tenantRegistry.withTenantLock(params.tenantId, async () => {
-      const tenant = await this.getExistingTenant(params.tenantId)
+    return this.tenantRegistry.withTenantLock(params.tenantId, async (registryClient) => {
+      const tenant = await this.getExistingTenant(params.tenantId, registryClient)
       const isExistingRolloutState =
         tenant.currentState === 'ready' ||
         tenant.currentState === 'upgrading' ||
@@ -283,10 +283,14 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       }
 
       if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
-        await this.tenantRegistry.updateTenantVersion(tenant.id, requestedVersion)
+        await this.tenantRegistry.updateTenantVersion(
+          tenant.id,
+          requestedVersion,
+          registryClient,
+        )
       }
 
-      const refreshedTenant = await this.getExistingTenant(tenant.id)
+      const refreshedTenant = await this.getExistingTenant(tenant.id, registryClient)
       const hadPersistedSubdomain = refreshedTenant.subdomain != null
       const shouldMarkUpgrading =
         isVersionRollout &&
@@ -294,13 +298,18 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         refreshedTenant.currentState === 'ready'
 
       try {
-        await this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
+        await this.tenantRegistry.updateTenantDesiredState(
+          refreshedTenant.id,
+          'ready',
+          registryClient,
+        )
         if (shouldMarkUpgrading) {
           await this.tenantRegistry.updateTenantState(
             refreshedTenant.id,
             'upgrading',
             params.triggeredBy,
             params.reason ?? 'Tenant rolling update started',
+            registryClient,
           )
         }
         const subdomain = assertPersistedTenantSubdomain(
@@ -308,11 +317,13 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           await this.tenantRegistry.reserveTenantSubdomain(
             refreshedTenant.id,
             () => this.createOpaqueSubdomainCandidate(),
+            10,
+            registryClient,
           ),
           'provisioning tenant resources',
         )
         const existingResources = buildTenantResourceNames({
-          tenant: await this.getExistingTenant(refreshedTenant.id),
+          tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
           subdomain,
           baseDomain: this.baseDomain,
           imageRepository: this.imageRepository,
@@ -337,7 +348,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         )
 
         const bundle = buildTenantInfrastructureBundle({
-          tenant: await this.getExistingTenant(refreshedTenant.id),
+          tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
           subdomain,
           database,
           tenantRuntimeAuth: this.tenantRuntimeAuth,
@@ -350,6 +361,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         })
         const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
           refreshedTenant.id,
+          registryClient,
         )
         if (!currentStorage) {
           throw new Error(`Tenant ${refreshedTenant.id} not found`)
@@ -370,16 +382,21 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         await this.tenantRegistry.updateTenantStorageReference(
           refreshedTenant.id,
           bundle.resources.pvcName ?? database.databaseName,
+          registryClient,
         )
-        await this.tenantRegistry.updateTenantStorageProfile(refreshedTenant.id, {
-          mode: nextStorageMode,
-          migrationStatus: shouldInitializeNotRequiredMigrationStatus
-            ? 'not-required'
-            : currentStorage.migrationStatus,
-          failureReason: shouldInitializeNotRequiredMigrationStatus
-            ? null
-            : currentStorage.lastMigrationFailure,
-        })
+        await this.tenantRegistry.updateTenantStorageProfile(
+          refreshedTenant.id,
+          {
+            mode: nextStorageMode,
+            migrationStatus: shouldInitializeNotRequiredMigrationStatus
+              ? 'not-required'
+              : currentStorage.migrationStatus,
+            failureReason: shouldInitializeNotRequiredMigrationStatus
+              ? null
+              : currentStorage.lastMigrationFailure,
+          },
+          registryClient,
+        )
 
         await this.infrastructureManager.applyTenantResources(bundle)
         await this.infrastructureManager.waitForTenantReady(
@@ -387,28 +404,36 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           this.readyTimeoutMs,
         )
 
-        const currentTenant = await this.getExistingTenant(refreshedTenant.id)
+        const currentTenant = await this.getExistingTenant(
+          refreshedTenant.id,
+          registryClient,
+        )
         if (currentTenant.currentState !== 'ready') {
           await this.tenantRegistry.updateTenantState(
             refreshedTenant.id,
             'ready',
             params.triggeredBy,
             params.reason ?? 'Tenant resources provisioned',
+            registryClient,
           )
         }
 
         return {
-          tenant: await this.getExistingTenant(refreshedTenant.id),
+          tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
           resources: bundle.resources,
         }
       } catch (error) {
-        const failedTenant = await this.getExistingTenant(refreshedTenant.id)
+        const failedTenant = await this.getExistingTenant(
+          refreshedTenant.id,
+          registryClient,
+        )
         if (failedTenant.currentState !== 'failed') {
           await this.tenantRegistry.updateTenantState(
             refreshedTenant.id,
             'failed',
             params.triggeredBy,
             params.reason ?? 'Tenant provisioning failed',
+            registryClient,
           )
         }
         throw error
@@ -421,8 +446,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     triggeredBy: string
     reason?: string
   }): Promise<TenantDeprovisionResponse> {
-    return this.tenantRegistry.withTenantLock(params.tenantId, async () => {
-      const tenant = await this.getExistingTenant(params.tenantId)
+    return this.tenantRegistry.withTenantLock(params.tenantId, async (registryClient) => {
+      const tenant = await this.getExistingTenant(params.tenantId, registryClient)
 
       if (tenant.currentState === 'deprovisioned') {
         return {
@@ -449,19 +474,28 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       }
 
       if (tenant.storageReference) {
-        await this.tenantRegistry.updateTenantStorageReference(tenant.id, null)
+        await this.tenantRegistry.updateTenantStorageReference(
+          tenant.id,
+          null,
+          registryClient,
+        )
       }
 
-      await this.tenantRegistry.updateTenantDesiredState(tenant.id, 'deprovisioned')
+      await this.tenantRegistry.updateTenantDesiredState(
+        tenant.id,
+        'deprovisioned',
+        registryClient,
+      )
       await this.tenantRegistry.updateTenantState(
         tenant.id,
         'deprovisioned',
         params.triggeredBy,
         params.reason ?? 'Tenant resources deleted',
+        registryClient,
       )
 
       return {
-        tenant: await this.getExistingTenant(tenant.id),
+        tenant: await this.getExistingTenant(tenant.id, registryClient),
         deprovisioned: true,
       }
     })
@@ -475,8 +509,11 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     return `${opaqueSubdomainPrefix}-${randomBytes(6).toString('hex')}`
   }
 
-  private async getExistingTenant(tenantId: string): Promise<Tenant> {
-    const tenant = await this.tenantRegistry.getTenant(tenantId)
+  private async getExistingTenant(
+    tenantId: string,
+    executor?: TenantRegistryClientLike,
+  ): Promise<Tenant> {
+    const tenant = await this.tenantRegistry.getTenant(tenantId, executor)
     if (!tenant) {
       throw new Error(`Tenant ${tenantId} not found`)
     }

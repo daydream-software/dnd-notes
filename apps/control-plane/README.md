@@ -229,7 +229,7 @@ Environment variables:
 - `PORT` — HTTP port (default: 3001)
 - `CONTROL_PLANE_DATABASE_URL` — required Postgres connection string for the control-plane registry pool
 - `CONTROL_PLANE_DATABASE_POOL_MIN` — minimum Postgres connections kept in the control-plane registry pool (default: `0`)
-- `CONTROL_PLANE_DATABASE_POOL_MAX` — maximum Postgres connections allowed in the control-plane registry pool (default: `10`, minimum: `2`)
+- `CONTROL_PLANE_DATABASE_POOL_MAX` — maximum Postgres connections allowed in the control-plane registry pool (default: `10`)
 - `CONTROL_PLANE_DATABASE_IDLE_TIMEOUT_MS` — idle Postgres connection timeout for the control-plane registry pool (default: `30000`)
 - `CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS` — connection acquisition timeout for the control-plane registry pool (default: `10000`)
 - `CONTROL_PLANE_DATABASE_STATEMENT_TIMEOUT_MS` — statement timeout for control-plane registry queries (default: `30000`)

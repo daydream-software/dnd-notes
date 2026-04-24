@@ -7,7 +7,7 @@ export function createTestTenantRegistry() {
   })
   let statementTimeout = '30s'
   db.public.registerFunction({
-    name: 'pg_advisory_lock',
+    name: 'pg_try_advisory_lock',
     args: [DataType.integer, DataType.integer],
     returns: DataType.bool,
     implementation: () => true,

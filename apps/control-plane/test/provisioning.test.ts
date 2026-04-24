@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { ApiException, type KubernetesObject, type V1Status } from '@kubernetes/client-node'
+import { DataType, newDb } from 'pg-mem'
 import {
   KubernetesTenantInfrastructureManager,
   PostgresTenantDatabaseManager,
@@ -12,6 +13,7 @@ import {
   buildTenantResourceNames,
   type TenantProvisioningPort,
 } from '../src/provisioning.js'
+import { TenantRegistry } from '../src/tenant-registry.js'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 import type { Tenant, TenantProvisioningResources } from '../src/types.js'
@@ -315,6 +317,84 @@ describe('TenantProvisioningService', () => {
     } finally {
       await provisioningService.close()
       await cleanup()
+    }
+  })
+
+  it('reuses the locked tenant-registry client throughout provisioning', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let connectCount = 0
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        return await pool.query(text, values as unknown[])
+      },
+      async connect() {
+        connectCount += 1
+        const client = await pool.connect()
+
+        return {
+          async query(text: string, values?: readonly unknown[]) {
+            return await client.query(text, values as unknown[])
+          },
+          release(error?: Error) {
+            client.release(error)
+          },
+        }
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry(
+      'postgres://control-plane.test/tenant-registry',
+      { pool: wrappedPool },
+    )
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      connectCount = 0
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(connectCount, 1)
+    } finally {
+      await provisioningService.close()
+      await tenantRegistry.close()
+      await pool.end()
     }
   })
 
