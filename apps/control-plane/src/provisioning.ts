@@ -20,7 +20,10 @@ import {
   applyLeastPrivilegeTenantGrants,
   initializeTenantNoteStoreDatabase,
 } from './tenant-database-bootstrap.js'
-import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
+import {
+  assertPersistedTenantSubdomain,
+  tenantPvcNamePrefix,
+} from './tenant-subdomain.js'
 import type {
   Tenant,
   TenantDeprovisionResponse,
@@ -344,7 +347,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       })
       await this.tenantRegistry.updateTenantStorageReference(
         refreshedTenant.id,
-        bundle.resources.pvcName ?? bundle.resources.databaseName,
+        bundle.resources.pvcName ?? database.databaseName,
       )
 
       await this.infrastructureManager.applyTenantResources(bundle)
@@ -841,12 +844,15 @@ export function createLiveTenantProvisioningService(params: {
 export function buildTenantInfrastructureBundle(
   options: BuildTenantInfrastructureBundleOptions,
 ): TenantInfrastructureBundle {
-  const resources = buildTenantResourceNames({
-    tenant: options.tenant,
-    subdomain: options.subdomain,
-    baseDomain: options.baseDomain,
-    imageRepository: options.imageRepository,
-  })
+  const resources = {
+    ...buildTenantResourceNames({
+      tenant: options.tenant,
+      subdomain: options.subdomain,
+      baseDomain: options.baseDomain,
+      imageRepository: options.imageRepository,
+    }),
+    databaseName: options.database.databaseName,
+  }
   const runtimeUrl = `${options.publicScheme}://${resources.hostname}`
   const namespaceLabels = buildTenantLabels(options.tenant, options.subdomain)
 
@@ -1207,7 +1213,7 @@ export function buildTenantResourceNames(params: {
 }
 
 function buildLegacyTenantPvcName(subdomain: string): string {
-  return `dnd-notes-data-${subdomain}`
+  return `${tenantPvcNamePrefix}${subdomain}`
 }
 
 function buildTenantSelectorLabels(tenant: Tenant): Record<string, string> {

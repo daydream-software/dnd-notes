@@ -240,11 +240,18 @@ describe('TenantProvisioningService', () => {
         tenantId: 'tenant-demo',
         triggeredBy: 'control-plane',
       })
+      const runtimeDatabaseUrl = new URL(
+        infrastructureManager.bundles[0].runtimeConnectionString ?? '',
+      )
 
       assert.equal(result.tenant.currentState, 'ready')
       assert.equal(result.tenant.desiredState, 'ready')
       assert.match(result.tenant.subdomain ?? '', /^t-[0-9a-f]{12}$/)
-      assert.equal(result.tenant.storageReference, result.resources.databaseName)
+      assert.equal(
+        result.tenant.storageReference,
+        runtimeDatabaseUrl.pathname.slice(1),
+      )
+      assert.equal(result.resources.databaseName, runtimeDatabaseUrl.pathname.slice(1))
       assert.equal(result.resources.pvcName, null)
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
@@ -262,9 +269,6 @@ describe('TenantProvisioningService', () => {
       assert.equal(
         infrastructureManager.bundles[0].resources.hostname,
         `${result.tenant.subdomain}.dnd-notes.test`,
-      )
-      const runtimeDatabaseUrl = new URL(
-        infrastructureManager.bundles[0].runtimeConnectionString ?? '',
       )
       assert.equal(
         decodeURIComponent(runtimeDatabaseUrl.username).startsWith('tenant_rt_'),
