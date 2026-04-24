@@ -39,6 +39,28 @@ describe('TenantRegistry', () => {
         true,
       )
       assert.equal(
+        tenantColumns.rows.some((column) => column.column_name === 'storage_mode'),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some(
+          (column) => column.column_name === 'storage_migration_status',
+        ),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some(
+          (column) => column.column_name === 'storage_migration_failure_reason',
+        ),
+        true,
+      )
+      assert.equal(
+        tenantColumns.rows.some(
+          (column) => column.column_name === 'storage_migration_updated_at',
+        ),
+        true,
+      )
+      assert.equal(
         portalAccountColumns.rows.some(
           (column) => column.column_name === 'password_hash',
         ),
@@ -245,6 +267,139 @@ describe('TenantRegistry', () => {
       assert.equal(latestTransitions.get('tenant-2')?.toState, 'ready')
     } finally {
       await cleanup()
+    }
+  })
+
+  it('persists tenant storage mode and migration status separately from the storage reference', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference('tenant-1', 'pvc-tenant-one')
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'sqlite-pvc',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+
+      const storage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
+
+      assert.ok(storage)
+      assert.equal(storage.storageReference, 'pvc-tenant-one')
+      assert.equal(storage.mode, 'sqlite-pvc')
+      assert.equal(storage.migrationStatus, 'failed')
+      assert.equal(storage.lastMigrationFailure, 'Synthetic cutover failure')
+      assert.ok(storage.migrationUpdatedAt)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('keeps migrated pre-v7 tenants conservative when storage_reference only hints at postgres', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    await pool.query(`
+      CREATE TABLE tenants (
+        id TEXT PRIMARY KEY,
+        slug TEXT NOT NULL UNIQUE,
+        subdomain TEXT,
+        owner_id TEXT NOT NULL,
+        display_name TEXT,
+        plan_tier TEXT,
+        initial_admin_email TEXT,
+        desired_state TEXT NOT NULL,
+        current_state TEXT NOT NULL,
+        version TEXT NOT NULL,
+        storage_reference TEXT,
+        backup_metadata TEXT,
+        storage_mode TEXT,
+        storage_migration_status TEXT,
+        storage_migration_failure_reason TEXT,
+        storage_migration_updated_at TIMESTAMPTZ,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `)
+    await pool.query(`
+      INSERT INTO tenants (
+        id,
+        slug,
+        subdomain,
+        owner_id,
+        desired_state,
+        current_state,
+        version,
+        storage_reference,
+        storage_mode,
+        storage_migration_status
+      )
+      VALUES (
+        'tenant-1',
+        'tenant-one',
+        't-tenantone',
+        'owner-1',
+        'ready',
+        'ready',
+        '1.0.0',
+        'tenant_existing_reference',
+        'unknown',
+        'not-started'
+      )
+    `)
+    let schemaVersionInjected = false
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        if (
+          !schemaVersionInjected &&
+          text.includes('SELECT version') &&
+          text.includes('FROM schema_version')
+        ) {
+          schemaVersionInjected = true
+          return {
+            rowCount: 1,
+            rows: [{ version: 6 }],
+          }
+        }
+
+        if (text.includes('CREATE TABLE IF NOT EXISTS tenants')) {
+          return {
+            rowCount: null,
+            rows: [],
+          }
+        }
+
+        return await pool.query(text, values as unknown[])
+      },
+      async connect() {
+        return await pool.connect()
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: wrappedPool,
+    })
+
+    try {
+      const storage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
+
+      assert.ok(storage)
+      assert.equal(storage.mode, 'unknown')
+      assert.equal(storage.migrationStatus, 'not-started')
+      assert.equal(storage.lastMigrationFailure, null)
+      assert.equal(storage.storageReference, 'tenant_existing_reference')
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
     }
   })
 

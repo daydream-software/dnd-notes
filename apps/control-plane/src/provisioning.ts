@@ -345,10 +345,38 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         publicScheme: this.publicScheme,
         tenantPort: this.tenantPort,
       })
+      const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
+        refreshedTenant.id,
+      )
+      if (!currentStorage) {
+        throw new Error(`Tenant ${refreshedTenant.id} not found`)
+      }
+      const nextStorageMode =
+        bundle.resources.pvcName !== null
+          ? 'sqlite-pvc'
+          : database.roleName === null
+            ? 'postgres-shared-user'
+            : 'postgres-dedicated-user'
+      const shouldInitializeNotRequiredMigrationStatus =
+        nextStorageMode === 'postgres-dedicated-user' &&
+        currentStorage?.mode === 'unknown' &&
+        currentStorage.migrationStatus === 'not-started' &&
+        currentStorage.lastMigrationFailure === null &&
+        refreshedTenant.storageReference === null
+
       await this.tenantRegistry.updateTenantStorageReference(
         refreshedTenant.id,
         bundle.resources.pvcName ?? database.databaseName,
       )
+      await this.tenantRegistry.updateTenantStorageProfile(refreshedTenant.id, {
+        mode: nextStorageMode,
+        migrationStatus: shouldInitializeNotRequiredMigrationStatus
+          ? 'not-required'
+          : currentStorage.migrationStatus,
+        failureReason: shouldInitializeNotRequiredMigrationStatus
+          ? null
+          : currentStorage.lastMigrationFailure,
+      })
 
       await this.infrastructureManager.applyTenantResources(bundle)
       await this.infrastructureManager.waitForTenantReady(

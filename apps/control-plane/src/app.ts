@@ -41,6 +41,10 @@ import type {
   TenantDetailResponse,
   TenantListResponse,
   TenantProvisioningResponse,
+  TenantStorageBackupReadiness,
+  TenantStorageSnapshot,
+  TenantStorageStatus,
+  TenantStorageStatusResponse,
 } from './types.js'
 import { portalBillingProviders } from './types.js'
 
@@ -117,6 +121,112 @@ function parseBackupMetadata(rawMetadata: string | null) {
 
 function hasBackupMetadata(rawMetadata: string | null) {
   return rawMetadata !== null && rawMetadata.trim().length > 0
+}
+
+const successfulCutoverBackupStatuses = new Set([
+  'ok',
+  'passed',
+  'success',
+  'succeeded',
+  'completed',
+])
+
+function describeTenantCutoverBackupReadiness(
+  rawMetadata: string | null,
+): TenantStorageBackupReadiness {
+  const backup = parseBackupMetadata(rawMetadata)
+
+  if (!backup.rawMetadata) {
+    return {
+      ...backup,
+      status: 'missing',
+      details: 'Record a successful backup before tenant cutover can start.',
+    }
+  }
+
+  if (!backup.location || !backup.lastBackupAt) {
+    return {
+      ...backup,
+      status: 'invalid',
+      details: 'Backup metadata must include both location and lastBackupAt before cutover.',
+    }
+  }
+
+  const normalizedStatus = backup.lastBackupStatus?.trim().toLowerCase() ?? null
+
+  if (!normalizedStatus) {
+    return {
+      ...backup,
+      status: 'invalid',
+      details:
+        'Backup metadata must include a successful lastBackupStatus before cutover.',
+    }
+  }
+
+  if (normalizedStatus && !successfulCutoverBackupStatuses.has(normalizedStatus)) {
+    return {
+      ...backup,
+      status: 'invalid',
+      details: `Latest backup status "${backup.lastBackupStatus}" is not cutover-ready.`,
+    }
+  }
+
+  return {
+    ...backup,
+    status: 'ready',
+    details: 'Latest backup metadata is sufficient for cutover gating.',
+  }
+}
+
+function buildTenantStorageStatus(snapshot: TenantStorageSnapshot): TenantStorageStatus {
+  const backup = describeTenantCutoverBackupReadiness(snapshot.backupMetadata)
+  const blockers: string[] = []
+
+  if (snapshot.currentState !== 'ready') {
+    blockers.push(
+      `Tenant must be ready before cutover (current state: ${snapshot.currentState}).`,
+    )
+  }
+
+  if (snapshot.desiredState !== 'ready') {
+    blockers.push(
+      `Tenant desired state must be ready before cutover (desired state: ${snapshot.desiredState}).`,
+    )
+  }
+
+  if (snapshot.mode === 'unknown') {
+    blockers.push('Tenant storage mode is unknown; inspect runtime wiring before cutover.')
+  }
+
+  if (snapshot.migrationStatus === 'in-progress') {
+    blockers.push('Tenant storage cutover is already in progress.')
+  }
+
+  if (
+    snapshot.mode === 'postgres-dedicated-user' &&
+    (snapshot.migrationStatus === 'not-required' ||
+      snapshot.migrationStatus === 'completed')
+  ) {
+    blockers.push('Tenant already uses the target dedicated Postgres runtime shape.')
+  }
+
+  if (backup.status !== 'ready') {
+    blockers.push(backup.details)
+  }
+
+  return {
+    tenantId: snapshot.tenantId,
+    currentState: snapshot.currentState,
+    desiredState: snapshot.desiredState,
+    storageReference: snapshot.storageReference,
+    mode: snapshot.mode,
+    migrationStatus: snapshot.migrationStatus,
+    lastMigrationFailure: snapshot.lastMigrationFailure,
+    migrationUpdatedAt: snapshot.migrationUpdatedAt,
+    cutoverReady: blockers.length === 0,
+    blockers,
+    backup,
+  }
 }
 
 interface RateLimitBucket {
@@ -1232,6 +1342,24 @@ export function createApp({
       }
 
       response.json({ tenant })
+    },
+  )
+
+  app.get(
+    `${tenantRoutePrefix}/:tenantId/storage`,
+    async (
+      request: Request<{ tenantId: string }>,
+      response: Response<TenantStorageStatusResponse | ErrorResponse>,
+    ) => {
+      const { tenantId } = request.params
+      const storage = await tenantRegistry.getTenantStorageSnapshot(tenantId)
+
+      if (!storage) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+
+      response.json({ storage: buildTenantStorageStatus(storage) })
     },
   )
 
