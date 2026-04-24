@@ -26,12 +26,15 @@ Build and run the production container:
 ```bash
 docker build -t dnd-notes:latest .
 docker run -p 3000:3000 \
+  -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd_notes \
   -e SERVE_WEB=true \
   -e PUBLIC_WEB_URL=http://localhost:3000 \
   dnd-notes:latest
 ```
 
 The container serves both web and API on the same origin at port 3000.
+The runtime is Postgres-only, so the container also needs a reachable
+`DATABASE_URL`.
 
 If you need a split-origin frontend build instead, set `VITE_API_BASE_URL` before
 building `apps/web`. When the variable is unset, production builds now default to

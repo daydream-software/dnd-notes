@@ -176,7 +176,7 @@ test('invalid note payloads return explicit errors for an authenticated owner', 
   assert.match(response.body.details[0], /Title|Body/)
 })
 
-test('notes and owner sessions persist across app recreation when using the same database file', async (t) => {
+test('notes and owner sessions persist across app recreation when using the same Postgres pool', async (t) => {
   const { pool } = createTestPgMemPool()
   t.after(async () => {
     await pool.end()

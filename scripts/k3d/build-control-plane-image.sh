@@ -6,6 +6,8 @@ CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 CONTROL_PLANE_IMAGE_REPOSITORY="${CONTROL_PLANE_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-control-plane}"
 CONTROL_PLANE_IMAGE_TAG="${CONTROL_PLANE_IMAGE_TAG:-k3d}"
 IMAGE_IMPORT_MODE="${K3D_IMAGE_IMPORT_MODE:-direct}"
+IMAGE_IMPORT_FALLBACK_MODE="${K3D_IMAGE_IMPORT_FALLBACK_MODE:-tools}"
+IMAGE_IMPORT_TIMEOUT_SECONDS="${K3D_IMAGE_IMPORT_TIMEOUT_SECONDS:-180}"
 IMAGE_REF="${CONTROL_PLANE_IMAGE_REPOSITORY}:${CONTROL_PLANE_IMAGE_TAG}"
 
 usage() {
@@ -17,6 +19,8 @@ Environment overrides:
   CONTROL_PLANE_IMAGE_REPOSITORY  Image repository (default: ghcr.io/daydream-software/dnd-notes-control-plane)
   CONTROL_PLANE_IMAGE_TAG         Image tag (default: k3d)
   K3D_IMAGE_IMPORT_MODE           k3d image import mode (default: direct)
+  K3D_IMAGE_IMPORT_FALLBACK_MODE  retry mode when the primary import stalls/fails (default: tools)
+  K3D_IMAGE_IMPORT_TIMEOUT_SECONDS  per-import timeout in seconds when `timeout` is available (default: 180)
 EOF
 }
 
@@ -48,7 +52,27 @@ fi
 echo "Building control-plane image ${IMAGE_REF}..."
 docker build -f "${ROOT}/docker/control-plane/Dockerfile" -t "${IMAGE_REF}" "${ROOT}"
 
-echo "Importing ${IMAGE_REF} into k3d cluster ${CLUSTER_NAME} with mode ${IMAGE_IMPORT_MODE}..."
-k3d image import --mode "${IMAGE_IMPORT_MODE}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"
+run_image_import() {
+  local mode="$1"
+
+  echo "Importing ${IMAGE_REF} into k3d cluster ${CLUSTER_NAME} with mode ${mode}..."
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "${IMAGE_IMPORT_TIMEOUT_SECONDS}" \
+      k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"
+    return
+  fi
+
+  k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"
+}
+
+if ! run_image_import "${IMAGE_IMPORT_MODE}"; then
+  if [[ "${IMAGE_IMPORT_FALLBACK_MODE}" == "${IMAGE_IMPORT_MODE}" ]]; then
+    echo "Image import failed with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured." >&2
+    exit 1
+  fi
+
+  echo "Image import with mode ${IMAGE_IMPORT_MODE} failed or timed out; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}." >&2
+  run_image_import "${IMAGE_IMPORT_FALLBACK_MODE}"
+fi
 
 echo "Control-plane image ready in k3d: ${IMAGE_REF}"
