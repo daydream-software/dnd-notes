@@ -9,13 +9,15 @@ export interface SeedTarget {
 export function resolveSeedTarget(
   environment: NodeJS.ProcessEnv = process.env,
 ): SeedTarget {
-  if (!environment.DATABASE_URL?.trim()) {
+  const databaseUrl = environment.DATABASE_URL?.trim()
+
+  if (!databaseUrl) {
     throw new Error('DATABASE_URL is required for seed workflows in the Postgres-only API runtime.')
   }
 
   return {
     backend: 'postgres',
-    noteStoreOptions: {},
+    noteStoreOptions: { databaseUrl },
     label: 'postgres',
   }
 }
