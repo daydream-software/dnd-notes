@@ -386,6 +386,70 @@ describe('FileSystemTenantBackupArtifactStore', () => {
       await rm(destinationDirectory, { recursive: true, force: true })
     }
   })
+
+  it('rejects path traversal tenant IDs when storing backups', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
+    const sourcePath = join(sourceDirectory, 'artifact.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+
+    try {
+      await writeFile(sourcePath, 'backup-artifact')
+
+      for (const tenantId of ['.', '..']) {
+        await assert.rejects(
+          () =>
+            artifactStore.storeBackup({
+              tenantId,
+              sourcePath,
+              capturedAt: '2026-04-24T01:00:00.000Z',
+            }),
+          (error) =>
+            error instanceof TenantBackupValidationError &&
+            /invalid backup path component/i.test(error.message),
+        )
+      }
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
+      await rm(sourceDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects backup locations that do not reference a regular file', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const destinationDirectory = await mkdtemp(
+      join(tmpdir(), 'tenant-backup-destination-'),
+    )
+    const destinationPath = join(destinationDirectory, 'copied.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+
+    try {
+      await assert.rejects(
+        () =>
+          artifactStore.materializeBackup({
+            location: pathToFileURL(artifactRoot).toString(),
+            destinationPath,
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /must reference a regular file/i.test(error.message),
+      )
+
+      await assert.rejects(
+        () =>
+          artifactStore.materializeBackup({
+            location: pathToFileURL(join(artifactRoot, 'missing.dump')).toString(),
+            destinationPath,
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /does not reference a readable artifact file/i.test(error.message),
+      )
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
+      await rm(destinationDirectory, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('resolveTenantDatabaseName', () => {

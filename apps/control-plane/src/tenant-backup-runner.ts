@@ -83,8 +83,8 @@ export interface TenantBackupArtifactStore {
 }
 
 export class TenantBackupValidationError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'TenantBackupValidationError'
   }
 }
@@ -165,15 +165,20 @@ export class FileSystemTenantBackupArtifactStore
   }): Promise<{ location: string }> {
     await mkdir(this.rootDirectory, { recursive: true, mode: 0o700 })
     await chmod(this.rootDirectory, 0o700)
-    const tenantDirectory = join(
+    const tenantDirectory = resolveContainedArtifactPath(
       this.rootDirectory,
-      sanitizePathComponent(params.tenantId),
+      join(this.rootDirectory, sanitizePathComponent(params.tenantId)),
+      `Backup artifact directory for tenant ${JSON.stringify(params.tenantId)}`,
     )
     await mkdir(tenantDirectory, { recursive: true, mode: 0o700 })
     await chmod(tenantDirectory, 0o700)
-    const targetPath = join(
-      tenantDirectory,
-      `${sanitizeTimestamp(params.capturedAt)}-${basename(params.sourcePath)}`,
+    const targetPath = resolveContainedArtifactPath(
+      this.rootDirectory,
+      join(
+        tenantDirectory,
+        `${sanitizeTimestamp(params.capturedAt)}-${basename(params.sourcePath)}`,
+      ),
+      `Backup artifact path for tenant ${JSON.stringify(params.tenantId)}`,
     )
     await copyFile(params.sourcePath, targetPath)
     await chmod(targetPath, 0o600)
@@ -187,6 +192,7 @@ export class FileSystemTenantBackupArtifactStore
     destinationPath: string
   }): Promise<void> {
     const sourcePath = this.resolveLocation(params.location)
+    await assertBackupArtifactFile(sourcePath, params.location)
     const destinationDirectory = dirname(params.destinationPath)
     await mkdir(destinationDirectory, { recursive: true, mode: 0o700 })
     await chmod(destinationDirectory, 0o700)
@@ -215,19 +221,11 @@ export class FileSystemTenantBackupArtifactStore
       )
     }
 
-    const relativePath = relative(this.rootDirectory, filePath)
-    if (
-      relativePath !== '' &&
-      (relativePath === '..' ||
-        relativePath.startsWith(`..${sep}`) ||
-        isAbsolute(relativePath))
-    ) {
-      throw new TenantBackupValidationError(
-        `Backup location ${JSON.stringify(location)} is outside the configured artifact store.`,
-      )
-    }
-
-    return filePath
+    return resolveContainedArtifactPath(
+      this.rootDirectory,
+      filePath,
+      `Backup location ${JSON.stringify(location)}`,
+    )
   }
 }
 
@@ -405,7 +403,15 @@ export function resolveTenantDatabaseName(tenant: Tenant): string {
 }
 
 function sanitizePathComponent(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, '-')
+  const sanitized = value.replace(/[^A-Za-z0-9._-]+/g, '-')
+
+  if (sanitized.length === 0 || sanitized === '.' || sanitized === '..') {
+    throw new TenantBackupValidationError(
+      `Invalid backup path component ${JSON.stringify(value)}.`,
+    )
+  }
+
+  return sanitized
 }
 
 function sanitizeTimestamp(value: string): string {
@@ -458,4 +464,48 @@ function resolveBackupArtifactPath(location: string): string | null {
   }
 
   return isAbsolute(location) ? location : null
+}
+
+function resolveContainedArtifactPath(
+  rootDirectory: string,
+  filePath: string,
+  label: string,
+): string {
+  const resolvedPath = resolve(filePath)
+  const relativePath = relative(rootDirectory, resolvedPath)
+
+  if (
+    relativePath !== '' &&
+    (relativePath === '..' ||
+      relativePath.startsWith(`..${sep}`) ||
+      isAbsolute(relativePath))
+  ) {
+    throw new TenantBackupValidationError(
+      `${label} is outside the configured artifact store.`,
+    )
+  }
+
+  return resolvedPath
+}
+
+async function assertBackupArtifactFile(
+  sourcePath: string,
+  location: string,
+): Promise<void> {
+  let sourceStats
+
+  try {
+    sourceStats = await stat(sourcePath)
+  } catch (error) {
+    throw new TenantBackupValidationError(
+      `Backup location ${JSON.stringify(location)} does not reference a readable artifact file.`,
+      { cause: error },
+    )
+  }
+
+  if (!sourceStats.isFile()) {
+    throw new TenantBackupValidationError(
+      `Backup location ${JSON.stringify(location)} must reference a regular file.`,
+    )
+  }
 }
