@@ -20,7 +20,10 @@ import {
   applyLeastPrivilegeTenantGrants,
   initializeTenantNoteStoreDatabase,
 } from './tenant-database-bootstrap.js'
-import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
+import {
+  assertPersistedTenantSubdomain,
+  tenantPvcNamePrefix,
+} from './tenant-subdomain.js'
 import type {
   Tenant,
   TenantDeprovisionResponse,
@@ -342,22 +345,37 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         publicScheme: this.publicScheme,
         tenantPort: this.tenantPort,
       })
+      const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
+        refreshedTenant.id,
+      )
+      if (!currentStorage) {
+        throw new Error(`Tenant ${refreshedTenant.id} not found`)
+      }
+      const nextStorageMode =
+        bundle.resources.pvcName !== null
+          ? 'sqlite-pvc'
+          : database.roleName === null
+            ? 'postgres-shared-user'
+            : 'postgres-dedicated-user'
+      const shouldInitializeNotRequiredMigrationStatus =
+        nextStorageMode === 'postgres-dedicated-user' &&
+        currentStorage?.mode === 'unknown' &&
+        currentStorage.migrationStatus === 'not-started' &&
+        currentStorage.lastMigrationFailure === null &&
+        refreshedTenant.storageReference === null
+
       await this.tenantRegistry.updateTenantStorageReference(
         refreshedTenant.id,
-        bundle.resources.pvcName ?? bundle.resources.databaseName,
+        bundle.resources.pvcName ?? database.databaseName,
       )
       await this.tenantRegistry.updateTenantStorageProfile(refreshedTenant.id, {
-        mode:
-          bundle.resources.pvcName !== null
-            ? 'sqlite-pvc'
-            : database.roleName === null
-              ? 'postgres-shared-user'
-              : 'postgres-dedicated-user',
-        migrationStatus:
-          database.roleName !== null && bundle.resources.pvcName === null
-            ? 'not-required'
-            : 'not-started',
-        failureReason: null,
+        mode: nextStorageMode,
+        migrationStatus: shouldInitializeNotRequiredMigrationStatus
+          ? 'not-required'
+          : currentStorage.migrationStatus,
+        failureReason: shouldInitializeNotRequiredMigrationStatus
+          ? null
+          : currentStorage.lastMigrationFailure,
       })
 
       await this.infrastructureManager.applyTenantResources(bundle)
@@ -854,12 +872,15 @@ export function createLiveTenantProvisioningService(params: {
 export function buildTenantInfrastructureBundle(
   options: BuildTenantInfrastructureBundleOptions,
 ): TenantInfrastructureBundle {
-  const resources = buildTenantResourceNames({
-    tenant: options.tenant,
-    subdomain: options.subdomain,
-    baseDomain: options.baseDomain,
-    imageRepository: options.imageRepository,
-  })
+  const resources = {
+    ...buildTenantResourceNames({
+      tenant: options.tenant,
+      subdomain: options.subdomain,
+      baseDomain: options.baseDomain,
+      imageRepository: options.imageRepository,
+    }),
+    databaseName: options.database.databaseName,
+  }
   const runtimeUrl = `${options.publicScheme}://${resources.hostname}`
   const namespaceLabels = buildTenantLabels(options.tenant, options.subdomain)
 
@@ -1220,7 +1241,7 @@ export function buildTenantResourceNames(params: {
 }
 
 function buildLegacyTenantPvcName(subdomain: string): string {
-  return `dnd-notes-data-${subdomain}`
+  return `${tenantPvcNamePrefix}${subdomain}`
 }
 
 function buildTenantSelectorLabels(tenant: Tenant): Record<string, string> {
