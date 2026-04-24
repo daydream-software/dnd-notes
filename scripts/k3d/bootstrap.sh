@@ -77,6 +77,11 @@ wait_for_kube_api() {
 }
 
 pull_k3s_image() {
+  if (( K3S_PULL_RETRIES == 0 )); then
+    echo "Skipping k3s image pre-pull because K3D_K3S_PULL_RETRIES=0."
+    return 0
+  fi
+
   if docker image inspect "${K3S_IMAGE}" >/dev/null 2>&1; then
     echo "Using cached k3s image ${K3S_IMAGE}."
     return 0

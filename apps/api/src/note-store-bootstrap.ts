@@ -164,31 +164,6 @@ async function determinePostgresSchemaMode(
   }
 }
 
-async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
-  const missingTables: string[] = []
-
-  for (const tableName of requiredPostgresTableNames) {
-    const existing = await database
-      .prepare<{ table_name: string }>(`
-        SELECT table_name
-        FROM information_schema.tables
-        WHERE table_schema = current_schema()
-          AND table_name = ?
-      `)
-      .get(tableName)
-
-    if (!existing) {
-      missingTables.push(tableName)
-    }
-  }
-
-  if (missingTables.length > 0) {
-    throw new Error(
-      `Postgres note store requires a pre-initialized schema for least-privilege runtime credentials; missing tables: ${missingTables.join(', ')}`,
-    )
-  }
-}
-
 async function listMissingRequiredPostgresTables(database: NoteStoreDatabase) {
   const missingTables: string[] = []
 
@@ -208,6 +183,16 @@ async function listMissingRequiredPostgresTables(database: NoteStoreDatabase) {
   }
 
   return missingTables
+}
+
+async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
+  const missingTables = await listMissingRequiredPostgresTables(database)
+
+  if (missingTables.length > 0) {
+    throw new Error(
+      `Postgres note store requires a pre-initialized schema for least-privilege runtime credentials; missing tables: ${missingTables.join(', ')}`,
+    )
+  }
 }
 
 async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
