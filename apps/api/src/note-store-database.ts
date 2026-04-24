@@ -216,10 +216,126 @@ function isSqliteMutationSql(sql: string) {
 }
 
 function splitSqlStatements(sql: string) {
-  return sql
-    .split(/;\s*(?:\r?\n|$)/)
-    .map((statement) => statement.trim())
-    .filter((statement) => statement.length > 0)
+  const statements: string[] = []
+  let currentStatement = ''
+  let inSingleQuote = false
+  let inDoubleQuote = false
+  let inBacktickQuote = false
+  let inBracketQuote = false
+  let inLineComment = false
+  let inBlockComment = false
+
+  for (let index = 0; index < sql.length; index += 1) {
+    const char = sql[index]
+    const nextChar = sql[index + 1]
+
+    currentStatement += char
+
+    if (inLineComment) {
+      if (char === '\n') {
+        inLineComment = false
+      }
+      continue
+    }
+
+    if (inBlockComment) {
+      if (char === '*' && nextChar === '/') {
+        currentStatement += nextChar
+        inBlockComment = false
+        index += 1
+      }
+      continue
+    }
+
+    if (inSingleQuote) {
+      if (char === "'" && nextChar === "'") {
+        currentStatement += nextChar
+        index += 1
+        continue
+      }
+
+      if (char === "'") {
+        inSingleQuote = false
+      }
+      continue
+    }
+
+    if (inDoubleQuote) {
+      if (char === '"' && nextChar === '"') {
+        currentStatement += nextChar
+        index += 1
+        continue
+      }
+
+      if (char === '"') {
+        inDoubleQuote = false
+      }
+      continue
+    }
+
+    if (inBacktickQuote) {
+      if (char === '`') {
+        inBacktickQuote = false
+      }
+      continue
+    }
+
+    if (inBracketQuote) {
+      if (char === ']') {
+        inBracketQuote = false
+      }
+      continue
+    }
+
+    if (char === '-' && nextChar === '-') {
+      currentStatement += nextChar
+      inLineComment = true
+      index += 1
+      continue
+    }
+
+    if (char === '/' && nextChar === '*') {
+      currentStatement += nextChar
+      inBlockComment = true
+      index += 1
+      continue
+    }
+
+    if (char === "'") {
+      inSingleQuote = true
+      continue
+    }
+
+    if (char === '"') {
+      inDoubleQuote = true
+      continue
+    }
+
+    if (char === '`') {
+      inBacktickQuote = true
+      continue
+    }
+
+    if (char === '[') {
+      inBracketQuote = true
+      continue
+    }
+
+    if (char === ';') {
+      const statement = currentStatement.slice(0, -1).trim()
+      if (statement.length > 0) {
+        statements.push(statement)
+      }
+      currentStatement = ''
+    }
+  }
+
+  const trailingStatement = currentStatement.trim()
+  if (trailingStatement.length > 0) {
+    statements.push(trailingStatement)
+  }
+
+  return statements
 }
 
 function ensureSqliteDatabaseOpen(state: LoadedSqliteDatabase) {

@@ -412,11 +412,7 @@ test('createSqliteDatabase exec rejects readonly multi-statement writes', async 
   const readonlyDatabase = createSqliteDatabase(dbPath, { readonly: true })
   try {
     await assert.rejects(
-      () =>
-        readonlyDatabase.exec(`
-          SELECT title FROM notes ORDER BY id ASC;
-          INSERT INTO notes (title) VALUES ('Blocked');
-        `),
+      () => readonlyDatabase.exec(`SELECT title FROM notes ORDER BY id ASC; INSERT INTO notes (title) VALUES ('Blocked');`),
       /readonly/i,
     )
   } finally {
@@ -438,9 +434,7 @@ test('createSqliteDatabase exec persists multi-statement writes to disk', async 
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL
       );
-
-      SELECT 1;
-      INSERT INTO notes (title) VALUES ('Persisted');
+      SELECT 1; INSERT INTO notes (title) VALUES ('Persisted');
     `)
   } finally {
     await database.close()
@@ -459,36 +453,36 @@ test('createSqliteDatabase exec persists multi-statement writes to disk', async 
 
 test('sqlite close handles multiple concurrent close() calls safely', async () => {
   const database = createSqliteDatabase(':memory:')
-  
+
   await database.exec(`
     CREATE TABLE notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL
     )
   `)
-  
+
   // Call close multiple times concurrently - should be idempotent
   await Promise.all([
     database.close(),
     database.close(),
     database.close()
   ])
-  
+
   // All should complete without error (test passes if no exception thrown)
 })
 
 test('sqlite operations after close throw appropriate error', async () => {
   const database = createSqliteDatabase(':memory:')
-  
+
   await database.exec(`
     CREATE TABLE notes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL
     )
   `)
-  
+
   await database.close()
-  
+
   await assert.rejects(
     async () => await database.exec(`INSERT INTO notes (title) VALUES ('test')`),
     { message: 'SQLite database is closed.' }
@@ -497,7 +491,7 @@ test('sqlite operations after close throw appropriate error', async () => {
 
 test('sqlite close rejects calls from within an active transaction', async () => {
   const database = createSqliteDatabase(':memory:')
-  
+
   try {
     await database.exec(`
       CREATE TABLE notes (
@@ -505,7 +499,7 @@ test('sqlite close rejects calls from within an active transaction', async () =>
         title TEXT NOT NULL
       )
     `)
-    
+
     const insertNote = database.prepare('INSERT INTO notes (title) VALUES (?)')
     const transactionFn = database.transaction(async () => {
       await insertNote.run('test-note')
@@ -517,7 +511,7 @@ test('sqlite close rejects calls from within an active transaction', async () =>
 
       await insertNote.run('after-close-call')
     })
-    
+
     await transactionFn()
 
     const notes = await database.prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC').all()
