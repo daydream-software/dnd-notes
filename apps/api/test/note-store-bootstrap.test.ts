@@ -155,6 +155,21 @@ test('least-privilege postgres runtime skips schema DDL after control-plane boot
   assert.deepEqual(database.promotedEmails, ['admin@example.com'])
 })
 
+test('schema-capable postgres runtime reapplies idempotent schema SQL after control-plane bootstrap', async () => {
+  const database = new FakePostgresDatabase({
+    allowSchemaChanges: true,
+    tableNames: requiredPostgresTables,
+  })
+
+  await initializeNoteStoreDatabase(database, new Set())
+
+  assert.match(database.executedSql[0] ?? '', /CREATE TABLE IF NOT EXISTS owner_accounts/)
+  assert.match(
+    database.executedSql[0] ?? '',
+    /CREATE INDEX IF NOT EXISTS idx_note_references_target/i,
+  )
+})
+
 test('least-privilege postgres runtime accepts a unique keycloak_sub index', async () => {
   const database = new FakePostgresDatabase({
     allowSchemaChanges: false,

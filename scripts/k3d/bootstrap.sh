@@ -6,6 +6,9 @@ CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 K3S_IMAGE="${K3D_K3S_IMAGE:-rancher/k3s:v1.35.3-k3s1}"
 HTTP_PORT="${K3D_HTTP_PORT:-8080}"
 HTTPS_PORT="${K3D_HTTPS_PORT:-8443}"
+K3S_PULL_RETRIES="${K3D_K3S_PULL_RETRIES:-3}"
+K3S_PULL_TIMEOUT_SECONDS="${K3D_K3S_PULL_TIMEOUT_SECONDS:-180}"
+K3S_PULL_RETRY_DELAY_SECONDS="${K3D_K3S_PULL_RETRY_DELAY_SECONDS:-5}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 INGRESS_NGINX_MANIFEST_PATH="${INGRESS_NGINX_MANIFEST_PATH:-${ROOT}/platform/k3d/ingress-nginx-controller-v1.12.1.yaml}"
 previous_kube_context=""
@@ -17,10 +20,15 @@ Bootstrap the local k3d platform environment for dnd-notes.
 Environment overrides:
   K3D_CLUSTER_NAME          Cluster name (default: dnd-notes)
   K3D_K3S_IMAGE             k3s image used for the cluster (default: rancher/k3s:v1.35.3-k3s1)
+  K3D_K3S_PULL_RETRIES      retries for pre-pulling the k3s image before cluster creation (default: 3)
+  K3D_K3S_PULL_TIMEOUT_SECONDS
+                            timeout for each k3s image pull attempt in seconds (default: 180)
+  K3D_K3S_PULL_RETRY_DELAY_SECONDS
+                            delay between failed k3s image pull attempts in seconds (default: 5)
   K3D_HTTP_PORT             Host port mapped to ingress HTTP (default: 8080)
   K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 8443)
   INGRESS_NGINX_MANIFEST_PATH
-                             Local ingress-nginx manifest path
+                              Local ingress-nginx manifest path
 EOF
 }
 
@@ -68,6 +76,33 @@ wait_for_kube_api() {
   return 1
 }
 
+pull_k3s_image() {
+  if docker image inspect "${K3S_IMAGE}" >/dev/null 2>&1; then
+    echo "Using cached k3s image ${K3S_IMAGE}."
+    return 0
+  fi
+
+  local attempt
+  for (( attempt = 1; attempt <= K3S_PULL_RETRIES; attempt += 1 )); do
+    echo "Pulling k3s image ${K3S_IMAGE} (attempt ${attempt}/${K3S_PULL_RETRIES})..."
+    if command -v timeout >/dev/null 2>&1; then
+      if timeout "${K3S_PULL_TIMEOUT_SECONDS}" docker pull "${K3S_IMAGE}"; then
+        return 0
+      fi
+    elif docker pull "${K3S_IMAGE}"; then
+      return 0
+    fi
+
+    if (( attempt < K3S_PULL_RETRIES )); then
+      echo "Retrying k3s image pull in ${K3S_PULL_RETRY_DELAY_SECONDS}s..." >&2
+      sleep "${K3S_PULL_RETRY_DELAY_SECONDS}"
+    fi
+  done
+
+  echo "Failed to pull k3s image ${K3S_IMAGE} after ${K3S_PULL_RETRIES} attempts." >&2
+  return 1
+}
+
 restore_previous_context() {
   local exit_code=$?
   set +e
@@ -103,6 +138,7 @@ previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
 trap restore_previous_context EXIT
 
 if ! cluster_exists; then
+  pull_k3s_image
   echo "Creating k3d cluster ${CLUSTER_NAME}..."
   k3d cluster create "$CLUSTER_NAME" \
     --servers 1 \

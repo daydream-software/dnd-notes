@@ -207,6 +207,9 @@ All three scripts honor a few env overrides when you need a different local shap
 | --- | --- | --- |
 | `K3D_CLUSTER_NAME` | `dnd-notes` | k3d cluster name |
 | `K3D_K3S_IMAGE` | `rancher/k3s:v1.35.3-k3s1` | pinned k3s image used by the local cluster |
+| `K3D_K3S_PULL_RETRIES` | `3` | retries for pre-pulling the pinned k3s image before `k3d cluster create` |
+| `K3D_K3S_PULL_TIMEOUT_SECONDS` | `180` | timeout for each `docker pull` attempt of the k3s image |
+| `K3D_K3S_PULL_RETRY_DELAY_SECONDS` | `5` | delay between failed k3s image pull attempts |
 | `INGRESS_NGINX_MANIFEST_PATH` | `platform/k3d/ingress-nginx-controller-v1.12.1.yaml` | local ingress-nginx manifest consumed by bootstrap |
 | `K3D_IMAGE_IMPORT_MODE` | `direct` | primary k3d image import mode for local image loads |
 | `K3D_IMAGE_IMPORT_FALLBACK_MODE` | `tools` | retry mode used if the primary import stalls or fails |

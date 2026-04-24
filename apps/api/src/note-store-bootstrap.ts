@@ -125,7 +125,19 @@ export interface InitializeNoteStoreDatabaseOptions {
   allowSchemaChanges?: boolean
 }
 
-async function canManagePostgresSchema(database: NoteStoreDatabase) {
+type PostgresSchemaMode =
+  | 'schema-capable'
+  | 'least-privilege'
+  | 'pg-mem-fallback'
+
+async function determinePostgresSchemaMode(
+  database: NoteStoreDatabase,
+  options: InitializeNoteStoreDatabaseOptions,
+): Promise<PostgresSchemaMode> {
+  if (options.allowSchemaChanges !== undefined) {
+    return options.allowSchemaChanges ? 'schema-capable' : 'least-privilege'
+  }
+
   try {
     const privileges = await database
       .prepare<{ can_create: boolean | string }>(`
@@ -134,19 +146,21 @@ async function canManagePostgresSchema(database: NoteStoreDatabase) {
       .get()
 
     return privileges?.can_create === true || privileges?.can_create === 't'
+      ? 'schema-capable'
+      : 'least-privilege'
   } catch (error) {
     if (
       error instanceof Error &&
       /function has_schema_privilege\(text,text\) does not exist/i.test(error.message)
     ) {
-      return true
+      return 'pg-mem-fallback'
     }
 
     console.error(
       '[note-store-bootstrap] Failed to check schema privileges; assuming least-privilege mode:',
       error,
     )
-    return false
+    return 'least-privilege'
   }
 }
 
@@ -372,10 +386,12 @@ export async function initializeNoteStoreDatabase(
   configuredSiteAdminEmails: ReadonlySet<string>,
   options: InitializeNoteStoreDatabaseOptions = {},
 ) {
-  const allowSchemaChanges =
-    options.allowSchemaChanges ?? (await canManagePostgresSchema(database))
+  const schemaMode = await determinePostgresSchemaMode(database, options)
+  const allowSchemaChanges = schemaMode !== 'least-privilege'
 
-  if (allowSchemaChanges) {
+  if (schemaMode === 'schema-capable') {
+    await database.exec(noteStoreSchemaSql)
+  } else if (schemaMode === 'pg-mem-fallback') {
     const missingTables = await listMissingRequiredPostgresTables(database)
 
     if (missingTables.length > 0) {
