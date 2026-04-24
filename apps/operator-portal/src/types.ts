@@ -57,7 +57,7 @@ export interface TenantProvisioningResources {
   namespace: string
   deploymentName: string
   serviceName: string
-  pvcName: string
+  pvcName: string | null
   configMapName: string
   secretName: string
   hostname: string

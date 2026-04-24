@@ -49,15 +49,16 @@ Each tenant record includes:
 - `desiredState`: Target state for orchestration
 - `currentState`: Actual state (observed from K8s API)
 - `version`: Current app version running
-- `storageReference`: Pointer to persistent volume (e.g., PVC name)
+- `storageReference`: Current storage backing reference (legacy PVC name or tenant Postgres database name)
 - `backupMetadata`: Opaque string for backup metadata (often JSON-serialized details such as locations and schedules)
 - `createdAt`: Tenant creation timestamp
 - `updatedAt`: Last modification timestamp
 
 The live provisioning slice also creates a per-tenant Postgres database plus a
-tenant-scoped runtime role/secret for newly provisioned tenants, but the
-registry keeps `storageReference` focused on the Kubernetes storage handle so
-the PVC lifecycle stays explicit in tenant metadata.
+tenant-scoped runtime role/secret for newly provisioned tenants. New Postgres-only
+tenants now store the tenant database name in `storageReference`, while legacy
+PVC-backed tenants still surface the PVC name until the explicit cutover work
+removes that transitional shape.
 
 ### State Transitions
 

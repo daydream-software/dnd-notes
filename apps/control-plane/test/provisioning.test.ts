@@ -244,10 +244,8 @@ describe('TenantProvisioningService', () => {
       assert.equal(result.tenant.currentState, 'ready')
       assert.equal(result.tenant.desiredState, 'ready')
       assert.match(result.tenant.subdomain ?? '', /^t-[0-9a-f]{12}$/)
-      assert.equal(
-        result.tenant.storageReference,
-        result.resources.pvcName,
-      )
+      assert.equal(result.tenant.storageReference, result.resources.databaseName)
+      assert.equal(result.resources.pvcName, null)
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
       assert.equal(infrastructureManager.bundles[0].ingressClassName, 'nginx')
@@ -998,7 +996,7 @@ describe('TenantProvisioningService', () => {
     }
   })
 
-  it('builds a tenant PVC and mounts it into the workload', async () => {
+  it('builds a postgres-only workload for newly provisioned tenants', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
@@ -1023,8 +1021,8 @@ describe('TenantProvisioningService', () => {
         tenantPort: 3000,
       })
 
-      assert.equal(bundle.resources.pvcName, 'dnd-notes-data-t-opaque123456')
-      assert.equal(bundle.persistentVolumeClaim.metadata?.name, bundle.resources.pvcName)
+      assert.equal(bundle.resources.pvcName, null)
+      assert.equal(bundle.persistentVolumeClaim, undefined)
       assert.equal(bundle.ingress.metadata?.name, bundle.resources.serviceName)
       assert.equal(bundle.ingress.spec?.ingressClassName, 'nginx')
       assert.equal(bundle.ingress.spec?.rules?.[0]?.host, bundle.resources.hostname)
@@ -1033,11 +1031,51 @@ describe('TenantProvisioningService', () => {
         bundle.ingress.spec?.rules?.[0]?.http?.paths?.[0]?.backend?.service?.name,
         bundle.resources.serviceName,
       )
+      assert.equal(bundle.configMap.data?.NOTES_DB_PATH, undefined)
+      assert.equal(bundle.deployment.spec?.template?.spec?.volumes, undefined)
       assert.equal(
-        bundle.configMap.data?.NOTES_DB_PATH,
-        '/app/data/dnd-notes.sqlite',
+        bundle.deployment.spec?.template?.spec?.containers?.[0]?.volumeMounts,
+        undefined,
       )
-      assert.deepEqual(bundle.persistentVolumeClaim.spec?.accessModes, ['ReadWriteOnce'])
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('keeps legacy PVC wiring when tenant metadata still points at the PVC-backed shape', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      const tenant = await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        tenant.id,
+        'dnd-notes-data-t-opaque123456',
+      )
+      const legacyTenant = (await tenantRegistry.getTenant(tenant.id))!
+      const bundle = buildTenantInfrastructureBundle({
+        tenant: legacyTenant,
+        subdomain: 't-opaque123456',
+        database: {
+          databaseName: 'tenant_demo_t_opaque123456',
+          roleName: 'tenant_rt_demo_t_opaque123456',
+          runtimeConnectionString:
+            'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
+        },
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+        publicScheme: 'https',
+        tenantPort: 3000,
+      })
+
+      assert.equal(bundle.resources.pvcName, 'dnd-notes-data-t-opaque123456')
+      assert.equal(bundle.persistentVolumeClaim?.metadata?.name, bundle.resources.pvcName)
+      assert.equal(bundle.configMap.data?.NOTES_DB_PATH, '/app/data/dnd-notes.sqlite')
+      assert.deepEqual(bundle.persistentVolumeClaim?.spec?.accessModes, ['ReadWriteOnce'])
       assert.deepEqual(bundle.deployment.spec?.template?.spec?.volumes, [
         {
           name: 'tenant-data',
@@ -1088,7 +1126,7 @@ describe('TenantProvisioningService', () => {
 
       assert.equal(maxLengthSubdomain.length, maxTenantSubdomainLength)
       assert.ok(bundle.resources.namespace.length <= 63)
-      assert.ok(bundle.resources.pvcName.length <= 63)
+      assert.equal(bundle.resources.pvcName, null)
       assert.equal(bundle.resources.hostname, `${maxLengthSubdomain}.dnd-notes.test`)
     } finally {
       await cleanup()
@@ -1531,8 +1569,13 @@ describe('KubernetesTenantInfrastructureManager', () => {
       ownerId: 'owner-1',
       version: '1.0.0',
     })
+    await tenantRegistry.updateTenantStorageReference(
+      tenant.id,
+      'dnd-notes-data-t-opaque123456',
+    )
+    const legacyTenant = (await tenantRegistry.getTenant(tenant.id))!
     const bundle = buildTenantInfrastructureBundle({
-      tenant,
+      tenant: legacyTenant,
       subdomain: 't-opaque123456',
       database: {
         databaseName: 'tenant_demo_t_opaque123456',
@@ -1610,8 +1653,13 @@ describe('KubernetesTenantInfrastructureManager', () => {
       ownerId: 'owner-1',
       version: '1.0.0',
     })
+    await tenantRegistry.updateTenantStorageReference(
+      tenant.id,
+      'dnd-notes-data-t-opaque123456',
+    )
+    const legacyTenant = (await tenantRegistry.getTenant(tenant.id))!
     const bundle = buildTenantInfrastructureBundle({
-      tenant,
+      tenant: legacyTenant,
       subdomain: 't-opaque123456',
       database: {
         databaseName: 'tenant_demo_t_opaque123456',
@@ -1716,5 +1764,40 @@ describe('KubernetesTenantInfrastructureManager', () => {
       ['PersistentVolumeClaim', 'Namespace'],
     )
     assert.equal(client.namespaceReadCountdown, 0)
+  })
+
+  it('skips PVC deletion when tenant resources are already Postgres-only', async () => {
+    const client = new FakeKubernetesClient()
+    client.namespaceReadCountdown = 1
+    client.seed({
+      apiVersion: 'v1',
+      kind: 'Namespace',
+      metadata: {
+        name: 'tenant-t-opaque123456',
+      },
+    })
+
+    const manager = new KubernetesTenantInfrastructureManager({
+      client,
+      readyPollIntervalMs: 1,
+      deleteTimeoutMs: 200,
+    })
+
+    await manager.deleteTenantResources({
+      namespace: 'tenant-t-opaque123456',
+      deploymentName: 'dnd-notes',
+      serviceName: 'dnd-notes',
+      pvcName: null,
+      configMapName: 'dnd-notes-runtime',
+      secretName: 'dnd-notes-runtime-secret',
+      hostname: 't-opaque123456.dnd-notes.test',
+      databaseName: 'tenant_demo_t_opaque123456',
+      image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+    })
+
+    assert.deepEqual(
+      client.deleteCalls.map((call) => call.kind),
+      ['Namespace'],
+    )
   })
 })

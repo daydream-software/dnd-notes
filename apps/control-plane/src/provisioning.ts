@@ -82,7 +82,7 @@ interface TenantInfrastructureBundle {
   namespace: V1Namespace
   configMap: V1ConfigMap
   secret: V1Secret
-  persistentVolumeClaim: V1PersistentVolumeClaim
+  persistentVolumeClaim?: V1PersistentVolumeClaim
   service: V1Service
   ingress: V1Ingress
   deployment: V1Deployment
@@ -344,7 +344,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       })
       await this.tenantRegistry.updateTenantStorageReference(
         refreshedTenant.id,
-        bundle.resources.pvcName,
+        bundle.resources.pvcName ?? bundle.resources.databaseName,
       )
 
       await this.infrastructureManager.applyTenantResources(bundle)
@@ -652,7 +652,9 @@ export class KubernetesTenantInfrastructureManager
     await upsertKubernetesObject(this.client, bundle.namespace)
     await upsertKubernetesObject(this.client, bundle.configMap)
     await upsertKubernetesObject(this.client, bundle.secret)
-    await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
+    if (bundle.persistentVolumeClaim) {
+      await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
+    }
     await upsertKubernetesObject(this.client, bundle.service)
     await upsertKubernetesObject(this.client, bundle.ingress)
     await upsertKubernetesObject(this.client, bundle.deployment)
@@ -735,18 +737,20 @@ export class KubernetesTenantInfrastructureManager
   }
 
   async deleteTenantResources(resources: TenantProvisioningResources): Promise<void> {
-    try {
-      await this.client.delete({
-        apiVersion: 'v1',
-        kind: 'PersistentVolumeClaim',
-        metadata: {
-          name: resources.pvcName,
-          namespace: resources.namespace,
-        },
-      })
-    } catch (error) {
-      if (!isApiException(error, 404)) {
-        throw error
+    if (resources.pvcName) {
+      try {
+        await this.client.delete({
+          apiVersion: 'v1',
+          kind: 'PersistentVolumeClaim',
+          metadata: {
+            name: resources.pvcName,
+            namespace: resources.namespace,
+          },
+        })
+      } catch (error) {
+        if (!isApiException(error, 404)) {
+          throw error
+        }
       }
     }
 
@@ -851,10 +855,13 @@ export function buildTenantInfrastructureBundle(
     SERVE_WEB: 'true',
     PUBLIC_WEB_URL: runtimeUrl,
     ALLOWED_ORIGINS: runtimeUrl,
-    NOTES_DB_PATH: `${defaultTenantStorageMountPath}/dnd-notes.sqlite`,
   }
   const secretData: Record<string, string> = {
     DATABASE_URL: encodeSecretValue(options.database.runtimeConnectionString),
+  }
+
+  if (resources.pvcName) {
+    configMapData.NOTES_DB_PATH = `${defaultTenantStorageMountPath}/dnd-notes.sqlite`
   }
 
   if (options.tenantRuntimeAuth?.mode === 'keycloak') {
@@ -909,23 +916,25 @@ export function buildTenantInfrastructureBundle(
       type: 'Opaque',
       data: secretData,
     },
-    persistentVolumeClaim: {
-      apiVersion: 'v1',
-      kind: 'PersistentVolumeClaim',
-      metadata: {
-        name: resources.pvcName,
-        namespace: resources.namespace,
-        labels: namespaceLabels,
-      },
-      spec: {
-        accessModes: ['ReadWriteOnce'],
-        resources: {
-          requests: {
-            storage: defaultTenantStorageRequest,
+    persistentVolumeClaim: resources.pvcName
+      ? {
+          apiVersion: 'v1',
+          kind: 'PersistentVolumeClaim',
+          metadata: {
+            name: resources.pvcName,
+            namespace: resources.namespace,
+            labels: namespaceLabels,
           },
-        },
-      },
-    },
+          spec: {
+            accessModes: ['ReadWriteOnce'],
+            resources: {
+              requests: {
+                storage: defaultTenantStorageRequest,
+              },
+            },
+          },
+        }
+      : undefined,
     service: {
       apiVersion: 'v1',
       kind: 'Service',
@@ -1027,12 +1036,14 @@ export function buildTenantInfrastructureBundle(
                     secretRef: { name: resources.secretName },
                   },
                 ],
-                volumeMounts: [
-                  {
-                    name: 'tenant-data',
-                    mountPath: defaultTenantStorageMountPath,
-                  },
-                ],
+                volumeMounts: resources.pvcName
+                  ? [
+                      {
+                        name: 'tenant-data',
+                        mountPath: defaultTenantStorageMountPath,
+                      },
+                    ]
+                  : undefined,
                 livenessProbe: {
                   httpGet: {
                     path: '/healthz',
@@ -1055,14 +1066,16 @@ export function buildTenantInfrastructureBundle(
                 },
               },
             ],
-            volumes: [
-              {
-                name: 'tenant-data',
-                persistentVolumeClaim: {
-                  claimName: resources.pvcName,
-                },
-              },
-            ],
+             volumes: resources.pvcName
+               ? [
+                   {
+                     name: 'tenant-data',
+                     persistentVolumeClaim: {
+                       claimName: resources.pvcName,
+                     },
+                   },
+                 ]
+               : undefined,
           },
         },
       },
@@ -1179,17 +1192,22 @@ export function buildTenantResourceNames(params: {
   imageRepository: string
 }): TenantProvisioningResources {
   const namespace = `tenant-${params.subdomain}`
+  const legacyPvcName = buildLegacyTenantPvcName(params.subdomain)
   return {
     namespace,
     deploymentName: 'dnd-notes',
     serviceName: 'dnd-notes',
-    pvcName: `dnd-notes-data-${params.subdomain}`,
+    pvcName: params.tenant.storageReference === legacyPvcName ? legacyPvcName : null,
     configMapName: 'dnd-notes-runtime',
     secretName: 'dnd-notes-runtime-secret',
     hostname: `${params.subdomain}.${params.baseDomain}`,
     databaseName: buildTenantDatabaseName(params.tenant.id, params.subdomain),
     image: `${params.imageRepository}:${params.tenant.version}`,
   }
+}
+
+function buildLegacyTenantPvcName(subdomain: string): string {
+  return `dnd-notes-data-${subdomain}`
 }
 
 function buildTenantSelectorLabels(tenant: Tenant): Record<string, string> {
