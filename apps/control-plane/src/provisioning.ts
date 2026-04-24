@@ -348,9 +348,11 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       )
       await this.tenantRegistry.updateTenantStorageProfile(refreshedTenant.id, {
         mode:
-          database.roleName === null
-            ? 'postgres-shared-user'
-            : 'postgres-dedicated-user',
+          bundle.resources.pvcName !== null
+            ? 'sqlite-pvc'
+            : database.roleName === null
+              ? 'postgres-shared-user'
+              : 'postgres-dedicated-user',
         migrationStatus:
           database.roleName !== null && bundle.resources.pvcName === null
             ? 'not-required'

@@ -1001,6 +1001,60 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('keeps the storage profile on sqlite-pvc while legacy PVC-backed tenants are reprovisioned', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      const tenant = await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantSubdomain(tenant.id, 't-legacydemo')
+      await tenantRegistry.updateTenantStorageReference(
+        tenant.id,
+        'dnd-notes-data-t-legacydemo',
+      )
+      await tenantRegistry.updateTenantDesiredState(tenant.id, 'ready')
+      await tenantRegistry.updateTenantState(
+        tenant.id,
+        'ready',
+        'control-plane',
+        'Legacy tenant already provisioned',
+      )
+      infrastructureManager.runtimeConnectionStrings.set(
+        'tenant-t-legacydemo/dnd-notes-runtime-secret',
+        'postgresql://legacy-user:legacy-password@postgres.default:5432/tenant_demo_t_legacydemo',
+      )
+
+      await provisioningService.provisionTenant({
+        tenantId: tenant.id,
+        triggeredBy: 'control-plane',
+      })
+
+      const storage = await tenantRegistry.getTenantStorageSnapshot(tenant.id)
+
+      assert.ok(storage)
+      assert.equal(storage.mode, 'sqlite-pvc')
+      assert.equal(storage.migrationStatus, 'not-started')
+      assert.equal(storage.storageReference, 'dnd-notes-data-t-legacydemo')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
   it('builds a postgres-only workload for newly provisioned tenants', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
