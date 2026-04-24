@@ -1,8 +1,5 @@
 import type { NoteStoreDatabase } from './note-store-database.js'
 
-const pragmaTableNames = ['notes', 'owner_accounts', 'campaign_share_links'] as const
-type PragmaTableName = (typeof pragmaTableNames)[number]
-const pragmaTableNameSet = new Set<string>(pragmaTableNames)
 const requiredPostgresTableNames = [
   'owner_accounts',
   'owner_sessions',
@@ -128,33 +125,7 @@ export interface InitializeNoteStoreDatabaseOptions {
   allowSchemaChanges?: boolean
 }
 
-async function tableExists(database: NoteStoreDatabase, tableName: string) {
-  return database
-    .prepare(`
-      SELECT 1
-      FROM sqlite_master
-      WHERE type = 'table' AND name = ?
-    `)
-    .get(tableName)
-}
-
-async function listTableColumns(database: NoteStoreDatabase, tableName: PragmaTableName) {
-  if (!pragmaTableNameSet.has(tableName)) {
-    throw new Error(`Unsupported PRAGMA table lookup for "${tableName}".`)
-  }
-
-  return new Set(
-    ((await database.prepare(`
-        PRAGMA table_info("${tableName}")
-      `).all()) as Array<{ name: string }>).map((column) => column.name),
-  )
-}
-
 async function canManagePostgresSchema(database: NoteStoreDatabase) {
-  if (database.kind !== 'postgres') {
-    return true
-  }
-
   try {
     const privileges = await database
       .prepare<{ can_create: boolean | string }>(`
@@ -180,10 +151,6 @@ async function canManagePostgresSchema(database: NoteStoreDatabase) {
 }
 
 async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
-  if (database.kind !== 'postgres') {
-    return
-  }
-
   const missingTables: string[] = []
 
   for (const tableName of requiredPostgresTableNames) {
@@ -208,11 +175,28 @@ async function ensureRequiredPostgresTables(database: NoteStoreDatabase) {
   }
 }
 
-async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
-  if (database.kind !== 'postgres') {
-    return
+async function listMissingRequiredPostgresTables(database: NoteStoreDatabase) {
+  const missingTables: string[] = []
+
+  for (const tableName of requiredPostgresTableNames) {
+    const existing = await database
+      .prepare<{ table_name: string }>(`
+        SELECT table_name
+        FROM information_schema.tables
+        WHERE table_schema = current_schema()
+          AND table_name = ?
+      `)
+      .get(tableName)
+
+    if (!existing) {
+      missingTables.push(tableName)
+    }
   }
 
+  return missingTables
+}
+
+async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
   const ownerEmailIndex = await database
     .prepare<{ indexdef: string }>(`
       SELECT indexdef
@@ -238,10 +222,6 @@ async function ensureRequiredPostgresIndexes(database: NoteStoreDatabase) {
 async function ensureRequiredPostgresOwnerAccountKeycloakSub(
   database: NoteStoreDatabase,
 ) {
-  if (database.kind !== 'postgres') {
-    return
-  }
-
   const keycloakSubColumn = await database
     .prepare<{ column_name: string }>(`
       SELECT column_name
@@ -298,132 +278,23 @@ async function ensureRequiredPostgresOwnerAccountKeycloakSub(
   }
 }
 
-async function ensureNotesAttributionColumns(database: NoteStoreDatabase) {
-  if (database.kind !== 'sqlite') {
-    return
-  }
-
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'notes'))) {
-      return
-    }
-
-    const noteColumns = await listTableColumns(database, 'notes')
-
-    if (!noteColumns.has('created_by_membership_id')) {
-      await database.exec(`
-        ALTER TABLE notes
-        ADD COLUMN created_by_membership_id TEXT REFERENCES campaign_memberships(id)
-      `)
-    }
-
-    if (!noteColumns.has('last_edited_by_membership_id')) {
-      await database.exec(`
-        ALTER TABLE notes
-        ADD COLUMN last_edited_by_membership_id TEXT REFERENCES campaign_memberships(id)
-      `)
-    }
-
-    if (!noteColumns.has('linked_notes_json')) {
-      await database.exec(`
-        ALTER TABLE notes
-        ADD COLUMN linked_notes_json TEXT NOT NULL DEFAULT '[]'
-      `)
-    }
-  })
-
-  await transaction()
-}
-
-async function ensureOwnerSiteAdminColumn(database: NoteStoreDatabase) {
-  if (database.kind !== 'sqlite') {
-    return
-  }
-
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'owner_accounts'))) {
-      return
-    }
-
-    const ownerColumns = await listTableColumns(database, 'owner_accounts')
-
-    if (!ownerColumns.has('is_site_admin')) {
-      await database.exec(`
-        ALTER TABLE owner_accounts
-        ADD COLUMN is_site_admin INTEGER NOT NULL DEFAULT 0
-      `)
-    }
-  })
-
-  await transaction()
-}
-
 async function ensureOwnerKeycloakSubColumn(
   database: NoteStoreDatabase,
   options: { allowSchemaChanges: boolean },
 ) {
-  if (database.kind === 'postgres') {
-    if (!options.allowSchemaChanges) {
-      return
-    }
-
-    await database.exec(`
-      ALTER TABLE owner_accounts
-      ADD COLUMN IF NOT EXISTS keycloak_sub TEXT
-    `)
-    await database.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
-      ON owner_accounts(keycloak_sub)
-      WHERE keycloak_sub IS NOT NULL
-    `)
+  if (!options.allowSchemaChanges) {
     return
   }
 
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'owner_accounts'))) {
-      return
-    }
-
-    const ownerColumns = await listTableColumns(database, 'owner_accounts')
-
-    if (!ownerColumns.has('keycloak_sub')) {
-      await database.exec(`
-        ALTER TABLE owner_accounts
-        ADD COLUMN keycloak_sub TEXT
-      `)
-    }
-
-    await database.exec(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
-      ON owner_accounts(keycloak_sub)
-      WHERE keycloak_sub IS NOT NULL
-    `)
-  })
-
-  await transaction()
-}
-
-async function ensureShareLinkRevealTokens(database: NoteStoreDatabase) {
-  if (database.kind !== 'sqlite') {
-    return
-  }
-
-  const transaction = database.transaction(async () => {
-    if (!(await tableExists(database, 'campaign_share_links'))) {
-      return
-    }
-
-    const shareLinkColumns = await listTableColumns(database, 'campaign_share_links')
-
-    if (!shareLinkColumns.has('token_plaintext')) {
-      await database.exec(`
-        ALTER TABLE campaign_share_links
-        ADD COLUMN token_plaintext TEXT
-      `)
-    }
-  })
-
-  await transaction()
+  await database.exec(`
+    ALTER TABLE owner_accounts
+    ADD COLUMN IF NOT EXISTS keycloak_sub TEXT
+  `)
+  await database.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub
+    ON owner_accounts(keycloak_sub)
+    WHERE keycloak_sub IS NOT NULL
+  `)
 }
 
 async function elevateConfiguredSiteAdminAccounts(
@@ -505,16 +376,17 @@ export async function initializeNoteStoreDatabase(
     options.allowSchemaChanges ?? (await canManagePostgresSchema(database))
 
   if (allowSchemaChanges) {
-    await database.exec(noteStoreSchemaSql)
+    const missingTables = await listMissingRequiredPostgresTables(database)
+
+    if (missingTables.length > 0) {
+      await database.exec(noteStoreSchemaSql)
+    }
   } else {
     await ensureRequiredPostgresTables(database)
     await ensureRequiredPostgresOwnerAccountKeycloakSub(database)
   }
 
-  await ensureOwnerSiteAdminColumn(database)
   await ensureOwnerKeycloakSubColumn(database, { allowSchemaChanges })
-  await ensureNotesAttributionColumns(database)
-  await ensureShareLinkRevealTokens(database)
   await ensureOwnerEmailUniqueness(database, { allowSchemaChanges })
   await elevateConfiguredSiteAdminAccounts(database, configuredSiteAdminEmails)
 }

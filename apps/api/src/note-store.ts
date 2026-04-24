@@ -6,21 +6,6 @@ import {
   timingSafeEqual,
 } from 'node:crypto'
 import {
-  chmodSync,
-  closeSync,
-  copyFileSync,
-  createReadStream,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  rmSync,
-  writeSync,
-} from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { createInterface } from 'node:readline'
-import { fileURLToPath } from 'node:url'
-import {
   defaultCampaign,
   defaultCampaignId,
   defaultOwnerDisplayName,
@@ -28,7 +13,6 @@ import {
 import { initializeNoteStoreDatabase } from './note-store-bootstrap.js'
 import {
   createPostgresDatabase,
-  createSqliteDatabase,
   type NoteStoreDatabase,
   type PostgresPoolLike,
 } from './note-store-database.js'
@@ -174,19 +158,13 @@ type MembershipConsolidationResult =
   | { status: 'forbidden' }
 
 export interface CreateNoteStoreOptions {
-  dbPath?: string
   databaseUrl?: string
-  backend?: 'sqlite' | 'postgres'
+  backend?: 'postgres'
   postgresPool?: PostgresPoolLike
   siteAdminEmails?: readonly string[]
 }
 
-export type RuntimeNoteStoreOptions = Omit<
-  CreateNoteStoreOptions,
-  'backend' | 'dbPath'
->
-
-export class InvalidBackupDatabaseError extends Error {}
+export type RuntimeNoteStoreOptions = Omit<CreateNoteStoreOptions, 'backend'>
 export const ownerKeycloakLinkConflictCode = 'OWNER_KEYCLOAK_LINK_CONFLICT'
 
 export class OwnerKeycloakLinkConflictError extends Error {
@@ -198,301 +176,6 @@ export class OwnerKeycloakLinkConflictError extends Error {
   ) {
     super(message)
     this.name = 'OwnerKeycloakLinkConflictError'
-  }
-}
-
-const requiredBackupTables = [
-  'owner_accounts',
-  'owner_sessions',
-  'campaigns',
-  'campaign_memberships',
-  'campaign_share_links',
-  'notes',
-] as const
-
-const snapshotTableDefinitions = [
-  {
-    name: 'owner_accounts',
-    columns: [
-      'id',
-      'email',
-      'display_name',
-      'password_hash',
-      'is_site_admin',
-      'keycloak_sub',
-      'created_at',
-      'updated_at',
-    ],
-  },
-  {
-    name: 'owner_sessions',
-    columns: ['id', 'owner_user_id', 'token_hash', 'created_at', 'expires_at'],
-  },
-  {
-    name: 'campaigns',
-    columns: [
-      'id',
-      'name',
-      'tagline',
-      'system',
-      'setting',
-      'next_session',
-      'archived_at',
-      'created_at',
-      'updated_at',
-    ],
-  },
-  {
-    name: 'campaign_memberships',
-    columns: [
-      'id',
-      'campaign_id',
-      'role',
-      'display_name',
-      'user_id',
-      'guest_token_id',
-      'created_at',
-      'updated_at',
-    ],
-  },
-  {
-    name: 'campaign_share_links',
-    columns: [
-      'id',
-      'campaign_id',
-      'token_hash',
-      'token_plaintext',
-      'label',
-      'access_level',
-      'frame_ancestors',
-      'expires_at',
-      'revoked_at',
-      'created_at',
-      'updated_at',
-    ],
-  },
-  {
-    name: 'notes',
-    columns: [
-      'id',
-      'campaign_id',
-      'title',
-      'body',
-      'status',
-      'tags_json',
-      'linked_notes_json',
-      'session_name',
-      'created_by_membership_id',
-      'last_edited_by_membership_id',
-      'created_at',
-      'updated_at',
-    ],
-  },
-  {
-    name: 'note_references',
-    columns: [
-      'id',
-      'source_note_id',
-      'target_note_id',
-      'campaign_id',
-      'reference_type',
-      'label',
-      'qualifier',
-      'position_in_body',
-      'created_at',
-      'updated_at',
-    ],
-  },
-] as const
-
-const snapshotDeletionOrder = [...snapshotTableDefinitions]
-  .reverse()
-  .map((definition) => definition.name)
-
-// Keep page reads small enough to cap peak memory during backup and restore work.
-const snapshotCopyBatchSize = 100
-// Stay under SQLite's 999-parameter ceiling and avoid giant multi-row INSERTs.
-const snapshotInsertParameterLimit = 900
-
-interface SnapshotRow extends Record<string, unknown> {
-  id: string
-}
-
-interface SnapshotSpoolFile {
-  definition: (typeof snapshotTableDefinitions)[number]
-  path: string
-}
-
-function buildSnapshotSelectSql(definition: (typeof snapshotTableDefinitions)[number]) {
-  return `
-    SELECT ${definition.columns.join(', ')}
-    FROM ${definition.name}
-    WHERE (@afterId IS NULL OR id > @afterId)
-    ORDER BY id ASC
-    LIMIT @batchSize
-  `
-}
-
-function buildSnapshotInsertSql(
-  definition: (typeof snapshotTableDefinitions)[number],
-  rowCount = 1,
-) {
-  return `
-    INSERT INTO ${definition.name} (${definition.columns.join(', ')})
-    VALUES ${Array.from(
-      { length: rowCount },
-      () => `(${definition.columns.map(() => '?').join(', ')})`,
-    ).join(', ')}
-  `
-}
-
-function resolveSnapshotInsertBatchSize(definition: (typeof snapshotTableDefinitions)[number]) {
-  return Math.max(
-    1,
-    Math.min(
-      snapshotCopyBatchSize,
-      Math.floor(snapshotInsertParameterLimit / definition.columns.length),
-    ),
-  )
-}
-
-function flattenSnapshotRows(
-  definition: (typeof snapshotTableDefinitions)[number],
-  rows: SnapshotRow[],
-) {
-  return rows.flatMap((row) => definition.columns.map((columnName) => row[columnName]))
-}
-
-function tightenSqliteFilePermissions(dbPath: string) {
-  chmodSync(dbPath, 0o600)
-}
-
-function createRestoreWorkingCopy(backend: 'sqlite' | 'postgres', dbPath: string) {
-  if (backend === 'postgres') {
-    const directory = mkdtempSync(join(tmpdir(), 'dnd-notes-restore-'))
-
-    return {
-      directory,
-      path: join(directory, `restore-working-${randomUUID()}.sqlite`),
-    }
-  }
-
-  return {
-    directory: null,
-    path: `${dbPath}.restore-working-${randomUUID()}.sqlite`,
-  }
-}
-
-async function clearSnapshotTables(database: NoteStoreDatabase) {
-  for (const tableName of snapshotDeletionOrder) {
-    await database.prepare(`DELETE FROM ${tableName}`).run()
-  }
-}
-
-function createSnapshotSpoolDirectory() {
-  return mkdtempSync(join(tmpdir(), 'dnd-notes-snapshot-'))
-}
-
-async function spoolSnapshotTables(sourceDatabase: NoteStoreDatabase, spoolDirectory: string) {
-  const snapshotSpoolFiles: SnapshotSpoolFile[] = []
-
-  for (const definition of snapshotTableDefinitions) {
-    const selectStatement = sourceDatabase.prepare<SnapshotRow>(buildSnapshotSelectSql(definition))
-    const spoolPath = join(spoolDirectory, `${definition.name}-${randomUUID()}.jsonl`)
-    const spoolHandle = openSync(spoolPath, 'w')
-    let afterId: string | null = null
-
-    try {
-      while (true) {
-        const rows = (await selectStatement.all({
-          afterId,
-          batchSize: snapshotCopyBatchSize,
-        })) as SnapshotRow[]
-
-        if (rows.length > 0) {
-          writeSync(spoolHandle, `${JSON.stringify(rows)}\n`)
-        }
-
-        if (rows.length < snapshotCopyBatchSize) {
-          break
-        }
-
-        afterId = rows.at(-1)?.id ?? null
-      }
-    } finally {
-      closeSync(spoolHandle)
-    }
-
-    snapshotSpoolFiles.push({ definition, path: spoolPath })
-  }
-
-  return snapshotSpoolFiles
-}
-
-async function insertSnapshotRows(
-  definition: (typeof snapshotTableDefinitions)[number],
-  rows: SnapshotRow[],
-  destinationDatabase: NoteStoreDatabase,
-) {
-  const insertBatchSize = resolveSnapshotInsertBatchSize(definition)
-  const insertStatements = new Map<number, ReturnType<typeof destinationDatabase.prepare>>()
-
-  for (let index = 0; index < rows.length; index += insertBatchSize) {
-    const rowBatch = rows.slice(index, index + insertBatchSize)
-    let insertStatement = insertStatements.get(rowBatch.length)
-
-    if (!insertStatement) {
-      insertStatement = destinationDatabase.prepare(
-        buildSnapshotInsertSql(definition, rowBatch.length),
-      )
-      insertStatements.set(rowBatch.length, insertStatement)
-    }
-
-    await insertStatement.run(flattenSnapshotRows(definition, rowBatch))
-  }
-}
-
-async function writeSnapshotSpoolFiles(
-  snapshotSpoolFiles: SnapshotSpoolFile[],
-  destinationDatabase: NoteStoreDatabase,
-) {
-  for (const { definition, path } of snapshotSpoolFiles) {
-    const stream = createReadStream(path, { encoding: 'utf8' })
-    const lineReader = createInterface({
-      input: stream,
-      crlfDelay: Infinity,
-    })
-
-    try {
-      for await (const line of lineReader) {
-        if (!line) {
-          continue
-        }
-
-        await insertSnapshotRows(
-          definition,
-          JSON.parse(line) as SnapshotRow[],
-          destinationDatabase,
-        )
-      }
-    } finally {
-      lineReader.close()
-      stream.destroy()
-    }
-  }
-}
-
-export async function copySnapshotTables(
-  sourceDatabase: NoteStoreDatabase,
-  destinationDatabase: NoteStoreDatabase,
-) {
-  const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
-
-  try {
-    const snapshotSpoolFiles = await spoolSnapshotTables(sourceDatabase, snapshotSpoolDirectory)
-    await writeSnapshotSpoolFiles(snapshotSpoolFiles, destinationDatabase)
-  } finally {
-    rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
   }
 }
 
@@ -621,19 +304,7 @@ export interface NoteStore {
   getStats(campaignId?: string): Promise<NoteStats>
   getAdminOverview(): Promise<AdminOverview>
   checkHealth(): Promise<void>
-  backupDatabase(destinationPath: string): Promise<void>
   close(): Promise<void>
-}
-
-const defaultDbPath = fileURLToPath(
-  new URL('../data/dnd-notes.sqlite', import.meta.url),
-)
-
-export function resolveNoteDbPath(
-  options: CreateNoteStoreOptions = {},
-  environment: NodeJS.ProcessEnv = process.env,
-): string {
-  return options.dbPath ?? environment.NOTES_DB_PATH ?? defaultDbPath
 }
 
 function resolveDatabaseUrl(
@@ -641,13 +312,6 @@ function resolveDatabaseUrl(
   environment: NodeJS.ProcessEnv = process.env,
 ) {
   return options.databaseUrl ?? environment.DATABASE_URL ?? null
-}
-
-function hasExplicitOption<Key extends keyof CreateNoteStoreOptions>(
-  options: CreateNoteStoreOptions,
-  key: Key,
-) {
-  return Object.prototype.hasOwnProperty.call(options, key)
 }
 
 function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl = resolveDatabaseUrl(options)) {
@@ -658,23 +322,8 @@ function requirePostgresDatabaseUrl(options: CreateNoteStoreOptions, databaseUrl
   return databaseUrl
 }
 
-export function resolveNoteStoreBackend(
-  options: CreateNoteStoreOptions,
-  environment: NodeJS.ProcessEnv = process.env,
-): 'sqlite' | 'postgres' {
-  if (options.backend) {
-    return options.backend
-  }
-
-  if (options.postgresPool || hasExplicitOption(options, 'databaseUrl')) {
-    return 'postgres'
-  }
-
-  if (hasExplicitOption(options, 'dbPath')) {
-    return 'sqlite'
-  }
-
-  return resolveDatabaseUrl(options, environment) ? 'postgres' : 'sqlite'
+export function resolveNoteStoreBackend(): 'postgres' {
+  return 'postgres'
 }
 
 export async function initializeDatabaseOrClose(
@@ -828,16 +477,12 @@ function mapCampaignShareLinkRow(row: CampaignShareLinkRow): CampaignShareLink {
 export async function createNoteStore(
   options: CreateNoteStoreOptions = {},
 ): Promise<NoteStore> {
-  const backend = resolveNoteStoreBackend(options)
-  const databaseUrl = backend === 'postgres' ? requirePostgresDatabaseUrl(options) : null
+  const databaseUrl = requirePostgresDatabaseUrl(options)
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
-  const database =
-    backend === 'postgres'
-      ? createPostgresDatabase({
-          connectionString: databaseUrl ?? undefined,
-          pool: options.postgresPool,
-        })
-      : createSqliteDatabase(resolveNoteDbPath(options))
+  const database = createPostgresDatabase({
+    connectionString: databaseUrl ?? undefined,
+    pool: options.postgresPool,
+  })
 
   await initializeDatabaseOrClose(database, () =>
     initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
@@ -1238,23 +883,26 @@ export async function createNoteStore(
       owner_accounts.keycloak_sub,
       owner_accounts.created_at,
       owner_accounts.updated_at,
-      COUNT(DISTINCT campaign_memberships.id) AS membership_count,
-      COUNT(
-        DISTINCT CASE
-          WHEN campaign_memberships.role = 'owner' THEN campaign_memberships.campaign_id
-        END
-      ) AS owned_campaign_count
+      COALESCE(membership_counts.membership_count, 0) AS membership_count,
+      COALESCE(owned_campaign_counts.owned_campaign_count, 0) AS owned_campaign_count
     FROM owner_accounts
-    LEFT JOIN campaign_memberships
-      ON campaign_memberships.user_id = owner_accounts.id
-    GROUP BY
-      owner_accounts.id,
-      owner_accounts.email,
-      owner_accounts.display_name,
-      owner_accounts.is_site_admin,
-      owner_accounts.keycloak_sub,
-      owner_accounts.created_at,
-      owner_accounts.updated_at
+    LEFT JOIN (
+      SELECT
+        user_id,
+        COUNT(*) AS membership_count
+      FROM campaign_memberships
+      GROUP BY user_id
+    ) AS membership_counts
+      ON membership_counts.user_id = owner_accounts.id
+    LEFT JOIN (
+      SELECT
+        user_id,
+        COUNT(DISTINCT campaign_id) AS owned_campaign_count
+      FROM campaign_memberships
+      WHERE role = 'owner'
+      GROUP BY user_id
+    ) AS owned_campaign_counts
+      ON owned_campaign_counts.user_id = owner_accounts.id
     ORDER BY owner_accounts.is_site_admin DESC, owner_accounts.email ASC
   `)
 
@@ -2741,42 +2389,6 @@ export async function createNoteStore(
     async checkHealth() {
       await checkDatabaseConnection.get()
     },
-    backupDatabase(destinationPath) {
-      if (database.backup) {
-        return database.backup(destinationPath).then(() => {
-          tightenSqliteFilePermissions(destinationPath)
-        })
-      }
-
-      return (async () => {
-        const snapshotDatabase = createSqliteDatabase(destinationPath)
-
-        try {
-          await initializeNoteStoreDatabase(snapshotDatabase, new Set())
-          tightenSqliteFilePermissions(destinationPath)
-
-          const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
-
-          try {
-            const exportSnapshot = database.transaction(async () =>
-              spoolSnapshotTables(database, snapshotSpoolDirectory),
-            )
-            const snapshotSpoolFiles = await exportSnapshot()
-            const writeSnapshot = snapshotDatabase.transaction(async () => {
-              await clearSnapshotTables(snapshotDatabase)
-              await writeSnapshotSpoolFiles(snapshotSpoolFiles, snapshotDatabase)
-            })
-
-            await writeSnapshot()
-            tightenSqliteFilePermissions(destinationPath)
-          } finally {
-            rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
-          }
-        } finally {
-          await snapshotDatabase.close()
-        }
-      })()
-    },
     close() {
       return database.close()
     },
@@ -2785,140 +2397,8 @@ export async function createNoteStore(
   return noteStore
 }
 
-export async function restoreNoteStoreFromBackup(
-  sourcePath: string,
-  options: CreateNoteStoreOptions = {},
-): Promise<NoteStore> {
-  const backend = resolveNoteStoreBackend(options)
-  const dbPath = backend === 'sqlite' ? resolveNoteDbPath(options) : null
-
-  if (dbPath === ':memory:') {
-    throw new Error('Admin restore is not supported for in-memory note stores.')
-  }
-
-  const { directory: workingCopyDirectory, path: workingCopyPath } = createRestoreWorkingCopy(
-    backend,
-    dbPath ?? defaultDbPath,
-  )
-
-  const validationDatabase = createSqliteDatabase(sourcePath, { readonly: true })
-
-  try {
-    const existingTables = new Set(
-      (
-        await validationDatabase.prepare<{ name: string }>(`
-          SELECT name
-          FROM sqlite_master
-          WHERE type = 'table'
-        `).all()
-      ).map((row) => row.name),
-    )
-    const missingTables = requiredBackupTables.filter(
-      (tableName) => !existingTables.has(tableName),
-    )
-
-    if (missingTables.length > 0) {
-      throw new InvalidBackupDatabaseError(
-        `Missing required tables: ${missingTables.join(', ')}`,
-      )
-    }
-  } catch (error) {
-    if (error instanceof InvalidBackupDatabaseError) {
-      throw error
-    }
-
-    throw new InvalidBackupDatabaseError('The uploaded database could not be read.')
-  } finally {
-    await validationDatabase.close()
-  }
-
-  let validationStore: NoteStore | undefined
-
-  try {
-    mkdirSync(dirname(workingCopyPath), { recursive: true })
-    copyFileSync(sourcePath, workingCopyPath)
-    tightenSqliteFilePermissions(workingCopyPath)
-
-    try {
-      validationStore = await createNoteStore({
-        ...options,
-        dbPath: workingCopyPath,
-        backend: 'sqlite',
-      })
-      await validationStore.checkHealth()
-    } catch {
-      throw new InvalidBackupDatabaseError(
-        'The uploaded database could not be opened as a dnd-notes backup.',
-      )
-    } finally {
-      await validationStore?.close()
-    }
-
-    if (backend === 'sqlite') {
-      if (!dbPath) {
-        throw new Error('SQLite restore requires a target dbPath.')
-      }
-      mkdirSync(dirname(dbPath), { recursive: true })
-      copyFileSync(workingCopyPath, dbPath)
-      tightenSqliteFilePermissions(dbPath)
-
-      return createNoteStore({ ...options, dbPath, backend: 'sqlite' })
-    }
-
-    const databaseUrl = requirePostgresDatabaseUrl(options)
-    const destinationDatabase = createPostgresDatabase({
-      connectionString: databaseUrl ?? undefined,
-      pool: options.postgresPool,
-    })
-    const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
-    const sourceDatabase = createSqliteDatabase(workingCopyPath, { readonly: true })
-
-    try {
-      await initializeNoteStoreDatabase(destinationDatabase, configuredSiteAdminEmails)
-
-      const snapshotSpoolDirectory = createSnapshotSpoolDirectory()
-
-      try {
-        const snapshotSpoolFiles = await spoolSnapshotTables(sourceDatabase, snapshotSpoolDirectory)
-        const restoreTransaction = destinationDatabase.transaction(async () => {
-          await clearSnapshotTables(destinationDatabase)
-          await writeSnapshotSpoolFiles(snapshotSpoolFiles, destinationDatabase)
-        })
-
-        await restoreTransaction()
-      } finally {
-        rmSync(snapshotSpoolDirectory, { recursive: true, force: true })
-      }
-    } finally {
-      await sourceDatabase.close()
-      await destinationDatabase.close()
-    }
-
-    return createNoteStore({ ...options, backend: 'postgres' })
-  } finally {
-    rmSync(workingCopyPath, { force: true })
-
-    if (workingCopyDirectory) {
-      rmSync(workingCopyDirectory, { recursive: true, force: true })
-    }
-  }
-}
-
 export async function createRuntimeNoteStore(
   options: RuntimeNoteStoreOptions = {},
 ): Promise<NoteStore> {
-  return createNoteStore({
-    ...options,
-    backend: 'postgres',
-  })
-}
-
-export async function restoreRuntimeNoteStoreFromBackup(
-  sourcePath: string,
-  options: RuntimeNoteStoreOptions = {},
-): Promise<NoteStore> {
-  return restoreNoteStoreFromBackup(sourcePath, {
-    ...options,
-    backend: 'postgres',
-  })
+  return createNoteStore(options)
 }

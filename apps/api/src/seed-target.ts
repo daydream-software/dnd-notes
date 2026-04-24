@@ -1,11 +1,7 @@
-import {
-  resolveNoteDbPath,
-  resolveNoteStoreBackend,
-  type CreateNoteStoreOptions,
-} from './note-store.js'
+import { type CreateNoteStoreOptions } from './note-store.js'
 
 export interface SeedTarget {
-  backend: 'sqlite' | 'postgres'
+  backend: 'postgres'
   noteStoreOptions: CreateNoteStoreOptions
   label: string
 }
@@ -13,21 +9,13 @@ export interface SeedTarget {
 export function resolveSeedTarget(
   environment: NodeJS.ProcessEnv = process.env,
 ): SeedTarget {
-  const backend = resolveNoteStoreBackend({}, environment)
-
-  if (backend === 'postgres') {
-    return {
-      backend,
-      noteStoreOptions: {},
-      label: 'postgres',
-    }
+  if (!environment.DATABASE_URL?.trim()) {
+    throw new Error('DATABASE_URL is required for seed workflows in the Postgres-only API runtime.')
   }
 
-  const dbPath = resolveNoteDbPath({}, environment)
-
   return {
-    backend,
-    noteStoreOptions: { dbPath },
-    label: dbPath,
+    backend: 'postgres',
+    noteStoreOptions: {},
+    label: 'postgres',
   }
 }

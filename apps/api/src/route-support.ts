@@ -54,10 +54,8 @@ export interface RateLimitPolicy {
 
 export interface AppRouteContext {
   getNoteStore: () => NoteStore
-  setNoteStore: (noteStore: NoteStore) => void
   publicWebUrl: string | null
   runtimeAuth: TenantRuntimeAuth
-  restoreNoteStore?: (sourcePath: string) => Promise<NoteStore>
   isRateLimited: (
     request: Request,
     response: Response<ErrorResponse>,
@@ -90,8 +88,6 @@ export const sharedClaimRateLimitPolicy: RateLimitPolicy = {
   windowMs: 1000 * 60 * 15,
   errorMessage: 'Too many membership claim attempts. Please wait before trying again.',
 }
-
-export const sqliteFileHeader = Buffer.from('SQLite format 3\0')
 
 export function normalizePublicWebUrl(publicWebUrl?: string) {
   if (!publicWebUrl) {

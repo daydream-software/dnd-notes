@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 Issue #99 Postgres-only cleanup completed locally (2026-04-24T00:00:00Z): Finished the broader SQLite removal on `squad/99-postgres-only-cutover-followup`. `apps/api` is now Postgres-only end to end: the old SQLite bridge, backup/restore admin endpoints, related types, and `sql.js` dependencies are gone; `apps/web` no longer exposes backup/restore controls in the site-admin panel; README/RUNTIME now document only the Postgres runtime contract. Focused validation passed for both workspaces (`apps/api` lint/test/build and `apps/web` lint/test/build). — Copilot
+
 📌 PR #110 SQL-splitting follow-up addressed locally (2026-04-24T00:00:00Z): Closed the next three review threads on `squad/99-postgres-only-cutover-followup` by replacing the newline-only SQLite statement splitter with a small scanner that recognizes semicolon statement boundaries even on the same line while ignoring semicolons inside quotes and SQL comments. The readonly and persistence regressions now exercise same-line multi-statement SQL, trailing whitespace in the new test blocks is gone, and focused `apps/api` lint/test/build passed again. — Copilot
 
 📌 PR #110 metadata/docs follow-up addressed locally (2026-04-24T00:00:00Z): Closed the next two review threads on `squad/99-postgres-only-cutover-followup` by removing the contradictory duplicate `DATABASE_URL` entry from `RUNTIME.md`’s optional database section and aligning the PR body with the final SQLite close contract that shipped earlier: queued close calls wait for serialized work, while `close()` invoked inside an active SQLite transaction rejects explicitly instead of deferring. — Copilot

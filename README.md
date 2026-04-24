@@ -1,6 +1,6 @@
 # dnd-notes
 
-A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript API that now runs the main tenant runtime on Postgres while keeping a temporary SQLite-compatible snapshot bridge for migration/admin tooling. Containerized for Kubernetes deployment with same-origin web + API serving.
+A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript API backed by Postgres. Containerized for Kubernetes deployment with same-origin web + API serving.
 
 ## Getting started
 
@@ -28,7 +28,6 @@ docker build -t dnd-notes:latest .
 docker run -p 3000:3000 \
   -e SERVE_WEB=true \
   -e PUBLIC_WEB_URL=http://localhost:3000 \
-  -v $(pwd)/data:/app/data \
   dnd-notes:latest
 ```
 
@@ -65,7 +64,7 @@ the Conventional Commits format (for example `feat(api): harden CORS policy` or
 ## Workspace layout
 
 - `apps/web` — React + Vite + Material UI notes workspace
-- `apps/api` — Express + TypeScript API with Postgres runtime persistence plus a temporary SQLite-compatible snapshot bridge for migration/admin tooling
+- `apps/api` — Express + TypeScript API with Postgres persistence
 - `apps/control-plane` — Express + TypeScript control plane for tenant registry and provisioning orchestration
 
 ## Control-plane provisioning
@@ -85,22 +84,16 @@ only when you have a live kube context plus an admin Postgres connection string:
 - `TENANT_IMAGE_PULL_SECRET` — optional imagePullSecret name for private images
 
 When provisioning is enabled, the control plane reconciles a tenant namespace,
-runtime ConfigMap/Secret, PVC, Service, Deployment, generated per-tenant
-Ingress, and a per-tenant Postgres database. New tenants also get a dedicated
+runtime ConfigMap/Secret, Service, Deployment, generated per-tenant Ingress,
+and a per-tenant Postgres database. New tenants also get a dedicated
 Postgres runtime role with a random password, plus control-plane schema
 bootstrap before the tenant pod starts, so the pod can run on least-privilege
-`DATABASE_URL` credentials. The current hosted slice still keeps `/app/data` on
-a PVC for explicit tenant storage lifecycle plus SQLite-compatible fallback
-files, but issue `#95` changes the target hosted steady-state to per-tenant
-Postgres without a tenant PVC in the normal pod shape.
+`DATABASE_URL` credentials.
 
 Postgres-backed tenant upgrades reuse `POST /internal/tenants/:tenantId/provision`
-with a version override. The generated tenant Deployment currently makes the
-first rollout contract explicit (drain-first `RollingUpdate`, `maxSurge: 0`,
-`maxUnavailable: 1`, `minReadySeconds: 5`), while the tenant runtime drains
-HTTP traffic and Postgres connections on `SIGTERM`. Issue `#95` re-targets the
-hosted steady state to overlapping `maxSurge: 1` / `maxUnavailable: 0` updates
-once tenant pods stop depending on PVC-backed SQLite handoff. See
+with a version override. Postgres-only tenants use the overlapping rolling-update
+shape (`maxSurge: 1`, `maxUnavailable: 0`, `minReadySeconds: 5`), while the
+tenant runtime drains HTTP traffic and Postgres connections on `SIGTERM`. See
 [`apps/control-plane/README.md`](apps/control-plane/README.md) and
 [`RUNTIME.md`](RUNTIME.md) for the operator choreography and rollout rationale.
 
@@ -154,18 +147,6 @@ tenant server through the Postgres-only runtime entrypoint. Copy
 `apps/api/.env.example` to `apps/api/.env` and point `DATABASE_URL` at the
 tenant database you want to serve locally.
 
-`NOTES_DB_PATH` no longer affects the main runtime server. It remains available
-only for lower-level helper flows that intentionally work with SQLite-compatible
-snapshot files during the cutover, such as seed/reset helpers or backup/restore
-migration tooling.
-
-Writable SQLite snapshot files intentionally stay on rollback-journal mode
-(`journal_mode=DELETE`), not WAL. Hosted production now targets per-tenant
-Postgres, while the remaining SQLite usage is limited to the temporary
-SQLite-compatible backup/restore interchange during the `#95` cutover; keeping
-those snapshots on a single-file journal model avoids WAL sidecars and
-checkpoint handling in the migration workflow.
-
 Optional Postgres pool tuning env vars:
 
 - `NOTES_DB_POOL_MIN` (default `0`)
@@ -211,20 +192,8 @@ To replace whatever is currently in the local database with the starter notes:
 npm run reset:data
 ```
 
-Both commands use the active helper backend. With SQLite they honor
-`NOTES_DB_PATH`; with Postgres they honor `DATABASE_URL`. That behavior applies
-to the seed/reset helpers, not the main runtime server.
-
-### SQLite → Postgres migration
-
-For an existing SQLite tenant:
-
-1. Download a fresh admin backup (`GET /api/admin/backup`) while the app still runs on SQLite.
-2. Start the API with `DATABASE_URL` pointed at the target Postgres database.
-3. Restore that backup through the admin restore flow (`POST /api/admin/restore` or the site-admin UI).
-
-The backup format stays SQLite-compatible, so the same snapshot can seed a fresh
-Postgres database. Direct admin backup downloads remain `.sqlite` snapshots.
+Both commands target Postgres through `DATABASE_URL`. They are helper flows for
+local/dev data management, not alternate runtime backends.
 
 ## Current note model
 
@@ -241,8 +210,6 @@ Postgres database. Direct admin backup downloads remain `.sqlite` snapshots.
 - `GET /health`
 - `GET /api/admin/accounts`
 - `GET /api/admin/overview`
-- `GET /api/admin/backup`
-- `POST /api/admin/restore`
 - `GET /api/auth/config`
 - `POST /api/auth/register`
 - `POST /api/auth/login`
@@ -306,119 +273,10 @@ The API implements several security hardening measures:
 - **Authentication:** Owner routes use Bearer tokens in `Authorization` headers. `GET /api/auth/config` advertises whether the runtime expects local owner sessions or Keycloak JWTs. Guest
   routes use guest tokens in `X-Guest-Token` headers. No cookies are used for auth.
 
-`GET /api/admin/accounts`, `GET /api/admin/overview`, `GET /api/admin/backup`,
-and `POST /api/admin/restore` are site-admin-only. `/api/admin/accounts`
-returns the real-account directory plus current site-admin assignments.
-`/api/admin/overview` returns aggregate account, campaign, membership,
-share-link, and note counts for the admin surface. `/api/admin/backup`
-returns a SQLite-compatible snapshot as a downloadable attachment for
-operational backup workflows. `POST /api/admin/restore` accepts a raw SQLite
-upload (`application/octet-stream`) and restores that snapshot into the active
-database backend after validating that it looks like a restorable dnd-notes
-database.
-
-For restore operations, use the site-admin panel upload flow and keep a freshly
-downloaded backup nearby. A successful restore may invalidate the current owner
-session if the restored snapshot contains different session rows, so the UI may
-require signing in again immediately afterward.
-
-## Backup and restore runbook
-
-Use this runbook whenever you need to capture a backup, rehearse recovery, or
-restore a known-good SQLite-compatible snapshot into the active database
-backend.
-
-This runbook assumes single-file SQLite snapshots as the interchange artifact.
-When the app is running on file-backed SQLite, it intentionally keeps
-rollback-journal mode instead of WAL so operators do not need to coordinate
-`<dbPath>-wal` / `<dbPath>-shm` sidecars. When the app is running on Postgres,
-the same snapshot is imported through the restore flow instead of being copied
-into place as the live store.
-
-### Minimum operating expectations
-
-- do not overwrite your only known-good snapshot;
-- keep at least three rotating backups in durable storage, including the most
-  recent known-good snapshot;
-- take a fresh live backup immediately before any restore and retain that
-  pre-restore snapshot until post-restore validation passes and users confirm
-  the system is healthy;
-- label snapshots with when they were taken and why they exist (routine backup,
-  pre-maintenance backup, rehearsal fixture, incident recovery, and so on);
-- treat restore as an operator action: ask active users to stop editing before
-  you start the restore, because connected clients are not yet placed into a
-  maintenance mode automatically.
-
-### Backup procedure
-
-1. Sign in as a site admin and open the Site admin panel.
-2. Download a fresh backup using **Download backup** (aria label:
-   **Download SQLite backup**) before any risky maintenance or before starting
-   a restore.
-3. Store the snapshot somewhere durable outside the running app directory.
-4. Confirm the file is non-empty and keep the timestamp/provenance with it.
-
-### Restore preparation checklist
-
-Before uploading a snapshot to `POST /api/admin/restore` through the Site admin
-panel using **Restore backup**, confirm all of the following:
-
-1. You know why this snapshot is the correct recovery point.
-2. You already downloaded a fresh backup of the current live instance.
-3. Active collaborators have been told to stop editing until validation is done.
-4. You have site-admin credentials ready in case the current session is
-   invalidated by the restore.
-
-### Restore procedure
-
-1. Open the Site admin panel restore flow.
-2. Select the SQLite-compatible snapshot you intend to restore.
-3. Complete the required confirmation and start the restore.
-4. Wait for the app to finish importing the snapshot into the active database
-   backend.
-5. If the UI signs you out afterward, sign in again as a site admin before
-   continuing validation.
-
-### Post-restore validation
-
-Run these checks immediately after a restore:
-
-1. Confirm the app responds normally (for example, load the main app and
-   confirm `GET /health` still succeeds if you have direct API access).
-2. Sign in as a site admin and open the admin overview.
-3. Check that high-level counts look plausible for the restored snapshot
-   (accounts, campaigns, memberships, share links, notes).
-4. Open at least one representative campaign and verify that notes load.
-5. Verify one expected recent/shared workflow still works for the restored
-   data set, such as loading a shared campaign or browsing a known
-   notes/campaign session from the session-browsing workflow.
-6. Keep the pre-restore live backup until the restored instance is accepted as
-   healthy.
-
-### Restore rehearsal checklist
-
-Use this checklist for each non-production rehearsal:
-
-1. Capture a fresh backup from the rehearsal source instance and store it with
-   timestamp + purpose metadata.
-2. Run the **Restore preparation checklist** above before you upload the
-   rehearsal snapshot.
-3. Perform the **Restore procedure** end to end.
-4. Complete every step in **Post-restore validation** and record pass/fail for
-   each check.
-5. Record rehearsal timing (start/end/duration), who ran it, and any follow-up
-   actions.
-6. If any check fails, keep the pre-restore backup, investigate the gap, and
-   update this runbook before the next rehearsal.
-
-### Rehearsal expectations
-
-- rehearse the backup + restore flow on a non-production copy before you need
-  it for a real incident;
-- repeat rehearsals at least quarterly, after meaningful backup/restore
-  changes, and before first production rollout on a new hosting setup;
-- treat rehearsal results as operational evidence: keep logs/screenshots of the
-  restore flow plus your validation records.
+`GET /api/admin/accounts` and `GET /api/admin/overview` are site-admin-only.
+`/api/admin/accounts` returns the real-account directory plus current site-admin
+assignments. `/api/admin/overview` returns aggregate account, campaign,
+membership, share-link, and note counts for the admin surface.
 
 `POST /api/campaigns/:campaignId/memberships/consolidations` is also owner-only.
 Send `sourceMembershipId` and `targetMembershipId` to preview the note-attribution
