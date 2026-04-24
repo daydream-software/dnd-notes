@@ -787,6 +787,14 @@ describe('TenantRegistry', () => {
         }),
       /Invalid CONTROL_PLANE_DATABASE_CONNECTION_TIMEOUT_MS value: fast/,
     )
+
+    assert.throws(
+      () =>
+        createTenantRegistryPoolConfig('postgres://control-plane.test/tenant-registry', {
+          CONTROL_PLANE_DATABASE_POOL_MAX: '1',
+        }),
+      /CONTROL_PLANE_DATABASE_POOL_MAX \(1\) must be at least 2/,
+    )
   })
 
   it('persists portal accounts and bearer-token sessions while purging expired sessions', async () => {

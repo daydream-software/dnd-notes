@@ -1,4 +1,5 @@
 import { Pool, type PoolConfig, type QueryResultRow } from 'pg'
+import { normalizeUnknownError } from './error-formatting.js'
 import {
   assertGeneratedTenantSubdomain,
   assertPersistedTenantSubdomain,
@@ -196,6 +197,12 @@ export function createTenantRegistryPoolConfig(
     )
   }
 
+  if ((config.max ?? 0) < 2) {
+    throw new Error(
+      `Invalid control-plane pool settings: CONTROL_PLANE_DATABASE_POOL_MAX (${config.max}) must be at least 2 so tenant advisory locks cannot deadlock the registry pool.`,
+    )
+  }
+
   return config
 }
 
@@ -261,65 +268,6 @@ function createTenantLockKeys(tenantId: string): readonly [number, number] {
     Number(BigInt.asIntN(32, hash >> 32n)),
     Number(BigInt.asIntN(32, hash & 0xffff_ffffn)),
   ] as const
-}
-
-function formatUnknownError(error: unknown): string {
-  if (typeof error === 'string' && error.length > 0) {
-    return error
-  }
-
-  if (
-    typeof error === 'number' ||
-    typeof error === 'boolean' ||
-    typeof error === 'bigint'
-  ) {
-    return String(error)
-  }
-
-  if (error && typeof error === 'object') {
-    const record = error as Record<string, unknown>
-    const constructorName =
-      typeof error.constructor?.name === 'string' && error.constructor.name.length > 0
-        ? error.constructor.name
-        : 'Object'
-    const message =
-      typeof record.message === 'string' && record.message.trim().length > 0
-        ? record.message.trim()
-        : null
-    const code =
-      typeof record.code === 'string' && record.code.trim().length > 0
-        ? record.code.trim()
-        : null
-    const keys = Object.keys(record).slice(0, 5)
-
-    if (message && code) {
-      return `${constructorName}: ${message} (code: ${code})`
-    }
-
-    if (message) {
-      return `${constructorName}: ${message}`
-    }
-
-    if (code) {
-      return `${constructorName} (code: ${code})`
-    }
-
-    return keys.length > 0
-      ? `${constructorName} with keys: ${keys.join(', ')}`
-      : constructorName
-  }
-
-  return 'Unknown error'
-}
-
-function normalizeUnknownError(error: unknown, fallbackMessage: string): Error {
-  if (error instanceof Error) {
-    return error
-  }
-
-  return new Error(`${fallbackMessage}: ${formatUnknownError(error)}`, {
-    cause: error,
-  })
 }
 
 function toCleanupReleaseError(error: unknown): Error | undefined {
