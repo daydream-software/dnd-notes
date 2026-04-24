@@ -241,177 +241,179 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     reason?: string
     version?: string
   }): Promise<TenantProvisioningResponse> {
-    const tenant = await this.getExistingTenant(params.tenantId)
     const requestedVersion = normalizeTenantVersionOverride(params.version)
-    const isExistingRolloutState =
-      tenant.currentState === 'ready' ||
-      tenant.currentState === 'upgrading' ||
-      tenant.currentState === 'maintenance' ||
-      tenant.currentState === 'restoring'
+    return this.tenantRegistry.withTenantLock(params.tenantId, async () => {
+      const tenant = await this.getExistingTenant(params.tenantId)
+      const isExistingRolloutState =
+        tenant.currentState === 'ready' ||
+        tenant.currentState === 'upgrading' ||
+        tenant.currentState === 'maintenance' ||
+        tenant.currentState === 'restoring'
 
-    const isVersionRollout =
-      requestedVersion !== undefined && requestedVersion !== tenant.version
+      const isVersionRollout =
+        requestedVersion !== undefined && requestedVersion !== tenant.version
 
-    if (tenant.currentState === 'deprovisioned') {
-      throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
-    }
+      if (tenant.currentState === 'deprovisioned') {
+        throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
+      }
 
-    if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
-      throw new TenantProvisioningConflictError(
-        `Tenant ${tenant.id} already has a rolling update in progress. Wait for it to return to ready before starting another rollout.`,
-        'tenant_rollout_in_progress',
-      )
-    }
-
-    if (isVersionRollout && tenant.currentState !== 'ready') {
-      throw new TenantProvisioningConflictError(
-        `Tenant ${tenant.id} cannot start a rolling update from state ${tenant.currentState}. Rolling updates are only supported for ready tenants.`,
-        'tenant_rollout_disallowed',
-      )
-    }
-
-    if (
-      requestedVersion !== undefined &&
-      requestedVersion === tenant.version &&
-      isExistingRolloutState
-    ) {
-      throw new TenantProvisioningValidationError(
-        `Tenant ${tenant.id} is already running version ${tenant.version}. Choose a different target version for a rolling update.`,
-        'unsupported_target_version',
-      )
-    }
-
-    if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
-      await this.tenantRegistry.updateTenantVersion(tenant.id, requestedVersion)
-    }
-
-    const refreshedTenant = await this.getExistingTenant(tenant.id)
-    const hadPersistedSubdomain = refreshedTenant.subdomain != null
-    const shouldMarkUpgrading =
-      isVersionRollout &&
-      hadPersistedSubdomain &&
-      refreshedTenant.currentState === 'ready'
-
-    try {
-      await this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
-      if (shouldMarkUpgrading) {
-        await this.tenantRegistry.updateTenantState(
-          refreshedTenant.id,
-          'upgrading',
-          params.triggeredBy,
-          params.reason ?? 'Tenant rolling update started',
+      if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
+        throw new TenantProvisioningConflictError(
+          `Tenant ${tenant.id} already has a rolling update in progress. Wait for it to return to ready before starting another rollout.`,
+          'tenant_rollout_in_progress',
         )
       }
-      const subdomain = assertPersistedTenantSubdomain(
-        refreshedTenant.id,
-        await this.tenantRegistry.reserveTenantSubdomain(
-          refreshedTenant.id,
-          () => this.createOpaqueSubdomainCandidate(),
-        ),
-        'provisioning tenant resources',
-      )
-      const existingResources = buildTenantResourceNames({
-        tenant: await this.getExistingTenant(refreshedTenant.id),
-        subdomain,
-        baseDomain: this.baseDomain,
-        imageRepository: this.imageRepository,
-      })
-      const existingRuntimeConnectionString = hadPersistedSubdomain
-        ? await this.infrastructureManager.getTenantRuntimeConnectionString(
-            existingResources,
+
+      if (isVersionRollout && tenant.currentState !== 'ready') {
+        throw new TenantProvisioningConflictError(
+          `Tenant ${tenant.id} cannot start a rolling update from state ${tenant.currentState}. Rolling updates are only supported for ready tenants.`,
+          'tenant_rollout_disallowed',
+        )
+      }
+
+      if (
+        requestedVersion !== undefined &&
+        requestedVersion === tenant.version &&
+        isExistingRolloutState
+      ) {
+        throw new TenantProvisioningValidationError(
+          `Tenant ${tenant.id} is already running version ${tenant.version}. Choose a different target version for a rolling update.`,
+          'unsupported_target_version',
+        )
+      }
+
+      if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
+        await this.tenantRegistry.updateTenantVersion(tenant.id, requestedVersion)
+      }
+
+      const refreshedTenant = await this.getExistingTenant(tenant.id)
+      const hadPersistedSubdomain = refreshedTenant.subdomain != null
+      const shouldMarkUpgrading =
+        isVersionRollout &&
+        hadPersistedSubdomain &&
+        refreshedTenant.currentState === 'ready'
+
+      try {
+        await this.tenantRegistry.updateTenantDesiredState(refreshedTenant.id, 'ready')
+        if (shouldMarkUpgrading) {
+          await this.tenantRegistry.updateTenantState(
+            refreshedTenant.id,
+            'upgrading',
+            params.triggeredBy,
+            params.reason ?? 'Tenant rolling update started',
           )
-        : null
-      const wasSuccessfullyProvisioned =
-        refreshedTenant.currentState === 'ready' ||
-        refreshedTenant.currentState === 'upgrading' ||
-        refreshedTenant.currentState === 'maintenance' ||
-        refreshedTenant.currentState === 'restoring'
-      const database = await this.databaseManager.ensureTenantDatabase(
-        refreshedTenant,
-        subdomain,
-        {
-          existingRuntimeConnectionString,
-          requireExistingRuntimeConnectionString: wasSuccessfullyProvisioned,
-        },
-      )
-
-      const bundle = buildTenantInfrastructureBundle({
-        tenant: await this.getExistingTenant(refreshedTenant.id),
-        subdomain,
-        database,
-        tenantRuntimeAuth: this.tenantRuntimeAuth,
-        baseDomain: this.baseDomain,
-        ingressClassName: this.ingressClassName,
-        imageRepository: this.imageRepository,
-        imagePullSecretName: this.imagePullSecretName,
-        publicScheme: this.publicScheme,
-        tenantPort: this.tenantPort,
-      })
-      const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
-        refreshedTenant.id,
-      )
-      if (!currentStorage) {
-        throw new Error(`Tenant ${refreshedTenant.id} not found`)
-      }
-      const nextStorageMode =
-        bundle.resources.pvcName !== null
-          ? 'sqlite-pvc'
-          : database.roleName === null
-            ? 'postgres-shared-user'
-            : 'postgres-dedicated-user'
-      const shouldInitializeNotRequiredMigrationStatus =
-        nextStorageMode === 'postgres-dedicated-user' &&
-        currentStorage?.mode === 'unknown' &&
-        currentStorage.migrationStatus === 'not-started' &&
-        currentStorage.lastMigrationFailure === null &&
-        refreshedTenant.storageReference === null
-
-      await this.tenantRegistry.updateTenantStorageReference(
-        refreshedTenant.id,
-        bundle.resources.pvcName ?? database.databaseName,
-      )
-      await this.tenantRegistry.updateTenantStorageProfile(refreshedTenant.id, {
-        mode: nextStorageMode,
-        migrationStatus: shouldInitializeNotRequiredMigrationStatus
-          ? 'not-required'
-          : currentStorage.migrationStatus,
-        failureReason: shouldInitializeNotRequiredMigrationStatus
-          ? null
-          : currentStorage.lastMigrationFailure,
-      })
-
-      await this.infrastructureManager.applyTenantResources(bundle)
-      await this.infrastructureManager.waitForTenantReady(
-        bundle.resources,
-        this.readyTimeoutMs,
-      )
-
-      const currentTenant = await this.getExistingTenant(refreshedTenant.id)
-      if (currentTenant.currentState !== 'ready') {
-        await this.tenantRegistry.updateTenantState(
+        }
+        const subdomain = assertPersistedTenantSubdomain(
           refreshedTenant.id,
-          'ready',
-          params.triggeredBy,
-          params.reason ?? 'Tenant resources provisioned',
+          await this.tenantRegistry.reserveTenantSubdomain(
+            refreshedTenant.id,
+            () => this.createOpaqueSubdomainCandidate(),
+          ),
+          'provisioning tenant resources',
         )
-      }
+        const existingResources = buildTenantResourceNames({
+          tenant: await this.getExistingTenant(refreshedTenant.id),
+          subdomain,
+          baseDomain: this.baseDomain,
+          imageRepository: this.imageRepository,
+        })
+        const existingRuntimeConnectionString = hadPersistedSubdomain
+          ? await this.infrastructureManager.getTenantRuntimeConnectionString(
+              existingResources,
+            )
+          : null
+        const wasSuccessfullyProvisioned =
+          refreshedTenant.currentState === 'ready' ||
+          refreshedTenant.currentState === 'upgrading' ||
+          refreshedTenant.currentState === 'maintenance' ||
+          refreshedTenant.currentState === 'restoring'
+        const database = await this.databaseManager.ensureTenantDatabase(
+          refreshedTenant,
+          subdomain,
+          {
+            existingRuntimeConnectionString,
+            requireExistingRuntimeConnectionString: wasSuccessfullyProvisioned,
+          },
+        )
 
-      return {
-        tenant: await this.getExistingTenant(refreshedTenant.id),
-        resources: bundle.resources,
-      }
-    } catch (error) {
-      const failedTenant = await this.getExistingTenant(refreshedTenant.id)
-      if (failedTenant.currentState !== 'failed') {
-        await this.tenantRegistry.updateTenantState(
+        const bundle = buildTenantInfrastructureBundle({
+          tenant: await this.getExistingTenant(refreshedTenant.id),
+          subdomain,
+          database,
+          tenantRuntimeAuth: this.tenantRuntimeAuth,
+          baseDomain: this.baseDomain,
+          ingressClassName: this.ingressClassName,
+          imageRepository: this.imageRepository,
+          imagePullSecretName: this.imagePullSecretName,
+          publicScheme: this.publicScheme,
+          tenantPort: this.tenantPort,
+        })
+        const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
           refreshedTenant.id,
-          'failed',
-          params.triggeredBy,
-          params.reason ?? 'Tenant provisioning failed',
         )
+        if (!currentStorage) {
+          throw new Error(`Tenant ${refreshedTenant.id} not found`)
+        }
+        const nextStorageMode =
+          bundle.resources.pvcName !== null
+            ? 'sqlite-pvc'
+            : database.roleName === null
+              ? 'postgres-shared-user'
+              : 'postgres-dedicated-user'
+        const shouldInitializeNotRequiredMigrationStatus =
+          nextStorageMode === 'postgres-dedicated-user' &&
+          currentStorage.mode === 'unknown' &&
+          currentStorage.migrationStatus === 'not-started' &&
+          currentStorage.lastMigrationFailure === null &&
+          refreshedTenant.storageReference === null
+
+        await this.tenantRegistry.updateTenantStorageReference(
+          refreshedTenant.id,
+          bundle.resources.pvcName ?? database.databaseName,
+        )
+        await this.tenantRegistry.updateTenantStorageProfile(refreshedTenant.id, {
+          mode: nextStorageMode,
+          migrationStatus: shouldInitializeNotRequiredMigrationStatus
+            ? 'not-required'
+            : currentStorage.migrationStatus,
+          failureReason: shouldInitializeNotRequiredMigrationStatus
+            ? null
+            : currentStorage.lastMigrationFailure,
+        })
+
+        await this.infrastructureManager.applyTenantResources(bundle)
+        await this.infrastructureManager.waitForTenantReady(
+          bundle.resources,
+          this.readyTimeoutMs,
+        )
+
+        const currentTenant = await this.getExistingTenant(refreshedTenant.id)
+        if (currentTenant.currentState !== 'ready') {
+          await this.tenantRegistry.updateTenantState(
+            refreshedTenant.id,
+            'ready',
+            params.triggeredBy,
+            params.reason ?? 'Tenant resources provisioned',
+          )
+        }
+
+        return {
+          tenant: await this.getExistingTenant(refreshedTenant.id),
+          resources: bundle.resources,
+        }
+      } catch (error) {
+        const failedTenant = await this.getExistingTenant(refreshedTenant.id)
+        if (failedTenant.currentState !== 'failed') {
+          await this.tenantRegistry.updateTenantState(
+            refreshedTenant.id,
+            'failed',
+            params.triggeredBy,
+            params.reason ?? 'Tenant provisioning failed',
+          )
+        }
+        throw error
       }
-      throw error
-    }
+    })
   }
 
   async deprovisionTenant(params: {
@@ -419,48 +421,50 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     triggeredBy: string
     reason?: string
   }): Promise<TenantDeprovisionResponse> {
-    const tenant = await this.getExistingTenant(params.tenantId)
+    return this.tenantRegistry.withTenantLock(params.tenantId, async () => {
+      const tenant = await this.getExistingTenant(params.tenantId)
 
-    if (tenant.currentState === 'deprovisioned') {
+      if (tenant.currentState === 'deprovisioned') {
+        return {
+          tenant,
+          deprovisioned: true,
+        }
+      }
+
+      if (tenant.subdomain != null) {
+        const subdomain = assertPersistedTenantSubdomain(
+          tenant.id,
+          tenant.subdomain,
+          'deprovisioning tenant resources',
+        )
+        const resources = buildTenantResourceNames({
+          tenant,
+          subdomain,
+          baseDomain: this.baseDomain,
+          imageRepository: this.imageRepository,
+        })
+
+        await this.infrastructureManager.deleteTenantResources(resources)
+        await this.databaseManager.deleteTenantDatabase(tenant, subdomain)
+      }
+
+      if (tenant.storageReference) {
+        await this.tenantRegistry.updateTenantStorageReference(tenant.id, null)
+      }
+
+      await this.tenantRegistry.updateTenantDesiredState(tenant.id, 'deprovisioned')
+      await this.tenantRegistry.updateTenantState(
+        tenant.id,
+        'deprovisioned',
+        params.triggeredBy,
+        params.reason ?? 'Tenant resources deleted',
+      )
+
       return {
-        tenant,
+        tenant: await this.getExistingTenant(tenant.id),
         deprovisioned: true,
       }
-    }
-
-    if (tenant.subdomain != null) {
-      const subdomain = assertPersistedTenantSubdomain(
-        tenant.id,
-        tenant.subdomain,
-        'deprovisioning tenant resources',
-      )
-      const resources = buildTenantResourceNames({
-        tenant,
-        subdomain,
-        baseDomain: this.baseDomain,
-        imageRepository: this.imageRepository,
-      })
-
-      await this.infrastructureManager.deleteTenantResources(resources)
-      await this.databaseManager.deleteTenantDatabase(tenant, subdomain)
-    }
-
-    if (tenant.storageReference) {
-      await this.tenantRegistry.updateTenantStorageReference(tenant.id, null)
-    }
-
-    await this.tenantRegistry.updateTenantDesiredState(tenant.id, 'deprovisioned')
-    await this.tenantRegistry.updateTenantState(
-      tenant.id,
-      'deprovisioned',
-      params.triggeredBy,
-      params.reason ?? 'Tenant resources deleted',
-    )
-
-    return {
-      tenant: await this.getExistingTenant(tenant.id),
-      deprovisioned: true,
-    }
+    })
   }
 
   async close(): Promise<void> {

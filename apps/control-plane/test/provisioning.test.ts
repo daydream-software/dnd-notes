@@ -232,6 +232,12 @@ describe('TenantProvisioningService', () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
+    const originalWithTenantLock = tenantRegistry.withTenantLock.bind(tenantRegistry)
+    const tenantLockCalls: string[] = []
+    tenantRegistry.withTenantLock = async (tenantId, operation) => {
+      tenantLockCalls.push(tenantId)
+      return await originalWithTenantLock(tenantId, operation)
+    }
     const provisioningService: TenantProvisioningPort =
       new TenantProvisioningService({
         tenantRegistry,
@@ -271,6 +277,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(storage.mode, 'postgres-dedicated-user')
       assert.equal(storage.migrationStatus, 'not-required')
       assert.equal(storage.lastMigrationFailure, null)
+      assert.deepEqual(tenantLockCalls, ['tenant-demo'])
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
       assert.equal(infrastructureManager.bundles[0].ingressClassName, 'nginx')

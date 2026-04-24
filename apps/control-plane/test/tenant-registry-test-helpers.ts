@@ -1,9 +1,15 @@
-import { newDb } from 'pg-mem'
+import { DataType, newDb } from 'pg-mem'
 import { TenantRegistry } from '../src/tenant-registry.js'
 
 export function createTestTenantRegistry() {
   const db = newDb({
     autoCreateForeignKeyIndices: true,
+  })
+  db.public.registerFunction({
+    name: 'pg_advisory_xact_lock',
+    args: [DataType.integer, DataType.integer],
+    returns: DataType.bool,
+    implementation: () => true,
   })
   const { Pool } = db.adapters.createPg()
   const pool = new Pool()

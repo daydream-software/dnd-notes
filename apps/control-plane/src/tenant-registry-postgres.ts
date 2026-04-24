@@ -24,6 +24,7 @@ const tenantStorageMigrationStatusSqlList = tenantStorageMigrationStatuses
   .map((status) => `'${status}'`)
   .join(', ')
 const CURRENT_SCHEMA_VERSION = 7
+const tenantLockNamespaceKey = 101
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 const tenantSelectColumns = `id, slug, subdomain, owner_id, display_name, plan_tier,
   initial_admin_email, desired_state, current_state, version, storage_reference,
@@ -240,6 +241,17 @@ function normalizeTimestamp(value: Date | string): string {
 
 function isUniqueConstraintError(error: unknown): error is Error & { code?: string } {
   return error instanceof Error && (error as Error & { code?: string }).code === '23505'
+}
+
+function createTenantLockKey(tenantId: string): number {
+  let hash = 0x811c9dc5
+
+  for (let index = 0; index < tenantId.length; index += 1) {
+    hash ^= tenantId.charCodeAt(index)
+    hash = Math.imul(hash, 0x01000193)
+  }
+
+  return hash | 0
 }
 
 export class TenantRegistry {
@@ -501,6 +513,31 @@ export class TenantRegistry {
 
   async checkHealth(): Promise<void> {
     await this.run('SELECT 1')
+  }
+
+  async withTenantLock<Result>(
+    tenantId: string,
+    operation: () => Promise<Result>,
+  ): Promise<Result> {
+    return this.withTransaction(async (client) => {
+      await client.query(
+        'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
+        [tenantLockNamespaceKey, createTenantLockKey(tenantId)],
+      )
+
+      const existingTenant = await client.query<{ id: string }>(
+        `SELECT id
+         FROM tenants
+         WHERE id = $1`,
+        [tenantId],
+      )
+
+      if ((existingTenant.rowCount ?? existingTenant.rows.length) !== 1) {
+        throw new Error(`Tenant ${tenantId} not found`)
+      }
+
+      return operation()
+    })
   }
 
   async listTenants(): Promise<Tenant[]> {
@@ -981,18 +1018,44 @@ export class TenantRegistry {
       failureReason?: string | null
     },
   ): Promise<void> {
+    const currentProfile = await this.run<{
+      storage_migration_status: TenantStorageMigrationStatus
+      storage_migration_failure_reason: string | null
+    }>(
+      `SELECT storage_migration_status, storage_migration_failure_reason
+       FROM tenants
+       WHERE id = $1`,
+      [tenantId],
+    )
+    const existingProfile = currentProfile.rows[0]
+
+    if (!existingProfile) {
+      throw new Error(`Tenant ${tenantId} not found`)
+    }
+
+    const nextFailureReason = params.failureReason ?? null
+    const shouldRefreshMigrationTimestamp =
+      existingProfile.storage_migration_status !== params.migrationStatus ||
+      existingProfile.storage_migration_failure_reason !== nextFailureReason
     const result = await this.run(
-      `UPDATE tenants
-       SET storage_mode = $1,
-           storage_migration_status = $2,
-           storage_migration_failure_reason = $3,
-           storage_migration_updated_at = CURRENT_TIMESTAMP,
-           updated_at = CURRENT_TIMESTAMP
-       WHERE id = $4`,
+      shouldRefreshMigrationTimestamp
+        ? `UPDATE tenants
+           SET storage_mode = $1,
+               storage_migration_status = $2,
+               storage_migration_failure_reason = $3,
+               storage_migration_updated_at = CURRENT_TIMESTAMP,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $4`
+        : `UPDATE tenants
+           SET storage_mode = $1,
+               storage_migration_status = $2,
+               storage_migration_failure_reason = $3,
+               updated_at = CURRENT_TIMESTAMP
+           WHERE id = $4`,
       [
         params.mode,
         params.migrationStatus,
-        params.failureReason ?? null,
+        nextFailureReason,
         tenantId,
       ],
     )

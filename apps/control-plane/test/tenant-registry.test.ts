@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
+import { setTimeout as delay } from 'node:timers/promises'
 import { describe, it } from 'node:test'
-import { newDb } from 'pg-mem'
+import { DataType, newDb } from 'pg-mem'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { createTenantRegistryPoolConfig } from '../src/tenant-registry-postgres.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
@@ -297,6 +298,108 @@ describe('TenantRegistry', () => {
       assert.ok(storage.migrationUpdatedAt)
     } finally {
       await cleanup()
+    }
+  })
+
+  it('preserves the migration timestamp when only the storage mode is refreshed', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'sqlite-pvc',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+
+      const initialStorage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
+
+      assert.ok(initialStorage?.migrationUpdatedAt)
+      await delay(20)
+
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'postgres-dedicated-user',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+
+      const refreshedStorage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
+
+      assert.ok(refreshedStorage)
+      assert.equal(refreshedStorage.mode, 'postgres-dedicated-user')
+      assert.equal(
+        refreshedStorage.migrationUpdatedAt,
+        initialStorage.migrationUpdatedAt,
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('takes a tenant advisory lock before running serialized work', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_xact_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let observedTenantLock = false
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        return await pool.query(text, values as unknown[])
+      },
+      async connect() {
+        const client = await pool.connect()
+
+        return {
+          async query(text: string, values?: readonly unknown[]) {
+            if (text.includes('pg_advisory_xact_lock')) {
+              observedTenantLock = true
+            }
+
+            return await client.query(text, values as unknown[])
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: wrappedPool,
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      let operationRan = false
+      await tenantRegistry.withTenantLock('tenant-1', async () => {
+        operationRan = true
+        assert.equal(observedTenantLock, true)
+      })
+
+      assert.equal(operationRan, true)
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
     }
   })
 
