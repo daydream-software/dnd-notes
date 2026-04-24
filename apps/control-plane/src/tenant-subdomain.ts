@@ -1,5 +1,5 @@
 const maxKubernetesObjectNameLength = 63
-const tenantPvcNamePrefix = 'dnd-notes-data-'
+export const tenantPvcNamePrefix = 'dnd-notes-data-'
 export const maxTenantSubdomainLength =
   maxKubernetesObjectNameLength - tenantPvcNamePrefix.length
 

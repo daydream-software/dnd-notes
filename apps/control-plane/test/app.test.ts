@@ -659,7 +659,7 @@ describe('Control Plane API', () => {
           )
           await tenantRegistry.updateTenantStorageReference(
             request.tenantId,
-            `dnd-notes-data-${request.tenantId.slice(-8)}`,
+            'tenant_db',
           )
           await tenantRegistry.updateTenantDesiredState(request.tenantId, 'ready')
           await tenantRegistry.updateTenantState(
@@ -675,7 +675,7 @@ describe('Control Plane API', () => {
               namespace: `tenant-${request.tenantId.slice(-8)}`,
               deploymentName: 'dnd-notes',
               serviceName: 'dnd-notes',
-              pvcName: `dnd-notes-data-${request.tenantId.slice(-8)}`,
+              pvcName: null,
               configMapName: 'dnd-notes-runtime',
               secretName: 'dnd-notes-runtime-secret',
               hostname: `${request.tenantId.slice(-8)}.dnd-notes.test`,
@@ -1487,7 +1487,7 @@ describe('Control Plane API', () => {
           await tenantRegistry.updateTenantSubdomain('tenant-123', 't-opaque123456')
           await tenantRegistry.updateTenantStorageReference(
             'tenant-123',
-            'dnd-notes-data-t-opaque123456',
+            'tenant_db',
           )
           await tenantRegistry.updateTenantDesiredState('tenant-123', 'ready')
           await tenantRegistry.updateTenantState(
@@ -1503,7 +1503,7 @@ describe('Control Plane API', () => {
               namespace: 'tenant-t-opaque123456',
               deploymentName: 'dnd-notes',
               serviceName: 'dnd-notes',
-              pvcName: 'dnd-notes-data-t-opaque123456',
+              pvcName: null,
               configMapName: 'dnd-notes-runtime',
               secretName: 'dnd-notes-runtime-secret',
               hostname: 't-opaque123456.dnd-notes.test',
@@ -1537,13 +1537,10 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.tenant.subdomain, 't-opaque123456')
       assert.strictEqual(
         response.body.tenant.storageReference,
-        'dnd-notes-data-t-opaque123456',
+        'tenant_db',
       )
       assert.strictEqual(response.body.resources.namespace, 'tenant-t-opaque123456')
-      assert.strictEqual(
-        response.body.resources.pvcName,
-        'dnd-notes-data-t-opaque123456',
-      )
+      assert.strictEqual(response.body.resources.pvcName, null)
 
       const transitions = await authedGet(`${tenantPath('tenant-123')}/transitions`).expect(
         200,
