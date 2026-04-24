@@ -253,11 +253,18 @@ describe('TenantProvisioningService', () => {
         tenantId: 'tenant-demo',
         triggeredBy: 'control-plane',
       })
+      const runtimeDatabaseUrl = new URL(
+        infrastructureManager.bundles[0].runtimeConnectionString ?? '',
+      )
 
       assert.equal(result.tenant.currentState, 'ready')
       assert.equal(result.tenant.desiredState, 'ready')
       assert.match(result.tenant.subdomain ?? '', /^t-[0-9a-f]{12}$/)
-      assert.equal(result.tenant.storageReference, result.resources.databaseName)
+      assert.equal(
+        result.tenant.storageReference,
+        runtimeDatabaseUrl.pathname.slice(1),
+      )
+      assert.equal(result.resources.databaseName, runtimeDatabaseUrl.pathname.slice(1))
       assert.equal(result.resources.pvcName, null)
       const storage = await tenantRegistry.getTenantStorageSnapshot('tenant-demo')
       assert.ok(storage)
@@ -285,9 +292,6 @@ describe('TenantProvisioningService', () => {
       assert.equal(
         infrastructureManager.bundles[0].resources.hostname,
         `${result.tenant.subdomain}.dnd-notes.test`,
-      )
-      const runtimeDatabaseUrl = new URL(
-        infrastructureManager.bundles[0].runtimeConnectionString ?? '',
       )
       assert.equal(
         decodeURIComponent(runtimeDatabaseUrl.username).startsWith('tenant_rt_'),
@@ -1019,6 +1023,65 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('preserves explicit storage migration state while legacy PVC-backed tenants are reprovisioned', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      const tenant = await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantSubdomain(tenant.id, 't-legacydemo')
+      await tenantRegistry.updateTenantStorageReference(
+        tenant.id,
+        'dnd-notes-data-t-legacydemo',
+      )
+      await tenantRegistry.updateTenantStorageProfile(tenant.id, {
+        mode: 'sqlite-pvc',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+      await tenantRegistry.updateTenantDesiredState(tenant.id, 'ready')
+      await tenantRegistry.updateTenantState(
+        tenant.id,
+        'ready',
+        'control-plane',
+        'Legacy tenant already provisioned',
+      )
+      infrastructureManager.runtimeConnectionStrings.set(
+        'tenant-t-legacydemo/dnd-notes-runtime-secret',
+        'postgresql://legacy-user:legacy-password@postgres.default:5432/tenant_demo_t_legacydemo',
+      )
+
+      await provisioningService.provisionTenant({
+        tenantId: tenant.id,
+        triggeredBy: 'control-plane',
+      })
+
+      const storage = await tenantRegistry.getTenantStorageSnapshot(tenant.id)
+
+      assert.ok(storage)
+      assert.equal(storage.mode, 'sqlite-pvc')
+      assert.equal(storage.migrationStatus, 'failed')
+      assert.equal(storage.lastMigrationFailure, 'Synthetic cutover failure')
+      assert.equal(storage.storageReference, 'dnd-notes-data-t-legacydemo')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
   it('builds a postgres-only workload for newly provisioned tenants', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 

@@ -290,6 +290,7 @@ export class TenantRegistry {
       currentSchemaVersion !== 3 &&
       currentSchemaVersion !== 4 &&
       currentSchemaVersion !== 5 &&
+      currentSchemaVersion !== 6 &&
       currentSchemaVersion !== CURRENT_SCHEMA_VERSION
     ) {
       throw new Error(
@@ -460,15 +461,6 @@ export class TenantRegistry {
       await this.pool.query(`
         ALTER TABLE tenants
         ADD COLUMN IF NOT EXISTS storage_migration_updated_at TIMESTAMPTZ
-      `)
-      await this.pool.query(`
-        UPDATE tenants
-        SET storage_mode = 'postgres-dedicated-user',
-            storage_migration_status = 'not-required',
-            storage_migration_updated_at = COALESCE(storage_migration_updated_at, updated_at)
-        WHERE storage_mode = 'unknown'
-          AND storage_reference IS NOT NULL
-          AND storage_reference LIKE 'tenant\\_%' ESCAPE '\\'
       `)
     }
   }

@@ -1365,6 +1365,42 @@ describe('Control Plane API', () => {
       )
     })
 
+    it('blocks cutover readiness when backup metadata omits lastBackupStatus', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-789',
+        slug: 'third-tenant',
+        ownerId: 'owner-999',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantDesiredState('tenant-789', 'ready')
+      await tenantRegistry.updateTenantState(
+        'tenant-789',
+        'ready',
+        'provisioner',
+        'Provisioned successfully',
+      )
+      await tenantRegistry.updateTenantStorageReference('tenant-789', 'pvc-tenant-789')
+      await tenantRegistry.updateTenantStorageProfile('tenant-789', {
+        mode: 'sqlite-pvc',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+      await tenantRegistry.updateTenantBackupMetadata(
+        'tenant-789',
+        JSON.stringify({
+          lastBackupAt: '2026-04-24T00:00:00Z',
+          location: 'blob://backups/tenant-789',
+        }),
+      )
+
+      const response = await authedGet(`${tenantPath('tenant-789')}/storage`).expect(200)
+
+      assert.strictEqual(response.body.storage.cutoverReady, false)
+      assert.strictEqual(response.body.storage.backup.status, 'invalid')
+      assert.match(response.body.storage.backup.details, /lastBackupStatus/i)
+      assert.match(response.body.storage.blockers.join(' '), /lastBackupStatus/i)
+    })
+
     it('returns 404 for non-existent tenants', async () => {
       const response = await authedGet(`${tenantPath('non-existent')}/storage`).expect(
         404,

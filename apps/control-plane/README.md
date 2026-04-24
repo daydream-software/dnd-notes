@@ -113,7 +113,8 @@ The dedicated tenant-storage endpoint adds the next cutover-focused layer on
 top: it exposes the persisted storage mode, storage-migration status, the last
 cutover failure reason when one exists, and a simple cutover-readiness gate that
 checks tenant state plus backup metadata quality before a future cutover run is
-allowed.
+allowed. A backup only counts as cutover-ready when metadata includes
+`location`, `lastBackupAt`, and a successful `lastBackupStatus`.
 
 ### Customer portal surface (`#70`)
 

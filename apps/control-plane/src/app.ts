@@ -154,6 +154,15 @@ function describeTenantCutoverBackupReadiness(
 
   const normalizedStatus = backup.lastBackupStatus?.trim().toLowerCase() ?? null
 
+  if (!normalizedStatus) {
+    return {
+      ...backup,
+      status: 'invalid',
+      details:
+        'Backup metadata must include a successful lastBackupStatus before cutover.',
+    }
+  }
+
   if (normalizedStatus && !successfulCutoverBackupStatuses.has(normalizedStatus)) {
     return {
       ...backup,
