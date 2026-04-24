@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -59,14 +59,19 @@ class FakeCommandExecutor {
 class FakePool {
   queries: Array<{ text: string; values?: readonly unknown[] }> = []
   activeConnectionCount = 0
+  activeConnectionCounts: number[] = []
 
   async connect() {
     return {
       query: async (text: string, values?: readonly unknown[]) => {
         this.queries.push({ text, values })
         if (text.includes('COUNT(*)::integer AS active_connection_count')) {
+          const activeConnectionCount =
+            this.activeConnectionCounts.length > 0
+              ? (this.activeConnectionCounts.shift() ?? 0)
+              : this.activeConnectionCount
           return {
-            rows: [{ active_connection_count: this.activeConnectionCount }],
+            rows: [{ active_connection_count: activeConnectionCount }],
           }
         }
         return { rows: [] }
@@ -250,9 +255,11 @@ describe('PostgresTenantBackupRunner', () => {
         executor.calls.map((call) => call.command),
         ['pg_dump', 'pg_restore'],
       )
-      assert.equal(pool.queries.length, 1)
-      assert.match(pool.queries[0]?.text ?? '', /COUNT\(\*\)::integer AS active_connection_count/)
-      assert.deepEqual(pool.queries[0]?.values, ['tenant_demo_t_demo'])
+      assert.equal(pool.queries.length, 2)
+      for (const query of pool.queries) {
+        assert.match(query.text, /COUNT\(\*\)::integer AS active_connection_count/)
+        assert.deepEqual(query.values, ['tenant_demo_t_demo'])
+      }
       assert.equal(result.tenantId, 'tenant-demo')
       assert.equal(result.databaseName, 'tenant_demo_t_demo')
       assert.equal(result.backupLocation, storedBackup.location)
@@ -371,6 +378,61 @@ describe('PostgresTenantBackupRunner', () => {
 
       assert.equal(executor.calls.length, 0)
       assert.equal(pool.queries.length, 1)
+    } finally {
+      await runner.close()
+      if (sourceDirectory) {
+        await rm(sourceDirectory, { recursive: true, force: true })
+      }
+      await rm(artifactRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('rechecks for active connections immediately before pg_restore runs', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+    const executor = new FakeCommandExecutor()
+    const pool = new FakePool()
+    pool.activeConnectionCounts = [0, 1]
+    const runner = new PostgresTenantBackupRunner({
+      adminDatabaseUrl: 'postgresql://postgres:postgres@postgres.default:5432/postgres',
+      artifactStore,
+      commandExecutor: executor,
+      pool,
+      now: () => new Date('2026-04-24T01:10:00.000Z'),
+    })
+
+    let sourceDirectory: string | undefined
+    try {
+      sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
+      const sourcePath = join(sourceDirectory, 'incoming.dump')
+      await writeFile(sourcePath, 'restore-payload')
+      const storedBackup = await artifactStore.storeBackup({
+        tenantId: 'tenant-demo',
+        sourcePath,
+        capturedAt: '2026-04-24T01:00:00.000Z',
+      })
+
+      await assert.rejects(
+        () =>
+          runner.restoreTenant({
+            tenant: createTenant({
+              currentState: 'restoring',
+            }),
+            backupLocation: storedBackup.location,
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /exclusive maintenance window; found 1 active database connection/i.test(
+            error.message,
+          ),
+      )
+
+      assert.deepEqual(
+        executor.calls.map((call) => call.command),
+        ['pg_dump'],
+      )
+      assert.equal(executor.restoredPayloads.length, 0)
+      assert.equal(pool.queries.length, 2)
     } finally {
       await runner.close()
       if (sourceDirectory) {
@@ -536,6 +598,77 @@ describe('FileSystemTenantBackupArtifactStore', () => {
       )
     } finally {
       await rm(artifactRoot, { recursive: true, force: true })
+      await rm(destinationDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects symlink escapes when storing backups', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const outsideDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-outside-'))
+    const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
+    const sourcePath = join(sourceDirectory, 'artifact.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+
+    try {
+      await writeFile(sourcePath, 'backup-artifact')
+      await symlink(outsideDirectory, join(artifactRoot, 'tenant-demo'))
+
+      await assert.rejects(
+        () =>
+          artifactStore.storeBackup({
+            tenantId: 'tenant-demo',
+            sourcePath,
+            capturedAt: '2026-04-24T01:00:00.000Z',
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /must not traverse symbolic links/i.test(error.message),
+      )
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
+      await rm(outsideDirectory, { recursive: true, force: true })
+      await rm(sourceDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects symlink escapes when materializing backups', async () => {
+    if (process.platform === 'win32') {
+      return
+    }
+
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const outsideDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-outside-'))
+    const destinationDirectory = await mkdtemp(
+      join(tmpdir(), 'tenant-backup-destination-'),
+    )
+    const outsidePath = join(outsideDirectory, 'artifact.dump')
+    const destinationPath = join(destinationDirectory, 'copied.dump')
+    const tenantDirectory = join(artifactRoot, 'tenant-demo')
+    const symlinkPath = join(tenantDirectory, 'artifact.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+
+    try {
+      await writeFile(outsidePath, 'outside-artifact')
+      await mkdir(tenantDirectory, { recursive: true })
+      await symlink(outsidePath, symlinkPath)
+
+      await assert.rejects(
+        () =>
+          artifactStore.materializeBackup({
+            location: pathToFileURL(symlinkPath).toString(),
+            destinationPath,
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /must not traverse symbolic links/i.test(error.message),
+      )
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
+      await rm(outsideDirectory, { recursive: true, force: true })
       await rm(destinationDirectory, { recursive: true, force: true })
     }
   })

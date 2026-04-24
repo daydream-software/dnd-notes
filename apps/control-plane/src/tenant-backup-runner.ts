@@ -4,8 +4,10 @@ import { createReadStream } from 'node:fs'
 import {
   chmod,
   copyFile,
+  lstat,
   mkdir,
   mkdtemp,
+  realpath,
   rm,
   stat,
 } from 'node:fs/promises'
@@ -165,20 +167,26 @@ export class FileSystemTenantBackupArtifactStore
   }): Promise<{ location: string }> {
     await mkdir(this.rootDirectory, { recursive: true, mode: 0o700 })
     await chmod(this.rootDirectory, 0o700)
-    const tenantDirectory = resolveContainedArtifactPath(
+    const tenantDirectory = await resolveContainedArtifactPath(
       this.rootDirectory,
       join(this.rootDirectory, sanitizePathComponent(params.tenantId)),
       `Backup artifact directory for tenant ${JSON.stringify(params.tenantId)}`,
+      {
+        allowMissingLeaf: true,
+      },
     )
     await mkdir(tenantDirectory, { recursive: true, mode: 0o700 })
     await chmod(tenantDirectory, 0o700)
-    const targetPath = resolveContainedArtifactPath(
+    const targetPath = await resolveContainedArtifactPath(
       this.rootDirectory,
       join(
         tenantDirectory,
         `${sanitizeTimestamp(params.capturedAt)}-${basename(params.sourcePath)}`,
       ),
       `Backup artifact path for tenant ${JSON.stringify(params.tenantId)}`,
+      {
+        allowMissingLeaf: true,
+      },
     )
     await copyFile(params.sourcePath, targetPath)
     await chmod(targetPath, 0o600)
@@ -191,7 +199,7 @@ export class FileSystemTenantBackupArtifactStore
     location: string
     destinationPath: string
   }): Promise<void> {
-    const sourcePath = this.resolveLocation(params.location)
+    const sourcePath = await this.resolveLocation(params.location)
     await assertBackupArtifactFile(sourcePath, params.location)
     const destinationDirectory = dirname(params.destinationPath)
     await mkdir(destinationDirectory, { recursive: true, mode: 0o700 })
@@ -200,7 +208,7 @@ export class FileSystemTenantBackupArtifactStore
     await chmod(params.destinationPath, 0o600)
   }
 
-  private resolveLocation(location: string): string {
+  private async resolveLocation(location: string): Promise<string> {
     let filePath: string
 
     try {
@@ -225,6 +233,9 @@ export class FileSystemTenantBackupArtifactStore
       this.rootDirectory,
       filePath,
       `Backup location ${JSON.stringify(location)}`,
+      {
+        allowMissingLeaf: true,
+      },
     )
   }
 }
@@ -335,7 +346,7 @@ export class PostgresTenantBackupRunner {
       })
       await this.assertNoActiveConnections(databaseName, tenant.id)
       const safetySnapshot = await this.backupTenant(tenant)
-      const restoredAt = this.now().toISOString()
+      await this.assertNoActiveConnections(databaseName, tenant.id)
       await this.commandExecutor.run(
         'pg_restore',
         [
@@ -350,6 +361,7 @@ export class PostgresTenantBackupRunner {
           env: connectionTarget.env,
         },
       )
+      const restoredAt = this.now().toISOString()
 
       return {
         tenantId: tenant.id,
@@ -484,11 +496,14 @@ function resolveBackupArtifactPath(location: string): string | null {
   return isAbsolute(location) ? location : null
 }
 
-function resolveContainedArtifactPath(
+async function resolveContainedArtifactPath(
   rootDirectory: string,
   filePath: string,
   label: string,
-): string {
+  options: {
+    allowMissingLeaf?: boolean
+  } = {},
+): Promise<string> {
   const resolvedPath = resolve(filePath)
   const relativePath = relative(rootDirectory, resolvedPath)
 
@@ -503,7 +518,103 @@ function resolveContainedArtifactPath(
     )
   }
 
+  await assertContainedArtifactPathDoesNotTraverseSymlinks(
+    rootDirectory,
+    resolvedPath,
+    label,
+    options,
+  )
+
   return resolvedPath
+}
+
+async function assertContainedArtifactPathDoesNotTraverseSymlinks(
+  rootDirectory: string,
+  resolvedPath: string,
+  label: string,
+  options: {
+    allowMissingLeaf?: boolean
+  },
+): Promise<void> {
+  let realRootDirectory: string
+
+  try {
+    realRootDirectory = await realpath(rootDirectory)
+  } catch (error) {
+    throw new TenantBackupValidationError(
+      `Artifact store root ${JSON.stringify(rootDirectory)} is not readable.`,
+      { cause: error },
+    )
+  }
+
+  const relativePath = relative(rootDirectory, resolvedPath)
+
+  if (relativePath === '') {
+    return
+  }
+
+  const segments = relativePath.split(sep)
+  let currentPath = rootDirectory
+
+  for (const [index, segment] of segments.entries()) {
+    currentPath = join(currentPath, segment)
+
+    let currentStats
+    try {
+      currentStats = await lstat(currentPath)
+    } catch (error) {
+      if (
+        options.allowMissingLeaf === true &&
+        index === segments.length - 1 &&
+        isFileSystemErrorCode(error, 'ENOENT')
+      ) {
+        return
+      }
+
+      throw new TenantBackupValidationError(
+        `${label} does not reference a readable artifact path.`,
+        { cause: error },
+      )
+    }
+
+    if (currentStats.isSymbolicLink()) {
+      throw new TenantBackupValidationError(
+        `${label} must not traverse symbolic links.`,
+      )
+    }
+
+    let realCurrentPath: string
+    try {
+      realCurrentPath = await realpath(currentPath)
+    } catch (error) {
+      throw new TenantBackupValidationError(
+        `${label} does not reference a readable artifact path.`,
+        { cause: error },
+      )
+    }
+
+    const relativeRealPath = relative(realRootDirectory, realCurrentPath)
+
+    if (
+      relativeRealPath !== '' &&
+      (relativeRealPath === '..' ||
+        relativeRealPath.startsWith(`..${sep}`) ||
+        isAbsolute(relativeRealPath))
+    ) {
+      throw new TenantBackupValidationError(
+        `${label} is outside the configured artifact store.`,
+      )
+    }
+  }
+}
+
+function isFileSystemErrorCode(error: unknown, expectedCode: string): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    error.code === expectedCode
+  )
 }
 
 async function assertBackupArtifactFile(
