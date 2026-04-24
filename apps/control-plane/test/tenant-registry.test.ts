@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { setTimeout as delay } from 'node:timers/promises'
 import { describe, it } from 'node:test'
 import { DataType, newDb } from 'pg-mem'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
@@ -302,7 +301,8 @@ describe('TenantRegistry', () => {
   })
 
   it('preserves the migration timestamp when only the storage mode is refreshed', async () => {
-    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+    const pinnedMigrationTimestamp = '2026-04-24T00:00:00.000Z'
 
     try {
       await tenantRegistry.createTenant({
@@ -320,7 +320,12 @@ describe('TenantRegistry', () => {
       const initialStorage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
 
       assert.ok(initialStorage?.migrationUpdatedAt)
-      await delay(20)
+      await pool.query(
+        `UPDATE tenants
+         SET storage_migration_updated_at = $1
+         WHERE id = $2`,
+        [pinnedMigrationTimestamp, 'tenant-1'],
+      )
 
       await tenantRegistry.updateTenantStorageProfile('tenant-1', {
         mode: 'postgres-dedicated-user',
@@ -334,7 +339,7 @@ describe('TenantRegistry', () => {
       assert.equal(refreshedStorage.mode, 'postgres-dedicated-user')
       assert.equal(
         refreshedStorage.migrationUpdatedAt,
-        initialStorage.migrationUpdatedAt,
+        pinnedMigrationTimestamp,
       )
     } finally {
       await cleanup()

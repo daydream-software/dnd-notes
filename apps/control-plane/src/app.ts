@@ -1694,6 +1694,7 @@ export function createApp({
         }
 
         if (isRolloutRequest) {
+          console.error('Tenant rolling update failed', error)
           response.status(500).json({
             code: 'tenant_rollout_failed',
             error: 'Tenant rolling update failed',
@@ -1704,6 +1705,7 @@ export function createApp({
 
         const errorMessage =
           error instanceof Error ? error.message : 'Unknown error'
+        console.error('Failed to provision tenant resources', error)
         response.status(500).json({
           error: 'Failed to provision tenant resources',
           details: errorMessage,
