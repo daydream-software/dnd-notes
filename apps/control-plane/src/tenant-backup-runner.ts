@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import {
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
@@ -162,16 +163,20 @@ export class FileSystemTenantBackupArtifactStore
     sourcePath: string
     capturedAt: string
   }): Promise<{ location: string }> {
+    await mkdir(this.rootDirectory, { recursive: true, mode: 0o700 })
+    await chmod(this.rootDirectory, 0o700)
     const tenantDirectory = join(
       this.rootDirectory,
       sanitizePathComponent(params.tenantId),
     )
-    await mkdir(tenantDirectory, { recursive: true })
+    await mkdir(tenantDirectory, { recursive: true, mode: 0o700 })
+    await chmod(tenantDirectory, 0o700)
     const targetPath = join(
       tenantDirectory,
       `${sanitizeTimestamp(params.capturedAt)}-${basename(params.sourcePath)}`,
     )
     await copyFile(params.sourcePath, targetPath)
+    await chmod(targetPath, 0o600)
     return {
       location: pathToFileURL(targetPath).toString(),
     }
@@ -182,8 +187,11 @@ export class FileSystemTenantBackupArtifactStore
     destinationPath: string
   }): Promise<void> {
     const sourcePath = this.resolveLocation(params.location)
-    await mkdir(dirname(params.destinationPath), { recursive: true })
+    const destinationDirectory = dirname(params.destinationPath)
+    await mkdir(destinationDirectory, { recursive: true, mode: 0o700 })
+    await chmod(destinationDirectory, 0o700)
     await copyFile(sourcePath, params.destinationPath)
+    await chmod(params.destinationPath, 0o600)
   }
 
   private resolveLocation(location: string): string {
@@ -277,15 +285,17 @@ export class PostgresTenantBackupRunner {
         },
       )
 
-      const [fileStats, sha256, storedArtifact] = await Promise.all([
+      const [fileStats, storedArtifact] = await Promise.all([
         stat(backupPath),
-        calculateSha256(backupPath),
         this.artifactStore.storeBackup({
           tenantId: tenant.id,
           sourcePath: backupPath,
           capturedAt,
         }),
       ])
+      const sha256 = await calculateSha256(
+        resolveBackupArtifactPath(storedArtifact.location) ?? backupPath,
+      )
 
       return {
         tenantId: tenant.id,
@@ -317,16 +327,16 @@ export class PostgresTenantBackupRunner {
       )
     }
 
-    const safetySnapshot = await this.backupTenant(tenant)
     const restoreDirectory = await mkdtemp(join(tmpdir(), 'dnd-notes-tenant-restore-'))
     const restorePath = join(restoreDirectory, 'tenant-backup.dump')
-    const restoredAt = this.now().toISOString()
 
     try {
       await this.artifactStore.materializeBackup({
         location: backupLocation,
         destinationPath: restorePath,
       })
+      const safetySnapshot = await this.backupTenant(tenant)
+      const restoredAt = this.now().toISOString()
       await this.terminateActiveConnections(databaseName)
       await this.commandExecutor.run(
         'pg_restore',
@@ -440,4 +450,12 @@ function decodePgConnectionPassword(password: string): string {
   }
 
   return decodeURIComponent(password)
+}
+
+function resolveBackupArtifactPath(location: string): string | null {
+  if (location.startsWith('file:')) {
+    return fileURLToPath(location)
+  }
+
+  return isAbsolute(location) ? location : null
 }

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { describe, it } from 'node:test'
 import type { Tenant } from '../src/types.js'
@@ -133,7 +133,10 @@ describe('PostgresTenantBackupRunner', () => {
 
       const storedPath = fileURLToPath(artifact.location)
       const storedStats = await stat(storedPath)
+      const tenantDirectoryStats = await stat(dirname(storedPath))
       assert.equal(storedStats.size, executor.dumpPayload.length)
+      assert.equal(storedStats.mode & 0o777, 0o600)
+      assert.equal(tenantDirectoryStats.mode & 0o777, 0o700)
     } finally {
       await runner.close()
       await rm(artifactRoot, { recursive: true, force: true })
@@ -282,6 +285,38 @@ describe('PostgresTenantBackupRunner', () => {
           error instanceof TenantBackupValidationError &&
           /must be in restoring state/i.test(error.message),
       )
+    } finally {
+      await runner.close()
+      await rm(artifactRoot, { recursive: true, force: true })
+    }
+  })
+
+  it('validates the requested backup before taking a safety snapshot', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
+    const executor = new FakeCommandExecutor()
+    const pool = new FakePool()
+    const runner = new PostgresTenantBackupRunner({
+      adminDatabaseUrl: 'postgresql://postgres:postgres@postgres.default:5432/postgres',
+      artifactStore: new FileSystemTenantBackupArtifactStore(artifactRoot),
+      commandExecutor: executor,
+      pool,
+    })
+
+    try {
+      await assert.rejects(
+        () =>
+          runner.restoreTenant({
+            tenant: createTenant({
+              currentState: 'restoring',
+            }),
+            backupLocation: 'https://example.com/not-a-backup.dump',
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /unsupported backup location/i.test(error.message),
+      )
+      assert.equal(executor.calls.length, 0)
+      assert.equal(pool.queries.length, 0)
     } finally {
       await runner.close()
       await rm(artifactRoot, { recursive: true, force: true })
