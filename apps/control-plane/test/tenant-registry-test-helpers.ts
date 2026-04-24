@@ -6,7 +6,13 @@ export function createTestTenantRegistry() {
     autoCreateForeignKeyIndices: true,
   })
   db.public.registerFunction({
-    name: 'pg_advisory_xact_lock',
+    name: 'pg_advisory_lock',
+    args: [DataType.integer, DataType.integer],
+    returns: DataType.bool,
+    implementation: () => true,
+  })
+  db.public.registerFunction({
+    name: 'pg_advisory_unlock',
     args: [DataType.integer, DataType.integer],
     returns: DataType.bool,
     implementation: () => true,

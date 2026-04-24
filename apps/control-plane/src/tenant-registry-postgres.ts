@@ -519,11 +519,19 @@ export class TenantRegistry {
     tenantId: string,
     operation: () => Promise<Result>,
   ): Promise<Result> {
-    return this.withTransaction(async (client) => {
-      await client.query(
-        'SELECT pg_advisory_xact_lock($1::integer, $2::integer)',
-        [tenantLockNamespaceKey, createTenantLockKey(tenantId)],
-      )
+    this.assertOpen()
+    await this.ready
+
+    const client = await this.pool.connect()
+    const lockValues = [tenantLockNamespaceKey, createTenantLockKey(tenantId)] as const
+    let result: Result | undefined
+    let operationError: unknown
+    let lockAcquired = false
+    let unlockError: unknown
+
+    try {
+      await client.query('SELECT pg_advisory_lock($1::integer, $2::integer)', lockValues)
+      lockAcquired = true
 
       const existingTenant = await client.query<{ id: string }>(
         `SELECT id
@@ -536,8 +544,33 @@ export class TenantRegistry {
         throw new Error(`Tenant ${tenantId} not found`)
       }
 
-      return operation()
-    })
+      result = await operation()
+    } catch (error) {
+      operationError = error
+    } finally {
+      if (lockAcquired) {
+        try {
+          await client.query(
+            'SELECT pg_advisory_unlock($1::integer, $2::integer)',
+            lockValues,
+          )
+        } catch (error) {
+          unlockError = error
+        }
+      }
+
+      client.release()
+    }
+
+    if (operationError !== undefined) {
+      throw operationError
+    }
+
+    if (unlockError !== undefined) {
+      throw unlockError
+    }
+
+    return result as Result
   }
 
   async listTenants(): Promise<Tenant[]> {
@@ -1018,40 +1051,33 @@ export class TenantRegistry {
       failureReason?: string | null
     },
   ): Promise<void> {
-    const currentProfile = await this.run<{
-      storage_migration_status: TenantStorageMigrationStatus
-      storage_migration_failure_reason: string | null
-    }>(
-      `SELECT storage_migration_status, storage_migration_failure_reason
-       FROM tenants
-       WHERE id = $1`,
-      [tenantId],
-    )
-    const existingProfile = currentProfile.rows[0]
-
-    if (!existingProfile) {
-      throw new Error(`Tenant ${tenantId} not found`)
-    }
-
     const nextFailureReason = params.failureReason ?? null
-    const shouldRefreshMigrationTimestamp =
-      existingProfile.storage_migration_status !== params.migrationStatus ||
-      existingProfile.storage_migration_failure_reason !== nextFailureReason
     const result = await this.run(
-      shouldRefreshMigrationTimestamp
-        ? `UPDATE tenants
-           SET storage_mode = $1,
-               storage_migration_status = $2,
-               storage_migration_failure_reason = $3,
-               storage_migration_updated_at = CURRENT_TIMESTAMP,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $4`
-        : `UPDATE tenants
-           SET storage_mode = $1,
-               storage_migration_status = $2,
-               storage_migration_failure_reason = $3,
-               updated_at = CURRENT_TIMESTAMP
-           WHERE id = $4`,
+      `UPDATE tenants
+       SET storage_mode = $1,
+           storage_migration_status = $2,
+           storage_migration_failure_reason = $3,
+           storage_migration_updated_at = COALESCE(
+             CASE
+               WHEN current_profile.storage_migration_status <> $2
+                 OR (
+                   current_profile.storage_migration_failure_reason IS NULL
+                   AND $3 IS NOT NULL
+                 )
+                 OR (
+                   current_profile.storage_migration_failure_reason IS NOT NULL
+                   AND $3 IS NULL
+                 )
+                 OR current_profile.storage_migration_failure_reason <> $3
+               THEN CAST(CURRENT_TIMESTAMP AS TIMESTAMPTZ)
+               ELSE CAST(NULL AS TIMESTAMPTZ)
+             END,
+             current_profile.storage_migration_updated_at
+            ),
+           updated_at = CURRENT_TIMESTAMP
+       FROM tenants AS current_profile
+       WHERE tenants.id = $4
+         AND current_profile.id = tenants.id`,
       [
         params.mode,
         params.migrationStatus,

@@ -346,7 +346,13 @@ describe('TenantRegistry', () => {
       autoCreateForeignKeyIndices: true,
     })
     db.public.registerFunction({
-      name: 'pg_advisory_xact_lock',
+      name: 'pg_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
       args: [DataType.integer, DataType.integer],
       returns: DataType.bool,
       implementation: () => true,
@@ -354,6 +360,7 @@ describe('TenantRegistry', () => {
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
     let observedTenantLock = false
+    let observedTenantUnlock = false
     const wrappedPool = {
       async query(text: string, values?: readonly unknown[]) {
         return await pool.query(text, values as unknown[])
@@ -363,8 +370,11 @@ describe('TenantRegistry', () => {
 
         return {
           async query(text: string, values?: readonly unknown[]) {
-            if (text.includes('pg_advisory_xact_lock')) {
+            if (text.includes('pg_advisory_lock')) {
               observedTenantLock = true
+            }
+            if (text.includes('pg_advisory_unlock')) {
+              observedTenantUnlock = true
             }
 
             return await client.query(text, values as unknown[])
@@ -394,9 +404,11 @@ describe('TenantRegistry', () => {
       await tenantRegistry.withTenantLock('tenant-1', async () => {
         operationRan = true
         assert.equal(observedTenantLock, true)
+        assert.equal(observedTenantUnlock, false)
       })
 
       assert.equal(operationRan, true)
+      assert.equal(observedTenantUnlock, true)
     } finally {
       await tenantRegistry.close()
       await pool.end()
