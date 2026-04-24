@@ -524,12 +524,18 @@ export class TenantRegistry {
 
     const client = await this.pool.connect()
     const lockValues = [tenantLockNamespaceKey, createTenantLockKey(tenantId)] as const
+    const originalStatementTimeout = await this.readSessionSetting(
+      client,
+      'statement_timeout',
+    )
     let result: Result | undefined
     let operationError: unknown
     let lockAcquired = false
     let unlockError: unknown
+    let restoreSettingError: unknown
 
     try {
+      await this.setSessionSetting(client, 'statement_timeout', '0')
       await client.query('SELECT pg_advisory_lock($1::integer, $2::integer)', lockValues)
       lockAcquired = true
 
@@ -559,6 +565,16 @@ export class TenantRegistry {
         }
       }
 
+      try {
+        await this.setSessionSetting(
+          client,
+          'statement_timeout',
+          originalStatementTimeout,
+        )
+      } catch (error) {
+        restoreSettingError = error
+      }
+
       client.release()
     }
 
@@ -570,7 +586,33 @@ export class TenantRegistry {
       throw unlockError
     }
 
+    if (restoreSettingError !== undefined) {
+      throw restoreSettingError
+    }
+
     return result as Result
+  }
+
+  private async readSessionSetting(
+    executor: TenantRegistryQueryable,
+    settingName: string,
+  ): Promise<string> {
+    const result = await executor.query<{ setting_value: string }>(
+      `SELECT current_setting($1) AS setting_value`,
+      [settingName],
+    )
+    return result.rows[0]?.setting_value ?? ''
+  }
+
+  private async setSessionSetting(
+    executor: TenantRegistryQueryable,
+    settingName: string,
+    settingValue: string,
+  ): Promise<void> {
+    await executor.query('SELECT set_config($1, $2, false)', [
+      settingName,
+      settingValue,
+    ])
   }
 
   async listTenants(): Promise<Tenant[]> {

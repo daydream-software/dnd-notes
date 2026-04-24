@@ -345,6 +345,7 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
+    let statementTimeout = '30s'
     db.public.registerFunction({
       name: 'pg_advisory_lock',
       args: [DataType.integer, DataType.integer],
@@ -357,10 +358,41 @@ describe('TenantRegistry', () => {
       returns: DataType.bool,
       implementation: () => true,
     })
+    db.public.registerFunction({
+      name: 'current_setting',
+      args: [DataType.text],
+      returns: DataType.text,
+      implementation: (settingName: string) => {
+        if (settingName === 'statement_timeout') {
+          return statementTimeout
+        }
+
+        throw new Error(`Unsupported current_setting(${settingName}) in test`)
+      },
+    })
+    db.public.registerFunction({
+      name: 'set_config',
+      args: [DataType.text, DataType.text, DataType.bool],
+      returns: DataType.text,
+      implementation: (
+        settingName: string,
+        settingValue: string,
+        isLocal: boolean,
+      ) => {
+        if (settingName === 'statement_timeout' && isLocal === false) {
+          statementTimeout = settingValue
+          return statementTimeout
+        }
+
+        throw new Error(`Unsupported set_config(${settingName}) in test`)
+      },
+    })
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
     let observedTenantLock = false
     let observedTenantUnlock = false
+    let observedStatementTimeoutDisable = false
+    let observedStatementTimeoutRestore = false
     const wrappedPool = {
       async query(text: string, values?: readonly unknown[]) {
         return await pool.query(text, values as unknown[])
@@ -375,6 +407,13 @@ describe('TenantRegistry', () => {
             }
             if (text.includes('pg_advisory_unlock')) {
               observedTenantUnlock = true
+            }
+            if (text.includes('set_config') && values?.[0] === 'statement_timeout') {
+              if (values[1] === '0') {
+                observedStatementTimeoutDisable = true
+              } else if (values[1] === '30s') {
+                observedStatementTimeoutRestore = true
+              }
             }
 
             return await client.query(text, values as unknown[])
@@ -405,10 +444,13 @@ describe('TenantRegistry', () => {
         operationRan = true
         assert.equal(observedTenantLock, true)
         assert.equal(observedTenantUnlock, false)
+        assert.equal(observedStatementTimeoutDisable, true)
+        assert.equal(observedStatementTimeoutRestore, false)
       })
 
       assert.equal(operationRan, true)
       assert.equal(observedTenantUnlock, true)
+      assert.equal(observedStatementTimeoutRestore, true)
     } finally {
       await tenantRegistry.close()
       await pool.end()
