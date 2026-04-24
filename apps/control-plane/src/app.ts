@@ -483,7 +483,65 @@ function buildRolloutFailureDetails(tenantId: string) {
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : 'Unknown error'
+  if (error instanceof Error) {
+    return error.message
+  }
+
+  if (typeof error === 'string' && error.length > 0) {
+    return error
+  }
+
+  if (
+    typeof error === 'number' ||
+    typeof error === 'boolean' ||
+    typeof error === 'bigint'
+  ) {
+    return String(error)
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    const constructorName =
+      typeof error.constructor?.name === 'string' && error.constructor.name.length > 0
+        ? error.constructor.name
+        : 'Object'
+    const message =
+      typeof record.message === 'string' && record.message.trim().length > 0
+        ? record.message.trim()
+        : null
+    const code =
+      typeof record.code === 'string' && record.code.trim().length > 0
+        ? record.code.trim()
+        : null
+    const keys = Object.keys(record).slice(0, 5)
+
+    if (message && code) {
+      return `${constructorName}: ${message} (code: ${code})`
+    }
+
+    if (message) {
+      return `${constructorName}: ${message}`
+    }
+
+    if (code) {
+      return `${constructorName} (code: ${code})`
+    }
+
+    return keys.length > 0
+      ? `${constructorName} with keys: ${keys.join(', ')}`
+      : constructorName
+  }
+
+  return 'Unknown error'
+}
+
+function logUnexpectedError(message: string, error: unknown) {
+  if (error instanceof Error) {
+    console.error(message, error)
+    return
+  }
+
+  console.error(`${message}: ${getErrorMessage(error)}`)
 }
 
 function readRateLimitClientId(request: Request) {
@@ -1694,7 +1752,7 @@ export function createApp({
         }
 
         if (isRolloutRequest) {
-          console.error('Tenant rolling update failed', error)
+          logUnexpectedError('Tenant rolling update failed', error)
           response.status(500).json({
             code: 'tenant_rollout_failed',
             error: 'Tenant rolling update failed',
@@ -1703,12 +1761,10 @@ export function createApp({
           return
         }
 
-        const errorMessage =
-          error instanceof Error ? error.message : 'Unknown error'
-        console.error('Failed to provision tenant resources', error)
+        logUnexpectedError('Failed to provision tenant resources', error)
         response.status(500).json({
           error: 'Failed to provision tenant resources',
-          details: errorMessage,
+          details: getErrorMessage(error),
         })
       }
     },

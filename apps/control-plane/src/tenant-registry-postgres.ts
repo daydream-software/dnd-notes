@@ -255,12 +255,71 @@ function hashTenantLockKey(tenantId: string): bigint {
   return hash
 }
 
-function createTenantLockKey(tenantId: string): number {
-  return Number(BigInt.asIntN(32, hashTenantLockKey(tenantId) >> 32n))
+function createTenantLockKeys(tenantId: string): readonly [number, number] {
+  const hash = hashTenantLockKey(tenantId)
+  return [
+    Number(BigInt.asIntN(32, hash >> 32n)),
+    Number(BigInt.asIntN(32, hash & 0xffff_ffffn)),
+  ] as const
 }
 
-function createTenantLockSubkey(tenantId: string): number {
-  return Number(BigInt.asIntN(32, hashTenantLockKey(tenantId) & 0xffff_ffffn))
+function formatUnknownError(error: unknown): string {
+  if (typeof error === 'string' && error.length > 0) {
+    return error
+  }
+
+  if (
+    typeof error === 'number' ||
+    typeof error === 'boolean' ||
+    typeof error === 'bigint'
+  ) {
+    return String(error)
+  }
+
+  if (error && typeof error === 'object') {
+    const record = error as Record<string, unknown>
+    const constructorName =
+      typeof error.constructor?.name === 'string' && error.constructor.name.length > 0
+        ? error.constructor.name
+        : 'Object'
+    const message =
+      typeof record.message === 'string' && record.message.trim().length > 0
+        ? record.message.trim()
+        : null
+    const code =
+      typeof record.code === 'string' && record.code.trim().length > 0
+        ? record.code.trim()
+        : null
+    const keys = Object.keys(record).slice(0, 5)
+
+    if (message && code) {
+      return `${constructorName}: ${message} (code: ${code})`
+    }
+
+    if (message) {
+      return `${constructorName}: ${message}`
+    }
+
+    if (code) {
+      return `${constructorName} (code: ${code})`
+    }
+
+    return keys.length > 0
+      ? `${constructorName} with keys: ${keys.join(', ')}`
+      : constructorName
+  }
+
+  return 'Unknown error'
+}
+
+function normalizeUnknownError(error: unknown, fallbackMessage: string): Error {
+  if (error instanceof Error) {
+    return error
+  }
+
+  return new Error(`${fallbackMessage}: ${formatUnknownError(error)}`, {
+    cause: error,
+  })
 }
 
 function toCleanupReleaseError(error: unknown): Error | undefined {
@@ -542,10 +601,7 @@ export class TenantRegistry {
     await this.ready
 
     const client = await this.pool.connect()
-    const lockValues = [
-      createTenantLockKey(tenantId),
-      createTenantLockSubkey(tenantId),
-    ] as const
+    const lockValues = createTenantLockKeys(tenantId)
     let originalStatementTimeout: string | undefined
     let result: Result | undefined
     let operationError: unknown
@@ -605,9 +661,18 @@ export class TenantRegistry {
     }
 
     const errors = [
-      operationError,
-      unlockError,
-      restoreSettingError,
+      operationError === undefined
+        ? undefined
+        : normalizeUnknownError(operationError, 'Tenant registry operation failed'),
+      unlockError === undefined
+        ? undefined
+        : normalizeUnknownError(unlockError, 'Tenant registry advisory unlock failed'),
+      restoreSettingError === undefined
+        ? undefined
+        : normalizeUnknownError(
+            restoreSettingError,
+            'Tenant registry statement_timeout restore failed',
+          ),
     ].filter((error): error is NonNullable<typeof error> => error !== undefined)
 
     if (errors.length === 1) {

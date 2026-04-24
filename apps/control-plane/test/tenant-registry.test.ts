@@ -569,6 +569,41 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('wraps non-Error tenant lock failures before rethrowing them', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const thrownValue = {
+      client: 'synthetic-client',
+      queryable: false,
+    }
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.withTenantLock('tenant-1', async () => {
+            throw thrownValue
+          }),
+        (error) => {
+          assert.ok(error instanceof Error)
+          assert.match(
+            error.message,
+            /Tenant registry operation failed: Object with keys: client, queryable/,
+          )
+          assert.equal(error.cause, thrownValue)
+          return true
+        },
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('keeps migrated pre-v7 tenants conservative when storage_reference only hints at postgres', async () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
