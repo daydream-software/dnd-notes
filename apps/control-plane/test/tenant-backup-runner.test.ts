@@ -250,29 +250,64 @@ describe('PostgresTenantBackupRunner', () => {
 })
 
 describe('FileSystemTenantBackupArtifactStore', () => {
-  it('accepts file URLs rooted at / when the artifact store root is /', async () => {
-    const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-root-source-'))
+  it('rejects the filesystem root as an artifact store root directory', () => {
+    assert.throws(
+      () => new FileSystemTenantBackupArtifactStore('/'),
+      /must not be the filesystem root/i,
+    )
+  })
+
+  it('rejects backup locations outside the configured artifact store', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const sourceDirectory = await mkdtemp(join(tmpdir(), 'tenant-backup-source-'))
     const destinationDirectory = await mkdtemp(
-      join(tmpdir(), 'tenant-backup-root-destination-'),
+      join(tmpdir(), 'tenant-backup-destination-'),
     )
     const sourcePath = join(sourceDirectory, 'artifact.dump')
     const destinationPath = join(destinationDirectory, 'copied.dump')
-    const artifactStore = new FileSystemTenantBackupArtifactStore('/')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
 
     try {
-      await writeFile(sourcePath, 'root-visible-artifact')
+      await writeFile(sourcePath, 'outside-artifact')
 
-      await artifactStore.materializeBackup({
-        location: pathToFileURL(sourcePath).toString(),
-        destinationPath,
-      })
-
-      assert.equal(
-        await readFile(destinationPath, 'utf8'),
-        'root-visible-artifact',
+      await assert.rejects(
+        () =>
+          artifactStore.materializeBackup({
+            location: pathToFileURL(sourcePath).toString(),
+            destinationPath,
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /outside the configured artifact store/i.test(error.message),
       )
     } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
       await rm(sourceDirectory, { recursive: true, force: true })
+      await rm(destinationDirectory, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects non-file backup locations', async () => {
+    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-root-'))
+    const destinationDirectory = await mkdtemp(
+      join(tmpdir(), 'tenant-backup-destination-'),
+    )
+    const destinationPath = join(destinationDirectory, 'copied.dump')
+    const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
+
+    try {
+      await assert.rejects(
+        () =>
+          artifactStore.materializeBackup({
+            location: 'https://example.com/artifact.dump',
+            destinationPath,
+          }),
+        (error) =>
+          error instanceof TenantBackupValidationError &&
+          /unsupported backup location/i.test(error.message),
+      )
+    } finally {
+      await rm(artifactRoot, { recursive: true, force: true })
       await rm(destinationDirectory, { recursive: true, force: true })
     }
   })

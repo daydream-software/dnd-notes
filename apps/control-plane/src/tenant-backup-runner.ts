@@ -59,6 +59,8 @@ interface CommandExecutionOptions {
   env?: NodeJS.ProcessEnv
 }
 
+const maxCapturedCommandStderrBytes = 32 * 1024
+
 export interface CommandExecutor {
   run(
     command: string,
@@ -101,9 +103,21 @@ class SpawnCommandExecutor implements CommandExecutor {
         stdio: ['ignore', 'ignore', 'pipe'],
       })
       let stderr = ''
+      let stderrWasTruncated = false
 
       child.stderr.on('data', (chunk: Buffer | string) => {
-        stderr += chunk.toString()
+        const nextStderr = `${stderr}${chunk.toString()}`
+        const nextStderrBuffer = Buffer.from(nextStderr)
+
+        if (nextStderrBuffer.length <= maxCapturedCommandStderrBytes) {
+          stderr = nextStderr
+          return
+        }
+
+        stderrWasTruncated = true
+        stderr = nextStderrBuffer
+          .subarray(nextStderrBuffer.length - maxCapturedCommandStderrBytes)
+          .toString()
       })
       child.on('error', rejectPromise)
       child.on('close', (code) => {
@@ -113,10 +127,13 @@ class SpawnCommandExecutor implements CommandExecutor {
         }
 
         const details = stderr.trim()
+        const formattedDetails = stderrWasTruncated
+          ? `[stderr truncated to last ${maxCapturedCommandStderrBytes} bytes]\n${details}`
+          : details
         rejectPromise(
           new Error(
-            details.length > 0
-              ? `${command} failed: ${details}`
+            formattedDetails.length > 0
+              ? `${command} failed: ${formattedDetails}`
               : `${command} exited with code ${code ?? 'unknown'}`,
           ),
         )
@@ -131,7 +148,13 @@ export class FileSystemTenantBackupArtifactStore
   private readonly rootDirectory: string
 
   constructor(rootDirectory: string) {
-    this.rootDirectory = resolve(rootDirectory)
+    const resolvedRootDirectory = resolve(rootDirectory)
+
+    if (dirname(resolvedRootDirectory) === resolvedRootDirectory) {
+      throw new Error('Artifact store rootDirectory must not be the filesystem root.')
+    }
+
+    this.rootDirectory = resolvedRootDirectory
   }
 
   async storeBackup(params: {
