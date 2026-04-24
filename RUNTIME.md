@@ -2,12 +2,17 @@
 
 This document defines the environment variables and runtime expectations for the dnd-notes tenant container.
 
-Issue #95 makes per-tenant Postgres the hosted steady-state target. SQLite
-remains the local fallback and snapshot interchange path during the cutover.
+Issue #95 makes per-tenant Postgres the hosted steady-state target. The main
+tenant runtime is now Postgres-only; SQLite remains only as the temporary
+snapshot interchange format for admin backup/restore flows and helper tooling
+during the cutover.
 
 ## Required Environment Variables
 
-None. The application will start with defaults.
+- **`DATABASE_URL`**  
+  Postgres connection string for the tenant runtime database.  
+  Format: `postgresql://user:pass@host:5432/dbname`  
+  **Behavior:** Required by the main runtime entrypoint (`apps/api/src/index.ts`).
 
 ## Optional Environment Variables
 
@@ -23,14 +28,16 @@ None. The application will start with defaults.
 
 ### Database Configuration
 
-- **`NOTES_DB_PATH`** (default: `/app/data/dnd-notes.sqlite`)  
-  Path to the SQLite database file (Phase 0 local dev fallback).  
-  **Behavior:** Used automatically whenever `DATABASE_URL` is unset.
-
 - **`DATABASE_URL`**  
-  Postgres connection string for production tenant databases.  
+  Postgres connection string for tenant databases.  
   Format: `postgresql://user:pass@host:5432/dbname`  
   **Behavior:** When set, the API uses `node-postgres` with connection pooling. In control-plane provisioned environments this should be a tenant-scoped least-privilege role, not a shared fleet credential.
+
+- **`NOTES_DB_PATH`**  
+  Path to a SQLite snapshot file for helper tooling that intentionally targets
+  the non-runtime SQLite bridge.  
+  **Behavior:** Ignored by the main runtime entrypoint; still used by helper
+  flows such as seed/reset against SQLite snapshots.
 
 - **`NOTES_DB_POOL_MIN`** (default: `0`)  
   Minimum pooled Postgres connections.
@@ -178,17 +185,17 @@ readinessProbe:
 
 ## Persistent Storage
 
-### SQLite (local fallback and transitional runtime scratch)
+### SQLite-compatible snapshot scratch space
 - **Mount point:** `/app/data`  
 - **File:** `/app/data/dnd-notes.sqlite`  
 - **Volume type:** Local bind mount, or in the current hosted transition a
   Kubernetes `PersistentVolumeClaim`
 
-The control-plane provisioning slice for issue #54 now keeps this mount present
-even when the tenant runs primarily against `DATABASE_URL`, so the container
-retains a writable runtime volume for SQLite-compatible fallback files and
-operator-managed storage lifecycle. Issue #95 supersedes that PVC-backed tenant
-shape for hosted steady state.
+The control-plane provisioning slice for issue #54 kept this mount around during
+the transition so the container could still materialize SQLite-compatible admin
+snapshots and other temporary helper files. It is no longer the primary runtime
+write path; issue #95 supersedes the PVC-backed tenant shape for hosted steady
+state.
 
 **Kubernetes example:**
 ```yaml
@@ -217,7 +224,7 @@ volumes:
 
 ### Startup
 1. Resolve environment variables
-2. Initialize database connection (`DATABASE_URL` when set, otherwise `NOTES_DB_PATH`)
+2. Initialize the Postgres connection from `DATABASE_URL`
 3. Run compatible startup upgrades (if needed). Least-privilege Postgres runtime
    users verify the pre-initialized schema instead of creating it.
 4. Start HTTP server on `PORT`
@@ -258,7 +265,7 @@ The container runs as a non-root user (`appuser:appuser`, UID/GID assigned at bu
 
 **Security posture:**
 - No root privileges required at runtime
-- Write access only to `/app/data` (local fallback / scratch volume)
+- Write access only to `/app/data` when a deployment still mounts snapshot scratch storage
 - Read-only for application code (`/app/apps/api`, `/app/apps/web`)
 
 ## Build & Deployment
@@ -284,7 +291,6 @@ See issue #43 for full manifest examples after Phase 0 validation.
 
 **Current state in code:**
 - Hosted path: Postgres via `DATABASE_URL`
-- Local fallback: SQLite at `/app/data/dnd-notes.sqlite`
 - Backup via admin API (`GET /api/admin/backup`) using SQLite-compatible snapshots
 
 **Current hosted rollout contract:**
@@ -310,7 +316,8 @@ See issue #43 for full manifest examples after Phase 0 validation.
 2. Create or provision the target Postgres tenant so the control plane can
    pre-initialize the schema and emit tenant-scoped runtime credentials.
 3. Restore the backup through the admin restore flow; the API imports the snapshot into Postgres.
-4. Keep SQLite support for local development when `DATABASE_URL` is unset.
+4. Keep SQLite-compatible snapshot tooling only for migration/helper flows, not
+   for the main runtime server.
 
 Existing hosted tenants that already run on a shared runtime Postgres user are a
 deliberate migration boundary. This slice does not silently rotate those live

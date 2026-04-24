@@ -4,10 +4,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import Database from 'better-sqlite3'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
+import { createSqliteDatabase } from '../src/note-store-database.js'
 import { createNoteStore } from '../src/note-store.js'
 import { createTestApp, registerOwner, withAuth, withGuest } from './test-helpers.js'
 
@@ -229,56 +229,59 @@ test('legacy note databases are upgraded in place for membership attribution col
     await rm(directory, { recursive: true, force: true })
   })
 
-  const legacyDatabase = new Database(dbPath)
-  legacyDatabase.exec(`
-    CREATE TABLE notes (
-      id TEXT PRIMARY KEY,
-      campaign_id TEXT NOT NULL,
-      title TEXT NOT NULL,
-      body TEXT NOT NULL,
-      status TEXT NOT NULL,
-      tags_json TEXT NOT NULL,
-      session_name TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `)
-  legacyDatabase
-    .prepare(`
-      INSERT INTO notes (
-        id,
-        campaign_id,
-        title,
-        body,
-        status,
-        tags_json,
-        session_name,
-        created_at,
-        updated_at
-      ) VALUES (
-        @id,
-        @campaign_id,
-        @title,
-        @body,
-        @status,
-        @tags_json,
-        @session_name,
-        @created_at,
-        @updated_at
+  const legacyDatabase = createSqliteDatabase(dbPath)
+  try {
+    await legacyDatabase.exec(`
+      CREATE TABLE notes (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        body TEXT NOT NULL,
+        status TEXT NOT NULL,
+        tags_json TEXT NOT NULL,
+        session_name TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       )
     `)
-    .run({
-      id: 'legacy-note',
-      campaign_id: defaultCampaignId,
-      title: 'Legacy harbor log',
-      body: 'Recorded before attribution columns existed.',
-      status: 'active',
-      tags_json: JSON.stringify(['harbor']),
-      session_name: null,
-      created_at: '2026-04-12T00:00:00.000Z',
-      updated_at: '2026-04-12T00:00:00.000Z',
-    })
-  legacyDatabase.close()
+    await legacyDatabase
+      .prepare(`
+        INSERT INTO notes (
+          id,
+          campaign_id,
+          title,
+          body,
+          status,
+          tags_json,
+          session_name,
+          created_at,
+          updated_at
+        ) VALUES (
+          @id,
+          @campaign_id,
+          @title,
+          @body,
+          @status,
+          @tags_json,
+          @session_name,
+          @created_at,
+          @updated_at
+        )
+      `)
+      .run({
+        id: 'legacy-note',
+        campaign_id: defaultCampaignId,
+        title: 'Legacy harbor log',
+        body: 'Recorded before attribution columns existed.',
+        status: 'active',
+        tags_json: JSON.stringify(['harbor']),
+        session_name: null,
+        created_at: '2026-04-12T00:00:00.000Z',
+        updated_at: '2026-04-12T00:00:00.000Z',
+      })
+  } finally {
+    await legacyDatabase.close()
+  }
 
   const noteStore = await createNoteStore({ dbPath })
 
@@ -292,11 +295,11 @@ test('legacy note databases are upgraded in place for membership attribution col
     await noteStore.close()
   }
 
-  const migratedDatabase = new Database(dbPath, { readonly: true })
+  const migratedDatabase = createSqliteDatabase(dbPath, { readonly: true })
   const migratedColumns = (
-    migratedDatabase.prepare(`PRAGMA table_info(notes)`).all() as Array<{ name: string }>
+    await migratedDatabase.prepare<{ name: string }>(`PRAGMA table_info(notes)`).all()
   ).map((column) => column.name)
-  migratedDatabase.close()
+  await migratedDatabase.close()
 
   assert.ok(migratedColumns.includes('created_by_membership_id'))
   assert.ok(migratedColumns.includes('last_edited_by_membership_id'))
@@ -310,22 +313,25 @@ test('legacy share links without stored plaintext tokens return an explicit rege
     await rm(directory, { recursive: true, force: true })
   })
 
-  const legacyDatabase = new Database(dbPath)
-  legacyDatabase.exec(`
-    CREATE TABLE campaign_share_links (
-      id TEXT PRIMARY KEY,
-      campaign_id TEXT NOT NULL,
-      token_hash TEXT NOT NULL UNIQUE,
-      label TEXT,
-      access_level TEXT NOT NULL,
-      frame_ancestors TEXT,
-      expires_at TEXT,
-      revoked_at TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )
-  `)
-  legacyDatabase.close()
+  const legacyDatabase = createSqliteDatabase(dbPath)
+  try {
+    await legacyDatabase.exec(`
+      CREATE TABLE campaign_share_links (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE,
+        label TEXT,
+        access_level TEXT NOT NULL,
+        frame_ancestors TEXT,
+        expires_at TEXT,
+        revoked_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `)
+  } finally {
+    await legacyDatabase.close()
+  }
 
   const noteStore = await createNoteStore({ dbPath })
   t.after(async () => {
@@ -339,46 +345,49 @@ test('legacy share links without stored plaintext tokens return an explicit rege
   const shareLinkId = 'legacy-share-link'
   const legacyShareToken = 'legacy-share-token'
   const timestamp = '2026-04-12T00:00:00.000Z'
-  const writableDatabase = new Database(dbPath)
-  writableDatabase
-    .prepare(`
-      INSERT INTO campaign_share_links (
-        id,
-        campaign_id,
-        token_hash,
-        label,
-        access_level,
-        frame_ancestors,
-        expires_at,
-        revoked_at,
-        created_at,
-        updated_at
-      ) VALUES (
-        @id,
-        @campaign_id,
-        @token_hash,
-        @label,
-        @access_level,
-        @frame_ancestors,
-        @expires_at,
-        @revoked_at,
-        @created_at,
-        @updated_at
-      )
-    `)
-    .run({
-      id: shareLinkId,
-      campaign_id: defaultCampaignId,
-      token_hash: createHash('sha256').update(legacyShareToken).digest('hex'),
-      label: 'Legacy link',
-      access_level: 'viewer',
-      frame_ancestors: null,
-      expires_at: null,
-      revoked_at: null,
-      created_at: timestamp,
-      updated_at: timestamp,
-    })
-  writableDatabase.close()
+  const writableDatabase = createSqliteDatabase(dbPath)
+  try {
+    await writableDatabase
+      .prepare(`
+        INSERT INTO campaign_share_links (
+          id,
+          campaign_id,
+          token_hash,
+          label,
+          access_level,
+          frame_ancestors,
+          expires_at,
+          revoked_at,
+          created_at,
+          updated_at
+        ) VALUES (
+          @id,
+          @campaign_id,
+          @token_hash,
+          @label,
+          @access_level,
+          @frame_ancestors,
+          @expires_at,
+          @revoked_at,
+          @created_at,
+          @updated_at
+        )
+      `)
+      .run({
+        id: shareLinkId,
+        campaign_id: defaultCampaignId,
+        token_hash: createHash('sha256').update(legacyShareToken).digest('hex'),
+        label: 'Legacy link',
+        access_level: 'viewer',
+        frame_ancestors: null,
+        expires_at: null,
+        revoked_at: null,
+        created_at: timestamp,
+        updated_at: timestamp,
+      })
+  } finally {
+    await writableDatabase.close()
+  }
 
   const revealResponse = await authed.get(
     `/api/campaigns/${defaultCampaignId}/share-links/${shareLinkId}`,
@@ -388,13 +397,13 @@ test('legacy share links without stored plaintext tokens return an explicit rege
   assert.ok(Array.isArray(revealResponse.body.details))
   assert.match(revealResponse.body.details[0], /Revoke it and create a new share link/)
 
-  const migratedDatabase = new Database(dbPath, { readonly: true })
+  const migratedDatabase = createSqliteDatabase(dbPath, { readonly: true })
   const migratedColumns = (
-    migratedDatabase.prepare(`PRAGMA table_info(campaign_share_links)`).all() as Array<{
-      name: string
-    }>
+    await migratedDatabase
+      .prepare<{ name: string }>(`PRAGMA table_info(campaign_share_links)`)
+      .all()
   ).map((column) => column.name)
-  migratedDatabase.close()
+  await migratedDatabase.close()
 
   assert.ok(migratedColumns.includes('token_plaintext'))
 })
@@ -830,37 +839,40 @@ test('legacy databases without linked_notes_json column are upgraded safely', as
 
     await noteStore1.close()
 
-    const db = new Database(dbPath)
-    db.exec('DROP TABLE IF EXISTS note_references')
-    const columns = db.pragma('table_info(notes)') as Array<{ name: string }>
-    const hasLinkedNotesJson = columns.some((col) => col.name === 'linked_notes_json')
+    const db = createSqliteDatabase(dbPath)
+    try {
+      await db.exec('DROP TABLE IF EXISTS note_references')
+      const columns = await db.prepare<{ name: string }>('PRAGMA table_info(notes)').all()
+      const hasLinkedNotesJson = columns.some((column) => column.name === 'linked_notes_json')
 
-    if (hasLinkedNotesJson) {
-      db.exec('ALTER TABLE notes RENAME TO notes_old')
-      db.exec(`
-        CREATE TABLE notes (
-          id TEXT PRIMARY KEY,
-          campaign_id TEXT NOT NULL,
-          title TEXT NOT NULL,
-          body TEXT NOT NULL,
-          status TEXT NOT NULL,
-          tags_json TEXT NOT NULL,
-          session_name TEXT,
-          created_by_membership_id TEXT,
-          last_edited_by_membership_id TEXT,
-          created_at TEXT NOT NULL,
-          updated_at TEXT NOT NULL
-        )
-      `)
-      db.exec(`
-        INSERT INTO notes 
-        SELECT id, campaign_id, title, body, status, tags_json, session_name, 
-               created_by_membership_id, last_edited_by_membership_id, created_at, updated_at
-        FROM notes_old
-      `)
-      db.exec('DROP TABLE notes_old')
+      if (hasLinkedNotesJson) {
+        await db.exec('ALTER TABLE notes RENAME TO notes_old')
+        await db.exec(`
+          CREATE TABLE notes (
+            id TEXT PRIMARY KEY,
+            campaign_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            body TEXT NOT NULL,
+            status TEXT NOT NULL,
+            tags_json TEXT NOT NULL,
+            session_name TEXT,
+            created_by_membership_id TEXT,
+            last_edited_by_membership_id TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          )
+        `)
+        await db.exec(`
+          INSERT INTO notes 
+          SELECT id, campaign_id, title, body, status, tags_json, session_name, 
+                 created_by_membership_id, last_edited_by_membership_id, created_at, updated_at
+          FROM notes_old
+        `)
+        await db.exec('DROP TABLE notes_old')
+      }
+    } finally {
+      await db.close()
     }
-    db.close()
 
     const noteStore2 = await createNoteStore({ dbPath })
     const app2 = createApp({ noteStore: noteStore2 })

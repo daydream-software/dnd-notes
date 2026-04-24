@@ -1,7 +1,7 @@
-import Database from 'better-sqlite3'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { mkdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import initSqlJs from 'sql.js'
 import {
   Pool,
   type PoolConfig,
@@ -49,6 +49,45 @@ export interface PostgresClientLike extends PostgresQueryable {
 interface SqliteTransactionContext {
   readonly holdsExclusiveAccess: true
 }
+
+type SqliteBindScalar = number | string | Uint8Array | null | boolean
+type SqliteBindParams = SqliteBindScalar[] | Record<string, SqliteBindScalar>
+
+interface SqliteStatementLike {
+  bind(values?: SqliteBindParams | null): boolean
+  free(): boolean
+  getAsObject(values?: SqliteBindParams | null): Record<string, unknown>
+  run(values?: SqliteBindParams | null): void
+  step(): boolean
+}
+
+interface SqliteExecResult {
+  columns: string[]
+  values: unknown[][]
+}
+
+interface SqliteDatabaseLike {
+  close(): void
+  exec(sql: string, params?: SqliteBindParams | null): SqliteExecResult[]
+  export(): Uint8Array
+  getRowsModified(): number
+  prepare(sql: string, params?: SqliteBindParams | null): SqliteStatementLike
+  run(sql: string, params?: SqliteBindParams | null): SqliteDatabaseLike
+}
+
+interface SqliteModuleLike {
+  Database: new (data?: ArrayLike<number> | null) => SqliteDatabaseLike
+}
+
+interface LoadedSqliteDatabase {
+  database: SqliteDatabaseLike
+  dbPath: string
+  readonly: boolean
+  closed: boolean
+  persistedBytes: Buffer | null
+}
+
+const sqliteModulePromise: Promise<SqliteModuleLike> = initSqlJs()
 
 function isNamedParameterObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -104,35 +143,190 @@ function compilePostgresQuery(sql: string, params?: unknown[] | Record<string, u
   return compileNamedParameters(sql, params)
 }
 
-export function createSqliteDatabase(
+function normalizeSqliteParameters(
+  params?: unknown[] | Record<string, unknown>,
+): SqliteBindParams | undefined {
+  if (!params) {
+    return undefined
+  }
+
+  if (Array.isArray(params)) {
+    return params as SqliteBindScalar[]
+  }
+
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [
+      key.startsWith('@') || key.startsWith(':') || key.startsWith('$') ? key : `@${key}`,
+      value as SqliteBindScalar,
+    ]),
+  )
+}
+
+function stripLeadingSqlComments(sql: string) {
+  let remaining = sql.trimStart()
+
+  while (remaining.startsWith('--') || remaining.startsWith('/*')) {
+    if (remaining.startsWith('--')) {
+      const lineBreakIndex = remaining.indexOf('\n')
+      remaining =
+        lineBreakIndex === -1 ? '' : remaining.slice(lineBreakIndex + 1).trimStart()
+      continue
+    }
+
+    const blockCommentEnd = remaining.indexOf('*/')
+    if (blockCommentEnd === -1) {
+      return ''
+    }
+    remaining = remaining.slice(blockCommentEnd + 2).trimStart()
+  }
+
+  return remaining
+}
+
+function isSqliteMutationSql(sql: string) {
+  const normalizedSql = stripLeadingSqlComments(sql)
+  const firstToken = normalizedSql.match(/^[A-Za-z]+/)?.[0]?.toUpperCase()
+
+  if (!firstToken) {
+    return false
+  }
+
+  if (firstToken === 'PRAGMA') {
+    return /=/.test(normalizedSql)
+  }
+
+  return [
+    'ALTER',
+    'ANALYZE',
+    'BEGIN',
+    'COMMIT',
+    'CREATE',
+    'DELETE',
+    'DROP',
+    'INSERT',
+    'REINDEX',
+    'RELEASE',
+    'REPLACE',
+    'ROLLBACK',
+    'SAVEPOINT',
+    'UPDATE',
+    'VACUUM',
+  ].includes(firstToken)
+}
+
+function ensureSqliteDatabaseOpen(state: LoadedSqliteDatabase) {
+  if (state.closed) {
+    throw new Error('SQLite database is closed.')
+  }
+}
+
+function ensureSqliteDatabaseWritable(state: LoadedSqliteDatabase) {
+  if (state.readonly) {
+    throw new Error('attempt to write a readonly database')
+  }
+}
+
+function persistSqliteDatabase(state: LoadedSqliteDatabase) {
+  if (state.readonly || state.dbPath === ':memory:') {
+    return
+  }
+
+  mkdirSync(dirname(state.dbPath), { recursive: true })
+  const snapshotBytes = Buffer.from(state.database.export())
+  writeFileSync(state.dbPath, snapshotBytes)
+  state.persistedBytes = snapshotBytes
+}
+
+function readSqlitePragmaString(database: SqliteDatabaseLike, sql: string, columnName: string) {
+  const statement = database.prepare(sql)
+
+  try {
+    if (!statement.step()) {
+      return ''
+    }
+
+    const row = statement.getAsObject()
+    const value = row[columnName]
+    return value === undefined || value === null ? '' : String(value).toLowerCase()
+  } finally {
+    statement.free()
+  }
+}
+
+async function loadSqliteDatabase(
   dbPath: string,
-  options: CreateSqliteDatabaseOptions = {},
-): NoteStoreDatabase {
+  options: CreateSqliteDatabaseOptions,
+): Promise<LoadedSqliteDatabase> {
+  const SQL = await sqliteModulePromise
+
+  if (options.readonly && dbPath !== ':memory:' && !existsSync(dbPath)) {
+    throw new Error(`SQLite snapshot does not exist at ${dbPath}.`)
+  }
+
   if (!options.readonly && dbPath !== ':memory:') {
     mkdirSync(dirname(dbPath), { recursive: true })
   }
 
-  const database = options.readonly
-    ? new Database(dbPath, {
-        readonly: true,
-        fileMustExist: true,
-      })
-    : new Database(dbPath)
-
-  if (!options.readonly) {
-    if (dbPath !== ':memory:') {
-      const journalMode = String(
-        database.pragma('journal_mode = DELETE', { simple: true }) ?? '',
-      ).toLowerCase()
-      if (journalMode !== 'delete') {
-        throw new Error(
-          `Failed to set SQLite journal_mode to DELETE for ${dbPath}; current mode is ${journalMode || 'unknown'}`,
-        )
-      }
-    }
-    database.pragma('foreign_keys = ON')
+  const data =
+    dbPath !== ':memory:' && existsSync(dbPath) ? readFileSync(dbPath) : undefined
+  const database = new SQL.Database(data)
+  const state: LoadedSqliteDatabase = {
+    database,
+    dbPath,
+    readonly: Boolean(options.readonly),
+    closed: false,
+    persistedBytes: data ? Buffer.from(data) : null,
   }
+
+  if (!state.readonly) {
+    const journalMode = readSqlitePragmaString(database, 'PRAGMA journal_mode = DELETE', 'journal_mode')
+
+    if (dbPath !== ':memory:' && journalMode !== 'delete') {
+      throw new Error(
+        `Failed to set SQLite journal_mode to DELETE for ${dbPath}; current mode is ${journalMode || 'unknown'}`,
+      )
+    }
+
+    database.exec('PRAGMA foreign_keys = ON')
+    persistSqliteDatabase(state)
+  }
+
+  return state
+}
+
+async function refreshSqliteDatabaseFromDisk(state: LoadedSqliteDatabase) {
+  if (state.closed || state.dbPath === ':memory:') {
+    return
+  }
+
+  const nextBytes = existsSync(state.dbPath) ? readFileSync(state.dbPath) : null
+  const currentBytes = state.persistedBytes
+
+  if (
+    (currentBytes === null && nextBytes === null) ||
+    (currentBytes !== null && nextBytes !== null && currentBytes.equals(nextBytes))
+  ) {
+    return
+  }
+
+  const SQL = await sqliteModulePromise
+  const nextDatabase = new SQL.Database(nextBytes ?? undefined)
+
+  if (!state.readonly) {
+    nextDatabase.exec('PRAGMA foreign_keys = ON')
+  }
+
+  state.database.close()
+  state.database = nextDatabase
+  state.persistedBytes = nextBytes ? Buffer.from(nextBytes) : null
+}
+
+export function createSqliteDatabase(
+  dbPath: string,
+  options: CreateSqliteDatabaseOptions = {},
+): NoteStoreDatabase {
   const transactionExecutor = new AsyncLocalStorage<SqliteTransactionContext>()
+  const databaseStatePromise = loadSqliteDatabase(dbPath, options)
   let operationQueue = Promise.resolve()
 
   async function runSerialized<Result>(operation: () => Result | Promise<Result>) {
@@ -150,59 +344,122 @@ export function createSqliteDatabase(
     await previousOperation
 
     try {
-      // SQLite shares one connection here. Keep the queue lease until the full async
-      // operation settles so other requests cannot observe half-finished transaction work.
       return await operation()
     } finally {
       releaseQueue()
     }
   }
 
+  async function withLoadedDatabase<Result>(
+    callback: (state: LoadedSqliteDatabase) => Result | Promise<Result>,
+  ) {
+    const state = await databaseStatePromise
+    ensureSqliteDatabaseOpen(state)
+    if (!transactionExecutor.getStore()) {
+      await refreshSqliteDatabaseFromDisk(state)
+    }
+    return callback(state)
+  }
+
+  async function persistMutationIfNeeded(state: LoadedSqliteDatabase, sql: string) {
+    if (transactionExecutor.getStore() || !isSqliteMutationSql(sql)) {
+      return
+    }
+
+    persistSqliteDatabase(state)
+  }
+
   return {
     kind: 'sqlite',
     prepare<Row>(sql: string): DatabaseStatement<Row> {
-      const statement = database.prepare(sql)
-
       return {
         async get(...args: unknown[]) {
-          const params = normalizeStatementParameters(args)
+          const params = normalizeSqliteParameters(normalizeStatementParameters(args))
 
-          return runSerialized(() => {
-            if (params === undefined) {
-              return statement.get() as Row | undefined
-            }
+          return runSerialized(async () => {
+            return withLoadedDatabase(async (state) => {
+              if (state.readonly && isSqliteMutationSql(sql)) {
+                ensureSqliteDatabaseWritable(state)
+              }
 
-            return statement.get(params as never) as Row | undefined
+              const statement = state.database.prepare(sql)
+
+              try {
+                if (params !== undefined) {
+                  statement.bind(params)
+                }
+
+                const row = statement.step() ? (statement.getAsObject() as Row) : undefined
+                await persistMutationIfNeeded(state, sql)
+                return row
+              } finally {
+                statement.free()
+              }
+            })
           })
         },
         async all(...args: unknown[]) {
-          const params = normalizeStatementParameters(args)
+          const params = normalizeSqliteParameters(normalizeStatementParameters(args))
 
-          return runSerialized(() => {
-            if (params === undefined) {
-              return statement.all() as Row[]
-            }
+          return runSerialized(async () => {
+            return withLoadedDatabase(async (state) => {
+              if (state.readonly && isSqliteMutationSql(sql)) {
+                ensureSqliteDatabaseWritable(state)
+              }
 
-            return statement.all(params as never) as Row[]
+              const statement = state.database.prepare(sql)
+
+              try {
+                if (params !== undefined) {
+                  statement.bind(params)
+                }
+
+                const rows: Row[] = []
+                while (statement.step()) {
+                  rows.push(statement.getAsObject() as Row)
+                }
+                await persistMutationIfNeeded(state, sql)
+                return rows
+              } finally {
+                statement.free()
+              }
+            })
           })
         },
         async run(...args: unknown[]) {
-          const params = normalizeStatementParameters(args)
+          const params = normalizeSqliteParameters(normalizeStatementParameters(args))
 
-          return runSerialized(() => {
-            const result =
-              params === undefined
-                ? statement.run()
-                : statement.run(params as never)
+          return runSerialized(async () => {
+            return withLoadedDatabase(async (state) => {
+              if (state.readonly) {
+                ensureSqliteDatabaseWritable(state)
+              }
 
-            return { changes: result.changes }
+              const statement = state.database.prepare(sql)
+
+              try {
+                statement.run(params)
+                const result = { changes: state.database.getRowsModified() }
+                await persistMutationIfNeeded(state, sql)
+                return result
+              } finally {
+                statement.free()
+              }
+            })
           })
         },
       }
     },
     async exec(sql: string) {
-      await runSerialized(() => {
-        database.exec(sql)
+      await runSerialized(async () => {
+        await withLoadedDatabase(async (state) => {
+          if (state.readonly && isSqliteMutationSql(sql)) {
+            ensureSqliteDatabaseWritable(state)
+          }
+
+          state.database.exec(sql)
+          await persistMutationIfNeeded(state, sql)
+        })
       })
     },
     transaction<Args extends unknown[], Result>(
@@ -210,36 +467,59 @@ export function createSqliteDatabase(
     ) {
       return async (...args: Args) => {
         return runSerialized(async () => {
-          if (transactionExecutor.getStore()) {
-            return callback(...args)
-          }
-
-          database.exec('BEGIN IMMEDIATE')
-
-          try {
-            const result = await transactionExecutor.run(
-              { holdsExclusiveAccess: true },
-              () => callback(...args),
-            )
-            database.exec('COMMIT')
-            return result
-          } catch (error) {
-            if (database.inTransaction) {
-              database.exec('ROLLBACK')
+          return withLoadedDatabase(async (state) => {
+            if (transactionExecutor.getStore()) {
+              return callback(...args)
             }
 
-            throw error
-          }
+            ensureSqliteDatabaseWritable(state)
+            state.database.run('BEGIN IMMEDIATE')
+
+            try {
+              const result = await transactionExecutor.run(
+                { holdsExclusiveAccess: true },
+                () => callback(...args),
+              )
+              state.database.run('COMMIT')
+              persistSqliteDatabase(state)
+              return result
+            } catch (error) {
+              try {
+                state.database.run('ROLLBACK')
+              } catch {
+                // Preserve the original failure so rollback errors do not mask it.
+              }
+
+              throw error
+            }
+          })
         })
       }
     },
     async close() {
-      await runSerialized(() => {
-        database.close()
-      })
+      await databaseStatePromise.then(
+        (state) => {
+          if (state.closed) {
+            return
+          }
+
+          if (!state.readonly) {
+            persistSqliteDatabase(state)
+          }
+
+          state.database.close()
+          state.closed = true
+        },
+        () => undefined,
+      )
     },
     async backup(destinationPath: string) {
-      await runSerialized(() => database.backup(destinationPath))
+      await runSerialized(async () => {
+        await withLoadedDatabase(async (state) => {
+          mkdirSync(dirname(destinationPath), { recursive: true })
+          writeFileSync(destinationPath, Buffer.from(state.database.export()))
+        })
+      })
     },
   }
 }

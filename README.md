@@ -1,6 +1,6 @@
 # dnd-notes
 
-A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript API that targets Postgres in hosted environments while keeping SQLite as the local fallback. Containerized for Kubernetes deployment with same-origin web + API serving.
+A full-stack D&D notes MVP built as an npm workspace with a React + Material UI frontend and a TypeScript API that now runs the main tenant runtime on Postgres while keeping a temporary SQLite-compatible snapshot bridge for migration/admin tooling. Containerized for Kubernetes deployment with same-origin web + API serving.
 
 ## Getting started
 
@@ -65,7 +65,7 @@ the Conventional Commits format (for example `feat(api): harden CORS policy` or
 ## Workspace layout
 
 - `apps/web` — React + Vite + Material UI notes workspace
-- `apps/api` — Express + TypeScript API with Postgres-first hosted persistence and SQLite local fallback
+- `apps/api` — Express + TypeScript API with Postgres runtime persistence plus a temporary SQLite-compatible snapshot bridge for migration/admin tooling
 - `apps/control-plane` — Express + TypeScript control plane for tenant registry and provisioning orchestration
 
 ## Control-plane provisioning
@@ -149,25 +149,22 @@ committed control-plane image + manifest set.
 Copy `apps/api/.env.example` to `apps/api/.env` when you want a checked-in
 starting point for API configuration.
 
-By default, local development still stores notes in a SQLite database at:
+The runtime API now requires `DATABASE_URL`; `apps/api/src/index.ts` boots the
+tenant server through the Postgres-only runtime entrypoint. Copy
+`apps/api/.env.example` to `apps/api/.env` and point `DATABASE_URL` at the
+tenant database you want to serve locally.
 
-```text
-apps/api/data/dnd-notes.sqlite
-```
+`NOTES_DB_PATH` no longer affects the main runtime server. It remains available
+only for lower-level helper flows that intentionally work with SQLite-compatible
+snapshot files during the cutover, such as seed/reset helpers or backup/restore
+migration tooling.
 
-Set `DATABASE_URL` when you want the API to use Postgres instead. If `DATABASE_URL`
-is unset, the API falls back to SQLite automatically.
-
-You can override the SQLite path with `NOTES_DB_PATH`, and you can also set `PORT`
-there for the API listener. When you set `NOTES_DB_PATH` in `apps/api/.env`, use
-paths relative to `apps/api` (for example `data/dnd-notes.sqlite`).
-
-Writable SQLite note stores intentionally stay on rollback-journal mode
+Writable SQLite snapshot files intentionally stay on rollback-journal mode
 (`journal_mode=DELETE`), not WAL. Hosted production now targets per-tenant
-Postgres, while the remaining SQLite paths are local fallback plus
-backup/restore snapshot interchange during the `#95` cutover; keeping SQLite on
-a single-file journal model avoids WAL sidecars and checkpoint handling in
-those workflows.
+Postgres, while the remaining SQLite usage is limited to the temporary
+SQLite-compatible backup/restore interchange during the `#95` cutover; keeping
+those snapshots on a single-file journal model avoids WAL sidecars and
+checkpoint handling in the migration workflow.
 
 Optional Postgres pool tuning env vars:
 
@@ -214,8 +211,9 @@ To replace whatever is currently in the local database with the starter notes:
 npm run reset:data
 ```
 
-Both commands use the active database backend. With SQLite they honor
-`NOTES_DB_PATH`; with Postgres they honor `DATABASE_URL`.
+Both commands use the active helper backend. With SQLite they honor
+`NOTES_DB_PATH`; with Postgres they honor `DATABASE_URL`. That behavior applies
+to the seed/reset helpers, not the main runtime server.
 
 ### SQLite → Postgres migration
 

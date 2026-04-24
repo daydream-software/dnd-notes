@@ -4,7 +4,6 @@ import { chmod, mkdir, rm } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import Database from 'better-sqlite3'
 import {
   createPostgresDatabase,
   createSqliteDatabase,
@@ -296,11 +295,13 @@ test('createSqliteDatabase keeps writable file-backed stores on rollback journal
     await rm(`${dbPath}-shm`, { force: true })
   })
 
-  const seededDatabase = new Database(dbPath)
+  const seededDatabase = createSqliteDatabase(dbPath)
   try {
-    const seededJournalMode = seededDatabase.pragma('journal_mode = WAL', { simple: true })
-    assert.equal(String(seededJournalMode).toLowerCase(), 'wal')
-    seededDatabase.exec(`
+    const seededJournalMode = await seededDatabase
+      .prepare<{ journal_mode: string }>('PRAGMA journal_mode = WAL')
+      .get()
+    assert.equal(seededJournalMode?.journal_mode, 'wal')
+    await seededDatabase.exec(`
       CREATE TABLE notes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         title TEXT NOT NULL
@@ -309,7 +310,7 @@ test('createSqliteDatabase keeps writable file-backed stores on rollback journal
       INSERT INTO notes (title) VALUES ('WAL seed');
     `)
   } finally {
-    seededDatabase.close()
+    await seededDatabase.close()
   }
 
   const writableDatabase = createSqliteDatabase(dbPath)

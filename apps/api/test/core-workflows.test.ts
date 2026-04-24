@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import Database from 'better-sqlite3'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -8,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import request from 'supertest'
 import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
+import { createSqliteDatabase } from '../src/note-store-database.js'
 import { createNoteStore } from '../src/note-store.js'
 import {
   createTestApp,
@@ -610,18 +610,18 @@ test('owner email lookups are backed by a unique lower(email) index', async (t) 
 
   await closeNoteStore()
 
-  const database = new Database(dbPath, { readonly: true, fileMustExist: true })
-  t.after(() => {
-    database.close()
+  const database = createSqliteDatabase(dbPath, { readonly: true })
+  t.after(async () => {
+    await database.close()
   })
 
-  const indexRow = database
-    .prepare(`
+  const indexRow = await database
+    .prepare<{ sql: string }>(`
       SELECT sql
       FROM sqlite_master
       WHERE type = 'index' AND name = 'idx_owner_accounts_email_lower'
     `)
-    .get() as { sql: string } | undefined
+    .get()
 
   assert.ok(indexRow)
   assert.match(indexRow.sql, /CREATE UNIQUE INDEX/i)

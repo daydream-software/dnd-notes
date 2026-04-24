@@ -3,7 +3,6 @@ import test from 'node:test'
 import { chmod, mkdir, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 import { basename, dirname, join } from 'node:path'
-import Database from 'better-sqlite3'
 import { newDb } from 'pg-mem'
 import request from 'supertest'
 import { fileURLToPath } from 'node:url'
@@ -159,8 +158,8 @@ test('postgres-backed backups tighten restrictive permissions on snapshot files'
     await rm(backupPath, { force: true })
   })
 
-  const placeholderDatabase = new Database(backupPath)
-  placeholderDatabase.close()
+  const placeholderDatabase = createSqliteDatabase(backupPath)
+  await placeholderDatabase.close()
   await chmod(backupPath, 0o666)
 
   await noteStore.backupDatabase(backupPath)
@@ -279,19 +278,19 @@ test('postgres-backed backups roll back partial snapshot writes when export fail
   assert.equal(queryLog[0], 'BEGIN')
   assert.equal(queryLog.at(-1), 'ROLLBACK')
 
-  const snapshotDatabase = new Database(backupPath, { readonly: true })
+  const snapshotDatabase = createSqliteDatabase(backupPath, { readonly: true })
   try {
-    const ownerCount = snapshotDatabase
-      .prepare('SELECT COUNT(*) AS count FROM owner_accounts')
-      .get() as { count: number }
-    const noteCount = snapshotDatabase.prepare('SELECT COUNT(*) AS count FROM notes').get() as {
-      count: number
-    }
+    const ownerCount = await snapshotDatabase
+      .prepare<{ count: number }>('SELECT COUNT(*) AS count FROM owner_accounts')
+      .get()
+    const noteCount = await snapshotDatabase
+      .prepare<{ count: number }>('SELECT COUNT(*) AS count FROM notes')
+      .get()
 
-    assert.equal(ownerCount.count, 0)
-    assert.equal(noteCount.count, 0)
+    assert.equal(ownerCount?.count, 0)
+    assert.equal(noteCount?.count, 0)
   } finally {
-    snapshotDatabase.close()
+    await snapshotDatabase.close()
   }
 })
 
@@ -459,9 +458,9 @@ test('sqlite restore cleanup removes working copies when restore validation fail
     )
   })
 
-  const sourceDatabase = new Database(sourcePath)
+  const sourceDatabase = createSqliteDatabase(sourcePath)
   try {
-    sourceDatabase.exec(`
+    await sourceDatabase.exec(`
       CREATE TABLE owner_accounts (id TEXT PRIMARY KEY);
       CREATE TABLE owner_sessions (id TEXT PRIMARY KEY);
       CREATE TABLE campaigns (id TEXT PRIMARY KEY);
@@ -470,7 +469,7 @@ test('sqlite restore cleanup removes working copies when restore validation fail
       CREATE TABLE notes (id TEXT PRIMARY KEY);
     `)
   } finally {
-    sourceDatabase.close()
+    await sourceDatabase.close()
   }
 
   await assert.rejects(

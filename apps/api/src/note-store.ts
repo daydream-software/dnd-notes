@@ -1,4 +1,3 @@
-import Database from 'better-sqlite3'
 import {
   createHash,
   randomBytes,
@@ -2802,19 +2801,16 @@ export async function restoreNoteStoreFromBackup(
     dbPath ?? defaultDbPath,
   )
 
-  const validationDatabase = new Database(sourcePath, {
-    readonly: true,
-    fileMustExist: true,
-  })
+  const validationDatabase = createSqliteDatabase(sourcePath, { readonly: true })
 
   try {
     const existingTables = new Set(
       (
-        validationDatabase.prepare(`
+        await validationDatabase.prepare<{ name: string }>(`
           SELECT name
           FROM sqlite_master
           WHERE type = 'table'
-        `).all() as Array<{ name: string }>
+        `).all()
       ).map((row) => row.name),
     )
     const missingTables = requiredBackupTables.filter(
@@ -2833,7 +2829,7 @@ export async function restoreNoteStoreFromBackup(
 
     throw new InvalidBackupDatabaseError('The uploaded database could not be read.')
   } finally {
-    validationDatabase.close()
+    await validationDatabase.close()
   }
 
   let validationStore: NoteStore | undefined

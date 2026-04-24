@@ -4,8 +4,8 @@ import { mkdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
-import Database from 'better-sqlite3'
 import { defaultCampaignId } from '../src/campaign.js'
+import { createSqliteDatabase } from '../src/note-store-database.js'
 import { parseInlineNoteReferences } from '../src/note-references.js'
 import { createNoteStore } from '../src/note-store.js'
 
@@ -267,9 +267,12 @@ test('persistent stores backfill references from note bodies and linkedNoteIds o
 
   await noteStore.close()
 
-  const database = new Database(dbPath)
-  database.exec('DROP TABLE note_references')
-  database.close()
+  const database = createSqliteDatabase(dbPath)
+  try {
+    await database.exec('DROP TABLE note_references')
+  } finally {
+    await database.close()
+  }
 
   noteStore = await createNoteStore({ dbPath })
 
