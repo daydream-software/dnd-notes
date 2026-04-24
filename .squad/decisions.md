@@ -5670,3 +5670,75 @@ non-destructive cherry-pick after fast-forwarding `main` to `origin/main`.
   branch surgery.
 - Current example: recovered PR #81 follow-up commit `9cccb60` from
   `squad/79-k3d-full-stack-smoke-live-override` onto `main`.
+
+---
+
+### 2026-04-23: Mikey — Issue #95 replaces SQLite-per-tenant with per-tenant Postgres
+
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-23
+
+## Decision
+
+Issue #95 supersedes the earlier Phase 1 target in `.squad/decisions.md` that said
+"one SQLite file/volume per customer instance".
+
+The new hosted steady-state model is:
+
+- one Postgres database per tenant in the shared platform Postgres server;
+- one least-privilege Postgres runtime role per tenant;
+- no tenant PVC in the normal hosted app pod shape;
+- overlapping rolling updates (`maxSurge: 1`, `maxUnavailable: 0`) once the
+  tenant runtime no longer depends on single-writer SQLite handoff.
+
+SQLite remains only as a local-development fallback and as the snapshot/interchange
+format already used by admin backup and restore workflows until the broader
+cutover work lands.
+
+## Why
+
+- A tenant PVC plus SQLite single-writer semantics turns ordinary updates into a
+  drain-first replacement, which blocks the zero-downtime goal.
+- Postgres is already present in the k3d stack and tenant provisioning already
+  knows how to create per-tenant databases and runtime credentials.
+- Moving both tenant runtime data and the control-plane registry off SQLite
+  removes the main HA and rollout blocker before more refactors pile on top.
+
+## Impact
+
+- Provisioning should treat per-tenant Postgres as the normal path and PVC-backed
+  SQLite as legacy/transitional behavior, not the target platform shape.
+- Backup/restore work should pivot to `pg_dump` / `pg_restore` per tenant
+  database while keeping the SQLite-compatible snapshot bridge until the
+  operational cutover is complete.
+- Rollout docs should distinguish the current drain-first PVC-backed contract
+  from the new target overlapping rollout contract.
+- Follow-on implementation slices under #95 should land before restarting the
+  postponed #87 technical-debt work that would otherwise refactor around the old
+  persistence model.
+
+---
+
+### 2026-04-23: Data — Issue #97: control-plane registry goes Postgres-only
+
+**Decided by:** Data (Backend Dev)  
+**Date:** 2026-04-23  
+**Related:** Mikey's Issue #95 decision (strategic supersession)
+
+## Decision
+
+Treat `apps/control-plane/src/tenant-registry-postgres.ts` as the single live registry implementation.
+
+- Keep `apps/control-plane/src/tenant-registry.ts` as a thin delegator so routes/services keep one registry contract.
+- Drop the SQLite control-plane backend and `DATABASE_PATH` startup path for this slice.
+- Standardize control-plane tests on a shared `pg-mem` helper (`apps/control-plane/test/tenant-registry-test-helpers.ts`) so app/provisioning/auth suites exercise the Postgres contract without external infrastructure.
+
+## Why
+
+This keeps the runtime contract explicit: one env var, one pool, one backend. It also avoids dragging SQLite migration complexity into a slice whose source of truth is already Postgres. (Tactical implementation of Mikey's strategic #95 decision.)
+
+## Impact
+
+- Control-plane persistence is now exclusively Postgres-backed in all runtime/test paths.
+- Operator setup documentation updated to require `CONTROL_PLANE_DATABASE_URL` environment variable.
+- Bootstrap and health-check paths now depend on Postgres availability; local-dev fallback removed.
