@@ -52,7 +52,7 @@ export interface TenantRegistryPoolLike extends TenantRegistryQueryable {
 }
 
 export interface TenantRegistryClientLike extends TenantRegistryQueryable {
-  release(): void
+  release(error?: Error): void
 }
 
 interface TenantRegistryOptions {
@@ -243,15 +243,34 @@ function isUniqueConstraintError(error: unknown): error is Error & { code?: stri
   return error instanceof Error && (error as Error & { code?: string }).code === '23505'
 }
 
-function createTenantLockKey(tenantId: string): number {
-  let hash = 0x811c9dc5
+function hashTenantLockKey(tenantId: string): bigint {
+  const hashInput = `${tenantLockNamespaceKey}:${tenantId}`
+  let hash = 0xcbf29ce484222325n
 
-  for (let index = 0; index < tenantId.length; index += 1) {
-    hash ^= tenantId.charCodeAt(index)
-    hash = Math.imul(hash, 0x01000193)
+  for (let index = 0; index < hashInput.length; index += 1) {
+    hash ^= BigInt(hashInput.charCodeAt(index))
+    hash = BigInt.asUintN(64, hash * 0x100000001b3n)
   }
 
-  return hash | 0
+  return hash
+}
+
+function createTenantLockKey(tenantId: string): number {
+  return Number(BigInt.asIntN(32, hashTenantLockKey(tenantId) >> 32n))
+}
+
+function createTenantLockSubkey(tenantId: string): number {
+  return Number(BigInt.asIntN(32, hashTenantLockKey(tenantId) & 0xffff_ffffn))
+}
+
+function toCleanupReleaseError(error: unknown): Error | undefined {
+  if (error === undefined) {
+    return undefined
+  }
+
+  return error instanceof Error
+    ? error
+    : new Error('Tenant registry session cleanup failed', { cause: error })
 }
 
 export class TenantRegistry {
@@ -523,11 +542,11 @@ export class TenantRegistry {
     await this.ready
 
     const client = await this.pool.connect()
-    const lockValues = [tenantLockNamespaceKey, createTenantLockKey(tenantId)] as const
-    const originalStatementTimeout = await this.readSessionSetting(
-      client,
-      'statement_timeout',
-    )
+    const lockValues = [
+      createTenantLockKey(tenantId),
+      createTenantLockSubkey(tenantId),
+    ] as const
+    let originalStatementTimeout: string | undefined
     let result: Result | undefined
     let operationError: unknown
     let lockAcquired = false
@@ -535,6 +554,10 @@ export class TenantRegistry {
     let restoreSettingError: unknown
 
     try {
+      originalStatementTimeout = await this.readSessionSetting(
+        client,
+        'statement_timeout',
+      )
       await this.setSessionSetting(client, 'statement_timeout', '0')
       await client.query('SELECT pg_advisory_lock($1::integer, $2::integer)', lockValues)
       lockAcquired = true
@@ -565,29 +588,37 @@ export class TenantRegistry {
         }
       }
 
-      try {
-        await this.setSessionSetting(
-          client,
-          'statement_timeout',
-          originalStatementTimeout,
-        )
-      } catch (error) {
-        restoreSettingError = error
+      if (originalStatementTimeout !== undefined) {
+        try {
+          await this.setSessionSetting(
+            client,
+            'statement_timeout',
+            originalStatementTimeout,
+          )
+        } catch (error) {
+          restoreSettingError = error
+        }
       }
 
-      client.release()
+      const cleanupError = toCleanupReleaseError(unlockError ?? restoreSettingError)
+      client.release(cleanupError)
     }
 
-    if (operationError !== undefined) {
-      throw operationError
+    const errors = [
+      operationError,
+      unlockError,
+      restoreSettingError,
+    ].filter((error): error is NonNullable<typeof error> => error !== undefined)
+
+    if (errors.length === 1) {
+      throw errors[0]
     }
 
-    if (unlockError !== undefined) {
-      throw unlockError
-    }
-
-    if (restoreSettingError !== undefined) {
-      throw restoreSettingError
+    if (errors.length > 1) {
+      throw new AggregateError(
+        errors,
+        'Tenant registry operation failed and one or more session cleanup steps also failed',
+      )
     }
 
     return result as Result

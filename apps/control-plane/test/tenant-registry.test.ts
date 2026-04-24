@@ -148,8 +148,8 @@ describe('TenantRegistry', () => {
 
             return await client.query(text, values as unknown[])
           },
-          release() {
-            client.release()
+          release(error?: Error) {
+            client.release(error)
           },
         }
       },
@@ -418,8 +418,8 @@ describe('TenantRegistry', () => {
 
             return await client.query(text, values as unknown[])
           },
-          release() {
-            client.release()
+          release(error?: Error) {
+            client.release(error)
           },
         }
       },
@@ -451,6 +451,113 @@ describe('TenantRegistry', () => {
       assert.equal(operationRan, true)
       assert.equal(observedTenantUnlock, true)
       assert.equal(observedStatementTimeoutRestore, true)
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('discards the client and surfaces cleanup failures when a locked operation also fails', async () => {
+    const operationFailure = new Error('synthetic operation failure')
+    const unlockFailure = new Error('synthetic unlock failure')
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    let statementTimeout = '30s'
+    db.public.registerFunction({
+      name: 'pg_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'current_setting',
+      args: [DataType.text],
+      returns: DataType.text,
+      implementation: (settingName: string) => {
+        if (settingName === 'statement_timeout') {
+          return statementTimeout
+        }
+
+        throw new Error(`Unsupported current_setting(${settingName}) in test`)
+      },
+    })
+    db.public.registerFunction({
+      name: 'set_config',
+      args: [DataType.text, DataType.text, DataType.bool],
+      returns: DataType.text,
+      implementation: (
+        settingName: string,
+        settingValue: string,
+        isLocal: boolean,
+      ) => {
+        if (settingName === 'statement_timeout' && isLocal === false) {
+          statementTimeout = settingValue
+          return statementTimeout
+        }
+
+        throw new Error(`Unsupported set_config(${settingName}) in test`)
+      },
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let releasedWithError: Error | undefined
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: {
+        async query(text: string, values?: readonly unknown[]) {
+          return await pool.query(text, values as unknown[])
+        },
+        async connect() {
+          const client = await pool.connect()
+
+          return {
+            async query(text: string, values?: readonly unknown[]) {
+              if (text.includes('pg_advisory_unlock')) {
+                throw unlockFailure
+              }
+
+              return await client.query(text, values as unknown[])
+            },
+            release(error?: Error) {
+              releasedWithError = error
+              client.release(error)
+            },
+          }
+        },
+        async end() {
+          await pool.end()
+        },
+      },
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        () =>
+          tenantRegistry.withTenantLock('tenant-1', async () => {
+            throw operationFailure
+          }),
+        (error) => {
+          assert.ok(error instanceof AggregateError)
+          assert.equal(error.errors.length, 2)
+          assert.equal(error.errors[0], operationFailure)
+          assert.equal(error.errors[1], unlockFailure)
+          return true
+        },
+      )
+      assert.equal(releasedWithError, unlockFailure)
     } finally {
       await tenantRegistry.close()
       await pool.end()
