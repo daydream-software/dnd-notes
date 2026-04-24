@@ -1213,19 +1213,19 @@ export class TenantRegistry {
       `UPDATE tenants
        SET storage_mode = $1,
            storage_migration_status = $2,
-           storage_migration_failure_reason = $3,
+           storage_migration_failure_reason = CAST($3 AS TEXT),
            storage_migration_updated_at = COALESCE(
              CASE
                WHEN current_profile.storage_migration_status <> $2
                  OR (
-                   current_profile.storage_migration_failure_reason IS NULL
-                   AND $3 IS NOT NULL
-                 )
-                 OR (
-                   current_profile.storage_migration_failure_reason IS NOT NULL
-                   AND $3 IS NULL
-                 )
-                 OR current_profile.storage_migration_failure_reason <> $3
+                    current_profile.storage_migration_failure_reason IS NULL
+                    AND CAST($3 AS TEXT) IS NOT NULL
+                  )
+                  OR (
+                    current_profile.storage_migration_failure_reason IS NOT NULL
+                    AND CAST($3 AS TEXT) IS NULL
+                  )
+                  OR current_profile.storage_migration_failure_reason <> CAST($3 AS TEXT)
                THEN CAST(CURRENT_TIMESTAMP AS TIMESTAMPTZ)
                ELSE CAST(NULL AS TIMESTAMPTZ)
              END,

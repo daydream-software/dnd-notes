@@ -349,6 +349,71 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('casts nullable storage failure reasons to text in the profile update SQL', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let capturedUpdateSql = ''
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        if (text.includes('storage_migration_failure_reason')) {
+          capturedUpdateSql = text
+        }
+
+        return await pool.query(text, values as unknown[])
+      },
+      async connect() {
+        return await pool.connect()
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool: wrappedPool,
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await tenantRegistry.updateTenantStorageProfile('tenant-1', {
+        mode: 'postgres-dedicated-user',
+        migrationStatus: 'not-required',
+        failureReason: null,
+      })
+
+      assert.match(capturedUpdateSql, /storage_migration_failure_reason = CAST\(\$3 AS TEXT\)/)
+      assert.match(capturedUpdateSql, /CAST\(\$3 AS TEXT\) IS NOT NULL/)
+      assert.match(capturedUpdateSql, /CAST\(\$3 AS TEXT\) IS NULL/)
+      assert.match(
+        capturedUpdateSql,
+        /storage_migration_failure_reason <> CAST\(\$3 AS TEXT\)/,
+      )
+    } finally {
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
   it('reuses the locked registry session for tenant work without extra pool checkouts', async () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
