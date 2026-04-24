@@ -85,7 +85,6 @@ interface LoadedSqliteDatabase {
   dbPath: string
   readonly: boolean
   closed: boolean
-  closeRequested: boolean
   persistedBytes: Buffer | null
 }
 
@@ -291,7 +290,6 @@ async function loadSqliteDatabase(
     dbPath,
     readonly: Boolean(options.readonly),
     closed: false,
-    closeRequested: false,
     persistedBytes: data ? Buffer.from(data) : null,
   }
 
@@ -529,10 +527,6 @@ export function createSqliteDatabase(
               }
 
               throw error
-            } finally {
-              if (state.closeRequested) {
-                finalizeSqliteClose(state)
-              }
             }
           })
         })
@@ -540,15 +534,7 @@ export function createSqliteDatabase(
     },
     async close() {
       if (transactionExecutor.getStore()?.holdsExclusiveAccess) {
-        await databaseStatePromise.then(
-          (state) => {
-            if (!state.closed) {
-              state.closeRequested = true
-            }
-          },
-          () => undefined,
-        )
-        return
+        throw new Error('Cannot close the database from within an active transaction.')
       }
 
       await runSerialized(async () => {

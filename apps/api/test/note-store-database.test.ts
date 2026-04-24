@@ -159,10 +159,14 @@ test('sqlite close waits for queued work before closing the database', async () 
     await transactionEntered.promise
 
     const queuedReadPromise = listNotes.all()
-    const closePromise = database.close()
+    let closeResolved = false
+    const closePromise = database.close().then(() => {
+      closeResolved = true
+    })
 
     await Promise.resolve()
     await Promise.resolve()
+    assert.equal(closeResolved, false)
 
     releaseTransaction.resolve()
 
@@ -172,6 +176,7 @@ test('sqlite close waits for queued work before closing the database', async () 
       ['before-close', 'after-close'],
     )
     await closePromise
+    assert.equal(closeResolved, true)
   } finally {
     await database.close()
   }
@@ -490,7 +495,7 @@ test('sqlite operations after close throw appropriate error', async () => {
   )
 })
 
-test('sqlite close called from within a transaction should wait', async () => {
+test('sqlite close rejects calls from within an active transaction', async () => {
   const database = createSqliteDatabase(':memory:')
   
   try {
@@ -502,28 +507,24 @@ test('sqlite close called from within a transaction should wait', async () => {
     `)
     
     const insertNote = database.prepare('INSERT INTO notes (title) VALUES (?)')
-    let closeCalled = false
-    let transactionCompleted = false
-    
     const transactionFn = database.transaction(async () => {
       await insertNote.run('test-note')
-      
-      // Try to close the database from within the transaction
-      const closePromise = database.close()
-      closeCalled = true
-      
-      // Do more work after calling close
+
+      await assert.rejects(
+        () => database.close(),
+        /Cannot close the database from within an active transaction\./,
+      )
+
       await insertNote.run('after-close-call')
-      transactionCompleted = true
-      
-      // Wait for close to complete
-      await closePromise
     })
     
     await transactionFn()
-    
-    assert.ok(closeCalled, 'close should have been called')
-    assert.ok(transactionCompleted, 'transaction should have completed')
+
+    const notes = await database.prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC').all()
+    assert.deepEqual(
+      notes.map((note) => note.title),
+      ['test-note', 'after-close-call'],
+    )
   } finally {
     await database.close()
   }
