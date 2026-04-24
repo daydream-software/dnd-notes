@@ -16,7 +16,6 @@
   },
   "license": "MIT",
   "dependencies": {
-    "@types/sql.js": "^1.4.11",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
@@ -30,6 +29,7 @@
     "@types/express": "^5.0.3",
     "@types/node": "^24.5.2",
     "@types/pg": "^8.15.5",
+    "@types/sql.js": "^1.4.11",
     "@types/supertest": "^6.0.3",
     "eslint": "^10.2.0",
     "globals": "^17.4.0",

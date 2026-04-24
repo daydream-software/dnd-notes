@@ -380,6 +380,78 @@ test('createSqliteDatabase keeps writable file-backed stores on rollback journal
   }
 })
 
+test('createSqliteDatabase exec rejects readonly multi-statement writes', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const dbPath = join(runtimeDirectory, `readonly-multi-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await chmod(dbPath, 0o666).catch(() => undefined)
+    await rm(dbPath, { force: true })
+  })
+
+  const writableDatabase = createSqliteDatabase(dbPath)
+  try {
+    await writableDatabase.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL
+      );
+
+      INSERT INTO notes (title) VALUES ('Seed');
+    `)
+  } finally {
+    await writableDatabase.close()
+  }
+
+  await chmod(dbPath, 0o444)
+
+  const readonlyDatabase = createSqliteDatabase(dbPath, { readonly: true })
+  try {
+    await assert.rejects(
+      () =>
+        readonlyDatabase.exec(`
+          SELECT title FROM notes ORDER BY id ASC;
+          INSERT INTO notes (title) VALUES ('Blocked');
+        `),
+      /readonly/i,
+    )
+  } finally {
+    await readonlyDatabase.close()
+  }
+})
+
+test('createSqliteDatabase exec persists multi-statement writes to disk', async (t) => {
+  await mkdir(runtimeDirectory, { recursive: true })
+  const dbPath = join(runtimeDirectory, `persist-multi-${randomUUID()}.sqlite`)
+  t.after(async () => {
+    await rm(dbPath, { force: true })
+  })
+
+  const database = createSqliteDatabase(dbPath)
+  try {
+    await database.exec(`
+      CREATE TABLE notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL
+      );
+
+      SELECT 1;
+      INSERT INTO notes (title) VALUES ('Persisted');
+    `)
+  } finally {
+    await database.close()
+  }
+
+  const reopenedDatabase = createSqliteDatabase(dbPath, { readonly: true })
+  try {
+    const notes = await reopenedDatabase
+      .prepare<{ title: string }>('SELECT title FROM notes ORDER BY id ASC')
+      .all()
+    assert.deepEqual(notes.map((note) => note.title), ['Persisted'])
+  } finally {
+    await reopenedDatabase.close()
+  }
+})
+
 test('sqlite close handles multiple concurrent close() calls safely', async () => {
   const database = createSqliteDatabase(':memory:')
   

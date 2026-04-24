@@ -1,5 +1,6 @@
+import { randomUUID } from 'node:crypto'
 import { AsyncLocalStorage } from 'node:async_hooks'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import initSqlJs from 'sql.js'
 import {
@@ -215,6 +216,13 @@ function isSqliteMutationSql(sql: string) {
   ].includes(firstToken)
 }
 
+function splitSqlStatements(sql: string) {
+  return sql
+    .split(/;\s*(?:\r?\n|$)/)
+    .map((statement) => statement.trim())
+    .filter((statement) => statement.length > 0)
+}
+
 function ensureSqliteDatabaseOpen(state: LoadedSqliteDatabase) {
   if (state.closed) {
     throw new Error('SQLite database is closed.')
@@ -234,8 +242,15 @@ function persistSqliteDatabase(state: LoadedSqliteDatabase) {
 
   mkdirSync(dirname(state.dbPath), { recursive: true })
   const snapshotBytes = Buffer.from(state.database.export())
-  writeFileSync(state.dbPath, snapshotBytes)
-  state.persistedBytes = snapshotBytes
+  const tempPath = `${state.dbPath}.tmp-${randomUUID()}`
+
+  try {
+    writeFileSync(tempPath, snapshotBytes, { mode: 0o600 })
+    renameSync(tempPath, state.dbPath)
+    state.persistedBytes = snapshotBytes
+  } finally {
+    rmSync(tempPath, { force: true })
+  }
 }
 
 function readSqlitePragmaString(database: SqliteDatabaseLike, sql: string, columnName: string) {
@@ -468,12 +483,20 @@ export function createSqliteDatabase(
     async exec(sql: string) {
       await runSerialized(async () => {
         await withLoadedDatabase(async (state) => {
-          if (state.readonly && isSqliteMutationSql(sql)) {
+          const statements = splitSqlStatements(sql)
+          const mutationStatement = statements.find((statement) =>
+            isSqliteMutationSql(statement),
+          )
+
+          if (state.readonly && mutationStatement) {
             ensureSqliteDatabaseWritable(state)
           }
 
           state.database.exec(sql)
-          await persistMutationIfNeeded(state, sql)
+
+          if (mutationStatement) {
+            await persistMutationIfNeeded(state, mutationStatement)
+          }
         })
       })
     },
