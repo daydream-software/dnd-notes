@@ -4,6 +4,7 @@ FROM node:22.21.1-bookworm-slim AS base
 WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
+COPY platform/keycloak-jwt/package*.json ./platform/keycloak-jwt/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 COPY apps/control-plane/package*.json ./apps/control-plane/
@@ -16,13 +17,17 @@ RUN npm ci
 
 FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./
+COPY platform/keycloak-jwt ./platform/keycloak-jwt
 COPY apps/control-plane ./apps/control-plane
+RUN npm run build --workspace platform/keycloak-jwt
 RUN npm run build --workspace apps/control-plane
 
 FROM node:22.21.1-bookworm-slim AS runtime
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
+COPY --from=build /app/platform/keycloak-jwt/dist ./platform/keycloak-jwt/dist
+COPY --from=build /app/platform/keycloak-jwt/package.json ./platform/keycloak-jwt/
 COPY --from=build /app/apps/control-plane/dist ./apps/control-plane/dist
 COPY --from=build /app/apps/control-plane/package.json ./apps/control-plane/
 COPY package.json ./
