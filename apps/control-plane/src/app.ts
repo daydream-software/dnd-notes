@@ -384,19 +384,13 @@ function isConstraintConflictError(
 
   const errorCode = (error as Error & { code?: string }).code
 
-  if (
-    errorCode === '23505' ||
-    errorCode === 'SQLITE_CONSTRAINT_UNIQUE' ||
-    errorCode === 'SQLITE_CONSTRAINT_PRIMARYKEY'
-  ) {
+  if (errorCode === '23505') {
     return true
   }
 
   return (
-    (errorCode === 'SQLITE_CONSTRAINT' || typeof errorCode !== 'string') &&
-    (error.message.includes('UNIQUE constraint failed') ||
-      error.message.includes('PRIMARY KEY constraint failed') ||
-      error.message.includes('duplicate key value violates unique constraint'))
+    typeof errorCode !== 'string' &&
+    error.message.includes('duplicate key value violates unique constraint')
   )
 }
 

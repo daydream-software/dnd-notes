@@ -291,11 +291,6 @@ Postgres-backed for this slice. The registry stores:
 - Tenant registry (primary source of truth for tenant metadata)
 - State transition audit log (full lifecycle history)
 
-Hosted rollouts assume a fresh control-plane Postgres bootstrap. This slice does
-not include an automated SQLite-to-Postgres migration path for pre-existing
-control-plane registries; local/dev SQLite metadata should be recreated or
-manually migrated only if an older non-production environment needs to keep it.
-
 ## Design Constraints
 
 - **Thin by design**: No business logic beyond registry CRUD and state tracking

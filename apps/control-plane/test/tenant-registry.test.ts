@@ -285,7 +285,7 @@ describe('TenantRegistry', () => {
       })
       await tenantRegistry.updateTenantStorageReference('tenant-1', 'pvc-tenant-one')
       await tenantRegistry.updateTenantStorageProfile('tenant-1', {
-        mode: 'sqlite-pvc',
+        mode: 'postgres-dedicated-user',
         migrationStatus: 'failed',
         failureReason: 'Synthetic cutover failure',
       })
@@ -294,7 +294,7 @@ describe('TenantRegistry', () => {
 
       assert.ok(storage)
       assert.equal(storage.storageReference, 'pvc-tenant-one')
-      assert.equal(storage.mode, 'sqlite-pvc')
+      assert.equal(storage.mode, 'postgres-dedicated-user')
       assert.equal(storage.migrationStatus, 'failed')
       assert.equal(storage.lastMigrationFailure, 'Synthetic cutover failure')
       assert.ok(storage.migrationUpdatedAt)
@@ -315,7 +315,7 @@ describe('TenantRegistry', () => {
         version: '1.0.0',
       })
       await tenantRegistry.updateTenantStorageProfile('tenant-1', {
-        mode: 'sqlite-pvc',
+        mode: 'postgres-dedicated-user',
         migrationStatus: 'failed',
         failureReason: 'Synthetic cutover failure',
       })
