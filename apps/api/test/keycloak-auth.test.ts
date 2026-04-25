@@ -127,6 +127,31 @@ test('tenant routes accept Keycloak JWTs and keep share-link guest flows local',
   assert.equal(sharedOverviewResponse.body.campaign.id, defaultCampaignId)
 })
 
+test('tenant routes tolerate a small future nbf skew from Keycloak', async (t) => {
+  const keycloak = await startFakeKeycloakServer(keycloakRealm)
+  t.after(() => keycloak.close())
+
+  const runtimeAuth = createRuntimeAuth(keycloak.baseUrl, keycloak.issuer)
+  const { app, cleanup } = await createTestApp({ runtimeAuth })
+  t.after(cleanup)
+
+  const ownerToken = keycloak.issueToken({
+    audience: 'account',
+    clientId: keycloakClientId,
+    subject: 'tenant-owner-sub',
+    email: 'owner@example.com',
+    userName: 'Tenant Owner',
+    notBeforeOffsetSeconds: 5,
+  })
+
+  const response = await request(app)
+    .get('/api/auth/session')
+    .set('Authorization', `Bearer ${ownerToken}`)
+
+  assert.equal(response.status, 200)
+  assert.equal(response.body.owner.email, 'owner@example.com')
+})
+
 test('tenant routes reject invalid Keycloak JWTs', async (t) => {
   const keycloak = await startFakeKeycloakServer(keycloakRealm)
   t.after(() => keycloak.close())
