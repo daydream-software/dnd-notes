@@ -14,6 +14,17 @@ import {
 
 const expectedTenantStateSignature =
   'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+const tenantStateCheckSqlList = expectedTenantStateSignature
+  .split(',')
+  .map((state) => `'${state}'`)
+  .join(', ')
+const legacyRegistryCreatePatterns = [
+  /CREATE TABLE IF NOT EXISTS tenants \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS state_transitions \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS portal_accounts \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS portal_sessions \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS schema_metadata \([\s\S]*?\);\s*/i,
+]
 
 describe('TenantRegistry', () => {
   it('bootstraps the Postgres registry schema with the expected columns', async () => {
@@ -121,6 +132,159 @@ describe('TenantRegistry', () => {
         assert.equal(metadata.rows[0]?.value, expectedTenantStateSignature)
       } finally {
         await secondRegistry.close()
+      }
+    } finally {
+      await pool.end()
+    }
+  })
+
+  it('upgrades legacy registry schemas through the migration runner before serving traffic', async () => {
+    const db = newDb({ autoCreateForeignKeyIndices: true })
+    registerPgMemTenantRegistrySupport(db)
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+
+    try {
+      await pool.query(`
+        CREATE TABLE schema_version (
+          key TEXT PRIMARY KEY,
+          version INTEGER NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        INSERT INTO schema_version (key, version)
+        VALUES ('tenant_registry', 4);
+
+        CREATE TABLE schema_metadata (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE tenants (
+          id TEXT PRIMARY KEY,
+          slug TEXT NOT NULL UNIQUE,
+          owner_id TEXT NOT NULL,
+          desired_state TEXT NOT NULL CHECK (desired_state IN (${tenantStateCheckSqlList})),
+          current_state TEXT NOT NULL CHECK (current_state IN (${tenantStateCheckSqlList})),
+          version TEXT NOT NULL,
+          storage_reference TEXT,
+          backup_metadata TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE state_transitions (
+          id SERIAL PRIMARY KEY,
+          tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+          from_state TEXT NOT NULL CHECK (from_state IN (${tenantStateCheckSqlList})),
+          to_state TEXT NOT NULL CHECK (to_state IN (${tenantStateCheckSqlList})),
+          triggered_by TEXT NOT NULL,
+          reason TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE portal_accounts (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          billing_email TEXT,
+          billing_provider TEXT,
+          auth_provider TEXT NOT NULL CHECK (auth_provider IN ('local', 'keycloak')),
+          keycloak_sub TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE portal_sessions (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL REFERENCES portal_accounts(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL UNIQUE,
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX idx_portal_sessions_expires_at_datetime
+          ON portal_sessions(expires_at);
+      `)
+
+      const tenantRegistry = new TenantRegistry(
+        'postgres://control-plane.test/tenant-registry',
+        {
+          pool: {
+            async query(text: string, values?: readonly unknown[]) {
+              return await pool.query(text, values as unknown[])
+            },
+            async connect() {
+              const client = await pool.connect()
+
+              return {
+                async query(text: string, values?: readonly unknown[]) {
+                  const rewritten = legacyRegistryCreatePatterns
+                    .reduce(
+                      (sql, pattern) => sql.replace(pattern, ''),
+                      text,
+                    )
+                    .trim()
+
+                  if (rewritten.length === 0) {
+                    return { rows: [], rowCount: 0 }
+                  }
+
+                  return await client.query(rewritten, values as unknown[])
+                },
+                release(error?: Error) {
+                  client.release(error)
+                },
+              }
+            },
+            async end() {
+              await pool.end()
+            },
+          },
+        },
+      )
+
+      try {
+        await tenantRegistry.whenReady()
+
+        const tenantColumns = await pool.query<{ column_name: string }>(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_name = 'tenants'
+        `)
+        const portalAccountColumns = await pool.query<{ column_name: string }>(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_name = 'portal_accounts'
+        `)
+        const portalSessionTable = db.public.getTable('portal_sessions')
+
+        assert.equal(
+          tenantColumns.rows.some((column) => column.column_name === 'subdomain'),
+          true,
+        )
+        assert.equal(
+          tenantColumns.rows.some((column) => column.column_name === 'storage_mode'),
+          true,
+        )
+        assert.equal(
+          portalAccountColumns.rows.some(
+            (column) => column.column_name === 'password_hash',
+          ),
+          true,
+        )
+        assert.equal(
+          portalSessionTable.constraintsByName.has('idx_portal_sessions_expires_at'),
+          true,
+        )
+        assert.equal(
+          portalSessionTable.constraintsByName.has(
+            'idx_portal_sessions_expires_at_datetime',
+          ),
+          false,
+        )
+      } finally {
+        await tenantRegistry.close()
       }
     } finally {
       await pool.end()
