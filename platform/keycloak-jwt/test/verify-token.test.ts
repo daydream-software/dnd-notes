@@ -340,6 +340,52 @@ test('verifyToken rejects invalid clock skew options before claim validation', a
   }
 })
 
+test('verifyToken rejects tokens whose exp overflows to a non-finite number', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const header = { alg: 'RS256', kid: fake.kid, typ: 'JWT' }
+  const payload = makeClaims(fake.issuer)
+  const token = `${encodeBase64Url(JSON.stringify(header))}.${encodeBase64Url(
+    JSON.stringify(payload).replace(`"exp":${payload.exp}`, '"exp":1e309'),
+  )}.signature`
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'malformed' &&
+      error.message.includes('"exp"'),
+  )
+})
+
+test('verifyToken rejects tokens whose nbf overflows to a non-finite number', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const header = { alg: 'RS256', kid: fake.kid, typ: 'JWT' }
+  const payload = makeClaims(fake.issuer)
+  const token = `${encodeBase64Url(JSON.stringify(header))}.${encodeBase64Url(
+    JSON.stringify(payload).replace(`"nbf":${payload.nbf}`, '"nbf":1e309'),
+  )}.signature`
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'malformed' &&
+      error.message.includes('"nbf"'),
+  )
+})
+
 test('verifyToken reuses a fresh JWKS response for repeated missing kids after one revalidation fetch', async (t) => {
   const fake = await startFakeJwks()
   t.after(() => fake.close())
@@ -643,7 +689,7 @@ test('verifyToken rejects malformed tokens (wrong segment count, missing kid)', 
   )
 })
 
-test('verifyToken surfaces jwks_fetch_failed when the JWKS endpoint is unreachable', async (t) => {
+test('verifyToken surfaces jwks_fetch_failed when the JWKS endpoint is unreachable', async () => {
   const fake = await startFakeJwks()
   await fake.close()
 
@@ -662,7 +708,6 @@ test('verifyToken surfaces jwks_fetch_failed when the JWKS endpoint is unreachab
       error instanceof KeycloakJwtVerificationError &&
       error.code === 'jwks_fetch_failed',
   )
-  t.diagnostic('Confirmed JWKS fetch failure surfaces as jwks_fetch_failed')
 })
 
 test('verifyToken surfaces malformed JWKS key material as a verification error', async (t) => {

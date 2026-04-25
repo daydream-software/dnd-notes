@@ -389,15 +389,31 @@ export async function verifyToken<TClaims extends JwtClaims = JwtClaims>(
 
   const now = Math.floor(Date.now() / 1000)
 
-  if (typeof claims.exp !== 'number' || claims.exp <= now - expirationClockSkewSec) {
+  if (typeof claims.exp !== 'number' || !Number.isFinite(claims.exp)) {
+    throw new KeycloakJwtVerificationError(
+      'malformed',
+      'JWT payload "exp" must be a finite number.',
+    )
+  }
+
+  if (claims.exp <= now - expirationClockSkewSec) {
     throw new KeycloakJwtVerificationError('expired', 'JWT has expired.')
   }
 
-  if (typeof claims.nbf === 'number' && claims.nbf > now + effectiveNotBeforeSkewSec) {
-    throw new KeycloakJwtVerificationError(
-      'not_yet_valid',
-      'JWT nbf is in the future beyond the allowed clock skew.',
-    )
+  if (claims.nbf !== undefined) {
+    if (typeof claims.nbf !== 'number' || !Number.isFinite(claims.nbf)) {
+      throw new KeycloakJwtVerificationError(
+        'malformed',
+        'JWT payload "nbf" must be a finite number when present.',
+      )
+    }
+
+    if (claims.nbf > now + effectiveNotBeforeSkewSec) {
+      throw new KeycloakJwtVerificationError(
+        'not_yet_valid',
+        'JWT nbf is in the future beyond the allowed clock skew.',
+      )
+    }
   }
 
   const publicKey = await getPublicKeyForKid(jwksUrl, header.kid)
