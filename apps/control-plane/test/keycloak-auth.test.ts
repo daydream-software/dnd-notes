@@ -75,6 +75,24 @@ describe('Control Plane Keycloak auth', () => {
     assert.equal(response.body.summary.totalTenants, 0)
   })
 
+  it('tolerates a small future nbf skew from Keycloak', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+    const app = createKeycloakApp()
+    const token = keycloak.issueToken({
+      audience: 'account',
+      clientId,
+      roles: ['control-plane-admin'],
+      notBeforeOffsetSeconds: 5,
+    })
+
+    const response = await request(app)
+      .get('/internal/fleet/status')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    assert.equal(response.body.controlPlane.status, 'healthy')
+  })
+
   it('rejects valid JWTs that lack a required workforce/admin role', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
     const app = createKeycloakApp()

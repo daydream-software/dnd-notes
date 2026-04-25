@@ -6,6 +6,7 @@
   "workspaces": [
     "packages/portal-utils",
     "packages/postgres-migrations",
+    "platform/keycloak-jwt",
     "apps/web",
     "apps/api",
     "apps/control-plane",
