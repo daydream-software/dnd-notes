@@ -9,12 +9,12 @@ dedicated Postgres database created and bootstrapped by the
 
 Schema changes are applied through the migration runner in
 `src/migrate.ts`, backed by [umzug](https://github.com/sequelize/umzug) and a
-`schema_migrations` ledger table. Migration files live in
+`schema_migrations_tenant_api` ledger table. Migration files live in
 `apps/api/migrations/` and are applied:
 
 - Automatically when `createNoteStore()` boots, before the API serves traffic,
-  guarded by the advisory-lock pair `(931, 1)` so concurrent pods serialize
-  cleanly.
+  guarded by the advisory-lock pair `(931, 1)` so concurrent pods wait for
+  in-flight migrations instead of failing fast.
 - On demand via `npm run db:migrate` for one-off operational use.
 
 ### Adding a migration

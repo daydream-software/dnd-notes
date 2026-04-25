@@ -363,23 +363,11 @@ export class TenantRegistry {
   private async migrateSchema(): Promise<void> {
     await runControlPlaneMigrations({ pool: this.pool })
 
-    // Tenant state metadata signature is tracked via schema_metadata. Adding a
-    // new tenant state, storage mode, or migration status changes the CHECK
-    // constraint and therefore requires its own additive migration.
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS schema_metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      )
-    `)
-
     const storedStateSignature = await this.getSchemaMetadata('tenant_state_signature')
     if (!storedStateSignature) {
-      await this.setSchemaMetadata(
-        'tenant_state_signature',
-        CURRENT_TENANT_STATE_SIGNATURE,
+      throw new Error(
+        'Control-plane schema metadata is incomplete; missing tenant_state_signature. Run "npm run db:migrate" before starting the control-plane.',
       )
-      return
     }
 
     if (storedStateSignature !== CURRENT_TENANT_STATE_SIGNATURE) {

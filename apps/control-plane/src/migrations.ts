@@ -14,20 +14,23 @@ import {
  */
 const CONTROL_PLANE_MIGRATION_LOCK_KEY = [930, 1] as const
 const TENANT_BOOTSTRAP_MIGRATION_LOCK_KEY = [930, 2] as const
+const CONTROL_PLANE_MIGRATION_SET = 'control_plane'
+const TENANT_BOOTSTRAP_MIGRATION_SET = 'control_plane_tenant_bootstrap'
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
-export const controlPlaneMigrationsDir = path.resolve(
-  moduleDir,
-  '..',
-  'migrations',
-)
+export const controlPlaneMigrationsDir = path.resolve(moduleDir, '..', 'migrations')
 
 export const tenantBootstrapMigrationsDir = path.resolve(
   moduleDir,
   '..',
   'migrations-tenant',
 )
+
+export const controlPlaneMigrationLedgerTable =
+  `schema_migrations_${CONTROL_PLANE_MIGRATION_SET}`
+export const tenantBootstrapMigrationLedgerTable =
+  `schema_migrations_${TENANT_BOOTSTRAP_MIGRATION_SET}`
 
 export interface RunControlPlaneMigrationsOptions {
   pool: MigrationPoolLike
@@ -40,6 +43,7 @@ export async function runControlPlaneMigrations(
   return runMigrations({
     pool: options.pool,
     migrationsDir: controlPlaneMigrationsDir,
+    migrationSet: CONTROL_PLANE_MIGRATION_SET,
     lockKey: CONTROL_PLANE_MIGRATION_LOCK_KEY,
     logger: options.logger,
   })
@@ -61,6 +65,7 @@ export async function runTenantBootstrapMigrations(
   return runMigrations({
     pool: options.pool,
     migrationsDir: tenantBootstrapMigrationsDir,
+    migrationSet: TENANT_BOOTSTRAP_MIGRATION_SET,
     lockKey: TENANT_BOOTSTRAP_MIGRATION_LOCK_KEY,
     logger: options.logger,
   })

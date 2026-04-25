@@ -299,15 +299,17 @@ manually migrated only if an older non-production environment needs to keep it.
 ## Database Migrations
 
 Schema changes are applied through the migration runner in `src/migrate.ts`,
-backed by [umzug](https://github.com/sequelize/umzug) and a `schema_migrations`
-ledger table. Two migration sets live in this service:
+backed by [umzug](https://github.com/sequelize/umzug) and namespaced migration
+ledger tables. Two migration sets live in this service:
 
 - `apps/control-plane/migrations/` — registry schema for the control-plane
   database itself; applied automatically on boot before the HTTP server starts
-  listening, guarded by the advisory-lock pair `(930, 1)`.
+  listening, recorded in `schema_migrations_control_plane`, and guarded by the
+  advisory-lock pair `(930, 1)` so concurrent pods wait for in-flight runs.
 - `apps/control-plane/migrations-tenant/` — baseline migrations for newly
   provisioned tenant Postgres databases; invoked from the provisioning path
-  on the freshly created tenant DB, guarded by `(930, 2)`.
+  on the freshly created tenant DB, recorded in
+  `schema_migrations_control_plane_tenant_bootstrap`, and guarded by `(930, 2)`.
 
 ### Adding a migration
 
