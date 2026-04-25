@@ -8,6 +8,8 @@
 
 ## Recent Updates
 
+📌 Epic #87 test & CI validation complete (2026-04-26): Verified test coverage and CI wiring for all 6 acceptance criteria. **Found two blocking CI gaps:** `platform/keycloak-jwt` and `packages/portal-utils` have comprehensive test suites (19 + 8 tests respectively) but don't run in CI because they're missing from `scripts/run-ci-tests.mjs:13-19`. Both are correctly consumed by parent apps and close the deduplication goals, but without CI wiring they create false-green risk for security-critical token verification and shared base-path logic. All other items PASS: maintenance drain transition (control-routes.test.ts:381), backup/restore/audit/catalog (tenant-backup-runner + app.test.ts), note-store split (880 lines, full module coverage), and migration runner (migrate.test.ts with advisory locks). Wrote blocking-gap decision to `.squad/decisions/inbox/chunk-87-validation.md`. — Chunk (Tester)
+
 📌 Issue #97 acceptance bar & QA notes (2026-04-23T19:20:50Z): Reviewed acceptance bar for issue #97 control-plane registry Postgres migration. Added QA notes documenting validation expectations and test coverage requirements. Coordinated with Data and Brand on multi-agent delivery. Session log at `.squad/log/2026-04-23T19:20:50Z-issue-97-control-plane-postgres.md`. Unit tests passing in control-plane; full smoke test pending Docker broker image resolution. — Chunk (Agent)
 
 ## Core Context (Summarized 2026-04-22T18:24:34Z)
@@ -239,4 +241,30 @@ Waiting for Copilot to implement Slice 1. Will validate test coverage before app
 - Waiting for Copilot to implement Slice 1
 - Will validate all test gates pass before approving each slice
 - Specific gate: `npm test --workspace apps/control-plane` must exit 0 with no assertion rewrites
+
+
+## Epic #87 Validation — CI & Test Coverage Audit (2026-04-25)
+
+Completed read-only test + CI audit for all 6 items of Epic #87:
+
+### Test Coverage Status
+
+- ✅ **Item 1:** `apps/api/test/control-routes.test.ts:381` — inflight drain validated
+- ✅ **Item 2:** `apps/control-plane/test/tenant-backup-runner.test.ts`, `app.test.ts:1862–2430`, `tenant-registry.test.ts` — backup/restore/audit/catalog
+- ✅ **Item 3:** `platform/keycloak-jwt/test/*.test.ts` — 19 tests, **NOT in CI**
+- ✅ **Item 4:** `packages/portal-utils/src/base-path.test.ts` — 8 tests, **NOT in CI**
+- ✅ **Item 5:** `apps/api/src/note-store*.ts` — comprehensive module coverage
+- ✅ **Item 6:** `apps/control-plane/test/migrate.test.ts` — versioned ledger with advisory locks
+
+### CI Gap Finding
+
+Two test suites exist but missing from `scripts/run-ci-tests.mjs:13–19`:
+1. **keycloak-jwt** (19 tests, security-critical token verification)
+2. **portal-utils** (8 tests, shared config logic)
+
+Risk: test drift on shared modules. Both already have test:ci scripts ready.
+
+### Verdict
+
+Code consolidation for all 6 items is complete and functional. Test infrastructure is in place but CI wiring is missing. Marked as P1 follow-up. Session: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`.
 
