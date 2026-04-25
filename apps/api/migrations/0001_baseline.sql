@@ -2,7 +2,8 @@
 --
 -- Recreates the schema previously emitted implicitly by
 -- initializeNoteStoreDatabase() (see issue #93). Idempotent so it can be
--- applied against an already-bootstrapped database without harm.
+-- applied against an already-bootstrapped database without harm, including
+-- older tenant databases that predate owner_accounts.keycloak_sub.
 
 CREATE TABLE IF NOT EXISTS owner_accounts (
   id TEXT PRIMARY KEY,
@@ -14,6 +15,9 @@ CREATE TABLE IF NOT EXISTS owner_accounts (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+
+ALTER TABLE owner_accounts
+ADD COLUMN IF NOT EXISTS keycloak_sub TEXT;
 
 CREATE TABLE IF NOT EXISTS owner_sessions (
   id TEXT PRIMARY KEY,

@@ -428,6 +428,9 @@ export class TenantRegistry {
   }
 
   private async migrateSchema(): Promise<void> {
+    // The baseline migration is also the forward-only replacement for the
+    // retired schema_version upgrade chain, so older registries are widened
+    // here before the runtime-only metadata validation below.
     await runControlPlaneMigrations({ pool: this.pool })
 
     let storedStateSignature = await this.getSchemaMetadata('tenant_state_signature')

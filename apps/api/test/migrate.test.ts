@@ -8,6 +8,9 @@ import {
 } from '../src/migrations.js'
 import { registerPgMemMigrationSupport } from './test-helpers.js'
 
+const legacyOwnerAccountsCreatePattern =
+  /CREATE TABLE IF NOT EXISTS owner_accounts \([\s\S]*?\);\s*/i
+
 test('tenant API migrations keep the .sql filename and use a namespaced ledger', async () => {
   const db = newDb({ autoCreateForeignKeyIndices: true })
   registerPgMemMigrationSupport(db)
@@ -143,4 +146,69 @@ test('tenant API migrations issue the ledger contract DDL', async () => {
     /CREATE UNIQUE INDEX IF NOT EXISTS sm_tenant_api_name_idx ON schema_migrations_tenant_api\(name\)/,
   )
   assert.match(ddl, /DROP INDEX IF EXISTS sm_tenant_api_name_idx/)
+})
+
+test('tenant API migrations widen legacy owner_accounts tables before creating the keycloak index', async () => {
+  const db = newDb({ autoCreateForeignKeyIndices: true })
+  registerPgMemMigrationSupport(db)
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
+
+  try {
+    await pool.query(`
+      CREATE TABLE owner_accounts (
+        id TEXT PRIMARY KEY,
+        email TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        is_site_admin INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    `)
+
+    await runTenantApiMigrations({
+      pool: {
+        async connect() {
+          const client = await pool.connect()
+
+          return {
+            async query(text: string, values?: readonly unknown[]) {
+              const rewritten = text.replace(legacyOwnerAccountsCreatePattern, '').trim()
+
+              if (rewritten.length === 0) {
+                return { rows: [], rowCount: 0 }
+              }
+
+              return await client.query(rewritten, values as unknown[])
+            },
+            release(error?: Error) {
+              client.release(error)
+            },
+          }
+        },
+      },
+    })
+
+    const columns = await pool.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'owner_accounts'
+      ORDER BY ordinal_position
+    `)
+
+    assert.equal(
+      columns.rows.some((column) => column.column_name === 'keycloak_sub'),
+      true,
+    )
+    assert.equal(
+      db.public
+        .getTable('owner_accounts')
+        .constraintsByName.has('idx_owner_accounts_keycloak_sub'),
+      true,
+    )
+  } finally {
+    await pool.end()
+  }
 })

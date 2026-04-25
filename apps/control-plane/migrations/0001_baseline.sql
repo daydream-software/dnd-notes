@@ -2,9 +2,9 @@
 --
 -- This migration recreates the schema previously emitted implicitly by
 -- TenantRegistry.bootstrap()/migrateLegacySchema() (see issue #93). It is
--- idempotent (CREATE TABLE/INDEX IF NOT EXISTS), so it is safe to apply
--- against an already-bootstrapped database that was provisioned by the
--- pre-migration-framework codebase.
+-- idempotent and carries forward the old additive upgrade chain, so it is safe
+-- to apply against an already-bootstrapped database that was provisioned by
+-- the pre-migration-framework codebase.
 --
 -- Tenant-state values are inlined here intentionally. Adding a new tenant
 -- state, storage mode, or storage migration status is a schema change and
@@ -80,6 +80,39 @@ CREATE TABLE IF NOT EXISTS portal_sessions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS subdomain TEXT;
+
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS display_name TEXT;
+
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS plan_tier TEXT;
+
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS initial_admin_email TEXT;
+
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS storage_mode TEXT NOT NULL DEFAULT 'unknown'
+  CHECK (storage_mode IN (
+    'unknown', 'sqlite-pvc', 'postgres-shared-user', 'postgres-dedicated-user'
+  ));
+
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS storage_migration_status TEXT NOT NULL DEFAULT 'not-started'
+  CHECK (storage_migration_status IN (
+    'not-started', 'in-progress', 'failed', 'completed', 'not-required'
+  ));
+
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS storage_migration_failure_reason TEXT;
+
+ALTER TABLE tenants
+ADD COLUMN IF NOT EXISTS storage_migration_updated_at TIMESTAMPTZ;
+
+ALTER TABLE portal_accounts
+ADD COLUMN IF NOT EXISTS password_hash TEXT;
+
 CREATE TABLE IF NOT EXISTS schema_metadata (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -91,6 +124,8 @@ VALUES (
   'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
 )
 ON CONFLICT (key) DO NOTHING;
+
+DROP INDEX IF EXISTS idx_portal_sessions_expires_at_datetime; -- @migration:destructive
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_subdomain
   ON tenants(subdomain)
