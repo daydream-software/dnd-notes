@@ -3,6 +3,10 @@ import { newDb } from 'pg-mem'
 import type { IMemoryDb } from 'pg-mem'
 import type { SuperTest, Test } from 'supertest'
 import { createApp } from '../src/app.js'
+import {
+  createControlState,
+  type ControlState,
+} from '../src/control-state.js'
 import type { TenantRuntimeAuth } from '../src/keycloak-auth.js'
 import {
   createNoteStore,
@@ -23,6 +27,7 @@ export interface CreateTestAppOptions {
   schemaVersion?: string
   tenantId?: string | null
   maintenanceDrainGraceMs?: number
+  controlState?: ControlState
 }
 
 export function createTestPgMemDb(): IMemoryDb {
@@ -45,6 +50,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     postgresPool: pool,
     siteAdminEmails: options.siteAdminEmails,
   })
+  const controlState = options.controlState ?? createControlState()
   let noteStoreClosed = false
   let poolClosed = false
 
@@ -64,6 +70,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     schemaVersion: options.schemaVersion,
     tenantId: options.tenantId ?? null,
     maintenanceDrainGraceMs: options.maintenanceDrainGraceMs,
+    controlState,
   })
 
   const closeNoteStore = async () => {
@@ -88,6 +95,7 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     app,
     db,
     pool,
+    controlState,
     get noteStore(): NoteStore {
       return noteStore
     },

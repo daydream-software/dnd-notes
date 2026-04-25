@@ -168,37 +168,6 @@ export function createApp({
 
   app.use(express.json())
 
-  // Track in-flight writes and last-write timestamp for /_control/info reporting
-  // and for the maintenance grace-window drain.
-  app.use((request, response, next) => {
-    if (
-      writeMethods.has(request.method) &&
-      !request.path.startsWith('/_control/')
-    ) {
-      controlState.inflightWrites += 1
-      let settled = false
-      const settle = () => {
-        if (settled) {
-          return
-        }
-
-        settled = true
-        controlState.inflightWrites = Math.max(
-          0,
-          controlState.inflightWrites - 1,
-        )
-
-        if (response.statusCode < 400) {
-          controlState.lastWriteAt = new Date().toISOString()
-        }
-      }
-      response.on('finish', settle)
-      response.on('close', settle)
-    }
-
-    next()
-  })
-
   // Maintenance write gate. Reads keep working; readiness/liveness handlers
   // run before this middleware. Control-plane endpoints are always reachable.
   app.use((request, response: Response<ErrorResponse & { code?: string }>, next) => {
@@ -222,6 +191,42 @@ export function createApp({
       code: controlMaintenanceErrorCode,
       error: 'Tenant is in maintenance mode; write operations are paused.',
     })
+  })
+
+  // Track in-flight writes and last-write timestamp for /_control/info reporting
+  // and for the maintenance grace-window drain.
+  app.use((request, response, next) => {
+    const shouldTrackWrite =
+      writeMethods.has(request.method) &&
+      !request.path.startsWith('/_control/')
+
+    if (!shouldTrackWrite) {
+      next()
+      return
+    }
+
+    controlState.inflightWrites += 1
+    let settled = false
+    const settle = ({ updateLastWriteAt }: { updateLastWriteAt: boolean }) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      controlState.inflightWrites = Math.max(
+        0,
+        controlState.inflightWrites - 1,
+      )
+
+      if (updateLastWriteAt && response.statusCode < 400) {
+        controlState.lastWriteAt = new Date().toISOString()
+      }
+    }
+
+    response.on('finish', () => settle({ updateLastWriteAt: true }))
+    response.on('close', () => settle({ updateLastWriteAt: false }))
+
+    next()
   })
 
   // Liveness probe - process is alive

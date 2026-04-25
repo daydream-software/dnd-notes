@@ -1580,6 +1580,61 @@ describe('Control Plane API', () => {
         'Failed to propagate maintenance state to tenant',
       )
     })
+
+    it('logs the full maintenance transition when propagation fails', async () => {
+      const originalConsoleError = console.error
+      const errorMessages: string[] = []
+      let controlCallCount = 0
+      const tenantControlClient = {
+        async setMaintenanceMode() {
+          controlCallCount += 1
+
+          if (controlCallCount === 2) {
+            throw new Error('connection refused')
+          }
+
+          return { status: 200, body: null }
+        },
+      }
+      console.error = ((message: unknown) => {
+        errorMessages.push(String(message))
+      }) as typeof console.error
+
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        tenantControlClient,
+      })
+
+      try {
+        await authedPost(tenantsPath).send({
+          id: 'tenant-123',
+          slug: 'test-tenant',
+          ownerId: 'owner-456',
+          version: '1.0.0',
+        })
+
+        await authedPatch(`${tenantPath('tenant-123')}/state`)
+          .send({ state: 'ready', triggeredBy: 'provisioner' })
+          .expect(200)
+
+        await authedPatch(`${tenantPath('tenant-123')}/state`)
+          .send({ state: 'maintenance', triggeredBy: 'operator' })
+          .expect(200)
+
+        await authedPatch(`${tenantPath('tenant-123')}/state`)
+          .send({ state: 'ready', triggeredBy: 'operator' })
+          .expect(502)
+
+        assert.match(
+          errorMessages[0] ?? '',
+          /maintenance transition maintenance -> ready \(disable\)/,
+        )
+      } finally {
+        console.error = originalConsoleError
+      }
+    })
   })
 
   describe('PATCH /internal/tenants/:tenantId/desired-state', () => {

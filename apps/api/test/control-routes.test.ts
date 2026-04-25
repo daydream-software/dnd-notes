@@ -1,10 +1,109 @@
 import assert from 'node:assert/strict'
+import http from 'node:http'
+import { once } from 'node:events'
 import test from 'node:test'
 import request from 'supertest'
 import { createTestApp, registerOwner, withAuth } from './test-helpers.js'
 
 const controlPlaneToken = 'test-control-plane-token'
 const authHeader = `Bearer ${controlPlaneToken}`
+
+async function listen(app: http.RequestListener) {
+  const server = http.createServer(app)
+  server.listen(0, '127.0.0.1')
+  await once(server, 'listening')
+
+  const address = server.address()
+  assert(address && typeof address === 'object')
+
+  return {
+    server,
+    origin: `http://127.0.0.1:${address.port}`,
+  }
+}
+
+async function close(server: http.Server) {
+  server.close()
+  await once(server, 'close')
+}
+
+async function sleep(ms: number) {
+  await new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitUntil(
+  predicate: () => boolean,
+  { timeoutMs = 500, intervalMs = 5 }: { timeoutMs?: number; intervalMs?: number } = {},
+) {
+  const deadline = Date.now() + timeoutMs
+
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error('Timed out waiting for condition')
+    }
+
+    await sleep(intervalMs)
+  }
+}
+
+async function sendJsonRequest({
+  origin,
+  path,
+  method = 'POST',
+  body,
+  headers = {},
+}: {
+  origin: string
+  path: string
+  method?: string
+  body?: unknown
+  headers?: Record<string, string>
+}) {
+  return new Promise<{ statusCode?: number; body: unknown }>((resolve, reject) => {
+    const payload = body === undefined ? null : JSON.stringify(body)
+    const requestHeaders = payload
+      ? {
+          'Content-Type': 'application/json',
+          'Content-Length': Buffer.byteLength(payload).toString(),
+          ...headers,
+        }
+      : headers
+
+    const clientRequest = http.request(
+      `${origin}${path}`,
+      {
+        method,
+        headers: requestHeaders,
+      },
+      (response) => {
+        response.setEncoding('utf8')
+
+        let responseBody = ''
+        response.on('data', (chunk) => {
+          responseBody += chunk
+        })
+        response.on('end', () => {
+          resolve({
+            statusCode: response.statusCode,
+            body:
+              responseBody.length > 0
+                ? (JSON.parse(responseBody) as unknown)
+                : null,
+          })
+        })
+        response.on('error', reject)
+      },
+    )
+
+    clientRequest.on('error', reject)
+
+    if (payload) {
+      clientRequest.write(payload)
+    }
+
+    clientRequest.end()
+  })
+}
 
 test('GET /_control/info returns 503 when control plane token is not configured', async () => {
   const { app, cleanup } = await createTestApp({ controlPlaneToken: null })
@@ -97,6 +196,70 @@ test('GET /_control/info reports last-write timestamp after a successful write',
   }
 })
 
+test('GET /_control/info does not advance lastWriteAt for an aborted write', async () => {
+  const { app, cleanup, controlState } = await createTestApp({ controlPlaneToken })
+  let releaseHandler: (() => void) | undefined
+  const handlerReleased = new Promise<void>((resolve) => {
+    releaseHandler = resolve
+  })
+  let markStarted: (() => void) | undefined
+  const requestStarted = new Promise<void>((resolve) => {
+    markStarted = resolve
+  })
+
+  app.post('/api/test-abort', async (_request, response) => {
+    markStarted?.()
+    await handlerReleased
+
+    if (!response.destroyed) {
+      response.status(201).json({ ok: true })
+    }
+  })
+
+  const { server, origin } = await listen(app)
+
+  try {
+    const payload = JSON.stringify({})
+    const clientRequest = http.request(`${origin}/api/test-abort`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload).toString(),
+      },
+    })
+    clientRequest.on('error', () => {
+      // Expected after we abort the client-side connection.
+    })
+    clientRequest.write(payload)
+    clientRequest.end()
+
+    await requestStarted
+    clientRequest.destroy()
+
+    await waitUntil(() => controlState.inflightWrites === 0)
+    releaseHandler?.()
+
+    const infoResponse = await sendJsonRequest({
+      origin,
+      path: '/_control/info',
+      method: 'GET',
+      headers: {
+        Authorization: authHeader,
+      },
+    })
+
+    assert.equal(infoResponse.statusCode, 200)
+    assert.equal(
+      (infoResponse.body as { lastWriteAt: string | null }).lastWriteAt,
+      null,
+    )
+  } finally {
+    releaseHandler?.()
+    await close(server)
+    await cleanup()
+  }
+})
+
 test('POST /_control/maintenance enable then disable toggles the maintenance state', async () => {
   const { app, cleanup } = await createTestApp({
     controlPlaneToken,
@@ -132,6 +295,112 @@ test('POST /_control/maintenance enable then disable toggles the maintenance sta
     assert.equal(disableResponse.body.maintenance.since, null)
     assert.equal(disableResponse.body.maintenance.reason, null)
   } finally {
+    await cleanup()
+  }
+})
+
+test('POST /_control/maintenance drains only writes that started before maintenance mode', async () => {
+  const { app, cleanup, controlState } = await createTestApp({
+    controlPlaneToken,
+    maintenanceDrainGraceMs: 75,
+  })
+  let releaseWrite: (() => void) | undefined
+  const writeReleased = new Promise<void>((resolve) => {
+    releaseWrite = resolve
+  })
+  let markWriteStarted: (() => void) | undefined
+  const writeStarted = new Promise<void>((resolve) => {
+    markWriteStarted = resolve
+  })
+
+  app.post('/api/test-hold', async (_request, response) => {
+    markWriteStarted?.()
+    await writeReleased
+    response.status(201).json({ ok: true })
+  })
+
+  app.post('/api/test-blocked', (_request, response) => {
+    response.status(201).json({ ok: true })
+  })
+
+  const { server, origin } = await listen(app)
+  const originalEnd = http.ServerResponse.prototype.end as (
+    this: http.ServerResponse,
+    ...args: unknown[]
+  ) => http.ServerResponse
+
+  try {
+    const inflightWritePromise = sendJsonRequest({
+      origin,
+      path: '/api/test-hold',
+      body: {},
+    })
+    await writeStarted
+
+    http.ServerResponse.prototype.end = function patchedEnd(
+      this: http.ServerResponse,
+      ...args: unknown[]
+    ) {
+      if (this.statusCode === 503) {
+        setTimeout(() => {
+          originalEnd.apply(this, args)
+        }, 40)
+        return this
+      }
+
+      return originalEnd.apply(this, args)
+    } as typeof http.ServerResponse.prototype.end
+
+    const enableMaintenancePromise = sendJsonRequest({
+      origin,
+      path: '/_control/maintenance',
+      headers: {
+        Authorization: authHeader,
+      },
+      body: { mode: 'enable' },
+    })
+
+    await waitUntil(() => controlState.maintenance.mode === 'enabled')
+
+    const blockedWritePromises = [0, 20, 40].map(async (delayMs) => {
+      await sleep(delayMs)
+      return sendJsonRequest({
+        origin,
+        path: '/api/test-blocked',
+        body: {},
+      })
+    })
+
+    await sleep(20)
+    releaseWrite?.()
+
+    const [inflightWriteResponse, enableMaintenanceResponse, blockedWriteResponses] =
+      await Promise.all([
+        inflightWritePromise,
+        enableMaintenancePromise,
+        Promise.all(blockedWritePromises),
+      ])
+
+    assert.equal(inflightWriteResponse.statusCode, 201)
+    assert.equal(enableMaintenanceResponse.statusCode, 200)
+    assert.equal(
+      (enableMaintenanceResponse.body as { drained: boolean }).drained,
+      true,
+    )
+    assert.equal(
+      (
+        enableMaintenanceResponse.body as { inflightWritesRemaining: number }
+      ).inflightWritesRemaining,
+      0,
+    )
+
+    for (const blockedWriteResponse of blockedWriteResponses) {
+      assert.equal(blockedWriteResponse.statusCode, 503)
+    }
+  } finally {
+    http.ServerResponse.prototype.end = originalEnd as typeof http.ServerResponse.prototype.end
+    releaseWrite?.()
+    await close(server)
     await cleanup()
   }
 })

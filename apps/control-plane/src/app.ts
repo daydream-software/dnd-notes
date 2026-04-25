@@ -1480,10 +1480,12 @@ export function createApp({
         }
 
         if (isMaintenanceTransition && tenantControlClient) {
+          const maintenanceMode = state === 'maintenance' ? 'enable' : 'disable'
+
           try {
             await tenantControlClient.setMaintenanceMode({
               tenant: updatedTenant,
-              mode: state === 'maintenance' ? 'enable' : 'disable',
+              mode: maintenanceMode,
               reason,
             })
           } catch (controlError) {
@@ -1492,7 +1494,7 @@ export function createApp({
                 ? controlError.status
                 : 0
             logUnexpectedError(
-              `Failed to propagate maintenance ${state} to tenant ${tenantId} via /_control/maintenance (status ${status})`,
+              `Failed to propagate maintenance transition ${previousState} -> ${state} (${maintenanceMode}) to tenant ${tenantId} via /_control/maintenance (status ${status})`,
               controlError,
             )
             response.status(502).json({
