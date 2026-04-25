@@ -4,6 +4,7 @@ FROM node:22.21.1-bookworm-slim AS base
 WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
+COPY packages/postgres-migrations ./packages/postgres-migrations
 COPY platform/keycloak-jwt/package*.json ./platform/keycloak-jwt/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
@@ -19,6 +20,7 @@ FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./
 COPY platform/keycloak-jwt ./platform/keycloak-jwt
 COPY apps/control-plane ./apps/control-plane
+RUN npm run build --workspace packages/postgres-migrations
 RUN npm run build --workspace platform/keycloak-jwt
 RUN npm run build --workspace apps/control-plane
 
@@ -30,6 +32,10 @@ COPY --from=build /app/platform/keycloak-jwt/dist ./platform/keycloak-jwt/dist
 COPY --from=build /app/platform/keycloak-jwt/package.json ./platform/keycloak-jwt/
 COPY --from=build /app/apps/control-plane/dist ./apps/control-plane/dist
 COPY --from=build /app/apps/control-plane/package.json ./apps/control-plane/
+COPY --from=build /app/apps/control-plane/migrations ./apps/control-plane/migrations
+COPY apps/api/migrations ./apps/api/migrations
+COPY --from=build /app/packages/postgres-migrations/package.json ./packages/postgres-migrations/
+COPY --from=build /app/packages/postgres-migrations/dist ./packages/postgres-migrations/dist
 COPY package.json ./
 
 RUN mkdir -p /app/data && \

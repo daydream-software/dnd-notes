@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { initializeNoteStoreDatabase } from './note-store-bootstrap.js'
 import {
+  createNoteStorePostgresPool,
   createPostgresDatabase,
   type NoteStoreDatabase,
   type PostgresPoolLike,
 } from './note-store-database.js'
+import { runTenantApiMigrations } from './migrations.js'
 import {
   createAdminDomain,
   prepareAdminStatements,
@@ -82,6 +84,7 @@ export interface CreateNoteStoreOptions {
   databaseUrl?: string
   postgresPool?: PostgresPoolLike
   siteAdminEmails?: readonly string[]
+  migrationMode?: 'apply' | 'verify'
 }
 
 export type RuntimeNoteStoreOptions = CreateNoteStoreOptions
@@ -241,13 +244,44 @@ export async function createNoteStore(
 ): Promise<NoteStore> {
   const databaseUrl = requirePostgresDatabaseUrl(options)
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
-  const database = createPostgresDatabase({
-    connectionString: databaseUrl ?? undefined,
-    pool: options.postgresPool,
-  })
+  const migrationMode = options.migrationMode ?? 'apply'
 
-  await initializeDatabaseOrClose(database, () =>
-    initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
+  let pool: PostgresPoolLike
+  let ownedPool: PostgresPoolLike | undefined
+
+  if (options.postgresPool) {
+    pool = options.postgresPool
+  } else {
+    ownedPool = createNoteStorePostgresPool(databaseUrl ?? '')
+    pool = ownedPool
+  }
+
+  if (migrationMode === 'apply') {
+    try {
+      await runTenantApiMigrations({ pool })
+    } catch (error) {
+      if (ownedPool) {
+        try {
+          await ownedPool.end()
+        } catch {
+          // Preserve the original failure.
+        }
+      }
+      throw error
+    }
+  }
+
+  const database = createPostgresDatabase({ pool })
+
+  await initializeDatabaseOrClose(
+    {
+      async close() {
+        if (ownedPool) {
+          await ownedPool.end()
+        }
+      },
+    },
+    () => initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
   )
 
   const checkDatabaseConnection = database.prepare('SELECT 1')
@@ -825,7 +859,11 @@ export async function createNoteStore(
       await checkDatabaseConnection.get()
     },
     close() {
-      return database.close()
+      const tasks: Array<Promise<unknown>> = [database.close()]
+      if (ownedPool) {
+        tasks.push(ownedPool.end())
+      }
+      return Promise.all(tasks).then(() => undefined)
     },
   }
 
@@ -835,5 +873,8 @@ export async function createNoteStore(
 export async function createRuntimeNoteStore(
   options: RuntimeNoteStoreOptions = {},
 ): Promise<NoteStore> {
-  return createNoteStore(options)
+  return createNoteStore({
+    ...options,
+    migrationMode: 'verify',
+  })
 }

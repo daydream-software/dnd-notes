@@ -15,6 +15,11 @@ const buildWorkspaces = [
     workspace: 'packages/portal-utils',
   },
   {
+    name: 'postgres-migrations',
+    sourceDirectory: 'packages/postgres-migrations/src',
+    workspace: 'packages/postgres-migrations',
+  },
+  {
     name: 'keycloak-jwt',
     sourceDirectory: 'platform/keycloak-jwt/src',
     workspace: 'platform/keycloak-jwt',
