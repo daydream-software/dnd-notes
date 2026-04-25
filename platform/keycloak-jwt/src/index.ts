@@ -126,15 +126,23 @@ export async function getPublicKeyForKid(
     )
   }
 
-  const publicKey = createPublicKey({
-    key: {
-      kty: 'RSA',
-      kid: jwk.kid,
-      n: jwk.n,
-      e: jwk.e,
-    },
-    format: 'jwk',
-  })
+  let publicKey: KeyObject
+  try {
+    publicKey = createPublicKey({
+      key: {
+        kty: 'RSA',
+        kid: jwk.kid,
+        n: jwk.n,
+        e: jwk.e,
+      },
+      format: 'jwk',
+    })
+  } catch {
+    throw new KeycloakJwtVerificationError(
+      'jwks_key_missing',
+      `JWKS at ${jwksUrl} contains malformed RSA key material for kid=${keyId}.`,
+    )
+  }
   jwkCache.set(cacheKey, publicKey)
   return publicKey
 }
@@ -215,7 +223,7 @@ export async function verifyToken<TClaims extends JwtClaims = JwtClaims>(
 
   const now = Math.floor(Date.now() / 1000)
 
-  if (typeof claims.exp !== 'number' || claims.exp <= now) {
+  if (typeof claims.exp !== 'number' || claims.exp <= now - clockSkewSec) {
     throw new KeycloakJwtVerificationError('expired', 'JWT has expired.')
   }
 

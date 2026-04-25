@@ -21,6 +21,11 @@ interface FakeRsaSigner {
   close: () => Promise<void>
 }
 
+interface StartFakeJwksOptions {
+  realm?: string
+  publicJwkOverrides?: Record<string, unknown>
+}
+
 function encodeBase64Url(value: Buffer | string): string {
   return Buffer.from(value)
     .toString('base64')
@@ -29,9 +34,12 @@ function encodeBase64Url(value: Buffer | string): string {
     .replace(/=+$/g, '')
 }
 
-async function startFakeJwks(realm = 'test-realm'): Promise<FakeRsaSigner> {
+async function startFakeJwks({
+  realm = 'test-realm',
+  publicJwkOverrides = {},
+}: StartFakeJwksOptions = {}): Promise<FakeRsaSigner> {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
-  const publicJwk = publicKey.export({ format: 'jwk' }) as Record<string, string>
+  const publicJwk = publicKey.export({ format: 'jwk' }) as Record<string, unknown>
   let kid = `kid-${randomUUID()}`
   let fetchCount = 0
 
@@ -41,7 +49,7 @@ async function startFakeJwks(realm = 'test-realm'): Promise<FakeRsaSigner> {
       res.writeHead(200, { 'content-type': 'application/json' })
       res.end(
         JSON.stringify({
-          keys: [{ ...publicJwk, alg: 'RS256', kid, use: 'sig' }],
+          keys: [{ ...publicJwk, ...publicJwkOverrides, alg: 'RS256', kid, use: 'sig' }],
         }),
       )
       return
@@ -197,6 +205,26 @@ test('verifyToken rejects an expired token with code "expired"', async (t) => {
   )
 })
 
+test('verifyToken accepts a token whose exp is within the allowed clock skew window', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now - 300, exp: now - 5, nbf: now - 300 }),
+  )
+
+  const { claims } = await verifyToken(token, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+    clockSkewSec: 30,
+  })
+
+  assert.equal(claims.sub, 'subject-1')
+})
+
 test('verifyToken rejects a token whose audience/azp does not match', async (t) => {
   const fake = await startFakeJwks()
   t.after(() => fake.close())
@@ -329,4 +357,27 @@ test('verifyToken surfaces jwks_fetch_failed when the JWKS endpoint is unreachab
       error.code === 'jwks_fetch_failed',
   )
   t.diagnostic('Confirmed JWKS fetch failure surfaces as jwks_fetch_failed')
+})
+
+test('verifyToken surfaces malformed JWKS key material as a verification error', async (t) => {
+  const fake = await startFakeJwks({
+    publicJwkOverrides: { n: { malformed: true } },
+  })
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'jwks_key_missing',
+  )
 })
