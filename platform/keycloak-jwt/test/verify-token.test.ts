@@ -246,6 +246,77 @@ test('verifyToken accepts a token whose exp is within the allowed clock skew win
   assert.equal(claims.sub, 'subject-1')
 })
 
+test('verifyToken accepts a token whose nbf is within the explicit notBeforeSkewSec window', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now, exp: now + 300, nbf: now + 5 }),
+  )
+
+  const { claims } = await verifyToken(token, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+    notBeforeSkewSec: 30,
+  })
+
+  assert.equal(claims.sub, 'subject-1')
+})
+
+test('verifyToken keeps expiration strict when only notBeforeSkewSec is provided', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now - 300, exp: now - 5, nbf: now - 5 }),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+      notBeforeSkewSec: 30,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError && error.code === 'expired',
+  )
+})
+
+test('verifyToken rejects invalid clock skew options before claim validation', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  for (const [name, options] of [
+    ['clockSkewSec', { clockSkewSec: Number.NaN }],
+    ['clockSkewSec', { clockSkewSec: Number.POSITIVE_INFINITY }],
+    ['notBeforeSkewSec', { notBeforeSkewSec: -1 }],
+  ] as const) {
+    await assert.rejects(
+      verifyToken(token, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+        ...options,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'malformed' &&
+        error.message.includes(name),
+    )
+  }
+})
+
 test('verifyToken reuses a fresh JWKS response for repeated missing kids after one revalidation fetch', async (t) => {
   const fake = await startFakeJwks()
   t.after(() => fake.close())

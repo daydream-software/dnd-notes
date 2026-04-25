@@ -296,6 +296,7 @@ export interface VerifyTokenOptions {
   audience: string
   jwksUrl: string
   clockSkewSec?: number
+  notBeforeSkewSec?: number
 }
 
 export interface VerifiedToken<TClaims extends JwtClaims = JwtClaims> {
@@ -320,10 +321,28 @@ function audienceMatches(claims: JwtClaims, audience: string): boolean {
   return inAud
 }
 
+function normalizeClockSkewSec(name: string, value: number | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined
+  }
+
+  if (!Number.isFinite(value) || value < 0) {
+    throw new KeycloakJwtVerificationError(
+      'malformed',
+      `Verification option "${name}" must be a finite, non-negative number.`,
+    )
+  }
+
+  return value
+}
+
 export async function verifyToken<TClaims extends JwtClaims = JwtClaims>(
   rawJwt: string,
-  { issuer, audience, jwksUrl, clockSkewSec = 0 }: VerifyTokenOptions,
+  { issuer, audience, jwksUrl, clockSkewSec, notBeforeSkewSec }: VerifyTokenOptions,
 ): Promise<VerifiedToken<TClaims>> {
+  const expirationClockSkewSec = normalizeClockSkewSec('clockSkewSec', clockSkewSec) ?? 0
+  const effectiveNotBeforeSkewSec =
+    normalizeClockSkewSec('notBeforeSkewSec', notBeforeSkewSec) ?? expirationClockSkewSec
   const parts = rawJwt.split('.')
 
   if (parts.length !== 3) {
@@ -367,11 +386,11 @@ export async function verifyToken<TClaims extends JwtClaims = JwtClaims>(
 
   const now = Math.floor(Date.now() / 1000)
 
-  if (typeof claims.exp !== 'number' || claims.exp <= now - clockSkewSec) {
+  if (typeof claims.exp !== 'number' || claims.exp <= now - expirationClockSkewSec) {
     throw new KeycloakJwtVerificationError('expired', 'JWT has expired.')
   }
 
-  if (typeof claims.nbf === 'number' && claims.nbf > now + clockSkewSec) {
+  if (typeof claims.nbf === 'number' && claims.nbf > now + effectiveNotBeforeSkewSec) {
     throw new KeycloakJwtVerificationError(
       'not_yet_valid',
       'JWT nbf is in the future beyond the allowed clock skew.',

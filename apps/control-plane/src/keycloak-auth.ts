@@ -99,6 +99,7 @@ export function createControlPlaneAdminAuth(
           issuer,
           audience: clientId,
           jwksUrl,
+          notBeforeSkewSec: 30,
         })
         claims = result.claims
       } catch (error) {
