@@ -96,7 +96,6 @@ function createTenant(overrides: Partial<Tenant> = {}): Tenant {
     currentState: 'ready',
     version: '1.0.0',
     storageReference: 'tenant_demo_t_demo',
-    backupMetadata: null,
     createdAt: '2026-04-24T00:00:00Z',
     updatedAt: '2026-04-24T00:00:00Z',
     ...overrides,
