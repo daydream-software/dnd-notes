@@ -74,6 +74,7 @@ describe('TenantRegistry', () => {
       )
 
       const portalSessionTable = db.public.getTable('portal_sessions')
+      const restoreLogTable = db.public.getTable('restore_log')
 
       assert.equal(
         portalSessionTable.constraintsByName.has('idx_portal_sessions_expires_at'),
@@ -84,6 +85,98 @@ describe('TenantRegistry', () => {
           'idx_portal_sessions_expires_at_datetime',
         ),
         false,
+      )
+      assert.equal(
+        restoreLogTable.constraintsByName.has('idx_restore_log_tenant_requested_at'),
+        true,
+      )
+      assert.equal(
+        restoreLogTable.constraintsByName.has('idx_restore_log_tenant_completed_at'),
+        false,
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('filters latest backup and restore summaries to the requested tenant ids', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.createTenant({
+        id: 'tenant-2',
+        slug: 'tenant-two',
+        ownerId: 'owner-2',
+        version: '1.0.0',
+      })
+
+      await tenantRegistry.createBackupRun({
+        id: 'backup-1',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-1', {
+        location: 'blob://backups/tenant-1',
+        completedAt: '2026-04-25T00:00:00Z',
+      })
+      await tenantRegistry.createBackupRun({
+        id: 'backup-2',
+        tenantId: 'tenant-2',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-2', {
+        location: 'blob://backups/tenant-2',
+        completedAt: '2026-04-25T01:00:00Z',
+      })
+
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-1',
+        tenantId: 'tenant-1',
+        backupId: 'backup-1',
+        backupLocation: 'blob://backups/tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markRestoreRunCompleted('restore-1', {
+        completedAt: '2026-04-25T02:00:00Z',
+      })
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-2',
+        tenantId: 'tenant-2',
+        backupId: 'backup-2',
+        backupLocation: 'blob://backups/tenant-2',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markRestoreRunCompleted('restore-2', {
+        completedAt: '2026-04-25T03:00:00Z',
+      })
+
+      const backupSummaries =
+        await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([
+          'tenant-1',
+        ])
+      const restoreSummaries = await tenantRegistry.getLatestRestoreSummariesForTenantIds([
+        'tenant-1',
+      ])
+
+      assert.equal(backupSummaries.size, 1)
+      assert.equal(backupSummaries.get('tenant-1')?.backupId, 'backup-1')
+      assert.equal(backupSummaries.has('tenant-2'), false)
+      assert.equal(restoreSummaries.size, 1)
+      assert.equal(restoreSummaries.get('tenant-1')?.restoreId, 'restore-1')
+      assert.equal(restoreSummaries.has('tenant-2'), false)
+      assert.equal(
+        (await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([])).size,
+        0,
+      )
+      assert.equal(
+        (await tenantRegistry.getLatestRestoreSummariesForTenantIds([])).size,
+        0,
       )
     } finally {
       await cleanup()

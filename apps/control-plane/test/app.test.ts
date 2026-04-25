@@ -1676,6 +1676,67 @@ describe('Control Plane API', () => {
         await customRegistry.cleanup()
       }
     })
+
+    it('keeps successful backups working when audit writes fail', async () => {
+      const dispatcher = {
+        async executeBackup({ tenant }: { tenant: { id: string } }) {
+          return {
+            tenantId: tenant.id,
+            databaseName: 'tenant_db',
+            format: 'custom' as const,
+            location: 'blob://backups/tenant-audit-failure',
+            sha256: 'sha256-audit-failure',
+            sizeBytes: 512,
+            capturedAt: '2026-04-25T00:00:00.000Z',
+          }
+        },
+        async executeRestore() {
+          throw new Error('not used in this test')
+        },
+      }
+      const customRegistry = createTestTenantRegistry()
+      customRegistry.tenantRegistry.appendAuditLogEntry = async () => {
+        throw new Error('synthetic audit failure')
+      }
+      const customApp = createApp({
+        tenantRegistry: customRegistry.tenantRegistry,
+        adminToken,
+        tenantBackupDispatcher: dispatcher,
+      })
+
+      try {
+        await customRegistry.tenantRegistry.createTenant({
+          id: 'tenant-audit-failure',
+          slug: 'tenant-audit-failure',
+          ownerId: 'owner-audit-failure',
+          version: '1.0.0',
+        })
+        await customRegistry.tenantRegistry.updateTenantStorageReference(
+          'tenant-audit-failure',
+          'pvc-tenant-audit-failure',
+        )
+        await customRegistry.tenantRegistry.updateTenantState(
+          'tenant-audit-failure',
+          'ready',
+          'test-suite',
+          'ready',
+        )
+
+        const response = await request(customApp)
+          .post(`/internal/tenants/tenant-audit-failure/backup`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ triggeredBy: 'test-suite' })
+          .expect(201)
+
+        assert.strictEqual(response.body.backup.status, 'completed')
+        assert.strictEqual(
+          response.body.backup.location,
+          'blob://backups/tenant-audit-failure',
+        )
+      } finally {
+        await customRegistry.cleanup()
+      }
+    })
   })
 
   describe('GET /internal/tenants/:tenantId/backups', () => {
@@ -1731,6 +1792,43 @@ describe('Control Plane API', () => {
         .expect(400)
 
       assert.match(response.body.error, /backupId or backupLocation/i)
+    })
+
+    it('rejects restore requests that provide both backupId and backupLocation', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-restore-ambiguous',
+        slug: 'tenant-restore-ambiguous',
+        ownerId: 'owner-restore-ambiguous',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-restore-ambiguous',
+        'pvc-tenant-restore-ambiguous',
+      )
+      await tenantRegistry.updateTenantState(
+        'tenant-restore-ambiguous',
+        'ready',
+        'test-suite',
+        'ready',
+      )
+      await tenantRegistry.createBackupRun({
+        id: 'backup-restore-ambiguous-1',
+        tenantId: 'tenant-restore-ambiguous',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-restore-ambiguous-1', {
+        location: 'blob://backups/restore-ambiguous-1',
+      })
+
+      const response = await authedPost(`${tenantPath('tenant-restore-ambiguous')}/restore`)
+        .send({
+          triggeredBy: 'test-suite',
+          backupId: 'backup-restore-ambiguous-1',
+          backupLocation: 'blob://backups/restore-ambiguous-1',
+        })
+        .expect(400)
+
+      assert.match(response.body.error, /either backupId or backupLocation/i)
     })
 
     it('returns 404 when the referenced backup does not belong to the tenant', async () => {
@@ -1821,6 +1919,265 @@ describe('Control Plane API', () => {
       const tenantAfter = await tenantRegistry.getTenant('tenant-restore-noop')
       assert.ok(tenantAfter)
       assert.strictEqual(tenantAfter.currentState, 'ready')
+    })
+
+    it('returns an operation-specific restore error for unexpected dispatcher failures', async () => {
+      const dispatcher = {
+        async executeBackup() {
+          throw new Error('not used in this test')
+        },
+        async executeRestore() {
+          throw new Error('synthetic restore failure')
+        },
+      }
+      const customRegistry = createTestTenantRegistry()
+      const customApp = createApp({
+        tenantRegistry: customRegistry.tenantRegistry,
+        adminToken,
+        tenantBackupDispatcher: dispatcher,
+      })
+
+      try {
+        await customRegistry.tenantRegistry.createTenant({
+          id: 'tenant-restore-failure',
+          slug: 'tenant-restore-failure',
+          ownerId: 'owner-restore-failure',
+          version: '1.0.0',
+        })
+        await customRegistry.tenantRegistry.updateTenantStorageReference(
+          'tenant-restore-failure',
+          'pvc-tenant-restore-failure',
+        )
+        await customRegistry.tenantRegistry.updateTenantState(
+          'tenant-restore-failure',
+          'ready',
+          'test-suite',
+          'ready',
+        )
+        await customRegistry.tenantRegistry.createBackupRun({
+          id: 'backup-restore-failure-1',
+          tenantId: 'tenant-restore-failure',
+          triggeredBy: 'test-suite',
+        })
+        await customRegistry.tenantRegistry.markBackupRunCompleted(
+          'backup-restore-failure-1',
+          {
+            location: 'blob://backups/restore-failure-1',
+          },
+        )
+
+        const response = await request(customApp)
+          .post(`/internal/tenants/tenant-restore-failure/restore`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            triggeredBy: 'test-suite',
+            backupId: 'backup-restore-failure-1',
+          })
+          .expect(500)
+
+        assert.strictEqual(response.body.error, 'Restore runner failed')
+        assert.strictEqual(response.body.details, 'synthetic restore failure')
+      } finally {
+        await customRegistry.cleanup()
+      }
+    })
+
+    it('records a completed restore, safety snapshot, and audit trail when a dispatcher succeeds', async () => {
+      const dispatcher = {
+        async executeBackup() {
+          throw new Error('not used in this test')
+        },
+        async executeRestore({ tenant }: { tenant: { id: string; currentState: string } }) {
+          assert.strictEqual(tenant.id, 'tenant-restore-success')
+          assert.strictEqual(tenant.currentState, 'restoring')
+
+          return {
+            tenantId: tenant.id,
+            databaseName: 'tenant_restore_success',
+            backupLocation: 'blob://backups/restore-success-1',
+            restoredAt: '2026-04-25T02:00:00.000Z',
+            safetySnapshot: {
+              tenantId: tenant.id,
+              databaseName: 'tenant_restore_success',
+              format: 'custom' as const,
+              location: 'blob://backups/restore-safety-snapshot-1',
+              sha256: 'restore-safety-sha',
+              sizeBytes: 2048,
+              capturedAt: '2026-04-25T01:30:00.000Z',
+            },
+          }
+        },
+      }
+      const customRegistry = createTestTenantRegistry()
+      const customApp = createApp({
+        tenantRegistry: customRegistry.tenantRegistry,
+        adminToken,
+        tenantBackupDispatcher: dispatcher,
+      })
+
+      try {
+        await customRegistry.tenantRegistry.createTenant({
+          id: 'tenant-restore-success',
+          slug: 'tenant-restore-success',
+          ownerId: 'owner-restore-success',
+          version: '1.0.0',
+        })
+        await customRegistry.tenantRegistry.updateTenantStorageReference(
+          'tenant-restore-success',
+          'pvc-tenant-restore-success',
+        )
+        await customRegistry.tenantRegistry.updateTenantState(
+          'tenant-restore-success',
+          'maintenance',
+          'test-suite',
+          'maintenance window',
+        )
+        await customRegistry.tenantRegistry.createBackupRun({
+          id: 'backup-restore-success-1',
+          tenantId: 'tenant-restore-success',
+          triggeredBy: 'test-suite',
+        })
+        await customRegistry.tenantRegistry.markBackupRunCompleted(
+          'backup-restore-success-1',
+          {
+            location: 'blob://backups/restore-success-1',
+          },
+        )
+
+        const response = await request(customApp)
+          .post(`/internal/tenants/tenant-restore-success/restore`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            triggeredBy: 'test-suite',
+            reason: 'restore after validation',
+            backupId: 'backup-restore-success-1',
+          })
+          .expect(201)
+
+        assert.strictEqual(response.body.restore.status, 'completed')
+        assert.strictEqual(
+          response.body.restore.completedAt,
+          '2026-04-25T02:00:00.000Z',
+        )
+        assert.ok(response.body.restore.safetySnapshotId)
+
+        const restores = await customRegistry.tenantRegistry.listTenantRestores(
+          'tenant-restore-success',
+        )
+        assert.strictEqual(restores.length, 1)
+        assert.strictEqual(restores[0]?.status, 'completed')
+        assert.strictEqual(
+          restores[0]?.safetySnapshotId,
+          response.body.restore.safetySnapshotId,
+        )
+
+        const safetySnapshot = await customRegistry.tenantRegistry.getBackupRun(
+          response.body.restore.safetySnapshotId,
+        )
+        assert.ok(safetySnapshot)
+        assert.strictEqual(safetySnapshot.location, 'blob://backups/restore-safety-snapshot-1')
+        assert.strictEqual(safetySnapshot.status, 'completed')
+        assert.match(safetySnapshot.reason ?? '', /Safety snapshot captured before restore/)
+
+        const tenantAfter = await customRegistry.tenantRegistry.getTenant(
+          'tenant-restore-success',
+        )
+        assert.ok(tenantAfter)
+        assert.strictEqual(tenantAfter.currentState, 'maintenance')
+
+        const transitions = await customRegistry.tenantRegistry.getStateTransitions(
+          'tenant-restore-success',
+        )
+        assert.strictEqual(transitions[0]?.toState, 'maintenance')
+        assert.strictEqual(transitions[1]?.toState, 'restoring')
+
+        const audit = await customRegistry.tenantRegistry.listTenantAuditLog(
+          'tenant-restore-success',
+        )
+        const outcomes = audit.map((entry) => entry.outcome)
+        assert.ok(outcomes.includes('requested'))
+        assert.ok(outcomes.includes('succeeded'))
+      } finally {
+        await customRegistry.cleanup()
+      }
+    })
+
+    it('keeps successful restores working when audit writes fail', async () => {
+      const dispatcher = {
+        async executeBackup() {
+          throw new Error('not used in this test')
+        },
+        async executeRestore({ tenant }: { tenant: { id: string } }) {
+          return {
+            tenantId: tenant.id,
+            databaseName: 'tenant_restore_audit_failure',
+            backupLocation: 'blob://backups/restore-audit-failure-1',
+            restoredAt: '2026-04-25T02:00:00.000Z',
+            safetySnapshot: {
+              tenantId: tenant.id,
+              databaseName: 'tenant_restore_audit_failure',
+              format: 'custom' as const,
+              location: 'blob://backups/restore-audit-failure-snapshot-1',
+              sha256: 'restore-audit-failure-sha',
+              sizeBytes: 1024,
+              capturedAt: '2026-04-25T01:30:00.000Z',
+            },
+          }
+        },
+      }
+      const customRegistry = createTestTenantRegistry()
+      customRegistry.tenantRegistry.appendAuditLogEntry = async () => {
+        throw new Error('synthetic audit failure')
+      }
+      const customApp = createApp({
+        tenantRegistry: customRegistry.tenantRegistry,
+        adminToken,
+        tenantBackupDispatcher: dispatcher,
+      })
+
+      try {
+        await customRegistry.tenantRegistry.createTenant({
+          id: 'tenant-restore-audit-failure',
+          slug: 'tenant-restore-audit-failure',
+          ownerId: 'owner-restore-audit-failure',
+          version: '1.0.0',
+        })
+        await customRegistry.tenantRegistry.updateTenantStorageReference(
+          'tenant-restore-audit-failure',
+          'pvc-tenant-restore-audit-failure',
+        )
+        await customRegistry.tenantRegistry.updateTenantState(
+          'tenant-restore-audit-failure',
+          'ready',
+          'test-suite',
+          'ready',
+        )
+        await customRegistry.tenantRegistry.createBackupRun({
+          id: 'backup-restore-audit-failure-1',
+          tenantId: 'tenant-restore-audit-failure',
+          triggeredBy: 'test-suite',
+        })
+        await customRegistry.tenantRegistry.markBackupRunCompleted(
+          'backup-restore-audit-failure-1',
+          {
+            location: 'blob://backups/restore-audit-failure-1',
+          },
+        )
+
+        const response = await request(customApp)
+          .post(`/internal/tenants/tenant-restore-audit-failure/restore`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({
+            triggeredBy: 'test-suite',
+            backupId: 'backup-restore-audit-failure-1',
+          })
+          .expect(201)
+
+        assert.strictEqual(response.body.restore.status, 'completed')
+        assert.ok(response.body.restore.safetySnapshotId)
+      } finally {
+        await customRegistry.cleanup()
+      }
     })
   })
 

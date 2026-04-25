@@ -63,8 +63,8 @@ CREATE TABLE IF NOT EXISTS restore_log (
 CREATE INDEX IF NOT EXISTS idx_restore_log_tenant_id
   ON restore_log(tenant_id);
 
-CREATE INDEX IF NOT EXISTS idx_restore_log_tenant_completed_at
-  ON restore_log(tenant_id, completed_at DESC);
+CREATE INDEX IF NOT EXISTS idx_restore_log_tenant_requested_at
+  ON restore_log(tenant_id, requested_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_restore_log_status
   ON restore_log(status);

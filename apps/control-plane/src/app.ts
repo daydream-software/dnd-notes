@@ -277,6 +277,10 @@ const triggerRestoreSchema = z.object({
   backupLocation: z.string().min(1).optional(),
 })
 
+function formatRunnerOperation(operation: 'backup' | 'restore') {
+  return operation === 'backup' ? 'Backup' : 'Restore'
+}
+
 const provisionTenantSchema = z.object({
   triggeredBy: z.string().min(1),
   reason: z.string().min(1).optional(),
@@ -686,6 +690,50 @@ export function createApp({
       tenants,
     }
   }
+  const getBackupAndRestoreSummaries = async (tenantIds?: readonly string[]) => {
+    const [backupSummaries, restoreSummaries] = await Promise.all([
+      tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds(tenantIds),
+      tenantRegistry.getLatestRestoreSummariesForTenantIds(tenantIds),
+    ])
+
+    return {
+      backupSummaries,
+      restoreSummaries,
+    }
+  }
+  const appendAuditLogEntryBestEffort = async (
+    params: Parameters<typeof tenantRegistry.appendAuditLogEntry>[0],
+  ) => {
+    await tenantRegistry.appendAuditLogEntry(params).catch(() => undefined)
+  }
+  const persistCompletedBackupArtifact = async (params: {
+    id: string
+    tenantId: string
+    triggeredBy: string
+    reason: string
+    artifact: {
+      format: string
+      location: string
+      sizeBytes: number
+      sha256: string
+      capturedAt: string
+    }
+  }) => {
+    await tenantRegistry.createBackupRun({
+      id: params.id,
+      tenantId: params.tenantId,
+      triggeredBy: params.triggeredBy,
+      reason: params.reason,
+      format: params.artifact.format,
+    })
+
+    return await tenantRegistry.markBackupRunCompleted(params.id, {
+      location: params.artifact.location,
+      sizeBytes: params.artifact.sizeBytes,
+      checksum: params.artifact.sha256,
+      completedAt: params.artifact.capturedAt,
+    })
+  }
   const buildPortalCatalogResponse = (): PortalCatalogResponse => ({
     authMode: portalAuthMode,
     defaultTenantVersion: portalDefaultTenantVersion,
@@ -718,12 +766,11 @@ export function createApp({
   const buildPortalTenantSummary = async (
     tenantId: string,
   ): Promise<PortalTenantSummary | null> => {
-    const [latestTransitionsByTenant, backupSummaries, restoreSummaries, tenant] =
+    const [latestTransitionsByTenant, tenant, { backupSummaries, restoreSummaries }] =
       await Promise.all([
         tenantRegistry.getLatestStateTransitions(),
-        tenantRegistry.getLatestSuccessfulBackupSummaries(),
-        tenantRegistry.getLatestRestoreSummaries(),
         tenantRegistry.getTenant(tenantId),
+        getBackupAndRestoreSummaries([tenantId]),
       ])
 
     if (!tenant) {
@@ -744,13 +791,13 @@ export function createApp({
   const buildPortalDashboardResponse = async (
     account: PortalAccount,
   ): Promise<PortalDashboardResponse> => {
-    const [latestTransitionsByTenant, backupSummaries, restoreSummaries, ownedTenants] =
-      await Promise.all([
-        tenantRegistry.getLatestStateTransitions(),
-        tenantRegistry.getLatestSuccessfulBackupSummaries(),
-        tenantRegistry.getLatestRestoreSummaries(),
-        tenantRegistry.listTenantsByOwnerId(account.id),
-      ])
+    const [latestTransitionsByTenant, ownedTenants] = await Promise.all([
+      tenantRegistry.getLatestStateTransitions(),
+      tenantRegistry.listTenantsByOwnerId(account.id),
+    ])
+    const { backupSummaries, restoreSummaries } = await getBackupAndRestoreSummaries(
+      ownedTenants.map((tenant) => tenant.id),
+    )
     const tenants = ownedTenants.map((tenant) => ({
       tenant,
       latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
@@ -1342,8 +1389,8 @@ export function createApp({
       const { tenantId } = request.params
       const [storage, backupSummaries, restoreSummaries] = await Promise.all([
         tenantRegistry.getTenantStorageSnapshot(tenantId),
-        tenantRegistry.getLatestSuccessfulBackupSummaries(),
-        tenantRegistry.getLatestRestoreSummaries(),
+        tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([tenantId]),
+        tenantRegistry.getLatestRestoreSummariesForTenantIds([tenantId]),
       ])
 
       if (!storage) {
@@ -1559,18 +1606,21 @@ export function createApp({
     },
   )
 
-  const handleBackupDispatchError = (error: unknown): { status: number; body: ErrorResponse } => {
+  const handleBackupDispatchError = (
+    operation: 'backup' | 'restore',
+    error: unknown,
+  ): { status: number; body: ErrorResponse } => {
     if (error instanceof BackupDispatchUnavailableError) {
       return {
         status: 501,
-        body: { error: error.message },
+        body: { error: `Tenant ${operation} runner is not configured.` },
       }
     }
 
     return {
       status: 500,
       body: {
-        error: 'Backup runner failed',
+        error: `${formatRunnerOperation(operation)} runner failed`,
         details: getErrorMessage(error),
       },
     }
@@ -1624,7 +1674,7 @@ export function createApp({
         triggeredBy,
         reason: reason ?? null,
       })
-      await tenantRegistry.appendAuditLogEntry({
+      await appendAuditLogEntryBestEffort({
         tenantId,
         actor: triggeredBy,
         action: 'tenant.backup.create',
@@ -1643,7 +1693,7 @@ export function createApp({
           checksum: artifact.sha256,
           completedAt: artifact.capturedAt,
         })
-        await tenantRegistry.appendAuditLogEntry({
+        await appendAuditLogEntryBestEffort({
           tenantId,
           actor: triggeredBy,
           action: 'tenant.backup.create',
@@ -1669,7 +1719,7 @@ export function createApp({
             details: failureReason,
           })
           .catch(() => undefined)
-        const { status, body } = handleBackupDispatchError(error)
+        const { status, body } = handleBackupDispatchError('backup', error)
         if (status === 501) {
           response.status(501).json({
             ...body,
@@ -1718,6 +1768,13 @@ export function createApp({
       }
 
       const { triggeredBy, reason, backupId, backupLocation } = parseResult.data
+
+      if (backupId && backupLocation) {
+        response.status(400).json({
+          error: 'Provide either backupId or backupLocation, but not both.',
+        })
+        return
+      }
 
       if (!backupId && !backupLocation) {
         response.status(400).json({
@@ -1784,7 +1841,7 @@ export function createApp({
         triggeredBy,
         reason: reason ?? null,
       })
-      await tenantRegistry.appendAuditLogEntry({
+      await appendAuditLogEntryBestEffort({
         tenantId,
         actor: triggeredBy,
         action: 'tenant.restore.create',
@@ -1810,6 +1867,14 @@ export function createApp({
           tenant: restoredTenant,
           backupLocation: resolvedLocation,
         })
+        const safetySnapshotId = randomUUID()
+        await persistCompletedBackupArtifact({
+          id: safetySnapshotId,
+          tenantId,
+          triggeredBy,
+          reason: `Safety snapshot captured before restore ${restoreId}`,
+          artifact: result.safetySnapshot,
+        })
         await tenantRegistry.updateTenantState(
           tenantId,
           previousState,
@@ -1817,9 +1882,10 @@ export function createApp({
           `Restore ${restoreId} completed`,
         )
         const completed = await tenantRegistry.markRestoreRunCompleted(restoreId, {
+          safetySnapshotId,
           completedAt: result.restoredAt,
         })
-        await tenantRegistry.appendAuditLogEntry({
+        await appendAuditLogEntryBestEffort({
           tenantId,
           actor: triggeredBy,
           action: 'tenant.restore.create',
@@ -1853,7 +1919,7 @@ export function createApp({
             details: failureReason,
           })
           .catch(() => undefined)
-        const { status, body } = handleBackupDispatchError(error)
+        const { status, body } = handleBackupDispatchError('restore', error)
         if (status === 501) {
           response.status(501).json(body)
           return

@@ -1367,21 +1367,37 @@ export class TenantRegistry {
   }
 
   async getLatestSuccessfulBackupSummaries(): Promise<Map<string, TenantBackupSummary>> {
+    return this.getLatestSuccessfulBackupSummariesForTenantIds()
+  }
+
+  async getLatestSuccessfulBackupSummariesForTenantIds(
+    tenantIds?: readonly string[],
+  ): Promise<Map<string, TenantBackupSummary>> {
+    if (tenantIds?.length === 0) {
+      return new Map()
+    }
+
+    const tenantIdValues = tenantIds ? [...tenantIds] : []
+    const tenantFilter = tenantIds
+      ? ` AND tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
+      : ''
     const result = await this.run<BackupCatalogRow>(
       `SELECT ${backupCatalogSelectColumns
         .split(',')
         .map((column) => `bc.${column.trim()}`)
         .join(', ')}
        FROM backup_catalog bc
-       INNER JOIN (
-         SELECT tenant_id, MAX(completed_at) AS latest_completed_at
-         FROM backup_catalog
-         WHERE status = 'completed'
-         GROUP BY tenant_id
-       ) latest
-         ON latest.tenant_id = bc.tenant_id
-        AND latest.latest_completed_at = bc.completed_at
-       WHERE bc.status = 'completed'`,
+        INNER JOIN (
+          SELECT tenant_id, MAX(completed_at) AS latest_completed_at
+          FROM backup_catalog
+          WHERE status = 'completed'
+          ${tenantFilter}
+          GROUP BY tenant_id
+        ) latest
+          ON latest.tenant_id = bc.tenant_id
+         AND latest.latest_completed_at = bc.completed_at
+        WHERE bc.status = 'completed'`,
+      tenantIdValues,
     )
 
     return new Map(
@@ -1403,19 +1419,35 @@ export class TenantRegistry {
   }
 
   async getLatestRestoreSummaries(): Promise<Map<string, TenantRestoreSummary>> {
+    return this.getLatestRestoreSummariesForTenantIds()
+  }
+
+  async getLatestRestoreSummariesForTenantIds(
+    tenantIds?: readonly string[],
+  ): Promise<Map<string, TenantRestoreSummary>> {
+    if (tenantIds?.length === 0) {
+      return new Map()
+    }
+
+    const tenantIdValues = tenantIds ? [...tenantIds] : []
+    const tenantFilter = tenantIds
+      ? `WHERE tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
+      : ''
     const result = await this.run<RestoreLogRow>(
       `SELECT ${restoreLogSelectColumns
         .split(',')
         .map((column) => `rl.${column.trim()}`)
         .join(', ')}
-       FROM restore_log rl
-       INNER JOIN (
-         SELECT tenant_id, MAX(requested_at) AS latest_requested_at
-         FROM restore_log
-         GROUP BY tenant_id
-       ) latest
-         ON latest.tenant_id = rl.tenant_id
-        AND latest.latest_requested_at = rl.requested_at`,
+        FROM restore_log rl
+        INNER JOIN (
+          SELECT tenant_id, MAX(requested_at) AS latest_requested_at
+          FROM restore_log
+          ${tenantFilter}
+          GROUP BY tenant_id
+        ) latest
+          ON latest.tenant_id = rl.tenant_id
+         AND latest.latest_requested_at = rl.requested_at`,
+      tenantIdValues,
     )
 
     return new Map(
