@@ -34,7 +34,7 @@ const defaultLogger: MigrationLogger = {
 
 const schemaMigrationsTablePrefix = 'schema_migrations_'
 const schemaMigrationsIndexPrefix = 'sm_'
-const defaultLockAcquireTimeoutMs = 30_000
+const defaultLockAcquireTimeoutMs = 120_000
 const defaultLockRetryDelayMs = 250
 const maxLockRetryDelayMs = 1_000
 
@@ -53,6 +53,7 @@ export interface RunMigrationsOptions {
    * service (control-plane vs tenant API) so they don't block each other.
    */
   lockKey: readonly [number, number]
+  lockAcquireTimeoutMs?: number
   logger?: MigrationLogger
 }
 
@@ -71,14 +72,16 @@ interface MigrationContext {
 export async function runMigrations(options: RunMigrationsOptions): Promise<string[]> {
   const logger = options.logger ?? defaultLogger
   const lockKey = options.lockKey
+  const lockAcquireTimeoutMs = options.lockAcquireTimeoutMs ?? defaultLockAcquireTimeoutMs
   const ledgerTable = resolveMigrationLedgerTableName(options.migrationSet)
   const ledgerIndex = resolveMigrationLedgerIndexName(options.migrationSet)
 
   const client = await options.pool.connect()
   let lockAcquired = false
+  let releaseError: Error | undefined
 
   try {
-    await acquireMigrationLock(client, lockKey, logger)
+    await acquireMigrationLock(client, lockKey, lockAcquireTimeoutMs, logger)
     lockAcquired = true
 
     await ensureMigrationLedgerTable(client, ledgerTable, ledgerIndex)
@@ -107,6 +110,9 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<stri
 
     const applied = await umzug.up()
     return applied.map((entry) => entry.name)
+  } catch (error) {
+    releaseError = toPoolReleaseError(error)
+    throw error
   } finally {
     if (lockAcquired) {
       try {
@@ -118,10 +124,11 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<stri
         logger.warn(
           `Failed to release migration advisory lock: ${formatUnknownError(error)}`,
         )
+        releaseError ??= toPoolReleaseError(error)
       }
     }
 
-    client.release()
+    client.release(releaseError)
   }
 }
 
@@ -198,6 +205,7 @@ function createSqlMigration({
 async function acquireMigrationLock(
   client: MigrationClientLike,
   lockKey: readonly [number, number],
+  lockAcquireTimeoutMs: number,
   logger: MigrationLogger,
 ): Promise<void> {
   const startedAt = Date.now()
@@ -216,16 +224,16 @@ async function acquireMigrationLock(
     }
 
     const elapsedMs = Date.now() - startedAt
-    if (elapsedMs >= defaultLockAcquireTimeoutMs) {
+    if (elapsedMs >= lockAcquireTimeoutMs) {
       throw new Error(
-        `Timed out waiting for migration advisory lock (${lockKey[0]}, ${lockKey[1]}) after ${defaultLockAcquireTimeoutMs}ms.`,
+        `Timed out waiting for migration advisory lock (${lockKey[0]}, ${lockKey[1]}) after ${lockAcquireTimeoutMs}ms.`,
       )
     }
 
     const waitMs = Math.min(
       defaultLockRetryDelayMs * 2 ** (attempt - 1),
       maxLockRetryDelayMs,
-      defaultLockAcquireTimeoutMs - elapsedMs,
+      lockAcquireTimeoutMs - elapsedMs,
     )
 
     if (attempt === 1) {
@@ -245,12 +253,51 @@ async function ensureMigrationLedgerTable(
 ): Promise<void> {
   await client.query(`
     CREATE TABLE IF NOT EXISTS ${ledgerTable} (
-      name TEXT
+      name TEXT,
+      applied_at TIMESTAMPTZ
     )
   `)
+  try {
+    await client.query(
+      `ALTER TABLE ${ledgerTable} ADD COLUMN IF NOT EXISTS applied_at TIMESTAMPTZ`,
+    )
+  } catch (error) {
+    if (!canIgnoreLedgerColumnError(error)) {
+      throw error
+    }
+  }
   await client.query(
     `CREATE UNIQUE INDEX IF NOT EXISTS ${ledgerIndex} ON ${ledgerTable}(name)`,
   )
+  await client.query(
+    `UPDATE ${ledgerTable} SET applied_at = CURRENT_TIMESTAMP WHERE applied_at IS NULL`,
+  )
+  await ensureLedgerConstraint(
+    client,
+    `ALTER TABLE ${ledgerTable} ALTER COLUMN name SET NOT NULL`,
+  )
+  await ensureLedgerConstraint(
+    client,
+    `ALTER TABLE ${ledgerTable} ALTER COLUMN applied_at SET DEFAULT CURRENT_TIMESTAMP`,
+  )
+  await ensureLedgerConstraint(
+    client,
+    `ALTER TABLE ${ledgerTable} ALTER COLUMN applied_at SET NOT NULL`,
+  )
+  await ensureLedgerConstraint(client, `ALTER TABLE ${ledgerTable} ADD PRIMARY KEY (name)`)
+}
+
+async function ensureLedgerConstraint(
+  client: MigrationClientLike,
+  statement: string,
+): Promise<void> {
+  try {
+    await client.query(statement)
+  } catch (error) {
+    if (!canIgnoreLedgerConstraintError(error)) {
+      throw error
+    }
+  }
 }
 
 function resolveMigrationLedgerTableName(migrationSet: string): string {
@@ -323,6 +370,29 @@ function formatUnknownError(error: unknown): string {
   }
 
   return String(error)
+}
+
+function toPoolReleaseError(error: unknown): Error {
+  if (error instanceof Error) {
+    return error
+  }
+
+  return new Error(String(error))
+}
+
+function canIgnoreLedgerColumnError(error: unknown): boolean {
+  const message = formatUnknownError(error)
+  return /not supported/i.test(message)
+}
+
+function canIgnoreLedgerConstraintError(error: unknown): boolean {
+  const message = formatUnknownError(error)
+  return (
+    /multiple primary keys/i.test(message) ||
+    /already has a primary key/i.test(message) ||
+    (/not supported/i.test(message) &&
+      /(primary key|not null|default|alter column)/i.test(message))
+  )
 }
 
 /**

@@ -24,6 +24,7 @@ export const tenantApiMigrationLedgerTable =
 
 export interface RunTenantApiMigrationsOptions {
   pool: MigrationPoolLike
+  lockAcquireTimeoutMs?: number
   logger?: MigrationLogger
 }
 
@@ -35,6 +36,7 @@ export async function runTenantApiMigrations(
     migrationsDir: tenantApiMigrationsDir,
     migrationSet: TENANT_API_MIGRATION_SET,
     lockKey: TENANT_API_MIGRATION_LOCK_KEY,
+    lockAcquireTimeoutMs: options.lockAcquireTimeoutMs,
     logger: options.logger,
   })
 }

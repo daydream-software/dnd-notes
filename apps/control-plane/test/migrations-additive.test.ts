@@ -7,7 +7,7 @@ import test from 'node:test'
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
 const destructivePattern =
-  /\b(DROP\s+(TABLE|COLUMN|INDEX|SCHEMA|CONSTRAINT)|ALTER\s+\w+\s+DROP|TRUNCATE|RENAME\s+(TO|COLUMN))\b/i
+  /\b(DROP\s+(TABLE|COLUMN|INDEX|SCHEMA|CONSTRAINT)|ALTER\b.*\bDROP\b|TRUNCATE|RENAME\s+(TO|COLUMN))\b/i
 
 const opt = '-- @migration:destructive'
 
@@ -39,6 +39,16 @@ async function assertNoDestructiveSql(migrationsDir: string, label: string) {
     })
   }
 }
+
+test('destructive guard catches ALTER ... DROP variants', () => {
+  for (const statement of [
+    'ALTER TABLE campaigns DROP COLUMN archived_at;',
+    'ALTER TABLE IF EXISTS public.campaigns DROP COLUMN archived_at;',
+    'ALTER TABLE ONLY public.campaigns DROP CONSTRAINT campaigns_pkey;',
+  ]) {
+    assert.match(statement, destructivePattern)
+  }
+})
 
 test('control-plane registry migrations are additive-only', async () => {
   const migrationsDir = path.resolve(moduleDir, '..', 'migrations')

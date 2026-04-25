@@ -34,6 +34,7 @@ export const tenantBootstrapMigrationLedgerTable =
 
 export interface RunControlPlaneMigrationsOptions {
   pool: MigrationPoolLike
+  lockAcquireTimeoutMs?: number
   logger?: MigrationLogger
 }
 
@@ -45,12 +46,14 @@ export async function runControlPlaneMigrations(
     migrationsDir: controlPlaneMigrationsDir,
     migrationSet: CONTROL_PLANE_MIGRATION_SET,
     lockKey: CONTROL_PLANE_MIGRATION_LOCK_KEY,
+    lockAcquireTimeoutMs: options.lockAcquireTimeoutMs,
     logger: options.logger,
   })
 }
 
 export interface RunTenantBootstrapMigrationsOptions {
   pool: MigrationPoolLike
+  lockAcquireTimeoutMs?: number
   logger?: MigrationLogger
 }
 
@@ -67,6 +70,7 @@ export async function runTenantBootstrapMigrations(
     migrationsDir: tenantBootstrapMigrationsDir,
     migrationSet: TENANT_BOOTSTRAP_MIGRATION_SET,
     lockKey: TENANT_BOOTSTRAP_MIGRATION_LOCK_KEY,
+    lockAcquireTimeoutMs: options.lockAcquireTimeoutMs,
     logger: options.logger,
   })
 }

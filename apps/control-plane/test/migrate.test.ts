@@ -23,8 +23,8 @@ test('control-plane migrations seed schema metadata and use a namespaced ledger'
   try {
     await runControlPlaneMigrations({ pool })
 
-    const migrations = await pool.query<{ name: string }>(
-      `SELECT name FROM ${controlPlaneMigrationLedgerTable} ORDER BY name`,
+    const migrations = await pool.query<{ applied_at: Date | null; name: string }>(
+      `SELECT name, applied_at FROM ${controlPlaneMigrationLedgerTable} ORDER BY name`,
     )
     assert.deepEqual(
       migrations.rows.map((row) => row.name),
@@ -44,6 +44,23 @@ test('control-plane migrations seed schema metadata and use a namespaced ledger'
     `)
     assert.equal(legacyLedger.rows.length, 0)
 
+    const ledgerColumns = await pool.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = '${controlPlaneMigrationLedgerTable}'
+      ORDER BY ordinal_position
+    `)
+    assert.deepEqual(
+      ledgerColumns.rows.map((row) => row.column_name),
+      ['name', 'applied_at'],
+    )
+    await pool.query(`INSERT INTO ${controlPlaneMigrationLedgerTable} (name) VALUES ('0002_manual.sql')`)
+    await assert.rejects(
+      pool.query(`INSERT INTO ${controlPlaneMigrationLedgerTable} (name) VALUES ('0002_manual.sql')`),
+      /duplicate|already exists|unique|primary key/i,
+    )
+
     assert.deepEqual(await listControlPlaneMigrations(), ['0001_baseline.sql'])
   } finally {
     await pool.end()
@@ -59,8 +76,8 @@ test('tenant bootstrap migrations keep their own namespaced ledger and filenames
   try {
     await runTenantBootstrapMigrations({ pool })
 
-    const migrations = await pool.query<{ name: string }>(
-      `SELECT name FROM ${tenantBootstrapMigrationLedgerTable} ORDER BY name`,
+    const migrations = await pool.query<{ applied_at: Date | null; name: string }>(
+      `SELECT name, applied_at FROM ${tenantBootstrapMigrationLedgerTable} ORDER BY name`,
     )
     assert.deepEqual(
       migrations.rows.map((row) => row.name),
@@ -103,4 +120,67 @@ test('control-plane migrations retry until the advisory lock becomes available',
   } finally {
     await pool.end()
   }
+})
+
+test('control-plane migrations honor a custom advisory lock timeout', async () => {
+  const db = newDb({ autoCreateForeignKeyIndices: true })
+  registerPgMemTenantRegistrySupport(db, {
+    tryAdvisoryLockImpl: () => false,
+  })
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
+
+  try {
+    await assert.rejects(
+      runControlPlaneMigrations({ pool, lockAcquireTimeoutMs: 5 }),
+      /after 5ms/,
+    )
+  } finally {
+    await pool.end()
+  }
+})
+
+test('control-plane migrations issue the ledger contract DDL', async () => {
+  const queries: string[] = []
+  const client = {
+    async query(text: string) {
+      queries.push(text.trim())
+
+      if (text.includes('pg_try_advisory_lock')) {
+        return { rows: [{ locked: true }] }
+      }
+
+      if (text.includes(`SELECT name FROM ${controlPlaneMigrationLedgerTable} ORDER BY name`)) {
+        return { rows: [] }
+      }
+
+      return { rows: [], rowCount: 0 }
+    },
+    release() {},
+  }
+
+  await runControlPlaneMigrations({
+    pool: {
+      async connect() {
+        return client
+      },
+    },
+    logger: {
+      info() {},
+      warn() {},
+      error() {},
+    },
+  })
+
+  const ddl = queries.join('\n')
+  assert.match(ddl, /ALTER TABLE schema_migrations_control_plane ALTER COLUMN name SET NOT NULL/)
+  assert.match(
+    ddl,
+    /ALTER TABLE schema_migrations_control_plane ALTER COLUMN applied_at SET DEFAULT CURRENT_TIMESTAMP/,
+  )
+  assert.match(
+    ddl,
+    /ALTER TABLE schema_migrations_control_plane ALTER COLUMN applied_at SET NOT NULL/,
+  )
+  assert.match(ddl, /ALTER TABLE schema_migrations_control_plane ADD PRIMARY KEY \(name\)/)
 })
