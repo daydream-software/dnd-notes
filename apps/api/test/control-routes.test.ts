@@ -105,6 +105,59 @@ async function sendJsonRequest({
   })
 }
 
+function startStreamingJsonRequest({
+  origin,
+  path,
+  method = 'POST',
+  headers = {},
+}: {
+  origin: string
+  path: string
+  method?: string
+  headers?: Record<string, string>
+}) {
+  let clientRequest!: http.ClientRequest
+  const responsePromise = new Promise<{ statusCode?: number; body: unknown }>(
+    (resolve, reject) => {
+      clientRequest = http.request(
+        `${origin}${path}`,
+        {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+        },
+        (response) => {
+          response.setEncoding('utf8')
+
+          let responseBody = ''
+          response.on('data', (chunk) => {
+            responseBody += chunk
+          })
+          response.on('end', () => {
+            resolve({
+              statusCode: response.statusCode,
+              body:
+                responseBody.length > 0
+                  ? (JSON.parse(responseBody) as unknown)
+                  : null,
+            })
+          })
+          response.on('error', reject)
+        },
+      )
+
+      clientRequest.on('error', reject)
+    },
+  )
+
+  return {
+    request: clientRequest,
+    responsePromise,
+  }
+}
+
 test('GET /_control/info returns 503 when control plane token is not configured', async () => {
   const { app, cleanup } = await createTestApp({ controlPlaneToken: null })
 
@@ -306,20 +359,10 @@ test('POST /_control/maintenance enable then disable toggles the maintenance sta
 test('POST /_control/maintenance drains only writes that started before maintenance mode', async () => {
   const { app, cleanup, controlState } = await createTestApp({
     controlPlaneToken,
-    maintenanceDrainGraceMs: 75,
-  })
-  let releaseWrite: (() => void) | undefined
-  const writeReleased = new Promise<void>((resolve) => {
-    releaseWrite = resolve
-  })
-  let markWriteStarted: (() => void) | undefined
-  const writeStarted = new Promise<void>((resolve) => {
-    markWriteStarted = resolve
+    maintenanceDrainGraceMs: 150,
   })
 
-  app.post('/api/test-hold', async (_request, response) => {
-    markWriteStarted?.()
-    await writeReleased
+  app.post('/api/test-streamed', (_request, response) => {
     response.status(201).json({ ok: true })
   })
 
@@ -328,32 +371,15 @@ test('POST /_control/maintenance drains only writes that started before maintena
   })
 
   const { server, origin } = await listen(app)
-  const originalEnd = http.ServerResponse.prototype.end as (
-    this: http.ServerResponse,
-    ...args: unknown[]
-  ) => http.ServerResponse
+
+  const inflightWrite = startStreamingJsonRequest({
+    origin,
+    path: '/api/test-streamed',
+  })
 
   try {
-    const inflightWritePromise = sendJsonRequest({
-      origin,
-      path: '/api/test-hold',
-      body: {},
-    })
-    await writeStarted
-
-    http.ServerResponse.prototype.end = function patchedEnd(
-      this: http.ServerResponse,
-      ...args: unknown[]
-    ) {
-      if (this.statusCode === 503) {
-        setTimeout(() => {
-          originalEnd.apply(this, args)
-        }, 40)
-        return this
-      }
-
-      return originalEnd.apply(this, args)
-    } as typeof http.ServerResponse.prototype.end
+    inflightWrite.request.write('{"name":"partially-sent')
+    await waitUntil(() => controlState.inflightWrites === 1)
 
     const enableMaintenancePromise = sendJsonRequest({
       origin,
@@ -365,24 +391,24 @@ test('POST /_control/maintenance drains only writes that started before maintena
     })
 
     await waitUntil(() => controlState.maintenance.mode === 'enabled')
+    const drainState = await Promise.race([
+      enableMaintenancePromise.then(() => 'resolved'),
+      sleep(20).then(() => 'pending'),
+    ])
+    assert.equal(drainState, 'pending')
 
-    const blockedWritePromises = [0, 20, 40].map(async (delayMs) => {
-      await sleep(delayMs)
-      return sendJsonRequest({
-        origin,
-        path: '/api/test-blocked',
-        body: {},
-      })
+    const blockedWritePromise = sendJsonRequest({
+      origin,
+      path: '/api/test-blocked',
+      body: {},
     })
+    inflightWrite.request.end('"}')
 
-    await sleep(20)
-    releaseWrite?.()
-
-    const [inflightWriteResponse, enableMaintenanceResponse, blockedWriteResponses] =
+    const [inflightWriteResponse, enableMaintenanceResponse, blockedWriteResponse] =
       await Promise.all([
-        inflightWritePromise,
+        inflightWrite.responsePromise,
         enableMaintenancePromise,
-        Promise.all(blockedWritePromises),
+        blockedWritePromise,
       ])
 
     assert.equal(inflightWriteResponse.statusCode, 201)
@@ -397,13 +423,9 @@ test('POST /_control/maintenance drains only writes that started before maintena
       ).inflightWritesRemaining,
       0,
     )
-
-    for (const blockedWriteResponse of blockedWriteResponses) {
-      assert.equal(blockedWriteResponse.statusCode, 503)
-    }
+    assert.equal(blockedWriteResponse.statusCode, 503)
   } finally {
-    http.ServerResponse.prototype.end = originalEnd as typeof http.ServerResponse.prototype.end
-    releaseWrite?.()
+    inflightWrite.request.destroy()
     await close(server)
     await cleanup()
   }

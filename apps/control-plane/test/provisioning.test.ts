@@ -1149,6 +1149,7 @@ describe('TenantProvisioningService', () => {
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.volumeMounts,
         undefined,
       )
+      assert.equal(bundle.configMap.data?.APP_VERSION, tenant.version)
       assert.equal(bundle.configMap.data?.TENANT_ID, tenant.id)
       assert.equal(bundle.secret?.data?.CONTROL_PLANE_TOKEN, undefined)
     } finally {
@@ -1188,6 +1189,7 @@ describe('TenantProvisioningService', () => {
         Buffer.from(encoded!, 'base64').toString('utf8'),
         'super-secret-token',
       )
+      assert.equal(bundle.configMap.data?.APP_VERSION, tenant.version)
       assert.equal(bundle.configMap.data?.TENANT_ID, tenant.id)
     } finally {
       await cleanup()

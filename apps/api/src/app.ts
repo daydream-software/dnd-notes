@@ -166,10 +166,9 @@ export function createApp({
     next()
   })
 
-  app.use(express.json())
-
-  // Maintenance write gate. Only non-control write methods are paused, so
-  // normal reads keep working and /_control/* stays reachable for toggles.
+  // Maintenance write gate. Reads keep working because only write methods are
+  // blocked, so readiness/liveness GET handlers still pass through and
+  // /_control/* stays reachable for toggles.
   app.use((request, response: Response<ErrorResponse & { code?: string }>, next) => {
     if (controlState.maintenance.mode !== 'enabled') {
       next()
@@ -228,6 +227,8 @@ export function createApp({
 
     next()
   })
+
+  app.use(express.json())
 
   // Liveness probe - process is alive
   app.get('/healthz', (_request: Request, response: Response<HealthResponse>) => {

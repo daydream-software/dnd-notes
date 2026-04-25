@@ -910,6 +910,7 @@ export function buildTenantInfrastructureBundle(
   const configMapData: Record<string, string> = {
     PORT: String(options.tenantPort),
     SERVE_WEB: 'true',
+    APP_VERSION: options.tenant.version,
     PUBLIC_WEB_URL: runtimeUrl,
     ALLOWED_ORIGINS: runtimeUrl,
   }
