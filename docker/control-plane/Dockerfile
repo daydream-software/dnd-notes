@@ -27,6 +27,7 @@ COPY --from=build /app/apps/control-plane/dist ./apps/control-plane/dist
 COPY --from=build /app/apps/control-plane/package.json ./apps/control-plane/
 COPY --from=build /app/apps/control-plane/migrations ./apps/control-plane/migrations
 COPY --from=build /app/apps/control-plane/migrations-tenant ./apps/control-plane/migrations-tenant
+COPY apps/api/migrations ./apps/api/migrations
 COPY package.json ./
 
 RUN mkdir -p /app/data && \

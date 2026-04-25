@@ -267,9 +267,6 @@ async function ensureMigrationLedgerTable(
     }
   }
   await client.query(
-    `CREATE UNIQUE INDEX IF NOT EXISTS ${ledgerIndex} ON ${ledgerTable}(name)`,
-  )
-  await client.query(
     `UPDATE ${ledgerTable} SET applied_at = CURRENT_TIMESTAMP WHERE applied_at IS NULL`,
   )
   await ensureLedgerConstraint(
@@ -284,7 +281,16 @@ async function ensureMigrationLedgerTable(
     client,
     `ALTER TABLE ${ledgerTable} ALTER COLUMN applied_at SET NOT NULL`,
   )
-  await ensureLedgerConstraint(client, `ALTER TABLE ${ledgerTable} ADD PRIMARY KEY (name)`)
+  const hasPrimaryKey = await ensureLedgerPrimaryKey(client, ledgerTable)
+
+  if (hasPrimaryKey) {
+    await dropRedundantLedgerIndexIfPrimaryKeyPresent(client, ledgerTable, ledgerIndex)
+    return
+  }
+
+  await client.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS ${ledgerIndex} ON ${ledgerTable}(name)`,
+  )
 }
 
 async function ensureLedgerConstraint(
@@ -298,6 +304,53 @@ async function ensureLedgerConstraint(
       throw error
     }
   }
+}
+
+async function ensureLedgerPrimaryKey(
+  client: MigrationClientLike,
+  ledgerTable: string,
+): Promise<boolean> {
+  try {
+    await client.query(`ALTER TABLE ${ledgerTable} ADD PRIMARY KEY (name)`)
+    return true
+  } catch (error) {
+    if (canIgnoreExistingLedgerPrimaryKeyError(error)) {
+      return true
+    }
+
+    if (canIgnoreUnsupportedLedgerPrimaryKeyError(error)) {
+      return false
+    }
+
+    throw error
+  }
+}
+
+async function dropRedundantLedgerIndexIfPrimaryKeyPresent(
+  client: MigrationClientLike,
+  ledgerTable: string,
+  ledgerIndex: string,
+): Promise<void> {
+  try {
+    const result = await client.query(
+      `
+        SELECT 1
+        FROM pg_index
+        WHERE indrelid = $1::regclass
+          AND indisprimary
+        LIMIT 1
+      `,
+      [ledgerTable],
+    )
+
+    if (result.rows.length === 0) {
+      return
+    }
+  } catch {
+    return
+  }
+
+  await client.query(`DROP INDEX IF EXISTS ${ledgerIndex}`)
 }
 
 function resolveMigrationLedgerTableName(migrationSet: string): string {
@@ -386,12 +439,22 @@ function canIgnoreLedgerColumnError(error: unknown): boolean {
 }
 
 function canIgnoreLedgerConstraintError(error: unknown): boolean {
+  return (
+    canIgnoreExistingLedgerPrimaryKeyError(error) ||
+    canIgnoreUnsupportedLedgerPrimaryKeyError(error)
+  )
+}
+
+function canIgnoreExistingLedgerPrimaryKeyError(error: unknown): boolean {
+  const message = formatUnknownError(error)
+  return /multiple primary keys/i.test(message) || /already has a primary key/i.test(message)
+}
+
+function canIgnoreUnsupportedLedgerPrimaryKeyError(error: unknown): boolean {
   const message = formatUnknownError(error)
   return (
-    /multiple primary keys/i.test(message) ||
-    /already has a primary key/i.test(message) ||
-    (/not supported/i.test(message) &&
-      /(primary key|not null|default|alter column)/i.test(message))
+    /not supported/i.test(message) &&
+    /(primary key|not null|default|alter column)/i.test(message)
   )
 }
 

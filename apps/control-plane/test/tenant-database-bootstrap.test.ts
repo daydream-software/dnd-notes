@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { newDb } from 'pg-mem'
-import { tenantBootstrapMigrationLedgerTable } from '../src/migrations.js'
+import {
+  tenantApiMigrationLedgerTable,
+  tenantBootstrapMigrationLedgerTable,
+} from '../src/migrations.js'
 import { initializeTenantNoteStoreDatabase } from '../src/tenant-database-bootstrap.js'
 import { registerPgMemTenantRegistrySupport } from './tenant-registry-test-helpers.js'
 
@@ -35,12 +38,20 @@ test('tenant database bootstrap applies the baseline migration including owner_a
     )
 
     const migrations = await pool.query<{ name: string }>(
-      `SELECT name FROM ${tenantBootstrapMigrationLedgerTable} ORDER BY name`,
+      `SELECT name FROM ${tenantApiMigrationLedgerTable} ORDER BY name`,
     )
     assert.deepEqual(
       migrations.rows.map((row) => row.name),
       ['0001_baseline.sql'],
     )
+
+    const legacyLedger = await pool.query<{ table_name: string }>(`
+      SELECT table_name
+      FROM information_schema.tables
+      WHERE table_schema = current_schema()
+        AND table_name = '${tenantBootstrapMigrationLedgerTable}'
+    `)
+    assert.equal(legacyLedger.rows.length, 0)
   } finally {
     await pool.end()
   }
@@ -57,7 +68,7 @@ test('tenant database bootstrap is idempotent across repeated invocations', asyn
     await initializeTenantNoteStoreDatabase(pool)
 
     const migrations = await pool.query<{ name: string }>(
-      `SELECT name FROM ${tenantBootstrapMigrationLedgerTable} ORDER BY name`,
+      `SELECT name FROM ${tenantApiMigrationLedgerTable} ORDER BY name`,
     )
     assert.equal(migrations.rows.length, 1)
   } finally {

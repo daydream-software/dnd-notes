@@ -154,6 +154,10 @@ test('control-plane migrations issue the ledger contract DDL', async () => {
         return { rows: [] }
       }
 
+      if (text.includes('FROM pg_index')) {
+        return { rows: [{ '?column?': 1 }] }
+      }
+
       return { rows: [], rowCount: 0 }
     },
     release() {},
@@ -183,4 +187,9 @@ test('control-plane migrations issue the ledger contract DDL', async () => {
     /ALTER TABLE schema_migrations_control_plane ALTER COLUMN applied_at SET NOT NULL/,
   )
   assert.match(ddl, /ALTER TABLE schema_migrations_control_plane ADD PRIMARY KEY \(name\)/)
+  assert.doesNotMatch(
+    ddl,
+    /CREATE UNIQUE INDEX IF NOT EXISTS sm_control_plane_name_idx ON schema_migrations_control_plane\(name\)/,
+  )
+  assert.match(ddl, /DROP INDEX IF EXISTS sm_control_plane_name_idx/)
 })

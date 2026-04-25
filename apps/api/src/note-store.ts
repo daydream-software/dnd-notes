@@ -163,6 +163,7 @@ export interface CreateNoteStoreOptions {
   databaseUrl?: string
   postgresPool?: PostgresPoolLike
   siteAdminEmails?: readonly string[]
+  migrationMode?: 'apply' | 'verify'
 }
 
 export type RuntimeNoteStoreOptions = CreateNoteStoreOptions
@@ -480,6 +481,7 @@ export async function createNoteStore(
 ): Promise<NoteStore> {
   const databaseUrl = requirePostgresDatabaseUrl(options)
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
+  const migrationMode = options.migrationMode ?? 'apply'
 
   let pool: PostgresPoolLike
   let ownedPool: PostgresPoolLike | undefined
@@ -491,17 +493,19 @@ export async function createNoteStore(
     pool = ownedPool
   }
 
-  try {
-    await runTenantApiMigrations({ pool })
-  } catch (error) {
-    if (ownedPool) {
-      try {
-        await ownedPool.end()
-      } catch {
-        // Preserve the original failure.
+  if (migrationMode === 'apply') {
+    try {
+      await runTenantApiMigrations({ pool })
+    } catch (error) {
+      if (ownedPool) {
+        try {
+          await ownedPool.end()
+        } catch {
+          // Preserve the original failure.
+        }
       }
+      throw error
     }
-    throw error
   }
 
   const database = createPostgresDatabase({ pool })
@@ -2433,5 +2437,8 @@ export async function createNoteStore(
 export async function createRuntimeNoteStore(
   options: RuntimeNoteStoreOptions = {},
 ): Promise<NoteStore> {
-  return createNoteStore(options)
+  return createNoteStore({
+    ...options,
+    migrationMode: 'verify',
+  })
 }

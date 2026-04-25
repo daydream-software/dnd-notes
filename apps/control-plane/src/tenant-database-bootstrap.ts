@@ -1,4 +1,4 @@
-import { runTenantBootstrapMigrations } from './migrations.js'
+import { runTenantApiMigrations } from './migrations.js'
 import type { MigrationPoolLike } from './migrate.js'
 
 interface QueryableClient {
@@ -6,14 +6,15 @@ interface QueryableClient {
 }
 
 /**
- * Bootstrap the tenant API note-store schema in a freshly created tenant
- * database. Delegates to the migration framework so every tenant starts at
- * the same revision the tenant API expects.
+ * Bootstrap or upgrade the tenant API note-store schema using the authoritative
+ * tenant API migration set while the control-plane still holds admin database
+ * credentials. Tenant runtime pods only verify the schema later under their
+ * least-privilege runtime role.
  */
 export async function initializeTenantNoteStoreDatabase(
   pool: MigrationPoolLike,
 ): Promise<void> {
-  await runTenantBootstrapMigrations({ pool })
+  await runTenantApiMigrations({ pool })
 }
 
 export async function applyLeastPrivilegeTenantGrants(

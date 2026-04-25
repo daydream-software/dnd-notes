@@ -108,6 +108,10 @@ test('tenant API migrations issue the ledger contract DDL', async () => {
         return { rows: [] }
       }
 
+      if (text.includes('FROM pg_index')) {
+        return { rows: [{ '?column?': 1 }] }
+      }
+
       return { rows: [], rowCount: 0 }
     },
     release() {},
@@ -134,4 +138,9 @@ test('tenant API migrations issue the ledger contract DDL', async () => {
   )
   assert.match(ddl, /ALTER TABLE schema_migrations_tenant_api ALTER COLUMN applied_at SET NOT NULL/)
   assert.match(ddl, /ALTER TABLE schema_migrations_tenant_api ADD PRIMARY KEY \(name\)/)
+  assert.doesNotMatch(
+    ddl,
+    /CREATE UNIQUE INDEX IF NOT EXISTS sm_tenant_api_name_idx ON schema_migrations_tenant_api\(name\)/,
+  )
+  assert.match(ddl, /DROP INDEX IF EXISTS sm_tenant_api_name_idx/)
 })

@@ -14,8 +14,10 @@ import {
  */
 const CONTROL_PLANE_MIGRATION_LOCK_KEY = [930, 1] as const
 const TENANT_BOOTSTRAP_MIGRATION_LOCK_KEY = [930, 2] as const
+const TENANT_API_MIGRATION_LOCK_KEY = [931, 1] as const
 const CONTROL_PLANE_MIGRATION_SET = 'control_plane'
 const TENANT_BOOTSTRAP_MIGRATION_SET = 'control_plane_tenant_bootstrap'
+const TENANT_API_MIGRATION_SET = 'tenant_api'
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 
@@ -26,11 +28,14 @@ export const tenantBootstrapMigrationsDir = path.resolve(
   '..',
   'migrations-tenant',
 )
+export const tenantApiMigrationsDir = path.resolve(moduleDir, '..', '..', 'api', 'migrations')
 
 export const controlPlaneMigrationLedgerTable =
   `schema_migrations_${CONTROL_PLANE_MIGRATION_SET}`
 export const tenantBootstrapMigrationLedgerTable =
   `schema_migrations_${TENANT_BOOTSTRAP_MIGRATION_SET}`
+export const tenantApiMigrationLedgerTable =
+  `schema_migrations_${TENANT_API_MIGRATION_SET}`
 
 export interface RunControlPlaneMigrationsOptions {
   pool: MigrationPoolLike
@@ -70,6 +75,30 @@ export async function runTenantBootstrapMigrations(
     migrationsDir: tenantBootstrapMigrationsDir,
     migrationSet: TENANT_BOOTSTRAP_MIGRATION_SET,
     lockKey: TENANT_BOOTSTRAP_MIGRATION_LOCK_KEY,
+    lockAcquireTimeoutMs: options.lockAcquireTimeoutMs,
+    logger: options.logger,
+  })
+}
+
+export interface RunTenantApiMigrationsOptions {
+  pool: MigrationPoolLike
+  lockAcquireTimeoutMs?: number
+  logger?: MigrationLogger
+}
+
+/**
+ * Apply the authoritative tenant API migrations against a tenant database
+ * during control-plane orchestration, before least-privilege runtime grants
+ * take effect for the tenant workload.
+ */
+export async function runTenantApiMigrations(
+  options: RunTenantApiMigrationsOptions,
+): Promise<string[]> {
+  return runMigrations({
+    pool: options.pool,
+    migrationsDir: tenantApiMigrationsDir,
+    migrationSet: TENANT_API_MIGRATION_SET,
+    lockKey: TENANT_API_MIGRATION_LOCK_KEY,
     lockAcquireTimeoutMs: options.lockAcquireTimeoutMs,
     logger: options.logger,
   })
