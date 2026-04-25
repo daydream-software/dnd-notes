@@ -1426,7 +1426,7 @@ export class TenantRegistry {
         .join(', ')}
        FROM restore_log rl
        ${tenantFilter}
-       ORDER BY rl.tenant_id, rl.requested_at DESC, rl.id DESC`,
+       ORDER BY rl.tenant_id, rl.requested_at DESC, rl.created_at DESC, rl.id DESC`,
       tenantIdValues,
     )
 

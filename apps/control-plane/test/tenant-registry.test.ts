@@ -242,7 +242,7 @@ describe('TenantRegistry', () => {
         triggeredBy: 'test-suite',
       })
       await tenantRegistry.createRestoreRun({
-        id: 'restore-c',
+        id: 'restore-z',
         tenantId: 'tenant-1',
         backupId: 'backup-b',
         backupLocation: 'blob://backups/tenant-1/b',
@@ -252,11 +252,11 @@ describe('TenantRegistry', () => {
       await pool.query(
         `UPDATE restore_log
          SET requested_at = $1,
-             created_at = CASE id
-               WHEN 'restore-a' THEN $2
-               ELSE $3
-             END
-         WHERE id IN ('restore-a', 'restore-b', 'restore-c')`,
+              created_at = CASE id
+                WHEN 'restore-z' THEN $2
+                ELSE $3
+              END
+         WHERE id IN ('restore-a', 'restore-b', 'restore-z')`,
         [
           '2026-04-25T05:00:00Z',
           '2026-04-25T05:01:00Z',
@@ -273,17 +273,17 @@ describe('TenantRegistry', () => {
       const restores = await tenantRegistry.listTenantRestores('tenant-1', 10)
 
       assert.equal(backupSummary.get('tenant-1')?.backupId, 'backup-b')
-      assert.equal(restoreSummary.get('tenant-1')?.restoreId, 'restore-c')
+      assert.equal(restoreSummary.get('tenant-1')?.restoreId, 'restore-b')
       assert.deepEqual(
         restores.map((restore) => restore.id),
-        ['restore-c', 'restore-b', 'restore-a'],
+        ['restore-b', 'restore-a', 'restore-z'],
       )
     } finally {
       await cleanup()
     }
   })
 
-  it('ignores completed backup rows with null completed_at when selecting latest summaries', async () => {
+  it('requires completed backup rows to include both location and completed_at', async () => {
     const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
 
     try {
@@ -294,40 +294,36 @@ describe('TenantRegistry', () => {
         version: '1.0.0',
       })
 
-      await tenantRegistry.createBackupRun({
-        id: 'backup-null-completed-at',
-        tenantId: 'tenant-1',
-        triggeredBy: 'test-suite',
-      })
-      await tenantRegistry.markBackupRunCompleted('backup-null-completed-at', {
-        location: 'blob://backups/tenant-1/null-completed-at',
-        completedAt: '2026-04-25T03:00:00Z',
-      })
-      await pool.query(
-        `UPDATE backup_catalog
-         SET completed_at = NULL
-         WHERE id = $1`,
-        ['backup-null-completed-at'],
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO backup_catalog (
+             id, tenant_id, status, triggered_by, completed_at
+           )
+           VALUES ($1, $2, 'completed', $3, $4)`,
+          [
+            'backup-missing-location',
+            'tenant-1',
+            'test-suite',
+            '2026-04-25T03:00:00Z',
+          ],
+        ),
+        /check/i,
       )
 
-      await tenantRegistry.createBackupRun({
-        id: 'backup-real-completed-at',
-        tenantId: 'tenant-1',
-        triggeredBy: 'test-suite',
-      })
-      await tenantRegistry.markBackupRunCompleted('backup-real-completed-at', {
-        location: 'blob://backups/tenant-1/real-completed-at',
-        completedAt: '2026-04-25T04:00:00Z',
-      })
-
-      const backupSummary = await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([
-        'tenant-1',
-      ])
-
-      assert.equal(backupSummary.get('tenant-1')?.backupId, 'backup-real-completed-at')
-      assert.equal(
-        backupSummary.get('tenant-1')?.location,
-        'blob://backups/tenant-1/real-completed-at',
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO backup_catalog (
+             id, tenant_id, status, location, triggered_by
+           )
+           VALUES ($1, $2, 'completed', $3, $4)`,
+          [
+            'backup-missing-completed-at',
+            'tenant-1',
+            'blob://backups/tenant-1/missing-completed-at',
+            'test-suite',
+          ],
+        ),
+        /check/i,
       )
     } finally {
       await cleanup()

@@ -28,6 +28,10 @@ CREATE TABLE IF NOT EXISTS backup_catalog (
   ),
   last_verification_details TEXT,
   scratch_target TEXT,
+  CHECK (
+    status <> 'completed'
+    OR (location IS NOT NULL AND completed_at IS NOT NULL)
+  ),
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
