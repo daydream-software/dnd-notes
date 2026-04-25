@@ -93,7 +93,7 @@ export async function runMigrations(options: RunMigrationsOptions): Promise<stri
         resolve: ({ name, path: filePath }) =>
           createSqlMigration({
             name,
-            filePath: filePath ?? '',
+            filePath: resolveMigrationFilePath(name, filePath),
             ledgerTable,
           }),
       },
@@ -200,6 +200,14 @@ function createSqlMigration({
       )
     },
   }
+}
+
+function resolveMigrationFilePath(name: string, filePath: string | undefined): string {
+  if (typeof filePath === 'string' && filePath.length > 0) {
+    return filePath
+  }
+
+  throw new Error(`Migration ${name} could not be resolved to a file path.`)
 }
 
 async function acquireMigrationLock(

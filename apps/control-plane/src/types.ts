@@ -12,6 +12,7 @@ export type TenantState = (typeof tenantStates)[number]
 
 export const tenantStorageModes = [
   'unknown',
+  'sqlite-pvc',
   'postgres-shared-user',
   'postgres-dedicated-user',
 ] as const
