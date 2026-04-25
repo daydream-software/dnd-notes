@@ -338,3 +338,10 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 📌 PR #114 branch sync rerun completed locally (2026-04-25T19:24:17Z): Merged latest `origin/main` into `squad/88-control-endpoints` without conflicts or history rewrites, installed the new shared `platform/keycloak-jwt` workspace so the nested worktree could resolve merged dependencies, reran required `apps/api` + `apps/control-plane` lint/test/build validation successfully, and confirmed all current PR review threads remain resolved. — Copilot
 
 📌 PR #114 final review loop addressed locally (2026-04-25T00:00:00Z): Merged latest `origin/main` into `squad/88-control-endpoints` without conflicts, refreshed workspace installs for the new shared migration package, isolated the k3d default `TENANT_READY_TIMEOUT_MS` smoke regression from ambient env leakage, and made the tenant API schema version derive from the latest migration file so `/_control/info` has a single source of truth. Required `apps/api` + `apps/control-plane` lint/test/build validation passed again before signing the follow-up push. — Copilot
+
+## 2026-04-25 — PR #114 blank control token follow-up
+- Worktree: `/home/appuser/workspace/dnd-notes/.worktrees/88-control-endpoints`
+- Branch: `squad/88-control-endpoints`
+- Scope: close the last unresolved review thread on `apps/api/src/routes/control-routes.ts` by making empty/whitespace configured control-plane tokens fail closed.
+- Progress: confirmed the only open thread (`PRRT_kwDOSAGgqc59ndGn`) asks for empty-token normalization, added middleware normalization plus focused `apps/api` regressions for empty and whitespace-only configured tokens, and baseline apps/api lint/test/build was green before the patch.
+- Next: rerun required `apps/api` lint/test/build, create a signed conventional commit with the Copilot trailer, push, and resolve the thread in PR #114.

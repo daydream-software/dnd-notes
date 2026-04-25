@@ -57,13 +57,27 @@ export const controlMaintenanceErrorCode = 'tenant_in_maintenance'
 export const controlNotConfiguredErrorCode = 'control_endpoints_not_configured'
 export const controlUnauthorizedErrorCode = 'control_unauthorized'
 
+function normalizeConfiguredControlPlaneToken(
+  controlPlaneToken: string | null,
+): string | null {
+  if (controlPlaneToken === null) {
+    return null
+  }
+
+  const normalizedToken = controlPlaneToken.trim()
+  return normalizedToken.length > 0 ? normalizedToken : null
+}
+
 export function createControlAuthMiddleware(controlPlaneToken: string | null) {
+  const normalizedControlPlaneToken =
+    normalizeConfiguredControlPlaneToken(controlPlaneToken)
+
   return (
     request: Request,
     response: Response<ControlErrorResponse>,
     next: NextFunction,
   ) => {
-    if (controlPlaneToken === null) {
+    if (normalizedControlPlaneToken === null) {
       response.status(503).json({
         code: controlNotConfiguredErrorCode,
         error: 'Control-plane endpoints are not configured on this tenant.',
@@ -83,7 +97,9 @@ export function createControlAuthMiddleware(controlPlaneToken: string | null) {
 
     const providedToken = authorizationHeader.slice('Bearer '.length).trim()
 
-    if (!compareControlPlaneTokens(controlPlaneToken, providedToken)) {
+    if (
+      !compareControlPlaneTokens(normalizedControlPlaneToken, providedToken)
+    ) {
       response.status(401).json({
         code: controlUnauthorizedErrorCode,
         error: 'Control-plane bearer token is invalid.',

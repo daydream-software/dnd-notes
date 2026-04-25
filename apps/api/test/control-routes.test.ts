@@ -171,6 +171,28 @@ test('GET /_control/info returns 503 when control plane token is not configured'
   }
 })
 
+for (const [description, configuredToken] of [
+  ['empty', ''],
+  ['whitespace-only', '   '],
+] as const) {
+  test(`GET /_control/info returns 503 when control plane token is ${description}`, async () => {
+    const { app, cleanup } = await createTestApp({
+      controlPlaneToken: configuredToken,
+    })
+
+    try {
+      const response = await request(app)
+        .get('/_control/info')
+        .set('Authorization', 'Bearer    ')
+
+      assert.equal(response.status, 503)
+      assert.equal(response.body.code, 'control_endpoints_not_configured')
+    } finally {
+      await cleanup()
+    }
+  })
+}
+
 test('GET /_control/info rejects requests without a bearer token', async () => {
   const { app, cleanup } = await createTestApp({ controlPlaneToken })
 
