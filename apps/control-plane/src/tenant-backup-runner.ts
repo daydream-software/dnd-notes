@@ -24,7 +24,6 @@ import {
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { Pool } from 'pg'
 import { buildTenantDatabaseConnectionString } from './provisioning.js'
-import { tenantPvcNamePrefix } from './tenant-subdomain.js'
 import type { Tenant } from './types.js'
 
 interface PostgresClientLike {
@@ -418,13 +417,20 @@ export function resolveTenantDatabaseName(tenant: Tenant): string {
     )
   }
 
-  if (storageReference.startsWith(tenantPvcNamePrefix)) {
+  if (!isExpectedTenantDatabaseName(storageReference)) {
     throw new TenantBackupValidationError(
-      `Tenant ${tenant.id} still uses PVC-backed SQLite storage; pg_dump/pg_restore is not available until cutover completes.`,
+      `Tenant ${tenant.id} has an unexpected Postgres database reference ${JSON.stringify(storageReference)}; expected a tenant_* database name.`,
     )
   }
 
   return storageReference
+}
+
+function isExpectedTenantDatabaseName(storageReference: string): boolean {
+  return (
+    storageReference.length <= 63 &&
+    /^tenant_[a-z0-9_]+$/.test(storageReference)
+  )
 }
 
 function sanitizePathComponent(value: string): string {

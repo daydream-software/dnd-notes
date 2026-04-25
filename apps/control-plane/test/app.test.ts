@@ -213,13 +213,13 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.error, 'Portal account already exists')
     })
 
-    it('returns 409 when signup hits a portal account sqlite constraint race', async () => {
+    it('returns 409 when signup hits a portal account postgres unique constraint race', async () => {
       const originalCreatePortalAccount = tenantRegistry.createPortalAccount.bind(tenantRegistry)
       tenantRegistry.createPortalAccount = () => {
-        const error = new Error('UNIQUE constraint failed: portal_accounts.email') as Error & {
+        const error = new Error('duplicate key value violates unique constraint "portal_accounts_email_key"') as Error & {
           code?: string
         }
-        error.code = 'SQLITE_CONSTRAINT_UNIQUE'
+        error.code = '23505'
         throw error
       }
 
@@ -602,7 +602,7 @@ describe('Control Plane API', () => {
       )
     })
 
-    it('returns 409 when tenant creation hits a sqlite constraint race', async () => {
+    it('returns 409 when tenant creation hits a postgres unique constraint race', async () => {
       const signupResponse = await request(app)
         .post('/portal/signup')
         .send({
@@ -620,10 +620,10 @@ describe('Control Plane API', () => {
       const sessionToken = signupResponse.body.token as string
       const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
       tenantRegistry.createTenant = () => {
-        const error = new Error('UNIQUE constraint failed: tenants.slug') as Error & {
+        const error = new Error('duplicate key value violates unique constraint "tenants_slug_key"') as Error & {
           code?: string
         }
-        error.code = 'SQLITE_CONSTRAINT_UNIQUE'
+        error.code = '23505'
         throw error
       }
 
@@ -675,7 +675,6 @@ describe('Control Plane API', () => {
               namespace: `tenant-${request.tenantId.slice(-8)}`,
               deploymentName: 'dnd-notes',
               serviceName: 'dnd-notes',
-              pvcName: null,
               configMapName: 'dnd-notes-runtime',
               secretName: 'dnd-notes-runtime-secret',
               hostname: `${request.tenantId.slice(-8)}.dnd-notes.test`,
@@ -1329,9 +1328,9 @@ describe('Control Plane API', () => {
         'provisioner',
         'Provisioned successfully',
       )
-      await tenantRegistry.updateTenantStorageReference('tenant-123', 'pvc-tenant-123')
+      await tenantRegistry.updateTenantStorageReference('tenant-123', 'tenant_tenant_123')
       await tenantRegistry.updateTenantStorageProfile('tenant-123', {
-        mode: 'sqlite-pvc',
+        mode: 'postgres-dedicated-user',
         migrationStatus: 'failed',
         failureReason: 'Synthetic cutover failure',
       })
@@ -1347,7 +1346,7 @@ describe('Control Plane API', () => {
       const response = await authedGet(`${tenantPath('tenant-123')}/storage`).expect(200)
 
       assert.strictEqual(response.body.storage.tenantId, 'tenant-123')
-      assert.strictEqual(response.body.storage.mode, 'sqlite-pvc')
+      assert.strictEqual(response.body.storage.mode, 'postgres-dedicated-user')
       assert.strictEqual(response.body.storage.migrationStatus, 'failed')
       assert.strictEqual(
         response.body.storage.lastMigrationFailure,
@@ -1403,9 +1402,9 @@ describe('Control Plane API', () => {
         'provisioner',
         'Provisioned successfully',
       )
-      await tenantRegistry.updateTenantStorageReference('tenant-789', 'pvc-tenant-789')
+      await tenantRegistry.updateTenantStorageReference('tenant-789', 'tenant_tenant_789')
       await tenantRegistry.updateTenantStorageProfile('tenant-789', {
-        mode: 'sqlite-pvc',
+        mode: 'postgres-dedicated-user',
         migrationStatus: 'failed',
         failureReason: 'Synthetic cutover failure',
       })
@@ -1647,7 +1646,6 @@ describe('Control Plane API', () => {
               namespace: 'tenant-t-opaque123456',
               deploymentName: 'dnd-notes',
               serviceName: 'dnd-notes',
-              pvcName: null,
               configMapName: 'dnd-notes-runtime',
               secretName: 'dnd-notes-runtime-secret',
               hostname: 't-opaque123456.dnd-notes.test',
@@ -1684,7 +1682,6 @@ describe('Control Plane API', () => {
         'tenant_db',
       )
       assert.strictEqual(response.body.resources.namespace, 'tenant-t-opaque123456')
-      assert.strictEqual(response.body.resources.pvcName, null)
 
       const transitions = await authedGet(`${tenantPath('tenant-123')}/transitions`).expect(
         200,
