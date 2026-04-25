@@ -1,12 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { newDb } from 'pg-mem'
-import {
-  tenantApiMigrationLedgerTable,
-  tenantBootstrapMigrationLedgerTable,
-} from '../src/migrations.js'
+import { tenantApiMigrationLedgerTable } from '../src/migrations.js'
 import { initializeTenantNoteStoreDatabase } from '../src/tenant-database-bootstrap.js'
 import { registerPgMemTenantRegistrySupport } from './tenant-registry-test-helpers.js'
+
+const retiredTenantBootstrapLedgerTable = 'schema_migrations_control_plane_tenant_bootstrap'
 
 test('tenant database bootstrap applies the baseline migration including owner_accounts.keycloak_sub', async () => {
   const db = newDb({ autoCreateForeignKeyIndices: true })
@@ -49,7 +48,7 @@ test('tenant database bootstrap applies the baseline migration including owner_a
       SELECT table_name
       FROM information_schema.tables
       WHERE table_schema = current_schema()
-        AND table_name = '${tenantBootstrapMigrationLedgerTable}'
+        AND table_name = '${retiredTenantBootstrapLedgerTable}'
     `)
     assert.equal(legacyLedger.rows.length, 0)
   } finally {

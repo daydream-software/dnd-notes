@@ -266,6 +266,47 @@ test('owner note creation and editing attributes notes to campaign membership', 
   assert.equal(getResponse.body.note.createdBy.displayName, owner.displayName)
 })
 
+test('direct note updates preserve lastEditedBy when a provided membership lookup fails', async (t) => {
+  const { app, noteStore, cleanup } = await createTestApp()
+  t.after(cleanup)
+
+  const { token } = await registerOwner(request(app))
+  const authed = withAuth(request(app), token)
+
+  const createResponse = await authed.post('/api/notes').send({
+    campaignId: defaultCampaignId,
+    title: 'Ancient leyline sketch',
+    body: 'The chalk marks point toward the observatory.',
+    tags: ['leyline'],
+    status: 'draft',
+    sessionName: null,
+  })
+
+  assert.equal(createResponse.status, 201)
+  const noteId = createResponse.body.note.id as string
+  const originalLastEditedBy = createResponse.body.note.lastEditedBy
+  assert.ok(originalLastEditedBy)
+
+  const updateResponse = await noteStore.updateNote(
+    noteId,
+    {
+      title: 'Ancient leyline sketch',
+      body: 'The chalk marks now point toward the collapsed observatory.',
+      tags: ['leyline', 'observatory'],
+      status: 'active',
+      sessionName: 'Session 18',
+    },
+    'missing-membership',
+  )
+
+  assert.ok(updateResponse)
+  assert.deepEqual(updateResponse.lastEditedBy, originalLastEditedBy)
+
+  const persisted = await noteStore.getNote(noteId)
+  assert.ok(persisted)
+  assert.deepEqual(persisted.lastEditedBy, originalLastEditedBy)
+})
+
 test('guest note creation and editing attributes notes to guest membership', async (t) => {
   const { app, cleanup } = await createTestApp()
   t.after(cleanup)

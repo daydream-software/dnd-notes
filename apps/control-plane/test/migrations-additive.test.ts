@@ -54,8 +54,3 @@ test('control-plane registry migrations are additive-only', async () => {
   const migrationsDir = path.resolve(moduleDir, '..', 'migrations')
   await assertNoDestructiveSql(migrationsDir, 'control-plane')
 })
-
-test('control-plane tenant-bootstrap migrations are additive-only', async () => {
-  const migrationsDir = path.resolve(moduleDir, '..', 'migrations-tenant')
-  await assertNoDestructiveSql(migrationsDir, 'control-plane tenant-bootstrap')
-})

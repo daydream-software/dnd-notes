@@ -430,11 +430,13 @@ export class TenantRegistry {
   private async migrateSchema(): Promise<void> {
     await runControlPlaneMigrations({ pool: this.pool })
 
-    const storedStateSignature = await this.getSchemaMetadata('tenant_state_signature')
+    let storedStateSignature = await this.getSchemaMetadata('tenant_state_signature')
     if (!storedStateSignature) {
-      throw new Error(
-        'Control-plane schema metadata is incomplete; missing tenant_state_signature. Run "npm run db:migrate" before starting the control-plane.',
+      await this.setSchemaMetadata(
+        'tenant_state_signature',
+        CURRENT_TENANT_STATE_SIGNATURE,
       )
+      storedStateSignature = CURRENT_TENANT_STATE_SIGNATURE
     }
 
     if (storedStateSignature !== CURRENT_TENANT_STATE_SIGNATURE) {

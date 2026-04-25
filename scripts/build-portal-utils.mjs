@@ -3,19 +3,24 @@ import { spawnSync } from 'node:child_process'
 
 const omit = (process.env.npm_config_omit ?? '').split(/[ ,]+/).filter(Boolean)
 if (omit.includes('dev')) {
-  console.log('Skipping portal-utils build: dev dependencies are omitted.')
-  process.exit(0)
-}
-
-if (!existsSync('packages/portal-utils/src')) {
-  console.log('Skipping portal-utils build: source directory not present.')
+  console.log('Skipping workspace package builds: dev dependencies are omitted.')
   process.exit(0)
 }
 
 const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
-const result = spawnSync(
-  npmCmd,
-  ['run', 'build', '--workspace', 'packages/portal-utils'],
-  { stdio: 'inherit' },
-)
-process.exit(result.status ?? 1)
+for (const workspace of ['packages/portal-utils', 'packages/postgres-migrations']) {
+  if (!existsSync(`${workspace}/src`)) {
+    console.log(`Skipping ${workspace} build: source directory not present.`)
+    continue
+  }
+
+  const result = spawnSync(
+    npmCmd,
+    ['run', 'build', '--workspace', workspace],
+    { stdio: 'inherit' },
+  )
+
+  if ((result.status ?? 1) !== 0) {
+    process.exit(result.status ?? 1)
+  }
+}
