@@ -82,7 +82,7 @@ class FakeInfrastructureManager {
     maxSurge: number | string | undefined
     maxUnavailable: number | string | undefined
     minReadySeconds: number | undefined
-    podDisruptionBudgetMinAvailable: number | string | undefined
+    podDisruptionBudgetMaxUnavailable: number | string | undefined
     podDisruptionBudgetName: string | undefined
     runtimeConnectionString: string | undefined
   }> = []
@@ -111,7 +111,7 @@ class FakeInfrastructureManager {
         name?: string
       }
       spec?: {
-        minAvailable?: number | string
+        maxUnavailable?: number | string
       }
     }
     ingress?: {
@@ -176,8 +176,8 @@ class FakeInfrastructureManager {
       maxUnavailable:
         bundle.deployment.spec?.strategy?.rollingUpdate?.maxUnavailable,
       minReadySeconds: bundle.deployment.spec?.minReadySeconds,
-      podDisruptionBudgetMinAvailable:
-        bundle.podDisruptionBudget?.spec?.minAvailable,
+      podDisruptionBudgetMaxUnavailable:
+        bundle.podDisruptionBudget?.spec?.maxUnavailable,
       podDisruptionBudgetName: bundle.podDisruptionBudget?.metadata?.name,
       runtimeConnectionString: bundle.secret?.data?.DATABASE_URL
         ? Buffer.from(bundle.secret.data.DATABASE_URL, 'base64').toString('utf8')
@@ -273,7 +273,6 @@ describe('TenantProvisioningService', () => {
         runtimeDatabaseUrl.pathname.slice(1),
       )
       assert.equal(result.resources.databaseName, runtimeDatabaseUrl.pathname.slice(1))
-      assert.equal(result.resources.pvcName, null)
       const storage = await tenantRegistry.getTenantStorageSnapshot('tenant-demo')
       assert.ok(storage)
       assert.equal(storage.mode, 'postgres-dedicated-user')
@@ -295,7 +294,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(infrastructureManager.bundles[0].minReadySeconds, 5)
       assert.equal(infrastructureManager.bundles[0].podDisruptionBudgetName, 'dnd-notes')
       assert.equal(
-        infrastructureManager.bundles[0].podDisruptionBudgetMinAvailable,
+        infrastructureManager.bundles[0].podDisruptionBudgetMaxUnavailable,
         1,
       )
       assert.equal(
@@ -1110,65 +1109,6 @@ describe('TenantProvisioningService', () => {
     }
   })
 
-  it('preserves explicit storage migration state while legacy PVC-backed tenants are reprovisioned', async () => {
-    const { tenantRegistry, cleanup } = createTestTenantRegistry()
-    const databaseManager = new FakeDatabaseManager()
-    const infrastructureManager = new FakeInfrastructureManager()
-    const provisioningService: TenantProvisioningPort =
-      new TenantProvisioningService({
-        tenantRegistry,
-        databaseManager,
-        infrastructureManager,
-        baseDomain: 'dnd-notes.test',
-        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
-      })
-
-    try {
-      const tenant = await tenantRegistry.createTenant({
-        id: 'tenant-demo',
-        slug: 'demo',
-        ownerId: 'owner-1',
-        version: '1.0.0',
-      })
-      await tenantRegistry.updateTenantSubdomain(tenant.id, 't-legacydemo')
-      await tenantRegistry.updateTenantStorageReference(
-        tenant.id,
-        'dnd-notes-data-t-legacydemo',
-      )
-      await tenantRegistry.updateTenantStorageProfile(tenant.id, {
-        mode: 'sqlite-pvc',
-        migrationStatus: 'failed',
-        failureReason: 'Synthetic cutover failure',
-      })
-      await tenantRegistry.updateTenantDesiredState(tenant.id, 'ready')
-      await tenantRegistry.updateTenantState(
-        tenant.id,
-        'ready',
-        'control-plane',
-        'Legacy tenant already provisioned',
-      )
-      infrastructureManager.runtimeConnectionStrings.set(
-        'tenant-t-legacydemo/dnd-notes-runtime-secret',
-        'postgresql://legacy-user:legacy-password@postgres.default:5432/tenant_demo_t_legacydemo',
-      )
-
-      await provisioningService.provisionTenant({
-        tenantId: tenant.id,
-        triggeredBy: 'control-plane',
-      })
-
-      const storage = await tenantRegistry.getTenantStorageSnapshot(tenant.id)
-
-      assert.ok(storage)
-      assert.equal(storage.mode, 'sqlite-pvc')
-      assert.equal(storage.migrationStatus, 'failed')
-      assert.equal(storage.lastMigrationFailure, 'Synthetic cutover failure')
-      assert.equal(storage.storageReference, 'dnd-notes-data-t-legacydemo')
-    } finally {
-      await provisioningService.close()
-      await cleanup()
-    }
-  })
   it('builds a postgres-only workload for newly provisioned tenants', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
@@ -1194,10 +1134,8 @@ describe('TenantProvisioningService', () => {
         tenantPort: 3000,
       })
 
-      assert.equal(bundle.resources.pvcName, null)
       assert.equal(bundle.podDisruptionBudget?.metadata?.name, bundle.resources.deploymentName)
-      assert.equal(bundle.podDisruptionBudget?.spec?.minAvailable, 1)
-      assert.equal(bundle.persistentVolumeClaim, undefined)
+      assert.equal(bundle.podDisruptionBudget?.spec?.maxUnavailable, 1)
       assert.equal(bundle.ingress.metadata?.name, bundle.resources.serviceName)
       assert.equal(bundle.ingress.spec?.ingressClassName, 'nginx')
       assert.equal(bundle.ingress.spec?.rules?.[0]?.host, bundle.resources.hostname)
@@ -1206,68 +1144,10 @@ describe('TenantProvisioningService', () => {
         bundle.ingress.spec?.rules?.[0]?.http?.paths?.[0]?.backend?.service?.name,
         bundle.resources.serviceName,
       )
-      assert.equal(bundle.configMap.data?.NOTES_DB_PATH, undefined)
       assert.equal(bundle.deployment.spec?.template?.spec?.volumes, undefined)
       assert.equal(
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.volumeMounts,
         undefined,
-      )
-    } finally {
-      await cleanup()
-    }
-  })
-
-  it('keeps legacy PVC wiring when tenant metadata still points at the PVC-backed shape', async () => {
-    const { tenantRegistry, cleanup } = createTestTenantRegistry()
-
-    try {
-      const tenant = await tenantRegistry.createTenant({
-        id: 'tenant-demo',
-        slug: 'demo',
-        ownerId: 'owner-1',
-        version: '1.0.0',
-      })
-      await tenantRegistry.updateTenantStorageReference(
-        tenant.id,
-        'dnd-notes-data-t-opaque123456',
-      )
-      const legacyTenant = (await tenantRegistry.getTenant(tenant.id))!
-      const bundle = buildTenantInfrastructureBundle({
-        tenant: legacyTenant,
-        subdomain: 't-opaque123456',
-        database: {
-          databaseName: 'tenant_demo_t_opaque123456',
-          roleName: 'tenant_rt_demo_t_opaque123456',
-          runtimeConnectionString:
-            'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
-        },
-        baseDomain: 'dnd-notes.test',
-        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
-        publicScheme: 'https',
-        tenantPort: 3000,
-      })
-
-      assert.equal(bundle.resources.pvcName, 'dnd-notes-data-t-opaque123456')
-      assert.equal(bundle.persistentVolumeClaim?.metadata?.name, bundle.resources.pvcName)
-      assert.equal(bundle.configMap.data?.NOTES_DB_PATH, '/app/data/dnd-notes.sqlite')
-      assert.equal(bundle.podDisruptionBudget, undefined)
-      assert.deepEqual(bundle.persistentVolumeClaim?.spec?.accessModes, ['ReadWriteOnce'])
-      assert.deepEqual(bundle.deployment.spec?.template?.spec?.volumes, [
-        {
-          name: 'tenant-data',
-          persistentVolumeClaim: {
-            claimName: bundle.resources.pvcName,
-          },
-        },
-      ])
-      assert.deepEqual(
-        bundle.deployment.spec?.template?.spec?.containers?.[0]?.volumeMounts,
-        [
-          {
-            name: 'tenant-data',
-            mountPath: '/app/data',
-          },
-        ],
       )
     } finally {
       await cleanup()
@@ -1302,7 +1182,6 @@ describe('TenantProvisioningService', () => {
 
       assert.equal(maxLengthSubdomain.length, maxTenantSubdomainLength)
       assert.ok(bundle.resources.namespace.length <= 63)
-      assert.equal(bundle.resources.pvcName, null)
       assert.equal(bundle.podDisruptionBudget?.metadata?.name, bundle.resources.deploymentName)
       assert.equal(bundle.resources.hostname, `${maxLengthSubdomain}.dnd-notes.test`)
     } finally {
@@ -1748,7 +1627,7 @@ describe('KubernetesTenantInfrastructureManager', () => {
     })
     await tenantRegistry.updateTenantStorageReference(
       tenant.id,
-      'dnd-notes-data-t-opaque123456',
+      'tenant_demo_t_opaque123456',
     )
     const legacyTenant = (await tenantRegistry.getTenant(tenant.id))!
     const bundle = buildTenantInfrastructureBundle({
@@ -1772,7 +1651,6 @@ describe('KubernetesTenantInfrastructureManager', () => {
         bundle.namespace,
         bundle.configMap,
         bundle.secret,
-        bundle.persistentVolumeClaim,
         bundle.ingress,
         bundle.deployment,
       ]) {
@@ -1822,91 +1700,6 @@ describe('KubernetesTenantInfrastructureManager', () => {
     }
   })
 
-  it('preserves pvc-assigned fields when replacing an existing PersistentVolumeClaim', async () => {
-    const { tenantRegistry, cleanup } = createTestTenantRegistry()
-    const tenant = await tenantRegistry.createTenant({
-      id: 'tenant-demo',
-      slug: 'demo',
-      ownerId: 'owner-1',
-      version: '1.0.0',
-    })
-    await tenantRegistry.updateTenantStorageReference(
-      tenant.id,
-      'dnd-notes-data-t-opaque123456',
-    )
-    const legacyTenant = (await tenantRegistry.getTenant(tenant.id))!
-    const bundle = buildTenantInfrastructureBundle({
-      tenant: legacyTenant,
-      subdomain: 't-opaque123456',
-      database: {
-        databaseName: 'tenant_demo_t_opaque123456',
-        roleName: 'tenant_rt_demo_t_opaque123456',
-        runtimeConnectionString:
-          'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
-      },
-      baseDomain: 'dnd-notes.test',
-      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
-      publicScheme: 'https',
-      tenantPort: 3000,
-    })
-    const client = new FakeKubernetesClient()
-
-    try {
-      for (const object of [
-        bundle.namespace,
-        bundle.configMap,
-        bundle.secret,
-        bundle.service,
-        bundle.ingress,
-        bundle.deployment,
-      ]) {
-        client.seed({
-          ...object,
-          metadata: {
-            ...object.metadata!,
-            resourceVersion: '1',
-          },
-        })
-      }
-
-      client.seed({
-        ...bundle.persistentVolumeClaim,
-        metadata: {
-          ...bundle.persistentVolumeClaim.metadata!,
-          resourceVersion: '1',
-        },
-        spec: {
-          ...bundle.persistentVolumeClaim.spec,
-          storageClassName: 'local-path',
-          volumeMode: 'Filesystem',
-          volumeName: 'pvc-12345',
-        },
-      })
-
-      const manager = new KubernetesTenantInfrastructureManager({ client })
-      await manager.applyTenantResources(bundle)
-
-      const replacedPvc = client.replaceCalls.find(
-        (object) => object.kind === 'PersistentVolumeClaim',
-      ) as
-        | (KubernetesObject & {
-            spec?: {
-              storageClassName?: string
-              volumeMode?: string
-              volumeName?: string
-            }
-          })
-        | undefined
-
-      assert.ok(replacedPvc)
-      assert.equal(replacedPvc.spec?.storageClassName, 'local-path')
-      assert.equal(replacedPvc.spec?.volumeMode, 'Filesystem')
-      assert.equal(replacedPvc.spec?.volumeName, 'pvc-12345')
-    } finally {
-      await cleanup()
-    }
-  })
-
   it('waits for namespace termination before finishing tenant deletion', async () => {
     const client = new FakeKubernetesClient()
     client.namespaceReadCountdown = 2
@@ -1928,43 +1721,6 @@ describe('KubernetesTenantInfrastructureManager', () => {
       namespace: 'tenant-t-opaque123456',
       deploymentName: 'dnd-notes',
       serviceName: 'dnd-notes',
-      pvcName: 'dnd-notes-data-t-opaque123456',
-      configMapName: 'dnd-notes-runtime',
-      secretName: 'dnd-notes-runtime-secret',
-      hostname: 't-opaque123456.dnd-notes.test',
-      databaseName: 'tenant_demo_t_opaque123456',
-      image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
-    })
-
-    assert.deepEqual(
-      client.deleteCalls.map((call) => call.kind),
-      ['PersistentVolumeClaim', 'Namespace'],
-    )
-    assert.equal(client.namespaceReadCountdown, 0)
-  })
-
-  it('skips PVC deletion when tenant resources are already Postgres-only', async () => {
-    const client = new FakeKubernetesClient()
-    client.namespaceReadCountdown = 1
-    client.seed({
-      apiVersion: 'v1',
-      kind: 'Namespace',
-      metadata: {
-        name: 'tenant-t-opaque123456',
-      },
-    })
-
-    const manager = new KubernetesTenantInfrastructureManager({
-      client,
-      readyPollIntervalMs: 1,
-      deleteTimeoutMs: 200,
-    })
-
-    await manager.deleteTenantResources({
-      namespace: 'tenant-t-opaque123456',
-      deploymentName: 'dnd-notes',
-      serviceName: 'dnd-notes',
-      pvcName: null,
       configMapName: 'dnd-notes-runtime',
       secretName: 'dnd-notes-runtime-secret',
       hostname: 't-opaque123456.dnd-notes.test',
@@ -1976,5 +1732,6 @@ describe('KubernetesTenantInfrastructureManager', () => {
       client.deleteCalls.map((call) => call.kind),
       ['Namespace'],
     )
+    assert.equal(client.namespaceReadCountdown, 0)
   })
 })
