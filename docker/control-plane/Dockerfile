@@ -4,6 +4,7 @@ FROM node:22.21.1-bookworm-slim AS base
 WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
+COPY packages/postgres-migrations ./packages/postgres-migrations
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 COPY apps/control-plane/package*.json ./apps/control-plane/
@@ -17,6 +18,7 @@ RUN npm ci
 FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./
 COPY apps/control-plane ./apps/control-plane
+RUN npm run build --workspace packages/postgres-migrations
 RUN npm run build --workspace apps/control-plane
 
 FROM node:22.21.1-bookworm-slim AS runtime
@@ -26,8 +28,9 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/apps/control-plane/dist ./apps/control-plane/dist
 COPY --from=build /app/apps/control-plane/package.json ./apps/control-plane/
 COPY --from=build /app/apps/control-plane/migrations ./apps/control-plane/migrations
-COPY --from=build /app/apps/control-plane/migrations-tenant ./apps/control-plane/migrations-tenant
 COPY apps/api/migrations ./apps/api/migrations
+COPY --from=build /app/packages/postgres-migrations/package.json ./packages/postgres-migrations/
+COPY --from=build /app/packages/postgres-migrations/dist ./packages/postgres-migrations/dist
 COPY package.json ./
 
 RUN mkdir -p /app/data && \

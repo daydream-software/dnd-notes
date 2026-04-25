@@ -12,6 +12,9 @@ import {
   registerPgMemTenantRegistrySupport,
 } from './tenant-registry-test-helpers.js'
 
+const expectedTenantStateSignature =
+  'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+
 describe('TenantRegistry', () => {
   it('bootstraps the Postgres registry schema with the expected columns', async () => {
     const { db, tenantRegistry, pool, cleanup } = createTestTenantRegistry()
@@ -87,6 +90,40 @@ describe('TenantRegistry', () => {
       )
     } finally {
       await cleanup()
+    }
+  })
+
+  it('re-seeds tenant_state_signature when the baseline ledger is already applied', async () => {
+    const db = newDb({ autoCreateForeignKeyIndices: true })
+    registerPgMemTenantRegistrySupport(db)
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    const firstRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool,
+    })
+
+    try {
+      await firstRegistry.whenReady()
+      await pool.query(`DELETE FROM schema_metadata WHERE key = 'tenant_state_signature'`)
+      await firstRegistry.close()
+
+      const secondRegistry = new TenantRegistry(
+        'postgres://control-plane.test/tenant-registry',
+        { pool },
+      )
+
+      try {
+        await secondRegistry.whenReady()
+
+        const metadata = await pool.query<{ value: string }>(
+          `SELECT value FROM schema_metadata WHERE key = 'tenant_state_signature'`,
+        )
+        assert.equal(metadata.rows[0]?.value, expectedTenantStateSignature)
+      } finally {
+        await secondRegistry.close()
+      }
+    } finally {
+      await pool.end()
     }
   })
 
