@@ -1148,6 +1148,48 @@ describe('TenantProvisioningService', () => {
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.volumeMounts,
         undefined,
       )
+      assert.equal(bundle.configMap.data?.APP_VERSION, tenant.version)
+      assert.equal(bundle.configMap.data?.TENANT_ID, tenant.id)
+      assert.equal(bundle.secret?.data?.CONTROL_PLANE_TOKEN, undefined)
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('injects the control-plane token into the tenant secret when provided', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      const tenant = await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      const bundle = buildTenantInfrastructureBundle({
+        tenant,
+        subdomain: 't-opaque123456',
+        database: {
+          databaseName: 'tenant_demo_t_opaque123456',
+          roleName: 'tenant_rt_demo_t_opaque123456',
+          runtimeConnectionString:
+            'postgresql://tenant_rt_demo_t_opaque123456:generated-runtime-password@postgres.default:5432/tenant_demo_t_opaque123456',
+        },
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+        publicScheme: 'https',
+        tenantPort: 3000,
+        controlPlaneToken: 'super-secret-token',
+      })
+
+      const encoded = bundle.secret?.data?.CONTROL_PLANE_TOKEN
+      assert.ok(encoded, 'expected CONTROL_PLANE_TOKEN to be present')
+      assert.equal(
+        Buffer.from(encoded!, 'base64').toString('utf8'),
+        'super-secret-token',
+      )
+      assert.equal(bundle.configMap.data?.APP_VERSION, tenant.version)
+      assert.equal(bundle.configMap.data?.TENANT_ID, tenant.id)
     } finally {
       await cleanup()
     }

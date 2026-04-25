@@ -12,6 +12,9 @@ const smokeScriptPath = fileURLToPath(
 const smokeScript = readFileSync(smokeScriptPath, 'utf8')
 const payloadBuilderMatch = smokeScript.match(/^build_tenant_create_payload\(\) \{\n[\s\S]*?^}/m)
 const requestJsonToFileMatch = smokeScript.match(/^request_json_to_file\(\) \{\n[\s\S]*?^}/m)
+const tenantReadyTimeoutMatch = smokeScript.match(
+  /^resolve_tenant_ready_timeout_ms\(\) \{\n[\s\S]*?^}/m,
+)
 
 if (!payloadBuilderMatch) {
   throw new Error('Expected build_tenant_create_payload() in scripts/k3d/smoke.sh')
@@ -19,6 +22,10 @@ if (!payloadBuilderMatch) {
 
 if (!requestJsonToFileMatch) {
   throw new Error('Expected request_json_to_file() in scripts/k3d/smoke.sh')
+}
+
+if (!tenantReadyTimeoutMatch) {
+  throw new Error('Expected resolve_tenant_ready_timeout_ms() in scripts/k3d/smoke.sh')
 }
 
 describe('k3d smoke tenant payload builder', () => {
@@ -111,3 +118,36 @@ request_json_to_file "$OUTPUT_PATH" -X POST -H 'Content-Type: application/json' 
   })
 })
 
+describe('k3d smoke tenant ready timeout helper', () => {
+  it('defaults to 240000ms and preserves explicit overrides', () => {
+    const defaultEnv = { ...process.env }
+    delete defaultEnv.TENANT_READY_TIMEOUT_MS
+
+    const defaultResult = spawnSync(
+      'bash',
+      ['-lc', `${tenantReadyTimeoutMatch[0]}\nresolve_tenant_ready_timeout_ms`],
+      {
+        encoding: 'utf8',
+        env: defaultEnv,
+      },
+    )
+
+    assert.strictEqual(defaultResult.status, 0, defaultResult.stderr)
+    assert.strictEqual(defaultResult.stdout.trim(), '240000')
+
+    const overrideResult = spawnSync(
+      'bash',
+      ['-lc', `${tenantReadyTimeoutMatch[0]}\nresolve_tenant_ready_timeout_ms`],
+      {
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          TENANT_READY_TIMEOUT_MS: '90000',
+        },
+      },
+    )
+
+    assert.strictEqual(overrideResult.status, 0, overrideResult.stderr)
+    assert.strictEqual(overrideResult.stdout.trim(), '90000')
+  })
+})

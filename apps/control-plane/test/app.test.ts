@@ -1572,6 +1572,175 @@ describe('Control Plane API', () => {
 
       assert.strictEqual(response.body.error, 'Tenant not found')
     })
+
+    it('invokes the tenant control client when transitioning ready -> maintenance and back', async () => {
+      const calls: Array<{ tenantId: string; mode: 'enable' | 'disable'; reason?: string }> = []
+      const tenantControlClient = {
+        async setMaintenanceMode({
+          tenant,
+          mode,
+          reason,
+        }: {
+          tenant: { id: string }
+          mode: 'enable' | 'disable'
+          reason?: string
+        }) {
+          calls.push({ tenantId: tenant.id, mode, reason })
+          return { status: 200, body: null }
+        },
+      }
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        tenantControlClient,
+      })
+
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'ready', triggeredBy: 'provisioner' })
+        .expect(200)
+      assert.strictEqual(calls.length, 0)
+
+      await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'maintenance', triggeredBy: 'operator', reason: 'rolling restart' })
+        .expect(200)
+
+      assert.deepStrictEqual(calls, [
+        { tenantId: 'tenant-123', mode: 'enable', reason: 'rolling restart' },
+      ])
+
+      await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'ready', triggeredBy: 'operator' })
+        .expect(200)
+
+      assert.strictEqual(calls.length, 2)
+      assert.strictEqual(calls[1].mode, 'disable')
+      assert.strictEqual(calls[1].tenantId, 'tenant-123')
+    })
+
+    it('returns 502 when the tenant control client fails to apply maintenance', async () => {
+      const tenantControlClient = {
+        async setMaintenanceMode() {
+          throw new Error('connection refused')
+        },
+      }
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        tenantControlClient,
+      })
+
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'ready', triggeredBy: 'provisioner' })
+        .expect(200)
+
+      const response = await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'maintenance', triggeredBy: 'operator' })
+        .expect(502)
+
+      assert.strictEqual(
+        response.body.error,
+        'Failed to propagate maintenance state to tenant',
+      )
+      const tenant = await tenantRegistry.getTenant('tenant-123')
+      assert.ok(tenant)
+      assert.strictEqual(tenant.currentState, 'ready')
+    })
+
+    it('returns 503 when a maintenance transition is requested without a tenant control client', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'ready', triggeredBy: 'provisioner' })
+        .expect(200)
+
+      const response = await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'maintenance', triggeredBy: 'operator' })
+        .expect(503)
+
+      assert.strictEqual(
+        response.body.error,
+        'Tenant maintenance propagation is not configured',
+      )
+      const tenant = await tenantRegistry.getTenant('tenant-123')
+      assert.ok(tenant)
+      assert.strictEqual(tenant.currentState, 'ready')
+    })
+
+    it('logs the full maintenance transition when propagation fails', async () => {
+      const originalConsoleError = console.error
+      const errorMessages: string[] = []
+      let controlCallCount = 0
+      const tenantControlClient = {
+        async setMaintenanceMode() {
+          controlCallCount += 1
+
+          if (controlCallCount === 2) {
+            throw new Error('connection refused')
+          }
+
+          return { status: 200, body: null }
+        },
+      }
+      console.error = ((message: unknown) => {
+        errorMessages.push(String(message))
+      }) as typeof console.error
+
+      app = createApp({
+        tenantRegistry,
+        adminToken,
+        tenantProvisioningService,
+        tenantControlClient,
+      })
+
+      try {
+        await authedPost(tenantsPath).send({
+          id: 'tenant-123',
+          slug: 'test-tenant',
+          ownerId: 'owner-456',
+          version: '1.0.0',
+        })
+
+        await authedPatch(`${tenantPath('tenant-123')}/state`)
+          .send({ state: 'ready', triggeredBy: 'provisioner' })
+          .expect(200)
+
+        await authedPatch(`${tenantPath('tenant-123')}/state`)
+          .send({ state: 'maintenance', triggeredBy: 'operator' })
+          .expect(200)
+
+        await authedPatch(`${tenantPath('tenant-123')}/state`)
+          .send({ state: 'ready', triggeredBy: 'operator' })
+          .expect(502)
+
+        assert.match(
+          errorMessages[0] ?? '',
+          /maintenance transition maintenance -> ready \(disable\)/,
+        )
+      } finally {
+        console.error = originalConsoleError
+      }
+    })
   })
 
   describe('PATCH /internal/tenants/:tenantId/desired-state', () => {
