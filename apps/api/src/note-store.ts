@@ -12,6 +12,7 @@ import {
 import {
   createCampaignDomain,
   prepareCampaignStatements,
+  type InsertMembershipRowInput,
 } from './note-store-campaigns.js'
 import {
   createMembershipDomain,
@@ -36,8 +37,6 @@ import type {
 } from './note-store-notes.js'
 import {
   createOwnerAccountDomain,
-  OwnerKeycloakLinkConflictError,
-  ownerKeycloakLinkConflictCode,
   prepareOwnerAccountStatements,
 } from './note-store-owner-accounts.js'
 import {
@@ -294,9 +293,7 @@ export async function createNoteStore(
   }
 
   const insertMembershipHelper = async (
-    input: Parameters<
-      Parameters<typeof createCampaignDomain>[0]['insertMembership']
-    >[0],
+    input: InsertMembershipRowInput,
   ) => {
     await membershipStatements.insertMembership.run(input)
   }
@@ -838,8 +835,3 @@ export async function createRuntimeNoteStore(
 ): Promise<NoteStore> {
   return createNoteStore(options)
 }
-
-// Suppress unused-import warning for OwnerKeycloakLinkConflictError; it is
-// re-exported above for consumers that previously imported it from this module.
-void OwnerKeycloakLinkConflictError
-void ownerKeycloakLinkConflictCode

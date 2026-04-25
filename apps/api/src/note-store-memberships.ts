@@ -206,18 +206,6 @@ export function prepareMembershipStatements(database: NoteStoreDatabase) {
     )
   `)
 
-  const updateUnclaimedDefaultMembership = database.prepare(`
-    UPDATE campaign_memberships
-    SET
-      user_id = @user_id,
-      display_name = @display_name,
-      updated_at = @updated_at
-    WHERE
-      campaign_id = @campaign_id
-      AND role = 'owner'
-      AND user_id IS NULL
-  `)
-
   const claimGuestMembershipStatement = database.prepare(`
     UPDATE campaign_memberships
     SET
@@ -292,7 +280,6 @@ export function prepareMembershipStatements(database: NoteStoreDatabase) {
     selectMembershipById,
     selectMembershipByCampaignAndId,
     insertMembership,
-    updateUnclaimedDefaultMembership,
     claimGuestMembershipStatement,
     countOwnerMembershipsStatement,
     selectMembershipConsolidationCounts,
