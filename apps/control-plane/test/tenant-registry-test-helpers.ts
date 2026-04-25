@@ -1,22 +1,29 @@
-import { DataType, newDb } from 'pg-mem'
+import { DataType, newDb, type IMemoryDb } from 'pg-mem'
 import { TenantRegistry } from '../src/tenant-registry.js'
 
-export function createTestTenantRegistry() {
-  const db = newDb({
-    autoCreateForeignKeyIndices: true,
-  })
+export interface RegisterPgMemTenantRegistrySupportOptions {
+  tryAdvisoryLockImpl?: (key1: unknown, key2: unknown) => boolean
+  advisoryUnlockImpl?: (key1: unknown, key2: unknown) => boolean
+}
+
+export function registerPgMemTenantRegistrySupport(
+  db: IMemoryDb,
+  options: RegisterPgMemTenantRegistrySupportOptions = {},
+) {
   let statementTimeout = '30s'
+  const tryAdvisoryLockImpl = options.tryAdvisoryLockImpl ?? (() => true)
+  const advisoryUnlockImpl = options.advisoryUnlockImpl ?? (() => true)
   db.public.registerFunction({
     name: 'pg_try_advisory_lock',
     args: [DataType.integer, DataType.integer],
     returns: DataType.bool,
-    implementation: () => true,
+    implementation: tryAdvisoryLockImpl,
   })
   db.public.registerFunction({
     name: 'pg_advisory_unlock',
     args: [DataType.integer, DataType.integer],
     returns: DataType.bool,
-    implementation: () => true,
+    implementation: advisoryUnlockImpl,
   })
   db.public.registerFunction({
     name: 'current_setting',
@@ -47,6 +54,13 @@ export function createTestTenantRegistry() {
       throw new Error(`Unsupported set_config(${settingName}) in pg-mem helper`)
     },
   })
+}
+
+export function createTestTenantRegistry() {
+  const db = newDb({
+    autoCreateForeignKeyIndices: true,
+  })
+  registerPgMemTenantRegistrySupport(db)
   const { Pool } = db.adapters.createPg()
   const pool = new Pool()
   const tenantRegistry = new TenantRegistry(

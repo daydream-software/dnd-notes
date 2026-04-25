@@ -11,11 +11,14 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "start": "node dist/index.js",
+    "db:migrate": "node --import tsx src/migrate-cli.ts",
+    "db:migrate:prod": "node dist/migrate-cli.js",
     "test": "node --import tsx --test test/*.test.ts",
     "test:ci": "c8 --all --src src --extension .ts --report-dir ../../reports/coverage/api --reporter text-summary --reporter lcov --reporter json-summary --reporter cobertura node --import tsx --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=../../reports/test-results/api.junit.xml test/*.test.ts"
   },
   "license": "MIT",
   "dependencies": {
+    "@dnd-notes/postgres-migrations": "*",
     "@dnd-notes/keycloak-jwt": "*",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

@@ -7,7 +7,24 @@ import {
   TenantRegistryLockTimeoutError,
 } from '../src/tenant-registry-postgres.js'
 import { TenantRegistry } from '../src/tenant-registry.js'
-import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
+import {
+  createTestTenantRegistry,
+  registerPgMemTenantRegistrySupport,
+} from './tenant-registry-test-helpers.js'
+
+const expectedTenantStateSignature =
+  'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+const tenantStateCheckSqlList = expectedTenantStateSignature
+  .split(',')
+  .map((state) => `'${state}'`)
+  .join(', ')
+const legacyRegistryCreatePatterns = [
+  /CREATE TABLE IF NOT EXISTS tenants \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS state_transitions \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS portal_accounts \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS portal_sessions \([\s\S]*?\);\s*/i,
+  /CREATE TABLE IF NOT EXISTS schema_metadata \([\s\S]*?\);\s*/i,
+]
 
 describe('TenantRegistry', () => {
   it('bootstraps the Postgres registry schema with the expected columns', async () => {
@@ -87,6 +104,193 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('re-seeds tenant_state_signature when the baseline ledger is already applied', async () => {
+    const db = newDb({ autoCreateForeignKeyIndices: true })
+    registerPgMemTenantRegistrySupport(db)
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    const firstRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
+      pool,
+    })
+
+    try {
+      await firstRegistry.whenReady()
+      await pool.query(`DELETE FROM schema_metadata WHERE key = 'tenant_state_signature'`)
+      await firstRegistry.close()
+
+      const secondRegistry = new TenantRegistry(
+        'postgres://control-plane.test/tenant-registry',
+        { pool },
+      )
+
+      try {
+        await secondRegistry.whenReady()
+
+        const metadata = await pool.query<{ value: string }>(
+          `SELECT value FROM schema_metadata WHERE key = 'tenant_state_signature'`,
+        )
+        assert.equal(metadata.rows[0]?.value, expectedTenantStateSignature)
+      } finally {
+        await secondRegistry.close()
+      }
+    } finally {
+      await pool.end()
+    }
+  })
+
+  it('upgrades legacy registry schemas through the migration runner before serving traffic', async () => {
+    const db = newDb({ autoCreateForeignKeyIndices: true })
+    registerPgMemTenantRegistrySupport(db)
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+
+    try {
+      await pool.query(`
+        CREATE TABLE schema_version (
+          key TEXT PRIMARY KEY,
+          version INTEGER NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        INSERT INTO schema_version (key, version)
+        VALUES ('tenant_registry', 4);
+
+        CREATE TABLE schema_metadata (
+          key TEXT PRIMARY KEY,
+          value TEXT NOT NULL
+        );
+
+        CREATE TABLE tenants (
+          id TEXT PRIMARY KEY,
+          slug TEXT NOT NULL UNIQUE,
+          owner_id TEXT NOT NULL,
+          desired_state TEXT NOT NULL CHECK (desired_state IN (${tenantStateCheckSqlList})),
+          current_state TEXT NOT NULL CHECK (current_state IN (${tenantStateCheckSqlList})),
+          version TEXT NOT NULL,
+          storage_reference TEXT,
+          backup_metadata TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE state_transitions (
+          id SERIAL PRIMARY KEY,
+          tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+          from_state TEXT NOT NULL CHECK (from_state IN (${tenantStateCheckSqlList})),
+          to_state TEXT NOT NULL CHECK (to_state IN (${tenantStateCheckSqlList})),
+          triggered_by TEXT NOT NULL,
+          reason TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE portal_accounts (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL UNIQUE,
+          display_name TEXT NOT NULL,
+          billing_email TEXT,
+          billing_provider TEXT,
+          auth_provider TEXT NOT NULL CHECK (auth_provider IN ('local', 'keycloak')),
+          keycloak_sub TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE portal_sessions (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL REFERENCES portal_accounts(id) ON DELETE CASCADE,
+          token_hash TEXT NOT NULL UNIQUE,
+          expires_at TIMESTAMPTZ NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX idx_portal_sessions_expires_at_datetime
+          ON portal_sessions(expires_at);
+      `)
+
+      const tenantRegistry = new TenantRegistry(
+        'postgres://control-plane.test/tenant-registry',
+        {
+          pool: {
+            async query(text: string, values?: readonly unknown[]) {
+              return await pool.query(text, values as unknown[])
+            },
+            async connect() {
+              const client = await pool.connect()
+
+              return {
+                async query(text: string, values?: readonly unknown[]) {
+                  const rewritten = legacyRegistryCreatePatterns
+                    .reduce(
+                      (sql, pattern) => sql.replace(pattern, ''),
+                      text,
+                    )
+                    .trim()
+
+                  if (rewritten.length === 0) {
+                    return { rows: [], rowCount: 0 }
+                  }
+
+                  return await client.query(rewritten, values as unknown[])
+                },
+                release(error?: Error) {
+                  client.release(error)
+                },
+              }
+            },
+            async end() {
+              await pool.end()
+            },
+          },
+        },
+      )
+
+      try {
+        await tenantRegistry.whenReady()
+
+        const tenantColumns = await pool.query<{ column_name: string }>(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_name = 'tenants'
+        `)
+        const portalAccountColumns = await pool.query<{ column_name: string }>(`
+          SELECT column_name
+          FROM information_schema.columns
+          WHERE table_name = 'portal_accounts'
+        `)
+        const portalSessionTable = db.public.getTable('portal_sessions')
+
+        assert.equal(
+          tenantColumns.rows.some((column) => column.column_name === 'subdomain'),
+          true,
+        )
+        assert.equal(
+          tenantColumns.rows.some((column) => column.column_name === 'storage_mode'),
+          true,
+        )
+        assert.equal(
+          portalAccountColumns.rows.some(
+            (column) => column.column_name === 'password_hash',
+          ),
+          true,
+        )
+        assert.equal(
+          portalSessionTable.constraintsByName.has('idx_portal_sessions_expires_at'),
+          true,
+        )
+        assert.equal(
+          portalSessionTable.constraintsByName.has(
+            'idx_portal_sessions_expires_at_datetime',
+          ),
+          false,
+        )
+      } finally {
+        await tenantRegistry.close()
+      }
+    } finally {
+      await pool.end()
+    }
+  })
+
   it('reserves and persists an opaque subdomain while retrying on collisions', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
@@ -122,6 +326,7 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
+    registerPgMemTenantRegistrySupport(db)
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
     let injectedConcurrentWrite = false
@@ -353,6 +558,7 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
+    registerPgMemTenantRegistrySupport(db)
     db.public.registerFunction({
       name: 'pg_try_advisory_lock',
       args: [DataType.integer, DataType.integer],
@@ -418,6 +624,7 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
+    registerPgMemTenantRegistrySupport(db)
     db.public.registerFunction({
       name: 'pg_try_advisory_lock',
       args: [DataType.integer, DataType.integer],
@@ -475,6 +682,8 @@ describe('TenantRegistry', () => {
         version: '1.0.0',
       })
       connectCount = 0
+      observedTenantLock = false
+      observedTenantUnlock = false
 
       let operationRan = false
       await tenantRegistry.withTenantLock('tenant-1', async (registryClient) => {
@@ -518,17 +727,11 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
-    db.public.registerFunction({
-      name: 'pg_try_advisory_lock',
-      args: [DataType.integer, DataType.integer],
-      returns: DataType.bool,
-      implementation: () => false,
-    })
-    db.public.registerFunction({
-      name: 'pg_advisory_unlock',
-      args: [DataType.integer, DataType.integer],
-      returns: DataType.bool,
-      implementation: () => true,
+    registerPgMemTenantRegistrySupport(db, {
+      tryAdvisoryLockImpl: (key1) => {
+        const ns = Number(key1)
+        return ns === 930 || ns === 931
+      },
     })
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
@@ -570,6 +773,7 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
+    registerPgMemTenantRegistrySupport(db)
     db.public.registerFunction({
       name: 'pg_try_advisory_lock',
       args: [DataType.integer, DataType.integer],
@@ -646,6 +850,7 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
+    registerPgMemTenantRegistrySupport(db)
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
     let releasedWithError: Error | undefined
@@ -737,109 +942,6 @@ describe('TenantRegistry', () => {
     }
   })
 
-  it('keeps migrated pre-v7 tenants conservative when storage_reference only hints at postgres', async () => {
-    const db = newDb({
-      autoCreateForeignKeyIndices: true,
-    })
-    const { Pool } = db.adapters.createPg()
-    const pool = new Pool()
-    await pool.query(`
-      CREATE TABLE tenants (
-        id TEXT PRIMARY KEY,
-        slug TEXT NOT NULL UNIQUE,
-        subdomain TEXT,
-        owner_id TEXT NOT NULL,
-        display_name TEXT,
-        plan_tier TEXT,
-        initial_admin_email TEXT,
-        desired_state TEXT NOT NULL,
-        current_state TEXT NOT NULL,
-        version TEXT NOT NULL,
-        storage_reference TEXT,
-        backup_metadata TEXT,
-        storage_mode TEXT,
-        storage_migration_status TEXT,
-        storage_migration_failure_reason TEXT,
-        storage_migration_updated_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
-    `)
-    await pool.query(`
-      INSERT INTO tenants (
-        id,
-        slug,
-        subdomain,
-        owner_id,
-        desired_state,
-        current_state,
-        version,
-        storage_reference,
-        storage_mode,
-        storage_migration_status
-      )
-      VALUES (
-        'tenant-1',
-        'tenant-one',
-        't-tenantone',
-        'owner-1',
-        'ready',
-        'ready',
-        '1.0.0',
-        'tenant_existing_reference',
-        'unknown',
-        'not-started'
-      )
-    `)
-    let schemaVersionInjected = false
-    const wrappedPool = {
-      async query(text: string, values?: readonly unknown[]) {
-        if (
-          !schemaVersionInjected &&
-          text.includes('SELECT version') &&
-          text.includes('FROM schema_version')
-        ) {
-          schemaVersionInjected = true
-          return {
-            rowCount: 1,
-            rows: [{ version: 6 }],
-          }
-        }
-
-        if (text.includes('CREATE TABLE IF NOT EXISTS tenants')) {
-          return {
-            rowCount: null,
-            rows: [],
-          }
-        }
-
-        return await pool.query(text, values as unknown[])
-      },
-      async connect() {
-        return await pool.connect()
-      },
-      async end() {
-        await pool.end()
-      },
-    }
-    const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {
-      pool: wrappedPool,
-    })
-
-    try {
-      const storage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
-
-      assert.ok(storage)
-      assert.equal(storage.mode, 'unknown')
-      assert.equal(storage.migrationStatus, 'not-started')
-      assert.equal(storage.lastMigrationFailure, null)
-      assert.equal(storage.storageReference, 'tenant_existing_reference')
-    } finally {
-      await tenantRegistry.close()
-      await pool.end()
-    }
-  })
-
   it('persists initial admin email on the tenant record', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
@@ -866,6 +968,7 @@ describe('TenantRegistry', () => {
     const db = newDb({
       autoCreateForeignKeyIndices: true,
     })
+    registerPgMemTenantRegistrySupport(db)
     const { Pool } = db.adapters.createPg()
     const pool = new Pool()
     const tenantRegistry = new TenantRegistry('postgres://control-plane.test/tenant-registry', {

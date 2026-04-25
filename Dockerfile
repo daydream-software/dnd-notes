@@ -6,6 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
 COPY packages/portal-utils ./packages/portal-utils
+COPY packages/postgres-migrations ./packages/postgres-migrations
 COPY platform/keycloak-jwt/package*.json ./platform/keycloak-jwt/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
@@ -22,6 +23,7 @@ COPY platform/keycloak-jwt ./platform/keycloak-jwt
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
 RUN npm run build --workspace packages/portal-utils
+RUN npm run build --workspace packages/postgres-migrations
 RUN npm run build --workspace platform/keycloak-jwt
 RUN npm run build --workspace apps/api
 RUN npm run build --workspace apps/web
@@ -37,8 +39,11 @@ COPY --from=build /app/platform/keycloak-jwt/dist ./platform/keycloak-jwt/dist
 COPY --from=build /app/platform/keycloak-jwt/package.json ./platform/keycloak-jwt/
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/
+COPY --from=build /app/apps/api/migrations ./apps/api/migrations
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 COPY --from=build /app/apps/web/package.json ./apps/web/
+COPY --from=build /app/packages/postgres-migrations/package.json ./packages/postgres-migrations/
+COPY --from=build /app/packages/postgres-migrations/dist ./packages/postgres-migrations/dist
 
 # Copy root package.json for workspace resolution
 COPY package.json ./

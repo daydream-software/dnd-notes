@@ -1,6 +1,7 @@
 import { setTimeout as delay } from 'node:timers/promises'
 import { Pool, type PoolConfig, type QueryResultRow } from 'pg'
 import { normalizeUnknownError } from './error-formatting.js'
+import { runControlPlaneMigrations } from './migrations.js'
 import {
   assertGeneratedTenantSubdomain,
   assertPersistedTenantSubdomain,
@@ -16,16 +17,8 @@ import {
   type TenantStorageMode,
   type TenantStorageSnapshot,
   type TenantState,
-  tenantStorageMigrationStatuses,
-  tenantStorageModes,
 } from './types.js'
 
-const tenantStateSqlList = tenantStates.map((state) => `'${state}'`).join(', ')
-const tenantStorageModeSqlList = tenantStorageModes.map((mode) => `'${mode}'`).join(', ')
-const tenantStorageMigrationStatusSqlList = tenantStorageMigrationStatuses
-  .map((status) => `'${status}'`)
-  .join(', ')
-const CURRENT_SCHEMA_VERSION = 7
 const tenantLockNamespaceKey = 101
 const CURRENT_TENANT_STATE_SIGNATURE = tenantStates.join(',')
 const defaultTenantLockAcquireTimeoutMs = 30_000
@@ -41,7 +34,6 @@ const portalAccountSelectColumns = `id, email, display_name, billing_email,
 const portalSessionSelectColumns = `id, account_id, token_hash, expires_at, created_at`
 const stateTransitionSelectColumns = `id, tenant_id, from_state, to_state,
   triggered_by, reason, created_at`
-const tenantRegistrySchemaVersionKey = 'tenant_registry'
 
 export interface TenantRegistryQueryable {
   query<Row extends QueryResultRow = QueryResultRow>(
@@ -63,10 +55,6 @@ interface TenantRegistryOptions {
   pool?: TenantRegistryPoolLike
   tenantLockAcquireTimeoutMs?: number
   tenantLockRetryDelayMs?: number
-}
-
-interface SchemaVersionRow {
-  version: number
 }
 
 interface SchemaMetadataRow {
@@ -356,6 +344,16 @@ export class TenantRegistry {
     this.ready = this.migrateSchema()
   }
 
+  /**
+   * Resolves once the control-plane schema has been migrated. Service boot
+   * code should await this before binding the HTTP listener so that any
+   * migration failure is surfaced before traffic is accepted.
+   */
+  whenReady(): Promise<void> {
+    this.assertOpen()
+    return this.ready
+  }
+
   private assertOpen(): void {
     if (this.closed) {
       throw new Error('Tenant registry unavailable')
@@ -363,206 +361,24 @@ export class TenantRegistry {
   }
 
   private async migrateSchema(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS schema_version (
-        key TEXT PRIMARY KEY,
-        version INTEGER NOT NULL,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      );
+    // The baseline migration is also the forward-only replacement for the
+    // retired schema_version upgrade chain, so older registries are widened
+    // here before the runtime-only metadata validation below.
+    await runControlPlaneMigrations({ pool: this.pool })
 
-      CREATE TABLE IF NOT EXISTS schema_metadata (
-        key TEXT PRIMARY KEY,
-        value TEXT NOT NULL
-      );
-    `)
-
-    const currentSchemaVersionResult = await this.pool.query<SchemaVersionRow>(
-      `SELECT version
-       FROM schema_version
-       WHERE key = $1`,
-      [tenantRegistrySchemaVersionKey],
-    )
-    const currentSchemaVersion = currentSchemaVersionResult.rows[0]?.version ?? 0
-
-    if (
-      currentSchemaVersion !== 0 &&
-      currentSchemaVersion !== 1 &&
-      currentSchemaVersion !== 2 &&
-      currentSchemaVersion !== 3 &&
-      currentSchemaVersion !== 4 &&
-      currentSchemaVersion !== 5 &&
-      currentSchemaVersion !== 6 &&
-      currentSchemaVersion !== CURRENT_SCHEMA_VERSION
-    ) {
-      throw new Error(
-        `Unsupported control-plane schema version ${currentSchemaVersion}`,
-      )
-    }
-
-    await this.bootstrap()
-    await this.migrateLegacySchema(currentSchemaVersion)
-
-    if (currentSchemaVersion !== CURRENT_SCHEMA_VERSION) {
-      await this.pool.query(
-        `INSERT INTO schema_version (key, version)
-         VALUES ($1, $2)
-         ON CONFLICT(key) DO UPDATE
-           SET version = EXCLUDED.version,
-               updated_at = CURRENT_TIMESTAMP`,
-        [tenantRegistrySchemaVersionKey, CURRENT_SCHEMA_VERSION],
-      )
-    }
-
-    const storedStateSignature = await this.getSchemaMetadata('tenant_state_signature')
+    let storedStateSignature = await this.getSchemaMetadata('tenant_state_signature')
     if (!storedStateSignature) {
       await this.setSchemaMetadata(
         'tenant_state_signature',
         CURRENT_TENANT_STATE_SIGNATURE,
       )
-      return
+      storedStateSignature = CURRENT_TENANT_STATE_SIGNATURE
     }
 
     if (storedStateSignature !== CURRENT_TENANT_STATE_SIGNATURE) {
       throw new Error(
         'Tenant state constraints changed; explicit schema migration required',
       )
-    }
-  }
-
-  private async bootstrap(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS tenants (
-        id TEXT PRIMARY KEY,
-        slug TEXT NOT NULL UNIQUE,
-        subdomain TEXT,
-        owner_id TEXT NOT NULL,
-        display_name TEXT,
-        plan_tier TEXT,
-        initial_admin_email TEXT,
-        desired_state TEXT NOT NULL CHECK (desired_state IN (${tenantStateSqlList})),
-        current_state TEXT NOT NULL CHECK (current_state IN (${tenantStateSqlList})),
-        version TEXT NOT NULL,
-        storage_reference TEXT,
-        backup_metadata TEXT,
-        storage_mode TEXT NOT NULL DEFAULT 'unknown'
-          CHECK (storage_mode IN (${tenantStorageModeSqlList})),
-        storage_migration_status TEXT NOT NULL DEFAULT 'not-started'
-          CHECK (storage_migration_status IN (${tenantStorageMigrationStatusSqlList})),
-        storage_migration_failure_reason TEXT,
-        storage_migration_updated_at TIMESTAMPTZ,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS state_transitions (
-        id SERIAL PRIMARY KEY,
-        tenant_id TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-        from_state TEXT NOT NULL CHECK (from_state IN (${tenantStateSqlList})),
-        to_state TEXT NOT NULL CHECK (to_state IN (${tenantStateSqlList})),
-        triggered_by TEXT NOT NULL,
-        reason TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS portal_accounts (
-        id TEXT PRIMARY KEY,
-        email TEXT NOT NULL UNIQUE,
-        display_name TEXT NOT NULL,
-        billing_email TEXT,
-        billing_provider TEXT,
-        password_hash TEXT,
-        auth_provider TEXT NOT NULL CHECK (auth_provider IN ('local', 'keycloak')),
-        keycloak_sub TEXT,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS portal_sessions (
-        id TEXT PRIMARY KEY,
-        account_id TEXT NOT NULL REFERENCES portal_accounts(id) ON DELETE CASCADE,
-        token_hash TEXT NOT NULL UNIQUE,
-        expires_at TIMESTAMPTZ NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    `)
-
-    await this.pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_subdomain
-      ON tenants(subdomain)
-      WHERE subdomain IS NOT NULL
-    `)
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_tenants_owner_id
-      ON tenants(owner_id)
-    `)
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_state_transitions_tenant_id
-      ON state_transitions(tenant_id)
-    `)
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_state_transitions_created_at
-      ON state_transitions(created_at DESC)
-    `)
-    await this.pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS idx_portal_accounts_keycloak_sub
-      ON portal_accounts(keycloak_sub)
-      WHERE keycloak_sub IS NOT NULL
-    `)
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_portal_sessions_account_id
-      ON portal_sessions(account_id)
-    `)
-    await this.pool.query(`
-      CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at
-      ON portal_sessions(expires_at)
-    `)
-  }
-
-  private async migrateLegacySchema(currentSchemaVersion: number): Promise<void> {
-    if (currentSchemaVersion > 0 && currentSchemaVersion < 5) {
-      await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subdomain TEXT`)
-      await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS display_name TEXT`)
-      await this.pool.query(`ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_tier TEXT`)
-      await this.pool.query(
-        `ALTER TABLE tenants ADD COLUMN IF NOT EXISTS initial_admin_email TEXT`,
-      )
-      await this.pool.query(
-        `ALTER TABLE portal_accounts ADD COLUMN IF NOT EXISTS password_hash TEXT`,
-      )
-    }
-
-    if (currentSchemaVersion > 0 && currentSchemaVersion < 6) {
-      await this.pool.query(`
-        DROP INDEX IF EXISTS idx_portal_sessions_expires_at_datetime
-      `)
-      await this.pool.query(`
-        CREATE INDEX IF NOT EXISTS idx_portal_sessions_expires_at
-        ON portal_sessions(expires_at)
-      `)
-    }
-
-    if (currentSchemaVersion > 0 && currentSchemaVersion < 7) {
-      await this.pool.query(`
-        ALTER TABLE tenants
-        ADD COLUMN IF NOT EXISTS storage_mode TEXT NOT NULL DEFAULT 'unknown'
-          CHECK (storage_mode IN (${tenantStorageModeSqlList}))
-      `)
-      await this.pool.query(`
-        ALTER TABLE tenants
-        ADD COLUMN IF NOT EXISTS storage_migration_status TEXT NOT NULL DEFAULT 'not-started'
-          CHECK (storage_migration_status IN (${tenantStorageMigrationStatusSqlList}))
-      `)
-      await this.pool.query(`
-        ALTER TABLE tenants
-        ADD COLUMN IF NOT EXISTS storage_migration_failure_reason TEXT
-      `)
-      await this.pool.query(`
-        ALTER TABLE tenants
-        ADD COLUMN IF NOT EXISTS storage_migration_updated_at TIMESTAMPTZ
-      `)
     }
   }
 

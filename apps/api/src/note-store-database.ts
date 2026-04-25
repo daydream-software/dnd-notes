@@ -116,6 +116,18 @@ function createOwnedPostgresPool(connectionString: string): PostgresPoolLike {
   return new Pool(config)
 }
 
+export function createNoteStorePostgresPool(connectionString: string): PostgresPoolLike {
+  const normalized = connectionString.trim()
+
+  if (!normalized) {
+    throw new Error(
+      'A non-empty connection string is required to create the Postgres note store pool.',
+    )
+  }
+
+  return createOwnedPostgresPool(normalized)
+}
+
 function resolvePostgresPool(options: {
   connectionString?: string
   pool?: PostgresPoolLike
