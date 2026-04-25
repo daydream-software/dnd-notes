@@ -140,6 +140,7 @@ interface TenantProvisioningServiceOptions {
   publicScheme?: 'http' | 'https'
   tenantPort?: number
   readyTimeoutMs?: number
+  controlPlaneToken?: string
 }
 
 interface BuildTenantInfrastructureBundleOptions {
@@ -153,6 +154,7 @@ interface BuildTenantInfrastructureBundleOptions {
   imagePullSecretName?: string
   publicScheme: 'http' | 'https'
   tenantPort: number
+  controlPlaneToken?: string
 }
 
 export class TenantProvisioningValidationError extends Error {
@@ -220,6 +222,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly publicScheme: 'http' | 'https'
   private readonly tenantPort: number
   private readonly readyTimeoutMs: number
+  private readonly controlPlaneToken?: string
 
   constructor(options: TenantProvisioningServiceOptions) {
     this.tenantRegistry = options.tenantRegistry
@@ -233,6 +236,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.publicScheme = options.publicScheme ?? 'https'
     this.tenantPort = options.tenantPort ?? defaultTenantPort
     this.readyTimeoutMs = options.readyTimeoutMs ?? defaultReadyTimeoutMs
+    this.controlPlaneToken = options.controlPlaneToken
   }
 
   async provisionTenant(params: {
@@ -358,6 +362,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           imagePullSecretName: this.imagePullSecretName,
           publicScheme: this.publicScheme,
           tenantPort: this.tenantPort,
+          controlPlaneToken: this.controlPlaneToken,
         })
         const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
           refreshedTenant.id,
@@ -896,6 +901,7 @@ export function createLiveTenantProvisioningService(params: {
   publicScheme?: 'http' | 'https'
   tenantPort?: number
   readyTimeoutMs?: number
+  controlPlaneToken?: string
 }): TenantProvisioningService {
   return new TenantProvisioningService({
     tenantRegistry: params.tenantRegistry,
@@ -912,6 +918,7 @@ export function createLiveTenantProvisioningService(params: {
     publicScheme: params.publicScheme,
     tenantPort: params.tenantPort,
     readyTimeoutMs: params.readyTimeoutMs,
+    controlPlaneToken: params.controlPlaneToken,
   })
 }
 
@@ -939,6 +946,12 @@ export function buildTenantInfrastructureBundle(
   const secretData: Record<string, string> = {
     DATABASE_URL: encodeSecretValue(options.database.runtimeConnectionString),
   }
+
+  if (options.controlPlaneToken && options.controlPlaneToken.length > 0) {
+    secretData.CONTROL_PLANE_TOKEN = encodeSecretValue(options.controlPlaneToken)
+  }
+
+  configMapData.TENANT_ID = options.tenant.id
 
   if (resources.pvcName) {
     configMapData.NOTES_DB_PATH = `${defaultTenantStorageMountPath}/dnd-notes.sqlite`

@@ -18,6 +18,11 @@ export interface CreateTestAppOptions {
   runtimeAuth?: TenantRuntimeAuth
   serveWeb?: boolean
   webDistPath?: string
+  controlPlaneToken?: string | null
+  appVersion?: string
+  schemaVersion?: string
+  tenantId?: string | null
+  maintenanceDrainGraceMs?: number
 }
 
 export function createTestPgMemDb(): IMemoryDb {
@@ -54,6 +59,11 @@ export async function createTestApp(options: CreateTestAppOptions = {}) {
     isShuttingDown: options.isShuttingDown,
     serveWeb: options.serveWeb,
     webDistPath: options.webDistPath,
+    controlPlaneToken: options.controlPlaneToken ?? null,
+    appVersion: options.appVersion,
+    schemaVersion: options.schemaVersion,
+    tenantId: options.tenantId ?? null,
+    maintenanceDrainGraceMs: options.maintenanceDrainGraceMs,
   })
 
   const closeNoteStore = async () => {

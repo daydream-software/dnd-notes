@@ -23,6 +23,10 @@ import {
   TenantProvisioningValidationError,
   type TenantProvisioningPort,
 } from './provisioning.js'
+import {
+  TenantControlError,
+  type TenantControlClient,
+} from './tenant-control-client.js'
 import { formatUnknownError } from './error-formatting.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import { tenantStates } from './types.js'
@@ -251,6 +255,7 @@ interface CreateAppOptions {
   portalDefaultTenantVersion?: string
   tenantBaseDomain?: string
   tenantPublicScheme?: 'http' | 'https'
+  tenantControlClient?: TenantControlClient
 }
 
 const require = createRequire(import.meta.url)
@@ -645,6 +650,7 @@ export function createApp({
   portalDefaultTenantVersion = appVersion,
   tenantBaseDomain,
   tenantPublicScheme = 'https',
+  tenantControlClient,
 }: CreateAppOptions): Express {
   const app = express()
   app.set('trust proxy', trustProxy)
@@ -1453,6 +1459,11 @@ export function createApp({
         return
       }
 
+      const previousState = tenant.currentState
+      const isMaintenanceTransition =
+        (previousState === 'ready' && state === 'maintenance') ||
+        (previousState === 'maintenance' && state === 'ready')
+
       try {
         await tenantRegistry.updateTenantState(
           tenantId,
@@ -1466,6 +1477,30 @@ export function createApp({
         if (!updatedTenant) {
           response.status(500).json({ error: 'Failed to retrieve updated tenant' })
           return
+        }
+
+        if (isMaintenanceTransition && tenantControlClient) {
+          try {
+            await tenantControlClient.setMaintenanceMode({
+              tenant: updatedTenant,
+              mode: state === 'maintenance' ? 'enable' : 'disable',
+              reason,
+            })
+          } catch (controlError) {
+            const status =
+              controlError instanceof TenantControlError
+                ? controlError.status
+                : 0
+            logUnexpectedError(
+              `Failed to propagate maintenance ${state} to tenant ${tenantId} via /_control/maintenance (status ${status})`,
+              controlError,
+            )
+            response.status(502).json({
+              error: 'Failed to propagate maintenance state to tenant',
+              details: getErrorMessage(controlError),
+            })
+            return
+          }
         }
 
         response.json({ tenant: updatedTenant })

@@ -7,6 +7,10 @@ import {
   type TenantProvisioningPort,
 } from './provisioning.js'
 import { createShutdownController } from './shutdown.js'
+import {
+  createHttpTenantControlClient,
+  type TenantControlClient,
+} from './tenant-control-client.js'
 import { TenantRegistry } from './tenant-registry.js'
 
 dotenv.config()
@@ -170,6 +174,21 @@ if (!CONTROL_PLANE_DATABASE_URL) {
 
 const tenantRegistry = new TenantRegistry(CONTROL_PLANE_DATABASE_URL)
 let tenantProvisioningService: TenantProvisioningPort | undefined
+let tenantControlClient: TenantControlClient | undefined
+
+const rawTenantControlPlaneToken = process.env.TENANT_CONTROL_PLANE_TOKEN?.trim()
+const TENANT_CONTROL_PLANE_TOKEN =
+  rawTenantControlPlaneToken && rawTenantControlPlaneToken.length > 0
+    ? rawTenantControlPlaneToken
+    : undefined
+
+if (TENANT_CONTROL_PLANE_TOKEN && TENANT_BASE_DOMAIN) {
+  tenantControlClient = createHttpTenantControlClient({
+    controlPlaneToken: TENANT_CONTROL_PLANE_TOKEN,
+    baseDomain: TENANT_BASE_DOMAIN,
+    publicScheme: TENANT_PUBLIC_SCHEME,
+  })
+}
 
 if (ENABLE_TENANT_PROVISIONING) {
   if (!TENANT_BASE_DOMAIN) {
@@ -229,6 +248,7 @@ if (ENABLE_TENANT_PROVISIONING) {
     publicScheme: TENANT_PUBLIC_SCHEME,
     tenantPort: tenantAppPort,
     readyTimeoutMs: tenantReadyTimeoutMs,
+    controlPlaneToken: TENANT_CONTROL_PLANE_TOKEN,
   })
 }
 
@@ -242,6 +262,7 @@ const app = createApp({
   portalDefaultTenantVersion: CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION,
   tenantBaseDomain: TENANT_BASE_DOMAIN,
   tenantPublicScheme: TENANT_PUBLIC_SCHEME,
+  tenantControlClient,
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000
 const serverRef: { current?: Server } = {}
