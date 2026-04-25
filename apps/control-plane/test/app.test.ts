@@ -1383,7 +1383,7 @@ describe('Control Plane API', () => {
       )
     })
 
-    it('blocks cutover readiness when the latest backup is incomplete', async () => {
+    it('blocks cutover readiness when the latest backup attempt failed', async () => {
       await authedPost(tenantsPath).send({
         id: 'tenant-789',
         slug: 'third-tenant',
@@ -1416,11 +1416,63 @@ describe('Control Plane API', () => {
       const response = await authedGet(`${tenantPath('tenant-789')}/storage`).expect(200)
 
       assert.strictEqual(response.body.storage.cutoverReady, false)
-      assert.strictEqual(response.body.storage.backup.status, 'missing')
+      assert.strictEqual(response.body.storage.backup.backupId, 'backup-tenant-789-1')
+      assert.strictEqual(response.body.storage.backup.lastBackupStatus, 'failed')
+      assert.strictEqual(response.body.storage.backup.status, 'invalid')
       assert.match(
         response.body.storage.blockers.join(' '),
-        /backup/i,
+        /completed/i,
       )
+    })
+
+    it('blocks cutover readiness when a newer failed backup exists after an older successful backup', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-790',
+        slug: 'fourth-tenant',
+        ownerId: 'owner-1000',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantDesiredState('tenant-790', 'ready')
+      await tenantRegistry.updateTenantState(
+        'tenant-790',
+        'ready',
+        'provisioner',
+        'Provisioned successfully',
+      )
+      await tenantRegistry.updateTenantStorageReference('tenant-790', 'tenant_tenant_790')
+      await tenantRegistry.updateTenantStorageProfile('tenant-790', {
+        mode: 'postgres-dedicated-user',
+        migrationStatus: 'failed',
+        failureReason: 'Synthetic cutover failure',
+      })
+      await tenantRegistry.createBackupRun({
+        id: 'backup-tenant-790-1',
+        tenantId: 'tenant-790',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-tenant-790-1', {
+        location: 'blob://backups/tenant-790-success',
+        completedAt: '2026-04-24T00:00:00Z',
+      })
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      await tenantRegistry.createBackupRun({
+        id: 'backup-tenant-790-2',
+        tenantId: 'tenant-790',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunFailed(
+        'backup-tenant-790-2',
+        'latest backup failed',
+      )
+
+      const response = await authedGet(`${tenantPath('tenant-790')}/storage`).expect(200)
+
+      assert.strictEqual(response.body.storage.cutoverReady, false)
+      assert.strictEqual(response.body.storage.backup.backupId, 'backup-tenant-790-2')
+      assert.strictEqual(response.body.storage.backup.lastBackupStatus, 'failed')
+      assert.strictEqual(response.body.storage.backup.location, null)
+      assert.strictEqual(response.body.storage.backup.status, 'invalid')
+      assert.match(response.body.storage.backup.details, /current status: failed/i)
     })
 
     it('returns 404 for non-existent tenants', async () => {
@@ -1908,6 +1960,7 @@ describe('Control Plane API', () => {
         .expect(501)
 
       assert.match(response.body.error, /not configured/i)
+      assert.match(response.body.details, /not configured/i)
 
       const restores = await tenantRegistry.listTenantRestores(
         'tenant-restore-noop',

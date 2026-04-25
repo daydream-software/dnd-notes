@@ -89,6 +89,25 @@ function buildFleetBackupStatus(
   }
 }
 
+function buildBackupStatusFromRun(
+  backupRun: BackupRun | undefined,
+  restoreSummary: TenantRestoreSummary | undefined,
+): FleetTenantBackupStatus {
+  return {
+    backupId: backupRun?.id ?? null,
+    location: backupRun?.location ?? null,
+    lastBackupAt: backupRun?.completedAt ?? null,
+    lastBackupStatus: backupRun?.status ?? null,
+    lastVerifiedAt: backupRun?.lastVerifiedAt ?? null,
+    lastVerificationStatus: backupRun?.lastVerificationStatus ?? null,
+    sizeBytes: backupRun?.sizeBytes ?? null,
+    checksum: backupRun?.checksum ?? null,
+    lastRestoreAt:
+      restoreSummary?.completedAt ?? restoreSummary?.requestedAt ?? null,
+    lastRestoreStatus: restoreSummary?.status ?? null,
+  }
+}
+
 function describeTenantCutoverBackupReadiness(
   backupStatus: FleetTenantBackupStatus,
 ): TenantStorageBackupReadiness {
@@ -98,6 +117,17 @@ function describeTenantCutoverBackupReadiness(
       status: 'missing',
       details:
         'Record a successful backup (POST /tenants/:id/backup) before tenant cutover can start.',
+    }
+  }
+
+  if (
+    backupStatus.lastBackupStatus !== 'completed' &&
+    backupStatus.lastBackupStatus !== 'succeeded'
+  ) {
+    return {
+      ...backupStatus,
+      status: 'invalid',
+      details: `Latest backup row must be completed before tenant cutover can start (current status: ${backupStatus.lastBackupStatus ?? 'unknown'}).`,
     }
   }
 
@@ -1381,9 +1411,9 @@ export function createApp({
       response: Response<TenantStorageStatusResponse | ErrorResponse>,
     ) => {
       const { tenantId } = request.params
-      const [storage, backupSummaries, restoreSummaries] = await Promise.all([
+      const [storage, latestBackups, restoreSummaries] = await Promise.all([
         tenantRegistry.getTenantStorageSnapshot(tenantId),
-        tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([tenantId]),
+        tenantRegistry.listTenantBackups(tenantId, 1),
         tenantRegistry.getLatestRestoreSummariesForTenantIds([tenantId]),
       ])
 
@@ -1392,8 +1422,8 @@ export function createApp({
         return
       }
 
-      const backupStatus = buildFleetBackupStatus(
-        backupSummaries.get(tenantId),
+      const backupStatus = buildBackupStatusFromRun(
+        latestBackups[0],
         restoreSummaries.get(tenantId),
       )
 
@@ -1891,7 +1921,7 @@ export function createApp({
         response.status(201).json({ restore: completed })
       } catch (error) {
         const failureReason = getErrorMessage(error)
-        await tenantRegistry
+        const failed = await tenantRegistry
           .markRestoreRunFailed(restoreId, failureReason)
           .catch(() => restoreRun)
         await tenantRegistry
@@ -1915,7 +1945,10 @@ export function createApp({
           .catch(() => undefined)
         const { status, body } = handleBackupDispatchError('restore', error)
         if (status === 501) {
-          response.status(501).json(body)
+          response.status(501).json({
+            ...body,
+            details: failed.failureReason ?? failureReason,
+          })
           return
         }
         logUnexpectedError('Failed to run tenant restore', error)

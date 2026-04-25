@@ -1348,7 +1348,7 @@ export class TenantRegistry {
       `SELECT ${backupCatalogSelectColumns}
        FROM backup_catalog
        WHERE tenant_id = $1
-       ORDER BY requested_at DESC
+       ORDER BY requested_at DESC, created_at DESC, id DESC
        LIMIT $2`,
       [tenantId, limit],
     )
