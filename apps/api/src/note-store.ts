@@ -204,8 +204,6 @@ function isOwnerEmailUniqueConstraintError(error: unknown) {
 
   return (
     code === '23505' ||
-    code === 'SQLITE_CONSTRAINT_UNIQUE' ||
-    code === 'SQLITE_CONSTRAINT' ||
     /owner_accounts\.email/i.test(details) ||
     /idx_owner_accounts_email_lower/i.test(details) ||
     /duplicate key value/i.test(details)

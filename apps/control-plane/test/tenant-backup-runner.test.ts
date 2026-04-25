@@ -193,31 +193,6 @@ describe('PostgresTenantBackupRunner', () => {
     }
   })
 
-  it('rejects backup attempts for PVC-backed tenants that have not cut over yet', async () => {
-    const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
-    const runner = new PostgresTenantBackupRunner({
-      adminDatabaseUrl: 'postgresql://postgres:postgres@postgres.default:5432/postgres',
-      artifactStore: new FileSystemTenantBackupArtifactStore(artifactRoot),
-    })
-
-    try {
-      await assert.rejects(
-        () =>
-          runner.backupTenant(
-            createTenant({
-              storageReference: 'dnd-notes-data-t-demo',
-            }),
-          ),
-        (error) =>
-          error instanceof TenantBackupValidationError &&
-          /PVC-backed SQLite storage/i.test(error.message),
-      )
-    } finally {
-      await runner.close()
-      await rm(artifactRoot, { recursive: true, force: true })
-    }
-  })
-
   it('restores a tenant backup after taking a pre-restore safety snapshot', async () => {
     const artifactRoot = await mkdtemp(join(tmpdir(), 'tenant-backup-artifacts-'))
     const artifactStore = new FileSystemTenantBackupArtifactStore(artifactRoot)
@@ -719,6 +694,18 @@ describe('resolveTenantDatabaseName', () => {
           }),
         ),
       /does not have a Postgres database reference/i,
+    )
+  })
+
+  it('rejects legacy or malformed storage references before backup commands run', () => {
+    assert.throws(
+      () =>
+        resolveTenantDatabaseName(
+          createTenant({
+            storageReference: 'pvc-tenant-demo',
+          }),
+        ),
+      /unexpected Postgres database reference/i,
     )
   })
 })

@@ -78,10 +78,8 @@ tables (see below) and dropped the column in migration `0003`.
   request outcome.
 
 The live provisioning slice also creates a per-tenant Postgres database plus a
-tenant-scoped runtime role/secret for newly provisioned tenants. New Postgres-only
-tenants now store the tenant database name in `storageReference`, while legacy
-PVC-backed tenants still surface the PVC name until the explicit cutover work
-removes that transitional shape.
+tenant-scoped runtime role/secret for newly provisioned tenants. Provisioned
+tenants store that tenant database name in `storageReference`.
 
 ### State Transitions
 
@@ -232,12 +230,11 @@ with a version override:
 2. If the tenant is already `ready`, the control plane records `upgrading`,
    reapplies the tenant manifests, and updates the Deployment image tag while
    preserving any existing tenant runtime secret.
-3. For stateless Postgres-only tenants, Kubernetes now performs an overlapping
-   rollout (`RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0`) with
-   `minReadySeconds: 5`, `terminationGracePeriodSeconds: 30`, and a per-tenant
-   `PodDisruptionBudget` (`minAvailable: 1`). Legacy PVC-backed tenants remain on
-   the older drain-first replacement shape until the cutover work removes that
-   transitional storage path.
+3. Kubernetes now performs an overlapping rollout (`RollingUpdate`,
+   `maxSurge: 1`, `maxUnavailable: 0`) with `minReadySeconds: 5`,
+   `terminationGracePeriodSeconds: 30`, and a per-tenant
+   `PodDisruptionBudget` (`maxUnavailable: 1`) so single-replica tenants do not
+   block voluntary disruptions such as node drains.
 4. The old pod flips `/ready` to `503` on `SIGTERM`, drains in-flight HTTP
    work, closes idle keep-alives, and only then closes the Postgres pool.
 5. When the new pod is fully rolled out (observedGeneration matches,
@@ -248,15 +245,12 @@ This path assumes tenant note traffic is Postgres-backed via `DATABASE_URL`.
 New tenants receive least-privilege runtime credentials after the control plane
 pre-initializes the note-store schema; already-deployed tenants that still use a
 shared runtime Postgres user remain on that credential until an explicit
-migration. Existing PVC-backed tenants keep the `/app/data` mount and do not
-receive the overlapping rollout/PDB contract until their cutover lands.
+migration.
 
 ### Operator notes
 
-- Postgres-only/stateless tenants now surge a temporary second pod during
-  rollouts; steady state remains 1 replica.
-- Legacy PVC-backed tenants still use a drain-first replacement until the
-  storage cutover work completes.
+- Provisioned tenants now surge a temporary second pod during rollouts; steady
+  state remains 1 replica.
 - Use a separate maintenance window for exclusive operations such as restore
   drills or incompatible schema work. The future maintenance endpoints stay
   reserved for that narrower path; ordinary image rollouts should use the
@@ -372,9 +366,6 @@ CONTROL_PLANE_DATABASE_URL=postgres://... npm run db:migrate
 
 The control-plane registry migrations also run automatically as part of
 `TenantRegistry`'s boot so a freshly deployed pod self-applies pending changes.
-
-
-
 ## Design Constraints
 
 - **Thin by design**: No business logic beyond registry CRUD and state tracking

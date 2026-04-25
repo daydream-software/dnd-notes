@@ -9,8 +9,6 @@ import {
   type V1Ingress,
   type V1Namespace,
   type V1PodDisruptionBudget,
-  type V1PersistentVolumeClaim,
-  type V1PersistentVolumeClaimSpec,
   type V1Secret,
   type V1Service,
   type V1ServicePort,
@@ -21,10 +19,7 @@ import {
   applyLeastPrivilegeTenantGrants,
   initializeTenantNoteStoreDatabase,
 } from './tenant-database-bootstrap.js'
-import {
-  assertPersistedTenantSubdomain,
-  tenantPvcNamePrefix,
-} from './tenant-subdomain.js'
+import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
 import type {
   Tenant,
   TenantDeprovisionResponse,
@@ -38,8 +33,6 @@ const defaultTenantPort = 3000
 const defaultReadyTimeoutMs = 120_000
 const defaultReadyPollIntervalMs = 2_000
 const defaultDeleteTimeoutMs = 120_000
-const defaultTenantStorageRequest = '1Gi'
-const defaultTenantStorageMountPath = '/app/data'
 const maxKubernetesLabelValueLength = 63
 const containerImageTagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/
 
@@ -87,7 +80,6 @@ interface TenantInfrastructureBundle {
   configMap: V1ConfigMap
   secret: V1Secret
   podDisruptionBudget?: V1PodDisruptionBudget
-  persistentVolumeClaim?: V1PersistentVolumeClaim
   service: V1Service
   ingress: V1Ingress
   deployment: V1Deployment
@@ -367,11 +359,9 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           throw new Error(`Tenant ${refreshedTenant.id} not found`)
         }
         const nextStorageMode =
-          bundle.resources.pvcName !== null
-            ? 'sqlite-pvc'
-            : database.roleName === null
-              ? 'postgres-shared-user'
-              : 'postgres-dedicated-user'
+          database.roleName === null
+            ? 'postgres-shared-user'
+            : 'postgres-dedicated-user'
         const shouldInitializeNotRequiredMigrationStatus =
           nextStorageMode === 'postgres-dedicated-user' &&
           currentStorage.mode === 'unknown' &&
@@ -381,7 +371,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
 
         await this.tenantRegistry.updateTenantStorageReference(
           refreshedTenant.id,
-          bundle.resources.pvcName ?? database.databaseName,
+          database.databaseName,
           registryClient,
         )
         await this.tenantRegistry.updateTenantStorageProfile(
@@ -729,9 +719,6 @@ export class KubernetesTenantInfrastructureManager
     if (bundle.podDisruptionBudget) {
       await upsertKubernetesObject(this.client, bundle.podDisruptionBudget)
     }
-    if (bundle.persistentVolumeClaim) {
-      await upsertKubernetesObject(this.client, bundle.persistentVolumeClaim)
-    }
     await upsertKubernetesObject(this.client, bundle.service)
     await upsertKubernetesObject(this.client, bundle.ingress)
     await upsertKubernetesObject(this.client, bundle.deployment)
@@ -814,23 +801,6 @@ export class KubernetesTenantInfrastructureManager
   }
 
   async deleteTenantResources(resources: TenantProvisioningResources): Promise<void> {
-    if (resources.pvcName) {
-      try {
-        await this.client.delete({
-          apiVersion: 'v1',
-          kind: 'PersistentVolumeClaim',
-          metadata: {
-            name: resources.pvcName,
-            namespace: resources.namespace,
-          },
-        })
-      } catch (error) {
-        if (!isApiException(error, 404)) {
-          throw error
-        }
-      }
-    }
-
     try {
       await this.client.delete(
         {
@@ -940,10 +910,6 @@ export function buildTenantInfrastructureBundle(
     DATABASE_URL: encodeSecretValue(options.database.runtimeConnectionString),
   }
 
-  if (resources.pvcName) {
-    configMapData.NOTES_DB_PATH = `${defaultTenantStorageMountPath}/dnd-notes.sqlite`
-  }
-
   if (options.tenantRuntimeAuth?.mode === 'keycloak') {
     if (
       !options.tenantRuntimeAuth.keycloakUrl ||
@@ -964,8 +930,6 @@ export function buildTenantInfrastructureBundle(
       configMapData.KEYCLOAK_JWKS_URL = options.tenantRuntimeAuth.keycloakJwksUrl
     }
   }
-
-  const usesLegacyPvcShape = resources.pvcName !== null
 
   return {
     resources,
@@ -998,42 +962,21 @@ export function buildTenantInfrastructureBundle(
       type: 'Opaque',
       data: secretData,
     },
-    podDisruptionBudget: !usesLegacyPvcShape
-      ? {
-          apiVersion: 'policy/v1',
-          kind: 'PodDisruptionBudget',
-          metadata: {
-            name: resources.deploymentName,
-            namespace: resources.namespace,
-            labels: namespaceLabels,
-          },
-          spec: {
-            minAvailable: 1,
-            selector: {
-              matchLabels: buildTenantSelectorLabels(options.tenant),
-            },
-          },
-        }
-      : undefined,
-    persistentVolumeClaim: resources.pvcName
-      ? {
-          apiVersion: 'v1',
-          kind: 'PersistentVolumeClaim',
-          metadata: {
-            name: resources.pvcName,
-            namespace: resources.namespace,
-            labels: namespaceLabels,
-          },
-          spec: {
-            accessModes: ['ReadWriteOnce'],
-            resources: {
-              requests: {
-                storage: defaultTenantStorageRequest,
-              },
-            },
-          },
-        }
-      : undefined,
+    podDisruptionBudget: {
+      apiVersion: 'policy/v1',
+      kind: 'PodDisruptionBudget',
+      metadata: {
+        name: resources.deploymentName,
+        namespace: resources.namespace,
+        labels: namespaceLabels,
+      },
+      spec: {
+        maxUnavailable: 1,
+        selector: {
+          matchLabels: buildTenantSelectorLabels(options.tenant),
+        },
+      },
+    },
     service: {
       apiVersion: 'v1',
       kind: 'Service',
@@ -1100,8 +1043,8 @@ export function buildTenantInfrastructureBundle(
         strategy: {
           type: 'RollingUpdate',
           rollingUpdate: {
-            maxSurge: usesLegacyPvcShape ? 0 : 1,
-            maxUnavailable: usesLegacyPvcShape ? 1 : 0,
+            maxSurge: 1,
+            maxUnavailable: 0,
           },
         },
         selector: {
@@ -1135,14 +1078,6 @@ export function buildTenantInfrastructureBundle(
                     secretRef: { name: resources.secretName },
                   },
                 ],
-                volumeMounts: resources.pvcName
-                  ? [
-                      {
-                        name: 'tenant-data',
-                        mountPath: defaultTenantStorageMountPath,
-                      },
-                    ]
-                  : undefined,
                 livenessProbe: {
                   httpGet: {
                     path: '/healthz',
@@ -1165,16 +1100,6 @@ export function buildTenantInfrastructureBundle(
                 },
               },
             ],
-             volumes: resources.pvcName
-               ? [
-                   {
-                     name: 'tenant-data',
-                     persistentVolumeClaim: {
-                       claimName: resources.pvcName,
-                     },
-                   },
-                 ]
-               : undefined,
           },
         },
       },
@@ -1291,22 +1216,16 @@ export function buildTenantResourceNames(params: {
   imageRepository: string
 }): TenantProvisioningResources {
   const namespace = `tenant-${params.subdomain}`
-  const legacyPvcName = buildLegacyTenantPvcName(params.subdomain)
   return {
     namespace,
     deploymentName: 'dnd-notes',
     serviceName: 'dnd-notes',
-    pvcName: params.tenant.storageReference === legacyPvcName ? legacyPvcName : null,
     configMapName: 'dnd-notes-runtime',
     secretName: 'dnd-notes-runtime-secret',
     hostname: `${params.subdomain}.${params.baseDomain}`,
     databaseName: buildTenantDatabaseName(params.tenant.id, params.subdomain),
     image: `${params.imageRepository}:${params.tenant.version}`,
   }
-}
-
-function buildLegacyTenantPvcName(subdomain: string): string {
-  return `${tenantPvcNamePrefix}${subdomain}`
 }
 
 function buildTenantSelectorLabels(tenant: Tenant): Record<string, string> {
@@ -1467,22 +1386,6 @@ function prepareKubernetesObjectForReplace<T extends KubernetesObject>(
     }
   }
 
-  if (
-    spec.kind === 'PersistentVolumeClaim' &&
-    existing.kind === 'PersistentVolumeClaim'
-  ) {
-    const desiredPvc = spec as T & V1PersistentVolumeClaim
-    const existingPvc = existing as T & V1PersistentVolumeClaim
-
-    return {
-      ...desiredPvc,
-      metadata: {
-        ...desiredPvc.metadata,
-      },
-      spec: mergePersistentVolumeClaimSpec(desiredPvc, existingPvc),
-    }
-  }
-
   return {
     ...spec,
     metadata: {
@@ -1520,19 +1423,6 @@ function mergeServicePorts(
       nodePort: desiredPort.nodePort ?? matchingExistingPort.nodePort,
     }
   })
-}
-
-function mergePersistentVolumeClaimSpec(
-  desiredPvc: V1PersistentVolumeClaim,
-  existingPvc: V1PersistentVolumeClaim,
-): V1PersistentVolumeClaimSpec | undefined {
-  return {
-    ...desiredPvc.spec,
-    storageClassName:
-      desiredPvc.spec?.storageClassName ?? existingPvc.spec?.storageClassName,
-    volumeMode: desiredPvc.spec?.volumeMode ?? existingPvc.spec?.volumeMode,
-    volumeName: desiredPvc.spec?.volumeName ?? existingPvc.spec?.volumeName,
-  }
 }
 
 function isApiException(error: unknown, statusCode: number): error is ApiException<unknown> {
