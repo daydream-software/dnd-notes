@@ -23,6 +23,10 @@ import {
   TenantProvisioningValidationError,
   type TenantProvisioningPort,
 } from './provisioning.js'
+import {
+  TenantControlError,
+  type TenantControlClient,
+} from './tenant-control-client.js'
 import { formatUnknownError } from './error-formatting.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import { tenantStates } from './types.js'
@@ -251,6 +255,7 @@ interface CreateAppOptions {
   portalDefaultTenantVersion?: string
   tenantBaseDomain?: string
   tenantPublicScheme?: 'http' | 'https'
+  tenantControlClient?: TenantControlClient
 }
 
 const require = createRequire(import.meta.url)
@@ -639,6 +644,7 @@ export function createApp({
   portalDefaultTenantVersion = appVersion,
   tenantBaseDomain,
   tenantPublicScheme = 'https',
+  tenantControlClient,
 }: CreateAppOptions): Express {
   const app = express()
   app.set('trust proxy', trustProxy)
@@ -1447,7 +1453,51 @@ export function createApp({
         return
       }
 
+      const previousState = tenant.currentState
+      const isMaintenanceTransition =
+        (previousState === 'ready' && state === 'maintenance') ||
+        (previousState === 'maintenance' && state === 'ready')
+      const maintenanceMode = isMaintenanceTransition
+        ? state === 'maintenance'
+          ? 'enable'
+          : 'disable'
+        : null
+
       try {
+        if (maintenanceMode) {
+          if (!tenantControlClient) {
+            const details = `Cannot propagate maintenance transition ${previousState} -> ${state} for tenant ${tenantId}: tenant control client is not configured.`
+            console.error(details)
+            response.status(503).json({
+              error: 'Tenant maintenance propagation is not configured',
+              details,
+            })
+            return
+          }
+
+          try {
+            await tenantControlClient.setMaintenanceMode({
+              tenant,
+              mode: maintenanceMode,
+              reason,
+            })
+          } catch (controlError) {
+            const status =
+              controlError instanceof TenantControlError
+                ? controlError.status
+                : 0
+            logUnexpectedError(
+              `Failed to propagate maintenance transition ${previousState} -> ${state} (${maintenanceMode}) to tenant ${tenantId} via /_control/maintenance (status ${status})`,
+              controlError,
+            )
+            response.status(502).json({
+              error: 'Failed to propagate maintenance state to tenant',
+              details: getErrorMessage(controlError),
+            })
+            return
+          }
+        }
+
         await tenantRegistry.updateTenantState(
           tenantId,
           state,

@@ -1,3 +1,4 @@
+import fs from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Pool } from 'pg'
@@ -21,6 +22,25 @@ const moduleDir = path.dirname(fileURLToPath(import.meta.url))
 export const tenantApiMigrationsDir = path.resolve(moduleDir, '..', 'migrations')
 export const tenantApiMigrationLedgerTable =
   `schema_migrations_${TENANT_API_MIGRATION_SET}`
+
+function deriveTenantApiSchemaVersion() {
+  const latestMigration = fs
+    .readdirSync(tenantApiMigrationsDir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.sql'))
+    .map((entry) => entry.name)
+    .sort()
+    .at(-1)
+
+  if (!latestMigration) {
+    throw new Error(
+      `Expected at least one tenant API migration in ${tenantApiMigrationsDir}.`,
+    )
+  }
+
+  return latestMigration.replace(/\.sql$/i, '')
+}
+
+export const tenantApiSchemaVersion = deriveTenantApiSchemaVersion()
 
 export interface RunTenantApiMigrationsOptions {
   pool: MigrationPoolLike

@@ -22,6 +22,13 @@ const runtimeAuth = createTenantRuntimeAuth({
 const shutdownGracePeriodMs = 30_000
 const siteAdminEmails =
   process.env.SITE_ADMIN_EMAILS?.split(',').map((email) => email.trim()) ?? []
+const rawControlPlaneToken = process.env.CONTROL_PLANE_TOKEN?.trim()
+const controlPlaneToken =
+  rawControlPlaneToken && rawControlPlaneToken.length > 0
+    ? rawControlPlaneToken
+    : null
+const rawTenantId = process.env.TENANT_ID?.trim()
+const tenantId = rawTenantId && rawTenantId.length > 0 ? rawTenantId : null
 const noteStore = await createRuntimeNoteStore({ siteAdminEmails })
 const serverRef: { current?: Server } = {}
 const shutdownController = createShutdownController({
@@ -36,6 +43,9 @@ const app = createApp({
   runtimeAuth,
   isShuttingDown: shutdownController.isShuttingDown,
   serveWeb,
+  controlPlaneToken,
+  tenantId,
+  appVersion: process.env.APP_VERSION,
 })
 serverRef.current = app.listen(port, () => {
   console.log(`dnd-notes API listening on http://localhost:${port}`)

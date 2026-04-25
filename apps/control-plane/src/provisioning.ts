@@ -30,7 +30,7 @@ import type { TenantRegistry, TenantRegistryClientLike } from './tenant-registry
 
 const opaqueSubdomainPrefix = 't'
 const defaultTenantPort = 3000
-const defaultReadyTimeoutMs = 120_000
+export const defaultTenantReadyTimeoutMs = 240_000
 const defaultReadyPollIntervalMs = 2_000
 const defaultDeleteTimeoutMs = 120_000
 const maxKubernetesLabelValueLength = 63
@@ -132,6 +132,7 @@ interface TenantProvisioningServiceOptions {
   publicScheme?: 'http' | 'https'
   tenantPort?: number
   readyTimeoutMs?: number
+  controlPlaneToken?: string
 }
 
 interface BuildTenantInfrastructureBundleOptions {
@@ -145,6 +146,7 @@ interface BuildTenantInfrastructureBundleOptions {
   imagePullSecretName?: string
   publicScheme: 'http' | 'https'
   tenantPort: number
+  controlPlaneToken?: string
 }
 
 export class TenantProvisioningValidationError extends Error {
@@ -212,6 +214,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly publicScheme: 'http' | 'https'
   private readonly tenantPort: number
   private readonly readyTimeoutMs: number
+  private readonly controlPlaneToken?: string
 
   constructor(options: TenantProvisioningServiceOptions) {
     this.tenantRegistry = options.tenantRegistry
@@ -224,7 +227,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.imagePullSecretName = options.imagePullSecretName
     this.publicScheme = options.publicScheme ?? 'https'
     this.tenantPort = options.tenantPort ?? defaultTenantPort
-    this.readyTimeoutMs = options.readyTimeoutMs ?? defaultReadyTimeoutMs
+    this.readyTimeoutMs = options.readyTimeoutMs ?? defaultTenantReadyTimeoutMs
+    this.controlPlaneToken = options.controlPlaneToken
   }
 
   async provisionTenant(params: {
@@ -350,6 +354,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           imagePullSecretName: this.imagePullSecretName,
           publicScheme: this.publicScheme,
           tenantPort: this.tenantPort,
+          controlPlaneToken: this.controlPlaneToken,
         })
         const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
           refreshedTenant.id,
@@ -755,7 +760,7 @@ export class KubernetesTenantInfrastructureManager
 
   async waitForTenantReady(
     resources: TenantProvisioningResources,
-    timeoutMs = defaultReadyTimeoutMs,
+    timeoutMs = defaultTenantReadyTimeoutMs,
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs
 
@@ -866,6 +871,7 @@ export function createLiveTenantProvisioningService(params: {
   publicScheme?: 'http' | 'https'
   tenantPort?: number
   readyTimeoutMs?: number
+  controlPlaneToken?: string
 }): TenantProvisioningService {
   return new TenantProvisioningService({
     tenantRegistry: params.tenantRegistry,
@@ -882,6 +888,7 @@ export function createLiveTenantProvisioningService(params: {
     publicScheme: params.publicScheme,
     tenantPort: params.tenantPort,
     readyTimeoutMs: params.readyTimeoutMs,
+    controlPlaneToken: params.controlPlaneToken,
   })
 }
 
@@ -903,6 +910,7 @@ export function buildTenantInfrastructureBundle(
   const configMapData: Record<string, string> = {
     PORT: String(options.tenantPort),
     SERVE_WEB: 'true',
+    APP_VERSION: options.tenant.version,
     PUBLIC_WEB_URL: runtimeUrl,
     ALLOWED_ORIGINS: runtimeUrl,
   }
@@ -910,6 +918,11 @@ export function buildTenantInfrastructureBundle(
     DATABASE_URL: encodeSecretValue(options.database.runtimeConnectionString),
   }
 
+  if (options.controlPlaneToken && options.controlPlaneToken.length > 0) {
+    secretData.CONTROL_PLANE_TOKEN = encodeSecretValue(options.controlPlaneToken)
+  }
+
+  configMapData.TENANT_ID = options.tenant.id
   if (options.tenantRuntimeAuth?.mode === 'keycloak') {
     if (
       !options.tenantRuntimeAuth.keycloakUrl ||
