@@ -1163,16 +1163,22 @@ describe('Control Plane API', () => {
         'test-suite',
         'Provisioned in test',
       )
-      await tenantRegistry.updateTenantBackupMetadata(
-        'tenant-ready',
-        JSON.stringify({
-          lastBackup: '2026-04-18T22:00:00Z',
-          lastBackupStatus: 'succeeded',
-          lastRestoreDrillAt: '2026-04-19T06:00:00Z',
-          lastRestoreDrillStatus: 'passed',
-          location: 'blob://backups/tenant-ready',
-        }),
-      )
+      await tenantRegistry.createBackupRun({
+        id: 'backup-ready-1',
+        tenantId: 'tenant-ready',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-ready-1', {
+        location: 'blob://backups/tenant-ready',
+        sizeBytes: 1024,
+        checksum: 'abc123',
+        completedAt: '2026-04-18T22:00:00Z',
+      })
+      await tenantRegistry.recordBackupVerification('backup-ready-1', {
+        status: 'passed',
+        verifiedAt: '2026-04-19T06:00:00Z',
+        details: 'restore drill ok',
+      })
 
       await tenantRegistry.createTenant({
         id: 'tenant-failed',
@@ -1200,8 +1206,8 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.summary.tenantsByDesiredState.ready, 2)
       assert.strictEqual(response.body.summary.tenantsByVersion['1.0.0'], 1)
       assert.strictEqual(response.body.summary.tenantsByVersion['2.0.0'], 1)
-      assert.strictEqual(response.body.summary.tenantsWithBackupMetadata, 1)
-      assert.strictEqual(response.body.summary.tenantsMissingBackupMetadata, 1)
+      assert.strictEqual(response.body.summary.tenantsWithBackup, 1)
+      assert.strictEqual(response.body.summary.tenantsMissingBackup, 1)
       assert.strictEqual(response.body.summary.tenantsNeedingAttention, 1)
 
       const readyTenant = response.body.tenants.find(
@@ -1213,13 +1219,11 @@ describe('Control Plane API', () => {
         readyTenant.tenant.initialAdminEmail,
         'admin@tenant-ready.example',
       )
-      assert.strictEqual(readyTenant.backup.lastBackupAt, '2026-04-18T22:00:00Z')
+      assert.strictEqual(readyTenant.backup.backupId, 'backup-ready-1')
+      assert.strictEqual(readyTenant.backup.lastBackupAt, '2026-04-18T22:00:00.000Z')
       assert.strictEqual(readyTenant.backup.lastBackupStatus, 'succeeded')
-      assert.strictEqual(
-        readyTenant.backup.lastRestoreDrillAt,
-        '2026-04-19T06:00:00Z',
-      )
-      assert.strictEqual(readyTenant.backup.lastRestoreDrillStatus, 'passed')
+      assert.strictEqual(readyTenant.backup.lastVerifiedAt, '2026-04-19T06:00:00.000Z')
+      assert.strictEqual(readyTenant.backup.lastVerificationStatus, 'passed')
       assert.strictEqual(
         readyTenant.backup.location,
         'blob://backups/tenant-ready',
@@ -1233,61 +1237,51 @@ describe('Control Plane API', () => {
       )
       assert.ok(failedTenant)
       assert.strictEqual(failedTenant.health, 'attention')
-      assert.strictEqual(failedTenant.backup.rawMetadata, null)
+      assert.strictEqual(failedTenant.backup.backupId, null)
       assert.strictEqual(failedTenant.latestTransition.triggeredBy, 'test-suite')
       assert.strictEqual(failedTenant.latestTransition.reason, 'Synthetic failure in test')
       assert.strictEqual(failedTenant.latestTransition.toState, 'failed')
     })
 
-    it('keeps opaque backup metadata when it is not parseable JSON', async () => {
+    it('flags tenants with only failed backups as missing a usable backup', async () => {
       await tenantRegistry.createTenant({
-        id: 'tenant-opaque',
-        slug: 'tenant-opaque',
+        id: 'tenant-only-failed',
+        slug: 'tenant-only-failed',
         ownerId: 'owner-3',
         version: '1.0.0',
       })
-      await tenantRegistry.updateTenantBackupMetadata('tenant-opaque', 'not-json')
-
-      const response = await authedGet('/internal/fleet/status').expect(200)
-      const tenant = response.body.tenants.find(
-        (entry: { tenant: { id: string } }) => entry.tenant.id === 'tenant-opaque',
+      await tenantRegistry.updateTenantDesiredState('tenant-only-failed', 'ready')
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-only-failed',
+        'pvc-tenant-only-failed',
       )
-
-      assert.ok(tenant)
-      assert.strictEqual(tenant.backup.rawMetadata, 'not-json')
-      assert.strictEqual(tenant.backup.lastBackupAt, null)
-      assert.strictEqual(tenant.backup.lastBackupStatus, null)
-      assert.strictEqual(tenant.backup.lastRestoreDrillAt, null)
-      assert.strictEqual(tenant.backup.lastRestoreDrillStatus, null)
-      assert.strictEqual(tenant.backup.location, null)
-    })
-
-    it('treats blank backup metadata as missing and needing attention', async () => {
-      await tenantRegistry.createTenant({
-        id: 'tenant-blank',
-        slug: 'tenant-blank',
-        ownerId: 'owner-4',
-        version: '1.0.0',
-      })
-      await tenantRegistry.updateTenantDesiredState('tenant-blank', 'ready')
       await tenantRegistry.updateTenantState(
-        'tenant-blank',
+        'tenant-only-failed',
         'ready',
         'test-suite',
         'Provisioned in test',
       )
-      await tenantRegistry.updateTenantBackupMetadata('tenant-blank', '   ')
+      await tenantRegistry.createBackupRun({
+        id: 'backup-only-failed-1',
+        tenantId: 'tenant-only-failed',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunFailed(
+        'backup-only-failed-1',
+        'pg_dump exited non-zero',
+      )
 
       const response = await authedGet('/internal/fleet/status').expect(200)
       const tenant = response.body.tenants.find(
-        (entry: { tenant: { id: string } }) => entry.tenant.id === 'tenant-blank',
+        (entry: { tenant: { id: string } }) =>
+          entry.tenant.id === 'tenant-only-failed',
       )
 
       assert.ok(tenant)
       assert.strictEqual(tenant.health, 'attention')
-      assert.strictEqual(tenant.backup.rawMetadata, null)
-      assert.strictEqual(response.body.summary.tenantsWithBackupMetadata, 0)
-      assert.strictEqual(response.body.summary.tenantsMissingBackupMetadata, 1)
+      assert.strictEqual(tenant.backup.backupId, null)
+      assert.strictEqual(response.body.summary.tenantsWithBackup, 0)
+      assert.strictEqual(response.body.summary.tenantsMissingBackup, 1)
       assert.strictEqual(response.body.summary.tenantsNeedingAttention, 1)
     })
   })
@@ -1335,14 +1329,15 @@ describe('Control Plane API', () => {
         migrationStatus: 'failed',
         failureReason: 'Synthetic cutover failure',
       })
-      await tenantRegistry.updateTenantBackupMetadata(
-        'tenant-123',
-        JSON.stringify({
-          lastBackupAt: '2026-04-24T00:00:00Z',
-          lastBackupStatus: 'succeeded',
-          location: 'blob://backups/tenant-123',
-        }),
-      )
+      await tenantRegistry.createBackupRun({
+        id: 'backup-tenant-123-1',
+        tenantId: 'tenant-123',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-tenant-123-1', {
+        location: 'blob://backups/tenant-123',
+        completedAt: '2026-04-24T00:00:00Z',
+      })
 
       const response = await authedGet(`${tenantPath('tenant-123')}/storage`).expect(200)
 
@@ -1389,7 +1384,7 @@ describe('Control Plane API', () => {
       )
     })
 
-    it('blocks cutover readiness when backup metadata omits lastBackupStatus', async () => {
+    it('blocks cutover readiness when the latest backup is incomplete', async () => {
       await authedPost(tenantsPath).send({
         id: 'tenant-789',
         slug: 'third-tenant',
@@ -1409,20 +1404,24 @@ describe('Control Plane API', () => {
         migrationStatus: 'failed',
         failureReason: 'Synthetic cutover failure',
       })
-      await tenantRegistry.updateTenantBackupMetadata(
-        'tenant-789',
-        JSON.stringify({
-          lastBackupAt: '2026-04-24T00:00:00Z',
-          location: 'blob://backups/tenant-789',
-        }),
+      await tenantRegistry.createBackupRun({
+        id: 'backup-tenant-789-1',
+        tenantId: 'tenant-789',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunFailed(
+        'backup-tenant-789-1',
+        'pg_dump exited non-zero',
       )
 
       const response = await authedGet(`${tenantPath('tenant-789')}/storage`).expect(200)
 
       assert.strictEqual(response.body.storage.cutoverReady, false)
-      assert.strictEqual(response.body.storage.backup.status, 'invalid')
-      assert.match(response.body.storage.backup.details, /lastBackupStatus/i)
-      assert.match(response.body.storage.blockers.join(' '), /lastBackupStatus/i)
+      assert.strictEqual(response.body.storage.backup.status, 'missing')
+      assert.match(
+        response.body.storage.blockers.join(' '),
+        /backup/i,
+      )
     })
 
     it('returns 404 for non-existent tenants', async () => {
@@ -1556,37 +1555,297 @@ describe('Control Plane API', () => {
     })
   })
 
-  describe('PATCH /internal/tenants/:tenantId/backup', () => {
-    it('updates backup metadata', async () => {
+  describe('POST /internal/tenants/:tenantId/backup', () => {
+    it('returns 501 when no backup runner is configured', async () => {
       await authedPost(tenantsPath).send({
-        id: 'tenant-123',
-        slug: 'test-tenant',
-        ownerId: 'owner-456',
+        id: 'tenant-noop',
+        slug: 'tenant-noop',
+        ownerId: 'owner-noop',
         version: '1.0.0',
       })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-noop',
+        'pvc-tenant-noop',
+      )
+      await tenantRegistry.updateTenantState(
+        'tenant-noop',
+        'ready',
+        'test-suite',
+        'ready for backup',
+      )
 
-      const metadata = JSON.stringify({
-        lastBackup: '2026-04-18T22:00:00Z',
-        location: 'blob://backups/tenant-123',
-      })
+      const response = await authedPost(`${tenantPath('tenant-noop')}/backup`)
+        .send({ triggeredBy: 'test-suite', reason: 'manual run' })
+        .expect(501)
 
-      const response = await authedPatch(`${tenantPath('tenant-123')}/backup`)
-        .send({
-          backupMetadata: metadata,
-        })
-        .expect(200)
+      assert.match(response.body.error, /not configured/i)
 
-      assert.strictEqual(response.body.tenant.backupMetadata, metadata)
+      const audit = await tenantRegistry.listTenantAuditLog('tenant-noop')
+      const actions = audit.map((entry) => entry.outcome)
+      assert.ok(actions.includes('requested'))
+      assert.ok(actions.includes('failed'))
+
+      const backups = await tenantRegistry.listTenantBackups('tenant-noop')
+      assert.strictEqual(backups.length, 1)
+      assert.strictEqual(backups[0]!.status, 'failed')
     })
 
-    it('returns 404 when updating backup metadata for non-existent tenant', async () => {
-      const response = await authedPatch(`${tenantPath('non-existent')}/backup`)
-        .send({
-          backupMetadata: '{"location":"blob://missing"}',
+    it('rejects backups for tenants without a storage reference', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-nostorage',
+        slug: 'tenant-nostorage',
+        ownerId: 'owner-nostorage',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantState(
+        'tenant-nostorage',
+        'ready',
+        'test-suite',
+        'ready',
+      )
+
+      const response = await authedPost(`${tenantPath('tenant-nostorage')}/backup`)
+        .send({ triggeredBy: 'test-suite' })
+        .expect(409)
+
+      assert.match(response.body.error, /storage is not provisioned/i)
+    })
+
+    it('records and returns a successful backup catalog row when a dispatcher succeeds', async () => {
+      const dispatcher = {
+        async executeBackup({ tenant }: { tenant: { id: string } }) {
+          return {
+            tenantId: tenant.id,
+            databaseName: 'tenant_db',
+            format: 'custom' as const,
+            location: 'blob://backups/tenant-success',
+            sha256: 'sha256-test',
+            sizeBytes: 4096,
+            capturedAt: '2026-04-25T00:00:00.000Z',
+          }
+        },
+        async executeRestore() {
+          throw new Error('not used in this test')
+        },
+      }
+      const customRegistry = createTestTenantRegistry()
+      const customApp = createApp({
+        tenantRegistry: customRegistry.tenantRegistry,
+        adminToken,
+        tenantBackupDispatcher: dispatcher,
+      })
+
+      try {
+        await customRegistry.tenantRegistry.createTenant({
+          id: 'tenant-success',
+          slug: 'tenant-success',
+          ownerId: 'owner-success',
+          version: '1.0.0',
         })
+        await customRegistry.tenantRegistry.updateTenantStorageReference(
+          'tenant-success',
+          'pvc-tenant-success',
+        )
+        await customRegistry.tenantRegistry.updateTenantState(
+          'tenant-success',
+          'ready',
+          'test-suite',
+          'ready',
+        )
+
+        const response = await request(customApp)
+          .post(`/internal/tenants/tenant-success/backup`)
+          .set('Authorization', `Bearer ${adminToken}`)
+          .send({ triggeredBy: 'test-suite', reason: 'manual run' })
+          .expect(201)
+
+        assert.strictEqual(response.body.backup.status, 'completed')
+        assert.strictEqual(
+          response.body.backup.location,
+          'blob://backups/tenant-success',
+        )
+        assert.strictEqual(response.body.backup.sizeBytes, 4096)
+        assert.strictEqual(response.body.backup.checksum, 'sha256-test')
+
+        const audit =
+          await customRegistry.tenantRegistry.listTenantAuditLog('tenant-success')
+        const outcomes = audit.map((entry) => entry.outcome)
+        assert.ok(outcomes.includes('requested'))
+        assert.ok(outcomes.includes('succeeded'))
+      } finally {
+        await customRegistry.cleanup()
+      }
+    })
+  })
+
+  describe('GET /internal/tenants/:tenantId/backups', () => {
+    it('lists backup runs in reverse-chronological order', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-list',
+        slug: 'tenant-list',
+        ownerId: 'owner-list',
+        version: '1.0.0',
+      })
+      await tenantRegistry.createBackupRun({
+        id: 'backup-list-1',
+        tenantId: 'tenant-list',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-list-1', {
+        location: 'blob://backups/list-1',
+      })
+
+      const response = await authedGet(
+        `${tenantPath('tenant-list')}/backups`,
+      ).expect(200)
+
+      assert.strictEqual(response.body.backups.length, 1)
+      assert.strictEqual(response.body.backups[0].id, 'backup-list-1')
+      assert.strictEqual(response.body.backups[0].status, 'completed')
+    })
+  })
+
+  describe('POST /internal/tenants/:tenantId/restore', () => {
+    it('rejects restore without a backupId or backupLocation', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-restore-bad',
+        slug: 'tenant-restore-bad',
+        ownerId: 'owner-restore-bad',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-restore-bad',
+        'pvc-tenant-restore-bad',
+      )
+      await tenantRegistry.updateTenantState(
+        'tenant-restore-bad',
+        'ready',
+        'test-suite',
+        'ready',
+      )
+
+      const response = await authedPost(
+        `${tenantPath('tenant-restore-bad')}/restore`,
+      )
+        .send({ triggeredBy: 'test-suite' })
+        .expect(400)
+
+      assert.match(response.body.error, /backupId or backupLocation/i)
+    })
+
+    it('returns 404 when the referenced backup does not belong to the tenant', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-restore-other',
+        slug: 'tenant-restore-other',
+        ownerId: 'owner-restore-other',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-restore-other',
+        'pvc-tenant-restore-other',
+      )
+      await tenantRegistry.updateTenantState(
+        'tenant-restore-other',
+        'ready',
+        'test-suite',
+        'ready',
+      )
+
+      await tenantRegistry.createTenant({
+        id: 'tenant-other',
+        slug: 'tenant-other',
+        ownerId: 'owner-other',
+        version: '1.0.0',
+      })
+      await tenantRegistry.createBackupRun({
+        id: 'backup-other-1',
+        tenantId: 'tenant-other',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-other-1', {
+        location: 'blob://backups/other-1',
+      })
+
+      const response = await authedPost(
+        `${tenantPath('tenant-restore-other')}/restore`,
+      )
+        .send({ triggeredBy: 'test-suite', backupId: 'backup-other-1' })
         .expect(404)
 
-      assert.strictEqual(response.body.error, 'Tenant not found')
+      assert.match(response.body.error, /Backup not found/i)
+    })
+
+    it('returns 501 and records audit failure when no dispatcher is configured', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-restore-noop',
+        slug: 'tenant-restore-noop',
+        ownerId: 'owner-restore-noop',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-restore-noop',
+        'pvc-tenant-restore-noop',
+      )
+      await tenantRegistry.updateTenantState(
+        'tenant-restore-noop',
+        'ready',
+        'test-suite',
+        'ready',
+      )
+      await tenantRegistry.createBackupRun({
+        id: 'backup-restore-noop-1',
+        tenantId: 'tenant-restore-noop',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-restore-noop-1', {
+        location: 'blob://backups/restore-noop-1',
+      })
+
+      const response = await authedPost(
+        `${tenantPath('tenant-restore-noop')}/restore`,
+      )
+        .send({
+          triggeredBy: 'test-suite',
+          backupId: 'backup-restore-noop-1',
+        })
+        .expect(501)
+
+      assert.match(response.body.error, /not configured/i)
+
+      const restores = await tenantRegistry.listTenantRestores(
+        'tenant-restore-noop',
+      )
+      assert.strictEqual(restores.length, 1)
+      assert.strictEqual(restores[0]!.status, 'failed')
+
+      const tenantAfter = await tenantRegistry.getTenant('tenant-restore-noop')
+      assert.ok(tenantAfter)
+      assert.strictEqual(tenantAfter.currentState, 'ready')
+    })
+  })
+
+  describe('GET /internal/tenants/:tenantId/audit', () => {
+    it('returns audit log entries for a tenant', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-audit',
+        slug: 'tenant-audit',
+        ownerId: 'owner-audit',
+        version: '1.0.0',
+      })
+      await tenantRegistry.appendAuditLogEntry({
+        tenantId: 'tenant-audit',
+        actor: 'test-suite',
+        action: 'tenant.test',
+        resourceType: 'tenant',
+        resourceId: 'tenant-audit',
+        outcome: 'requested',
+      })
+
+      const response = await authedGet(`${tenantPath('tenant-audit')}/audit`).expect(200)
+
+      assert.strictEqual(response.body.entries.length, 1)
+      assert.strictEqual(response.body.entries[0].action, 'tenant.test')
+      assert.strictEqual(response.body.entries[0].outcome, 'requested')
     })
   })
 

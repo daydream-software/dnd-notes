@@ -42,7 +42,6 @@ export interface Tenant {
   currentState: TenantState
   version: string
   storageReference: string | null
-  backupMetadata: string | null
   createdAt: string
   updatedAt: string
 }
@@ -97,12 +96,16 @@ export interface FleetDependencyHealth {
 }
 
 export interface FleetTenantBackupStatus {
-  rawMetadata: string | null
+  backupId: string | null
   location: string | null
   lastBackupAt: string | null
   lastBackupStatus: string | null
-  lastRestoreDrillAt: string | null
-  lastRestoreDrillStatus: string | null
+  lastVerifiedAt: string | null
+  lastVerificationStatus: BackupVerificationStatus | null
+  sizeBytes: number | null
+  checksum: string | null
+  lastRestoreAt: string | null
+  lastRestoreStatus: BackupRunStatus | null
 }
 
 export interface FleetTenantStatus {
@@ -117,8 +120,8 @@ export interface FleetStatusSummary {
   tenantsByCurrentState: Record<TenantState, number>
   tenantsByDesiredState: Record<TenantState, number>
   tenantsByVersion: Record<string, number>
-  tenantsWithBackupMetadata: number
-  tenantsMissingBackupMetadata: number
+  tenantsWithBackup: number
+  tenantsMissingBackup: number
   tenantsNeedingAttention: number
 }
 
@@ -138,7 +141,6 @@ export interface TenantStorageSnapshot {
   currentState: TenantState
   desiredState: TenantState
   storageReference: string | null
-  backupMetadata: string | null
   mode: TenantStorageMode
   migrationStatus: TenantStorageMigrationStatus
   lastMigrationFailure: string | null
@@ -275,4 +277,119 @@ export interface HealthResponse {
   status: 'healthy'
   uptime: number
   version: string
+}
+
+export const backupRunStatuses = [
+  'queued',
+  'running',
+  'completed',
+  'failed',
+  'canceled',
+] as const
+
+export type BackupRunStatus = (typeof backupRunStatuses)[number]
+
+export const backupVerificationStatuses = ['passed', 'failed'] as const
+
+export type BackupVerificationStatus =
+  (typeof backupVerificationStatuses)[number]
+
+export const auditOutcomes = ['requested', 'succeeded', 'failed'] as const
+
+export type AuditOutcome = (typeof auditOutcomes)[number]
+
+export interface BackupRun {
+  id: string
+  tenantId: string
+  status: BackupRunStatus
+  format: string
+  location: string | null
+  sizeBytes: number | null
+  checksum: string | null
+  failureReason: string | null
+  triggeredBy: string
+  reason: string | null
+  requestedAt: string
+  startedAt: string | null
+  completedAt: string | null
+  lastVerifiedAt: string | null
+  lastVerificationStatus: BackupVerificationStatus | null
+  lastVerificationDetails: string | null
+  scratchTarget: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface RestoreRun {
+  id: string
+  tenantId: string
+  backupId: string | null
+  backupLocation: string
+  status: BackupRunStatus
+  failureReason: string | null
+  safetySnapshotId: string | null
+  triggeredBy: string
+  reason: string | null
+  requestedAt: string
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface AuditLogEntry {
+  id: number
+  tenantId: string | null
+  actor: string
+  action: string
+  resourceType: string
+  resourceId: string | null
+  outcome: AuditOutcome
+  details: string | null
+  createdAt: string
+}
+
+/**
+ * Compact summary of the latest successful backup for a tenant. Used by fleet
+ * status / storage status views so they don't have to fetch every catalog row.
+ */
+export interface TenantBackupSummary {
+  backupId: string
+  location: string | null
+  lastBackupAt: string | null
+  lastBackupStatus: 'succeeded'
+  lastVerifiedAt: string | null
+  lastVerificationStatus: BackupVerificationStatus | null
+  sizeBytes: number | null
+  checksum: string | null
+}
+
+export interface TenantRestoreSummary {
+  restoreId: string
+  backupId: string | null
+  backupLocation: string
+  status: BackupRunStatus
+  requestedAt: string
+  completedAt: string | null
+  failureReason: string | null
+}
+
+export interface BackupRunResponse {
+  backup: BackupRun
+}
+
+export interface BackupRunListResponse {
+  backups: BackupRun[]
+}
+
+export interface RestoreRunResponse {
+  restore: RestoreRun
+}
+
+export interface RestoreRunListResponse {
+  restores: RestoreRun[]
+}
+
+export interface TenantAuditLogResponse {
+  entries: AuditLogEntry[]
 }

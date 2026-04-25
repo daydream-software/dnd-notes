@@ -25,9 +25,18 @@ import {
 } from './provisioning.js'
 import { formatUnknownError } from './error-formatting.js'
 import type { TenantRegistry } from './tenant-registry.js'
+import {
+  BackupDispatchUnavailableError,
+  ThrowingTenantBackupDispatcher,
+  type TenantBackupDispatcher,
+} from './tenant-backup-dispatcher.js'
 import { tenantStates } from './types.js'
 import type {
+  BackupRun,
+  BackupRunListResponse,
+  BackupRunResponse,
   FleetStatusResponse,
+  FleetTenantBackupStatus,
   PortalAccount,
   PortalCatalogResponse,
   PortalDashboardResponse,
@@ -35,6 +44,10 @@ import type {
   PortalSession,
   PortalSessionResponse,
   PortalTenantSummary,
+  RestoreRunListResponse,
+  RestoreRunResponse,
+  TenantAuditLogResponse,
+  TenantBackupSummary,
   TenantDeprovisionResponse,
   ErrorResponse,
   HealthResponse,
@@ -42,6 +55,7 @@ import type {
   TenantDetailResponse,
   TenantListResponse,
   TenantProvisioningResponse,
+  TenantRestoreSummary,
   TenantStorageBackupReadiness,
   TenantStorageSnapshot,
   TenantStorageStatus,
@@ -56,131 +70,58 @@ function createTenantStateCounts() {
   >
 }
 
-function readMetadataString(
-  metadata: Record<string, unknown>,
-  keys: string[],
-): string | null {
-  for (const key of keys) {
-    const value = metadata[key]
-    if (typeof value === 'string') {
-      const trimmedValue = value.trim()
-      if (trimmedValue.length > 0) {
-        return trimmedValue
-      }
-    }
-  }
-
-  return null
-}
-
-function parseBackupMetadata(rawMetadata: string | null) {
-  const normalizedRawMetadata =
-    rawMetadata && hasBackupMetadata(rawMetadata) ? rawMetadata.trim() : null
-  const emptyStatus = {
-    rawMetadata: normalizedRawMetadata,
-    location: null,
-    lastBackupAt: null,
-    lastBackupStatus: null,
-    lastRestoreDrillAt: null,
-    lastRestoreDrillStatus: null,
-  }
-
-  if (!normalizedRawMetadata) {
-    return emptyStatus
-  }
-
-  try {
-    const parsed = JSON.parse(normalizedRawMetadata)
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return emptyStatus
-    }
-
-    const metadata = parsed as Record<string, unknown>
-
-    return {
-      rawMetadata: normalizedRawMetadata,
-      location: readMetadataString(metadata, ['location', 'backupLocation']),
-      lastBackupAt: readMetadataString(metadata, ['lastBackupAt', 'lastBackup']),
-      lastBackupStatus: readMetadataString(metadata, [
-        'lastBackupStatus',
-        'backupStatus',
-      ]),
-      lastRestoreDrillAt: readMetadataString(metadata, [
-        'lastRestoreDrillAt',
-        'lastRestoreDrill',
-      ]),
-      lastRestoreDrillStatus: readMetadataString(metadata, [
-        'lastRestoreDrillStatus',
-        'restoreDrillStatus',
-        'lastRestoreStatus',
-      ]),
-    }
-  } catch {
-    return emptyStatus
+function buildFleetBackupStatus(
+  backupSummary: TenantBackupSummary | undefined,
+  restoreSummary: TenantRestoreSummary | undefined,
+): FleetTenantBackupStatus {
+  return {
+    backupId: backupSummary?.backupId ?? null,
+    location: backupSummary?.location ?? null,
+    lastBackupAt: backupSummary?.lastBackupAt ?? null,
+    lastBackupStatus: backupSummary?.lastBackupStatus ?? null,
+    lastVerifiedAt: backupSummary?.lastVerifiedAt ?? null,
+    lastVerificationStatus: backupSummary?.lastVerificationStatus ?? null,
+    sizeBytes: backupSummary?.sizeBytes ?? null,
+    checksum: backupSummary?.checksum ?? null,
+    lastRestoreAt:
+      restoreSummary?.completedAt ?? restoreSummary?.requestedAt ?? null,
+    lastRestoreStatus: restoreSummary?.status ?? null,
   }
 }
-
-function hasBackupMetadata(rawMetadata: string | null) {
-  return rawMetadata !== null && rawMetadata.trim().length > 0
-}
-
-const successfulCutoverBackupStatuses = new Set([
-  'ok',
-  'passed',
-  'success',
-  'succeeded',
-  'completed',
-])
 
 function describeTenantCutoverBackupReadiness(
-  rawMetadata: string | null,
+  backupStatus: FleetTenantBackupStatus,
 ): TenantStorageBackupReadiness {
-  const backup = parseBackupMetadata(rawMetadata)
-
-  if (!backup.rawMetadata) {
+  if (!backupStatus.backupId) {
     return {
-      ...backup,
+      ...backupStatus,
       status: 'missing',
-      details: 'Record a successful backup before tenant cutover can start.',
+      details:
+        'Record a successful backup (POST /tenants/:id/backup) before tenant cutover can start.',
     }
   }
 
-  if (!backup.location || !backup.lastBackupAt) {
+  if (!backupStatus.location || !backupStatus.lastBackupAt) {
     return {
-      ...backup,
-      status: 'invalid',
-      details: 'Backup metadata must include both location and lastBackupAt before cutover.',
-    }
-  }
-
-  const normalizedStatus = backup.lastBackupStatus?.trim().toLowerCase() ?? null
-
-  if (!normalizedStatus) {
-    return {
-      ...backup,
+      ...backupStatus,
       status: 'invalid',
       details:
-        'Backup metadata must include a successful lastBackupStatus before cutover.',
-    }
-  }
-
-  if (normalizedStatus && !successfulCutoverBackupStatuses.has(normalizedStatus)) {
-    return {
-      ...backup,
-      status: 'invalid',
-      details: `Latest backup status "${backup.lastBackupStatus}" is not cutover-ready.`,
+        'Latest backup row is missing a storage location or completion timestamp.',
     }
   }
 
   return {
-    ...backup,
+    ...backupStatus,
     status: 'ready',
-    details: 'Latest backup metadata is sufficient for cutover gating.',
+    details: 'Latest backup is sufficient for cutover gating.',
   }
 }
 
-function buildTenantStorageStatus(snapshot: TenantStorageSnapshot): TenantStorageStatus {
-  const backup = describeTenantCutoverBackupReadiness(snapshot.backupMetadata)
+function buildTenantStorageStatus(
+  snapshot: TenantStorageSnapshot,
+  backupStatus: FleetTenantBackupStatus,
+): TenantStorageStatus {
+  const backup = describeTenantCutoverBackupReadiness(backupStatus)
   const blockers: string[] = []
 
   if (snapshot.currentState !== 'ready') {
@@ -246,6 +187,7 @@ interface CreateAppOptions {
   adminToken?: string
   adminAuth?: ControlPlaneAdminAuth
   tenantProvisioningService?: TenantProvisioningPort
+  tenantBackupDispatcher?: TenantBackupDispatcher
   trustProxy?: boolean | number
   portalAuthMode?: 'local' | 'keycloak'
   portalDefaultTenantVersion?: string
@@ -323,8 +265,16 @@ const updateStorageSchema = z.object({
   storageReference: z.string().min(1),
 })
 
-const updateBackupSchema = z.object({
-  backupMetadata: z.string().min(1),
+const triggerBackupSchema = z.object({
+  triggeredBy: z.string().min(1),
+  reason: z.string().min(1).optional(),
+})
+
+const triggerRestoreSchema = z.object({
+  triggeredBy: z.string().min(1),
+  reason: z.string().min(1).optional(),
+  backupId: z.string().min(1).optional(),
+  backupLocation: z.string().min(1).optional(),
 })
 
 const provisionTenantSchema = z.object({
@@ -640,6 +590,7 @@ export function createApp({
   adminToken,
   adminAuth = createControlPlaneAdminAuth({ mode: 'static' }),
   tenantProvisioningService,
+  tenantBackupDispatcher = new ThrowingTenantBackupDispatcher(),
   trustProxy = false,
   portalAuthMode = 'local',
   portalDefaultTenantVersion = appVersion,
@@ -657,29 +608,39 @@ export function createApp({
     version: appVersion,
   })
   const buildFleetStatusResponse = async (): Promise<FleetStatusResponse> => {
-    const latestTransitionsByTenant = await tenantRegistry.getLatestStateTransitions()
+    const [latestTransitionsByTenant, backupSummaries, restoreSummaries, allTenants] =
+      await Promise.all([
+        tenantRegistry.getLatestStateTransitions(),
+        tenantRegistry.getLatestSuccessfulBackupSummaries(),
+        tenantRegistry.getLatestRestoreSummaries(),
+        tenantRegistry.listTenants(),
+      ])
     const tenantsByCurrentState = createTenantStateCounts()
     const tenantsByDesiredState = createTenantStateCounts()
     const tenantsByVersion: Record<string, number> = {}
-    let tenantsWithBackupMetadata = 0
-    let tenantsMissingBackupMetadata = 0
+    let tenantsWithBackup = 0
+    let tenantsMissingBackup = 0
     let tenantsNeedingAttention = 0
 
-    const tenants = (await tenantRegistry.listTenants()).map((tenant) => {
+    const tenants = allTenants.map((tenant) => {
       tenantsByCurrentState[tenant.currentState] += 1
       tenantsByDesiredState[tenant.desiredState] += 1
       tenantsByVersion[tenant.version] = (tenantsByVersion[tenant.version] ?? 0) + 1
 
-      if (hasBackupMetadata(tenant.backupMetadata)) {
-        tenantsWithBackupMetadata += 1
+      const backupSummary = backupSummaries.get(tenant.id)
+      const restoreSummary = restoreSummaries.get(tenant.id)
+      const backup = buildFleetBackupStatus(backupSummary, restoreSummary)
+
+      if (backupSummary) {
+        tenantsWithBackup += 1
       } else {
-        tenantsMissingBackupMetadata += 1
+        tenantsMissingBackup += 1
       }
 
       const needsAttention =
         tenant.currentState !== 'ready' ||
         tenant.currentState !== tenant.desiredState ||
-        !hasBackupMetadata(tenant.backupMetadata)
+        !backupSummary
       const health: 'healthy' | 'attention' = needsAttention
         ? 'attention'
         : 'healthy'
@@ -691,7 +652,7 @@ export function createApp({
       return {
         tenant,
         health,
-        backup: parseBackupMetadata(tenant.backupMetadata),
+        backup,
         latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
       }
     })
@@ -718,8 +679,8 @@ export function createApp({
         tenantsByCurrentState,
         tenantsByDesiredState,
         tenantsByVersion,
-        tenantsWithBackupMetadata,
-        tenantsMissingBackupMetadata,
+        tenantsWithBackup,
+        tenantsMissingBackup,
         tenantsNeedingAttention,
       },
       tenants,
@@ -757,8 +718,13 @@ export function createApp({
   const buildPortalTenantSummary = async (
     tenantId: string,
   ): Promise<PortalTenantSummary | null> => {
-    const latestTransitionsByTenant = await tenantRegistry.getLatestStateTransitions()
-    const tenant = await tenantRegistry.getTenant(tenantId)
+    const [latestTransitionsByTenant, backupSummaries, restoreSummaries, tenant] =
+      await Promise.all([
+        tenantRegistry.getLatestStateTransitions(),
+        tenantRegistry.getLatestSuccessfulBackupSummaries(),
+        tenantRegistry.getLatestRestoreSummaries(),
+        tenantRegistry.getTenant(tenantId),
+      ])
 
     if (!tenant) {
       return null
@@ -767,7 +733,10 @@ export function createApp({
     return {
       tenant,
       latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
-      backup: parseBackupMetadata(tenant.backupMetadata),
+      backup: buildFleetBackupStatus(
+        backupSummaries.get(tenant.id),
+        restoreSummaries.get(tenant.id),
+      ),
       appUrl: buildPortalAppUrl(tenant.subdomain),
       settingsPath: `/dashboard/tenants/${tenant.id}`,
     }
@@ -775,11 +744,20 @@ export function createApp({
   const buildPortalDashboardResponse = async (
     account: PortalAccount,
   ): Promise<PortalDashboardResponse> => {
-    const latestTransitionsByTenant = await tenantRegistry.getLatestStateTransitions()
-    const tenants = (await tenantRegistry.listTenantsByOwnerId(account.id)).map((tenant) => ({
+    const [latestTransitionsByTenant, backupSummaries, restoreSummaries, ownedTenants] =
+      await Promise.all([
+        tenantRegistry.getLatestStateTransitions(),
+        tenantRegistry.getLatestSuccessfulBackupSummaries(),
+        tenantRegistry.getLatestRestoreSummaries(),
+        tenantRegistry.listTenantsByOwnerId(account.id),
+      ])
+    const tenants = ownedTenants.map((tenant) => ({
       tenant,
       latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
-      backup: parseBackupMetadata(tenant.backupMetadata),
+      backup: buildFleetBackupStatus(
+        backupSummaries.get(tenant.id),
+        restoreSummaries.get(tenant.id),
+      ),
       appUrl: buildPortalAppUrl(tenant.subdomain),
       settingsPath: `/dashboard/tenants/${tenant.id}`,
     }))
@@ -1362,14 +1340,23 @@ export function createApp({
       response: Response<TenantStorageStatusResponse | ErrorResponse>,
     ) => {
       const { tenantId } = request.params
-      const storage = await tenantRegistry.getTenantStorageSnapshot(tenantId)
+      const [storage, backupSummaries, restoreSummaries] = await Promise.all([
+        tenantRegistry.getTenantStorageSnapshot(tenantId),
+        tenantRegistry.getLatestSuccessfulBackupSummaries(),
+        tenantRegistry.getLatestRestoreSummaries(),
+      ])
 
       if (!storage) {
         response.status(404).json({ error: 'Tenant not found' })
         return
       }
 
-      response.json({ storage: buildTenantStorageStatus(storage) })
+      const backupStatus = buildFleetBackupStatus(
+        backupSummaries.get(tenantId),
+        restoreSummaries.get(tenantId),
+      )
+
+      response.json({ storage: buildTenantStorageStatus(storage, backupStatus) })
     },
   )
 
@@ -1572,14 +1559,31 @@ export function createApp({
     },
   )
 
-  app.patch(
+  const handleBackupDispatchError = (error: unknown): { status: number; body: ErrorResponse } => {
+    if (error instanceof BackupDispatchUnavailableError) {
+      return {
+        status: 501,
+        body: { error: error.message },
+      }
+    }
+
+    return {
+      status: 500,
+      body: {
+        error: 'Backup runner failed',
+        details: getErrorMessage(error),
+      },
+    }
+  }
+
+  app.post(
     `${tenantRoutePrefix}/:tenantId/backup`,
     async (
       request: Request<{ tenantId: string }>,
-      response: Response<TenantDetailResponse | ErrorResponse>,
+      response: Response<BackupRunResponse | ErrorResponse>,
     ) => {
       const { tenantId } = request.params
-      const parseResult = updateBackupSchema.safeParse(request.body)
+      const parseResult = triggerBackupSchema.safeParse(request.body)
 
       if (!parseResult.success) {
         response.status(400).json({
@@ -1589,31 +1593,308 @@ export function createApp({
         return
       }
 
-      const { backupMetadata } = parseResult.data
-
-      const existingTenant = await tenantRegistry.getTenant(tenantId)
-      if (!existingTenant) {
+      const { triggeredBy, reason } = parseResult.data
+      const tenant = await tenantRegistry.getTenant(tenantId)
+      if (!tenant) {
         response.status(404).json({ error: 'Tenant not found' })
         return
       }
 
-      try {
-        await tenantRegistry.updateTenantBackupMetadata(tenantId, backupMetadata)
-        const tenant = await tenantRegistry.getTenant(tenantId)
+      if (!tenant.storageReference) {
+        response.status(409).json({
+          error: 'Tenant storage is not provisioned; cannot run backup.',
+        })
+        return
+      }
 
-        if (!tenant) {
-          response.status(404).json({ error: 'Tenant not found' })
+      if (
+        tenant.currentState !== 'ready' &&
+        tenant.currentState !== 'maintenance'
+      ) {
+        response.status(409).json({
+          error: `Tenant must be in ready or maintenance state to run a backup (current: ${tenant.currentState}).`,
+        })
+        return
+      }
+
+      const backupId = randomUUID()
+      const backupRun = await tenantRegistry.createBackupRun({
+        id: backupId,
+        tenantId,
+        triggeredBy,
+        reason: reason ?? null,
+      })
+      await tenantRegistry.appendAuditLogEntry({
+        tenantId,
+        actor: triggeredBy,
+        action: 'tenant.backup.create',
+        resourceType: 'backup_catalog',
+        resourceId: backupId,
+        outcome: 'requested',
+        details: reason ?? null,
+      })
+
+      try {
+        await tenantRegistry.markBackupRunRunning(backupId)
+        const artifact = await tenantBackupDispatcher.executeBackup({ tenant })
+        const completed = await tenantRegistry.markBackupRunCompleted(backupId, {
+          location: artifact.location,
+          sizeBytes: artifact.sizeBytes,
+          checksum: artifact.sha256,
+          completedAt: artifact.capturedAt,
+        })
+        await tenantRegistry.appendAuditLogEntry({
+          tenantId,
+          actor: triggeredBy,
+          action: 'tenant.backup.create',
+          resourceType: 'backup_catalog',
+          resourceId: backupId,
+          outcome: 'succeeded',
+          details: artifact.location,
+        })
+        response.status(201).json({ backup: completed })
+      } catch (error) {
+        const failureReason = getErrorMessage(error)
+        const failed = await tenantRegistry
+          .markBackupRunFailed(backupId, failureReason)
+          .catch(() => backupRun)
+        await tenantRegistry
+          .appendAuditLogEntry({
+            tenantId,
+            actor: triggeredBy,
+            action: 'tenant.backup.create',
+            resourceType: 'backup_catalog',
+            resourceId: backupId,
+            outcome: 'failed',
+            details: failureReason,
+          })
+          .catch(() => undefined)
+        const { status, body } = handleBackupDispatchError(error)
+        if (status === 501) {
+          response.status(501).json({
+            ...body,
+            details: failed.failureReason ?? failureReason,
+          })
           return
         }
-
-        response.json({ tenant })
-      } catch (error) {
-        logUnexpectedError('Failed to update backup metadata', error)
-        response.status(500).json({
-          error: 'Failed to update backup metadata',
-          details: getErrorMessage(error),
-        })
+        logUnexpectedError('Failed to run tenant backup', error)
+        response.status(status).json(body)
       }
+    },
+  )
+
+  app.get(
+    `${tenantRoutePrefix}/:tenantId/backups`,
+    async (
+      request: Request<{ tenantId: string }>,
+      response: Response<BackupRunListResponse | ErrorResponse>,
+    ) => {
+      const { tenantId } = request.params
+      const tenant = await tenantRegistry.getTenant(tenantId)
+      if (!tenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+      const backups = await tenantRegistry.listTenantBackups(tenantId)
+      response.json({ backups })
+    },
+  )
+
+  app.post(
+    `${tenantRoutePrefix}/:tenantId/restore`,
+    async (
+      request: Request<{ tenantId: string }>,
+      response: Response<RestoreRunResponse | ErrorResponse>,
+    ) => {
+      const { tenantId } = request.params
+      const parseResult = triggerRestoreSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      const { triggeredBy, reason, backupId, backupLocation } = parseResult.data
+
+      if (!backupId && !backupLocation) {
+        response.status(400).json({
+          error:
+            'Either backupId or backupLocation must be provided to identify the backup to restore.',
+        })
+        return
+      }
+
+      const tenant = await tenantRegistry.getTenant(tenantId)
+      if (!tenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+
+      if (!tenant.storageReference) {
+        response.status(409).json({
+          error: 'Tenant storage is not provisioned; cannot run restore.',
+        })
+        return
+      }
+
+      let resolvedBackup: BackupRun | null = null
+      if (backupId) {
+        resolvedBackup = await tenantRegistry.getBackupRun(backupId)
+        if (!resolvedBackup || resolvedBackup.tenantId !== tenantId) {
+          response.status(404).json({ error: 'Backup not found for this tenant.' })
+          return
+        }
+        if (resolvedBackup.status !== 'completed' || !resolvedBackup.location) {
+          response.status(409).json({
+            error: `Backup ${backupId} is not in a completed state with a stored location.`,
+          })
+          return
+        }
+      }
+
+      const resolvedLocation =
+        backupLocation ?? resolvedBackup?.location ?? null
+      if (!resolvedLocation) {
+        response.status(400).json({
+          error: 'Could not resolve a backup location for restore.',
+        })
+        return
+      }
+
+      if (
+        tenant.currentState !== 'ready' &&
+        tenant.currentState !== 'maintenance'
+      ) {
+        response.status(409).json({
+          error: `Tenant must be in ready or maintenance state to start a restore (current: ${tenant.currentState}).`,
+        })
+        return
+      }
+
+      const restoreId = randomUUID()
+      const previousState = tenant.currentState
+      const restoreRun = await tenantRegistry.createRestoreRun({
+        id: restoreId,
+        tenantId,
+        backupId: resolvedBackup?.id ?? null,
+        backupLocation: resolvedLocation,
+        triggeredBy,
+        reason: reason ?? null,
+      })
+      await tenantRegistry.appendAuditLogEntry({
+        tenantId,
+        actor: triggeredBy,
+        action: 'tenant.restore.create',
+        resourceType: 'restore_log',
+        resourceId: restoreId,
+        outcome: 'requested',
+        details: resolvedLocation,
+      })
+
+      try {
+        await tenantRegistry.updateTenantState(
+          tenantId,
+          'restoring',
+          triggeredBy,
+          reason ?? `Restore ${restoreId}`,
+        )
+        await tenantRegistry.markRestoreRunRunning(restoreId)
+        const restoredTenant = await tenantRegistry.getTenant(tenantId)
+        if (!restoredTenant) {
+          throw new Error(`Tenant ${tenantId} disappeared during restore.`)
+        }
+        const result = await tenantBackupDispatcher.executeRestore({
+          tenant: restoredTenant,
+          backupLocation: resolvedLocation,
+        })
+        await tenantRegistry.updateTenantState(
+          tenantId,
+          previousState,
+          triggeredBy,
+          `Restore ${restoreId} completed`,
+        )
+        const completed = await tenantRegistry.markRestoreRunCompleted(restoreId, {
+          completedAt: result.restoredAt,
+        })
+        await tenantRegistry.appendAuditLogEntry({
+          tenantId,
+          actor: triggeredBy,
+          action: 'tenant.restore.create',
+          resourceType: 'restore_log',
+          resourceId: restoreId,
+          outcome: 'succeeded',
+          details: resolvedLocation,
+        })
+        response.status(201).json({ restore: completed })
+      } catch (error) {
+        const failureReason = getErrorMessage(error)
+        await tenantRegistry
+          .markRestoreRunFailed(restoreId, failureReason)
+          .catch(() => restoreRun)
+        await tenantRegistry
+          .updateTenantState(
+            tenantId,
+            previousState,
+            triggeredBy,
+            `Restore ${restoreId} failed`,
+          )
+          .catch(() => undefined)
+        await tenantRegistry
+          .appendAuditLogEntry({
+            tenantId,
+            actor: triggeredBy,
+            action: 'tenant.restore.create',
+            resourceType: 'restore_log',
+            resourceId: restoreId,
+            outcome: 'failed',
+            details: failureReason,
+          })
+          .catch(() => undefined)
+        const { status, body } = handleBackupDispatchError(error)
+        if (status === 501) {
+          response.status(501).json(body)
+          return
+        }
+        logUnexpectedError('Failed to run tenant restore', error)
+        response.status(status).json(body)
+      }
+    },
+  )
+
+  app.get(
+    `${tenantRoutePrefix}/:tenantId/restores`,
+    async (
+      request: Request<{ tenantId: string }>,
+      response: Response<RestoreRunListResponse | ErrorResponse>,
+    ) => {
+      const { tenantId } = request.params
+      const tenant = await tenantRegistry.getTenant(tenantId)
+      if (!tenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+      const restores = await tenantRegistry.listTenantRestores(tenantId)
+      response.json({ restores })
+    },
+  )
+
+  app.get(
+    `${tenantRoutePrefix}/:tenantId/audit`,
+    async (
+      request: Request<{ tenantId: string }>,
+      response: Response<TenantAuditLogResponse | ErrorResponse>,
+    ) => {
+      const { tenantId } = request.params
+      const tenant = await tenantRegistry.getTenant(tenantId)
+      if (!tenant) {
+        response.status(404).json({ error: 'Tenant not found' })
+        return
+      }
+      const entries = await tenantRegistry.listTenantAuditLog(tenantId)
+      response.json({ entries })
     },
   )
 

@@ -8,7 +8,7 @@ The control-plane service maintains the tenant registry and exposes internal API
 - Provisioning new tenant instances
 - Tracking tenant lifecycle state (7-state model)
 - Recording state transitions for audit trails
-- Managing storage references and backup metadata
+- Managing storage references and per-tenant backup lifecycle (catalog, restore log, audit log)
 
 This service is **cluster-internal only** and not exposed to end users.
 All `/internal` routes require a bearer token. In static mode that is
@@ -50,9 +50,32 @@ Each tenant record includes:
 - `currentState`: Actual state (observed from K8s API)
 - `version`: Current app version running
 - `storageReference`: Current storage backing reference (legacy PVC name or tenant Postgres database name)
-- `backupMetadata`: Opaque string for backup metadata (often JSON-serialized details such as locations and schedules)
 - `createdAt`: Tenant creation timestamp
 - `updatedAt`: Last modification timestamp
+
+Backup state used to live on the tenant row as the free-form
+`backup_metadata` column. Issue `#89` replaced it with first-class catalog
+tables (see below) and dropped the column in migration `0003`.
+
+### Backup catalog, restore log, and audit log (`#89`)
+
+- `backup_catalog` — one row per backup attempt with full lifecycle
+  (`queued → running → completed/failed/canceled`), `format`, `location`,
+  `size_bytes`, `checksum`, `failure_reason`, `triggered_by`, `reason`,
+  verification fields (`last_verified_at`, `last_verification_status`,
+  `last_verification_details`), and `scratch_target` for the artifact
+  staging path. Latest successful row per tenant feeds the fleet/status
+  and storage-readiness surfaces.
+- `restore_log` — one row per restore attempt referencing the source
+  `backup_id` plus an optional `safety_snapshot_id` recorded by the
+  runner before the destructive restore step. Tracks the same lifecycle
+  as `backup_catalog`.
+- `control_plane_audit_log` — append-only audit trail for control-plane
+  actions (`tenant.backup.create`, `tenant.restore.create`, …). Each
+  entry captures `actor`, `action`, `resource_type`, `resource_id`,
+  `outcome` (`requested`/`succeeded`/`failed`), and free-form
+  `details`. Audit writes are best-effort; they never mask the original
+  request outcome.
 
 The live provisioning slice also creates a per-tenant Postgres database plus a
 tenant-scoped runtime role/secret for newly provisioned tenants. New Postgres-only
@@ -88,7 +111,11 @@ Every state change is logged with:
 - `PATCH /internal/tenants/:tenantId/state` — Update current state (records transition)
 - `PATCH /internal/tenants/:tenantId/desired-state` — Update desired state
 - `PATCH /internal/tenants/:tenantId/storage` — Update storage reference
-- `PATCH /internal/tenants/:tenantId/backup` — Update backup metadata
+- `POST /internal/tenants/:tenantId/backup` — Trigger a backup via the configured backup dispatcher (records a `backup_catalog` row + audit log entry; `501` when no live dispatcher is wired)
+- `GET /internal/tenants/:tenantId/backups` — List the tenant's `backup_catalog` history
+- `POST /internal/tenants/:tenantId/restore` — Trigger a restore from a catalog row or explicit `backupLocation` (records a `restore_log` row, drives `ready/maintenance ↔ restoring` transitions, audit-logged; `501` when no live dispatcher is wired)
+- `GET /internal/tenants/:tenantId/restores` — List the tenant's `restore_log` history
+- `GET /internal/tenants/:tenantId/audit` — List the tenant's `control_plane_audit_log` entries
 - `GET /internal/tenants/:tenantId/transitions` — Get state transition history
 
 ### Fleet status surface (`#57`)
@@ -101,13 +128,25 @@ not the full operator portal. It includes:
 - control-plane health (`status`, `uptime`, `version`)
 - key dependency state (tenant registry plus whether tenant provisioning is enabled)
 - fleet summary counts by tenant state and version
-- per-tenant status details, including current/desired state, latest recorded transition, and lifted backup fields when `backupMetadata` already contains parseable JSON
+- per-tenant status details, including current/desired state, latest recorded transition, and catalog-derived backup/restore fields (latest completed `backup_catalog` row per tenant plus the latest `restore_log` row)
 
-`backupMetadata` remains opaque in storage. The status endpoint only lifts known
-fields such as `lastBackupAt`, `lastBackupStatus`, `lastRestoreDrillAt`,
-`lastRestoreDrillStatus`, and `location` when they already exist in JSON
-metadata; otherwise it preserves the raw string and reports the parsed fields as
-`null`.
+`FleetTenantBackupStatus` is now derived directly from the catalog tables
+(`backupId`, `location`, `lastBackupAt`, `lastBackupStatus`,
+`lastVerifiedAt`, `lastVerificationStatus`, `sizeBytes`, `checksum`,
+`lastRestoreAt`, `lastRestoreStatus`). The opaque `backupMetadata`
+fall-back has been removed.
+
+### Backup runner seam (`#89` / `#100`)
+
+The control-plane API owns the `backup_catalog`/`restore_log`/audit
+lifecycle and tenant-state transitions, while the actual `pg_dump` /
+`pg_restore` work is delegated to a `TenantBackupDispatcher` injected
+into `createApp`. The default in-process dispatcher is
+`ThrowingTenantBackupDispatcher`, which surfaces `501` from the API so
+deploys that haven't wired a real runner stay safe. Issue `#100` is
+expected to plug `PostgresTenantBackupRunner` into the seam via
+`createPostgresTenantBackupDispatcher` once an artifact-store directory
+is configured.
 
 Issue `#100` now also has a direct Postgres runner seam in
 `src/tenant-backup-runner.ts`: it can create `pg_dump --format=custom`
@@ -121,8 +160,9 @@ The dedicated tenant-storage endpoint adds the next cutover-focused layer on
 top: it exposes the persisted storage mode, storage-migration status, the last
 cutover failure reason when one exists, and a simple cutover-readiness gate that
 checks tenant state plus backup metadata quality before a future cutover run is
-allowed. A backup only counts as cutover-ready when metadata includes
-`location`, `lastBackupAt`, and a successful `lastBackupStatus`.
+allowed. A backup only counts as cutover-ready when the latest
+`backup_catalog` row is `completed` and includes both `location` and a
+non-null `lastBackupAt`.
 
 ### Customer portal surface (`#70`)
 
