@@ -1178,6 +1178,16 @@ describe('Control Plane API', () => {
         verifiedAt: '2026-04-19T06:00:00Z',
         details: 'restore drill ok',
       })
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-ready-1',
+        tenantId: 'tenant-ready',
+        backupId: 'backup-ready-1',
+        backupLocation: 'blob://backups/tenant-ready',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markRestoreRunCompleted('restore-ready-1', {
+        completedAt: '2026-04-20T06:00:00Z',
+      })
 
       await tenantRegistry.createTenant({
         id: 'tenant-failed',
@@ -1223,10 +1233,24 @@ describe('Control Plane API', () => {
       assert.strictEqual(readyTenant.backup.lastBackupStatus, 'succeeded')
       assert.strictEqual(readyTenant.backup.lastVerifiedAt, '2026-04-19T06:00:00.000Z')
       assert.strictEqual(readyTenant.backup.lastVerificationStatus, 'passed')
+      assert.strictEqual(readyTenant.backup.lastRestoreAt, '2026-04-20T06:00:00.000Z')
+      assert.strictEqual(readyTenant.backup.lastRestoreStatus, 'completed')
+      assert.strictEqual(
+        readyTenant.backup.lastRestoreDrillAt,
+        '2026-04-20T06:00:00.000Z',
+      )
+      assert.strictEqual(readyTenant.backup.lastRestoreDrillStatus, 'completed')
       assert.strictEqual(
         readyTenant.backup.location,
         'blob://backups/tenant-ready',
       )
+      assert.deepStrictEqual(JSON.parse(readyTenant.backup.rawMetadata), {
+        location: 'blob://backups/tenant-ready',
+        lastBackupAt: '2026-04-18T22:00:00.000Z',
+        lastBackupStatus: 'succeeded',
+        lastRestoreDrillAt: '2026-04-20T06:00:00.000Z',
+        lastRestoreDrillStatus: 'completed',
+      })
       assert.strictEqual(readyTenant.latestTransition.triggeredBy, 'test-suite')
       assert.strictEqual(readyTenant.latestTransition.reason, 'Provisioned in test')
       assert.strictEqual(readyTenant.latestTransition.toState, 'ready')
@@ -2253,6 +2277,8 @@ describe('Control Plane API', () => {
       const response = await authedGet(`${tenantPath('tenant-audit')}/audit`).expect(200)
 
       assert.strictEqual(response.body.entries.length, 1)
+      assert.strictEqual(response.body.entries[0].id, '1')
+      assert.strictEqual(typeof response.body.entries[0].id, 'string')
       assert.strictEqual(response.body.entries[0].action, 'tenant.test')
       assert.strictEqual(response.body.entries[0].outcome, 'requested')
     })

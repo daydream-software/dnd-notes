@@ -70,11 +70,58 @@ function createTenantStateCounts() {
   >
 }
 
+function buildLegacyFleetBackupMetadata(params: {
+  hasBackupRecord: boolean
+  location: string | null
+  lastBackupAt: string | null
+  lastBackupStatus: string | null
+  lastRestoreDrillAt: string | null
+  lastRestoreDrillStatus: string | null
+}) {
+  if (!params.hasBackupRecord) {
+    return null
+  }
+
+  const metadata: Record<string, string> = {}
+
+  if (params.location) {
+    metadata.location = params.location
+  }
+  if (params.lastBackupAt) {
+    metadata.lastBackupAt = params.lastBackupAt
+  }
+  if (params.lastBackupStatus) {
+    metadata.lastBackupStatus = params.lastBackupStatus
+  }
+  if (params.lastRestoreDrillAt) {
+    metadata.lastRestoreDrillAt = params.lastRestoreDrillAt
+  }
+  if (params.lastRestoreDrillStatus) {
+    metadata.lastRestoreDrillStatus = params.lastRestoreDrillStatus
+  }
+
+  return JSON.stringify(metadata)
+}
+
 function buildFleetBackupStatus(
   backupSummary: TenantBackupSummary | undefined,
   restoreSummary: TenantRestoreSummary | undefined,
 ): FleetTenantBackupStatus {
+  const lastRestoreAt =
+    restoreSummary?.completedAt ?? restoreSummary?.requestedAt ?? null
+  const lastRestoreStatus = restoreSummary?.status ?? null
+
   return {
+    rawMetadata: buildLegacyFleetBackupMetadata({
+      hasBackupRecord: backupSummary !== undefined,
+      location: backupSummary?.location ?? null,
+      lastBackupAt: backupSummary?.lastBackupAt ?? null,
+      lastBackupStatus: backupSummary?.lastBackupStatus ?? null,
+      lastRestoreDrillAt: lastRestoreAt,
+      lastRestoreDrillStatus: lastRestoreStatus,
+    }),
+    lastRestoreDrillAt: lastRestoreAt,
+    lastRestoreDrillStatus: lastRestoreStatus,
     backupId: backupSummary?.backupId ?? null,
     location: backupSummary?.location ?? null,
     lastBackupAt: backupSummary?.lastBackupAt ?? null,
@@ -83,9 +130,8 @@ function buildFleetBackupStatus(
     lastVerificationStatus: backupSummary?.lastVerificationStatus ?? null,
     sizeBytes: backupSummary?.sizeBytes ?? null,
     checksum: backupSummary?.checksum ?? null,
-    lastRestoreAt:
-      restoreSummary?.completedAt ?? restoreSummary?.requestedAt ?? null,
-    lastRestoreStatus: restoreSummary?.status ?? null,
+    lastRestoreAt: lastRestoreAt,
+    lastRestoreStatus: lastRestoreStatus,
   }
 }
 
@@ -93,7 +139,21 @@ function buildBackupStatusFromRun(
   backupRun: BackupRun | undefined,
   restoreSummary: TenantRestoreSummary | undefined,
 ): FleetTenantBackupStatus {
+  const lastRestoreAt =
+    restoreSummary?.completedAt ?? restoreSummary?.requestedAt ?? null
+  const lastRestoreStatus = restoreSummary?.status ?? null
+
   return {
+    rawMetadata: buildLegacyFleetBackupMetadata({
+      hasBackupRecord: backupRun !== undefined,
+      location: backupRun?.location ?? null,
+      lastBackupAt: backupRun?.completedAt ?? null,
+      lastBackupStatus: backupRun?.status ?? null,
+      lastRestoreDrillAt: lastRestoreAt,
+      lastRestoreDrillStatus: lastRestoreStatus,
+    }),
+    lastRestoreDrillAt: lastRestoreAt,
+    lastRestoreDrillStatus: lastRestoreStatus,
     backupId: backupRun?.id ?? null,
     location: backupRun?.location ?? null,
     lastBackupAt: backupRun?.completedAt ?? null,
@@ -102,9 +162,8 @@ function buildBackupStatusFromRun(
     lastVerificationStatus: backupRun?.lastVerificationStatus ?? null,
     sizeBytes: backupRun?.sizeBytes ?? null,
     checksum: backupRun?.checksum ?? null,
-    lastRestoreAt:
-      restoreSummary?.completedAt ?? restoreSummary?.requestedAt ?? null,
-    lastRestoreStatus: restoreSummary?.status ?? null,
+    lastRestoreAt: lastRestoreAt,
+    lastRestoreStatus: lastRestoreStatus,
   }
 }
 

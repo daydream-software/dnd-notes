@@ -177,7 +177,7 @@ interface RestoreLogRow {
 }
 
 interface AuditLogRow {
-  id: number | string
+  id: bigint | number | string
   tenant_id: string | null
   actor: string
   action: string
@@ -1684,7 +1684,7 @@ export class TenantRegistry {
 
   private mapRowToAuditLogEntry(row: AuditLogRow): AuditLogEntry {
     return {
-      id: Number(row.id),
+      id: String(row.id),
       tenantId: row.tenant_id ?? null,
       actor: row.actor,
       action: row.action,

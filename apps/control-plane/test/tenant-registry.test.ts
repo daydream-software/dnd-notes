@@ -283,6 +283,36 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('preserves audit log ids as strings', () => {
+    const registry = Object.create(TenantRegistry.prototype) as TenantRegistry & {
+      mapRowToAuditLogEntry(row: {
+        id: string
+        tenant_id: string | null
+        actor: string
+        action: string
+        resource_type: string
+        resource_id: string | null
+        outcome: 'requested' | 'succeeded' | 'failed'
+        details: string | null
+        created_at: string
+      }): { id: string }
+    }
+
+    const entry = registry.mapRowToAuditLogEntry({
+      id: '9007199254740993',
+      tenant_id: 'tenant-audit',
+      actor: 'test-suite',
+      action: 'tenant.test',
+      resource_type: 'tenant',
+      resource_id: 'tenant-audit',
+      outcome: 'requested',
+      details: null,
+      created_at: '2026-04-25T00:00:00Z',
+    })
+
+    assert.equal(entry.id, '9007199254740993')
+  })
+
   it('re-seeds tenant_state_signature when the baseline ledger is already applied', async () => {
     const db = newDb({ autoCreateForeignKeyIndices: true })
     registerPgMemTenantRegistrySupport(db)

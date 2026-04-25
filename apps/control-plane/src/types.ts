@@ -95,6 +95,9 @@ export interface FleetDependencyHealth {
 }
 
 export interface FleetTenantBackupStatus {
+  rawMetadata: string | null
+  lastRestoreDrillAt: string | null
+  lastRestoreDrillStatus: string | null
   backupId: string | null
   location: string | null
   lastBackupAt: string | null
@@ -337,7 +340,7 @@ export interface RestoreRun {
 }
 
 export interface AuditLogEntry {
-  id: number
+  id: string
   tenantId: string | null
   actor: string
   action: string
