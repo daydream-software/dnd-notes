@@ -1,0 +1,734 @@
+import assert from 'node:assert/strict'
+import { createHmac, createSign, generateKeyPairSync, randomUUID } from 'node:crypto'
+import type { AddressInfo } from 'node:net'
+import { createServer, type Server } from 'node:http'
+import test, { afterEach } from 'node:test'
+
+import {
+  KeycloakJwtVerificationError,
+  clearJwkCache,
+  verifyToken,
+} from '../src/index.js'
+
+interface FakeRsaSigner {
+  baseUrl: string
+  jwksUrl: string
+  issuer: string
+  kid: string
+  signRs256: (header: Record<string, unknown>, payload: Record<string, unknown>) => string
+  setKid: (newKid: string) => void
+  fetchCount: () => number
+  close: () => Promise<void>
+}
+
+interface StartFakeJwksOptions {
+  realm?: string
+  publicJwkOverrides?: Record<string, unknown>
+}
+
+interface MockedNowController {
+  advanceMs: (deltaMs: number) => void
+}
+
+function encodeBase64Url(value: Buffer | string): string {
+  return Buffer.from(value)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '')
+}
+
+async function startFakeJwks({
+  realm = 'test-realm',
+  publicJwkOverrides = {},
+}: StartFakeJwksOptions = {}): Promise<FakeRsaSigner> {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 })
+  const publicJwk = publicKey.export({ format: 'jwk' }) as Record<string, unknown>
+  let kid = `kid-${randomUUID()}`
+  let fetchCount = 0
+
+  const server: Server = createServer((req, res) => {
+    if (req.url === `/realms/${realm}/protocol/openid-connect/certs`) {
+      fetchCount += 1
+      res.writeHead(200, { 'content-type': 'application/json' })
+      res.end(
+        JSON.stringify({
+          keys: [{ ...publicJwk, ...publicJwkOverrides, alg: 'RS256', kid, use: 'sig' }],
+        }),
+      )
+      return
+    }
+    res.writeHead(404)
+    res.end()
+  })
+
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
+  const address = server.address() as AddressInfo
+  const baseUrl = `http://127.0.0.1:${address.port}`
+  const issuer = `${baseUrl}/realms/${realm}`
+
+  return {
+    baseUrl,
+    issuer,
+    jwksUrl: `${issuer}/protocol/openid-connect/certs`,
+    get kid() {
+      return kid
+    },
+    setKid(newKid: string) {
+      kid = newKid
+    },
+    fetchCount() {
+      return fetchCount
+    },
+    signRs256(header, payload) {
+      const signingInput = `${encodeBase64Url(JSON.stringify(header))}.${encodeBase64Url(
+        JSON.stringify(payload),
+      )}`
+      const signature = createSign('RSA-SHA256').update(signingInput).sign(privateKey)
+      return `${signingInput}.${encodeBase64Url(signature)}`
+    },
+    async close() {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()))
+      })
+    },
+  }
+}
+
+function makeClaims(issuer: string, overrides: Record<string, unknown> = {}) {
+  const now = Math.floor(Date.now() / 1000)
+  return {
+    iss: issuer,
+    sub: 'subject-1',
+    aud: 'account',
+    azp: 'test-client',
+    email: 'user@example.com',
+    iat: now,
+    exp: now + 300,
+    nbf: now,
+    ...overrides,
+  }
+}
+
+async function withMockedDateNow<T>(
+  initialNowMs: number,
+  run: (controller: MockedNowController) => Promise<T>,
+): Promise<T> {
+  const originalDateNow = Date.now
+  let currentNowMs = initialNowMs
+  Date.now = () => currentNowMs
+
+  try {
+    return await run({
+      advanceMs(deltaMs: number) {
+        currentNowMs += deltaMs
+      },
+    })
+  } finally {
+    Date.now = originalDateNow
+  }
+}
+
+afterEach(() => {
+  clearJwkCache()
+})
+
+test('verifyToken accepts a well-formed RS256 JWT and returns parsed claims/header', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  const { header, claims } = await verifyToken(token, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+  })
+
+  assert.equal(header.alg, 'RS256')
+  assert.equal(claims.sub, 'subject-1')
+  assert.equal(claims.azp, 'test-client')
+})
+
+test('verifyToken caches the public key per (jwksUrl, kid) and skips repeat JWKS fetches', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  await verifyToken(token, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+  })
+  await verifyToken(token, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+  })
+
+  assert.equal(fake.fetchCount(), 1)
+})
+
+test('verifyToken refetches JWKS when a new kid rotates in', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const firstKid = fake.kid
+  const tokenA = fake.signRs256(
+    { alg: 'RS256', kid: firstKid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+  await verifyToken(tokenA, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+  })
+  assert.equal(fake.fetchCount(), 1)
+
+  const rotatedKid = `kid-${randomUUID()}`
+  fake.setKid(rotatedKid)
+  const tokenB = fake.signRs256(
+    { alg: 'RS256', kid: rotatedKid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  await verifyToken(tokenB, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+  })
+  assert.equal(fake.fetchCount(), 2)
+})
+
+test('verifyToken rejects an expired token with code "expired"', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now - 600, exp: now - 60, nbf: now - 600 }),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError && error.code === 'expired',
+  )
+})
+
+test('verifyToken keeps default expiration checks strict unless callers opt into clock skew', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now - 300, exp: now - 5, nbf: now - 300 }),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError && error.code === 'expired',
+  )
+})
+
+test('verifyToken accepts a token whose exp is within the allowed clock skew window', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now - 300, exp: now - 5, nbf: now - 300 }),
+  )
+
+  const { claims } = await verifyToken(token, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+    clockSkewSec: 30,
+  })
+
+  assert.equal(claims.sub, 'subject-1')
+})
+
+test('verifyToken accepts a token whose nbf is within the explicit notBeforeSkewSec window', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now, exp: now + 300, nbf: now + 5 }),
+  )
+
+  const { claims } = await verifyToken(token, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+    notBeforeSkewSec: 30,
+  })
+
+  assert.equal(claims.sub, 'subject-1')
+})
+
+test('verifyToken keeps expiration strict when only notBeforeSkewSec is provided', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now - 300, exp: now - 5, nbf: now - 5 }),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+      notBeforeSkewSec: 30,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError && error.code === 'expired',
+  )
+})
+
+test('verifyToken rejects invalid clock skew options before claim validation', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  for (const [name, options] of [
+    ['clockSkewSec', { clockSkewSec: Number.NaN }],
+    ['clockSkewSec', { clockSkewSec: Number.POSITIVE_INFINITY }],
+    ['notBeforeSkewSec', { notBeforeSkewSec: -1 }],
+  ] as const) {
+    await assert.rejects(
+      verifyToken(token, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+        ...options,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'malformed' &&
+        error.message.includes(name),
+    )
+  }
+})
+
+test('verifyToken rejects tokens whose exp overflows to a non-finite number', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const header = { alg: 'RS256', kid: fake.kid, typ: 'JWT' }
+  const payload = makeClaims(fake.issuer)
+  const token = `${encodeBase64Url(JSON.stringify(header))}.${encodeBase64Url(
+    JSON.stringify(payload).replace(`"exp":${payload.exp}`, '"exp":1e309'),
+  )}.signature`
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'malformed' &&
+      error.message.includes('"exp"'),
+  )
+})
+
+test('verifyToken rejects tokens whose nbf overflows to a non-finite number', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const header = { alg: 'RS256', kid: fake.kid, typ: 'JWT' }
+  const payload = makeClaims(fake.issuer)
+  const token = `${encodeBase64Url(JSON.stringify(header))}.${encodeBase64Url(
+    JSON.stringify(payload).replace(`"nbf":${payload.nbf}`, '"nbf":1e309'),
+  )}.signature`
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'malformed' &&
+      error.message.includes('"nbf"'),
+  )
+})
+
+test('verifyToken reuses a fresh JWKS response for repeated missing kids after one revalidation fetch', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const validToken = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+  await verifyToken(validToken, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+  })
+
+  const missingTokenA = fake.signRs256(
+    { alg: 'RS256', kid: `missing-${randomUUID()}`, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+  const missingTokenB = fake.signRs256(
+    { alg: 'RS256', kid: `missing-${randomUUID()}`, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  await assert.rejects(
+    verifyToken(missingTokenA, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'jwks_key_missing',
+  )
+  await assert.rejects(
+    verifyToken(missingTokenB, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'jwks_key_missing',
+  )
+
+  assert.equal(fake.fetchCount(), 2)
+})
+
+test('verifyToken revalidates a repeatedly missing kid on a fixed interval instead of sliding the negative-cache TTL', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  await withMockedDateNow(1_700_000_000_000, async ({ advanceMs }) => {
+    const missingToken = fake.signRs256(
+      { alg: 'RS256', kid: `missing-${randomUUID()}`, typ: 'JWT' },
+      makeClaims(fake.issuer),
+    )
+
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    advanceMs(4_000)
+
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    advanceMs(1_001)
+
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 2)
+  })
+})
+
+test('verifyToken refetches on the next fixed missing-kid interval once the key appears in JWKS', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  await withMockedDateNow(1_700_000_000_000, async ({ advanceMs }) => {
+    const rotatedKid = `kid-${randomUUID()}`
+    const token = fake.signRs256(
+      { alg: 'RS256', kid: rotatedKid, typ: 'JWT' },
+      makeClaims(fake.issuer),
+    )
+
+    await assert.rejects(
+      verifyToken(token, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    advanceMs(4_000)
+
+    await assert.rejects(
+      verifyToken(token, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    fake.setKid(rotatedKid)
+    advanceMs(1_001)
+
+    const { claims } = await verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    })
+
+    assert.equal(fake.fetchCount(), 2)
+    assert.equal(claims.sub, 'subject-1')
+  })
+})
+
+test('verifyToken de-duplicates concurrent JWKS fetches for the same missing kid', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const missingKid = `missing-${randomUUID()}`
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: missingKid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  const results = await Promise.allSettled([
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+  ])
+
+  assert.equal(fake.fetchCount(), 1)
+  for (const result of results) {
+    assert.equal(result.status, 'rejected')
+    assert.ok(result.reason instanceof KeycloakJwtVerificationError)
+    assert.equal(result.reason.code, 'jwks_key_missing')
+  }
+})
+
+test('verifyToken rejects a token whose audience/azp does not match', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { aud: 'other-client', azp: 'other-client' }),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'wrong_audience',
+  )
+})
+
+test('verifyToken rejects a token whose issuer does not match', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iss: 'https://evil.example.com/realms/spoofed' }),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'wrong_issuer',
+  )
+})
+
+test('verifyToken rejects non-RS256 algorithms via the alg allowlist', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const header = { alg: 'HS256', kid: fake.kid, typ: 'JWT' }
+  const payload = makeClaims(fake.issuer)
+  const signingInput = `${encodeBase64Url(JSON.stringify(header))}.${encodeBase64Url(
+    JSON.stringify(payload),
+  )}`
+  const signature = createHmac('sha256', 'shared-secret').update(signingInput).digest()
+  const hsToken = `${signingInput}.${encodeBase64Url(signature)}`
+
+  await assert.rejects(
+    verifyToken(hsToken, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'unsupported_alg',
+  )
+
+  const noneHeader = { alg: 'none', kid: fake.kid, typ: 'JWT' }
+  const noneInput = `${encodeBase64Url(JSON.stringify(noneHeader))}.${encodeBase64Url(
+    JSON.stringify(payload),
+  )}`
+  const noneToken = `${noneInput}.`
+
+  await assert.rejects(
+    verifyToken(noneToken, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'unsupported_alg',
+  )
+})
+
+test('verifyToken rejects malformed tokens (wrong segment count, missing kid)', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  await assert.rejects(
+    verifyToken('not.a.valid.token', {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError && error.code === 'malformed',
+  )
+
+  const tokenWithoutKid = fake.signRs256(
+    { alg: 'RS256', typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+  await assert.rejects(
+    verifyToken(tokenWithoutKid, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError && error.code === 'malformed',
+  )
+})
+
+test('verifyToken surfaces jwks_fetch_failed when the JWKS endpoint is unreachable', async () => {
+  const fake = await startFakeJwks()
+  await fake.close()
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'jwks_fetch_failed',
+  )
+})
+
+test('verifyToken surfaces malformed JWKS key material as a verification error', async (t) => {
+  const fake = await startFakeJwks({
+    publicJwkOverrides: { n: { malformed: true } },
+  })
+  t.after(() => fake.close())
+
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'jwks_key_missing',
+  )
+})

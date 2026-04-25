@@ -6,6 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
 COPY packages/portal-utils ./packages/portal-utils
+COPY platform/keycloak-jwt/package*.json ./platform/keycloak-jwt/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 
@@ -17,9 +18,11 @@ RUN npm ci
 
 FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./
+COPY platform/keycloak-jwt ./platform/keycloak-jwt
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
 RUN npm run build --workspace packages/portal-utils
+RUN npm run build --workspace platform/keycloak-jwt
 RUN npm run build --workspace apps/api
 RUN npm run build --workspace apps/web
 
@@ -30,6 +33,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 
 # Copy built artifacts
+COPY --from=build /app/platform/keycloak-jwt/dist ./platform/keycloak-jwt/dist
+COPY --from=build /app/platform/keycloak-jwt/package.json ./platform/keycloak-jwt/
 COPY --from=build /app/apps/api/dist ./apps/api/dist
 COPY --from=build /app/apps/api/package.json ./apps/api/
 COPY --from=build /app/apps/web/dist ./apps/web/dist
