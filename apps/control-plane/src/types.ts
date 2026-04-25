@@ -12,7 +12,6 @@ export type TenantState = (typeof tenantStates)[number]
 
 export const tenantStorageModes = [
   'unknown',
-  'sqlite-pvc',
   'postgres-shared-user',
   'postgres-dedicated-user',
 ] as const
@@ -69,7 +68,6 @@ export interface TenantProvisioningResources {
   namespace: string
   deploymentName: string
   serviceName: string
-  pvcName: string | null
   configMapName: string
   secretName: string
   hostname: string
