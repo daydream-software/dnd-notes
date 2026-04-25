@@ -21,9 +21,10 @@ import {
   type RateLimitPolicy,
 } from './route-support.js'
 import { createControlState, type ControlState } from './control-state.js'
+import { tenantApiSchemaVersion } from './migrations.js'
 import type { ErrorResponse, HealthResponse } from './types.js'
 
-export const noteStoreSchemaVersion = '2025-11-19'
+export const noteStoreSchemaVersion = tenantApiSchemaVersion
 const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const defaultMaintenanceDrainGraceMs = 5_000
 interface RateLimitBucket {

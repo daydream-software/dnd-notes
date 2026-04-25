@@ -120,12 +120,15 @@ request_json_to_file "$OUTPUT_PATH" -X POST -H 'Content-Type: application/json' 
 
 describe('k3d smoke tenant ready timeout helper', () => {
   it('defaults to 240000ms and preserves explicit overrides', () => {
+    const defaultEnv = { ...process.env }
+    delete defaultEnv.TENANT_READY_TIMEOUT_MS
+
     const defaultResult = spawnSync(
       'bash',
       ['-lc', `${tenantReadyTimeoutMatch[0]}\nresolve_tenant_ready_timeout_ms`],
       {
         encoding: 'utf8',
-        env: process.env,
+        env: defaultEnv,
       },
     )
 
