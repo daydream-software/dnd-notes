@@ -1372,24 +1372,17 @@ export class TenantRegistry {
 
     const tenantIdValues = tenantIds ? [...tenantIds] : []
     const tenantFilter = tenantIds
-      ? ` AND tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
+      ? ` AND bc.tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
       : ''
     const result = await this.run<BackupCatalogRow>(
-      `SELECT ${backupCatalogSelectColumns
+      `SELECT DISTINCT ON (bc.tenant_id) ${backupCatalogSelectColumns
         .split(',')
         .map((column) => `bc.${column.trim()}`)
         .join(', ')}
        FROM backup_catalog bc
-        INNER JOIN (
-          SELECT tenant_id, MAX(completed_at) AS latest_completed_at
-          FROM backup_catalog
-          WHERE status = 'completed'
-          ${tenantFilter}
-          GROUP BY tenant_id
-        ) latest
-          ON latest.tenant_id = bc.tenant_id
-         AND latest.latest_completed_at = bc.completed_at
-        WHERE bc.status = 'completed'`,
+       WHERE bc.status = 'completed'
+       ${tenantFilter}
+       ORDER BY bc.tenant_id, bc.completed_at DESC, bc.id DESC`,
       tenantIdValues,
     )
 
@@ -1424,22 +1417,16 @@ export class TenantRegistry {
 
     const tenantIdValues = tenantIds ? [...tenantIds] : []
     const tenantFilter = tenantIds
-      ? `WHERE tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
+      ? `WHERE rl.tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
       : ''
     const result = await this.run<RestoreLogRow>(
-      `SELECT ${restoreLogSelectColumns
+      `SELECT DISTINCT ON (rl.tenant_id) ${restoreLogSelectColumns
         .split(',')
         .map((column) => `rl.${column.trim()}`)
         .join(', ')}
-        FROM restore_log rl
-        INNER JOIN (
-          SELECT tenant_id, MAX(requested_at) AS latest_requested_at
-          FROM restore_log
-          ${tenantFilter}
-          GROUP BY tenant_id
-        ) latest
-          ON latest.tenant_id = rl.tenant_id
-         AND latest.latest_requested_at = rl.requested_at`,
+       FROM restore_log rl
+       ${tenantFilter}
+       ORDER BY rl.tenant_id, rl.requested_at DESC, rl.id DESC`,
       tenantIdValues,
     )
 
@@ -1551,7 +1538,7 @@ export class TenantRegistry {
       `SELECT ${restoreLogSelectColumns}
        FROM restore_log
        WHERE tenant_id = $1
-       ORDER BY requested_at DESC
+       ORDER BY requested_at DESC, created_at DESC, id DESC
        LIMIT $2`,
       [tenantId, limit],
     )

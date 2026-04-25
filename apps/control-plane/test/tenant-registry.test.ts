@@ -197,6 +197,92 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('uses deterministic tie-breakers for latest backup and restore lookups', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await tenantRegistry.createBackupRun({
+        id: 'backup-a',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-a', {
+        location: 'blob://backups/tenant-1/a',
+        completedAt: '2026-04-25T04:00:00Z',
+      })
+      await tenantRegistry.createBackupRun({
+        id: 'backup-b',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-b', {
+        location: 'blob://backups/tenant-1/b',
+        completedAt: '2026-04-25T04:00:00Z',
+      })
+
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-a',
+        tenantId: 'tenant-1',
+        backupId: 'backup-a',
+        backupLocation: 'blob://backups/tenant-1/a',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-b',
+        tenantId: 'tenant-1',
+        backupId: 'backup-b',
+        backupLocation: 'blob://backups/tenant-1/b',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-c',
+        tenantId: 'tenant-1',
+        backupId: 'backup-b',
+        backupLocation: 'blob://backups/tenant-1/b',
+        triggeredBy: 'test-suite',
+      })
+
+      await pool.query(
+        `UPDATE restore_log
+         SET requested_at = $1,
+             created_at = CASE id
+               WHEN 'restore-a' THEN $2
+               ELSE $3
+             END
+         WHERE id IN ('restore-a', 'restore-b', 'restore-c')`,
+        [
+          '2026-04-25T05:00:00Z',
+          '2026-04-25T05:01:00Z',
+          '2026-04-25T05:02:00Z',
+        ],
+      )
+
+      const backupSummary = await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([
+        'tenant-1',
+      ])
+      const restoreSummary = await tenantRegistry.getLatestRestoreSummariesForTenantIds([
+        'tenant-1',
+      ])
+      const restores = await tenantRegistry.listTenantRestores('tenant-1', 10)
+
+      assert.equal(backupSummary.get('tenant-1')?.backupId, 'backup-b')
+      assert.equal(restoreSummary.get('tenant-1')?.restoreId, 'restore-c')
+      assert.deepEqual(
+        restores.map((restore) => restore.id),
+        ['restore-c', 'restore-b', 'restore-a'],
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('re-seeds tenant_state_signature when the baseline ledger is already applied', async () => {
     const db = newDb({ autoCreateForeignKeyIndices: true })
     registerPgMemTenantRegistrySupport(db)
