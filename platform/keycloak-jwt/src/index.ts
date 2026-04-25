@@ -122,8 +122,8 @@ function hasFreshNegativeCache(cacheKey: string, now: number): boolean {
   return false
 }
 
-function cacheMissingKid(cacheKey: string, now: number): void {
-  missingKidCache.set(cacheKey, now + JWKS_CACHE_TTL_MS)
+function cacheMissingKid(cacheKey: string, checkedAtMs: number): void {
+  missingKidCache.set(cacheKey, checkedAtMs + JWKS_CACHE_TTL_MS)
 }
 
 function clearMissingKidCacheForUrl(jwksUrl: string): void {
@@ -269,13 +269,16 @@ export async function getPublicKeyForKid(
   const now = Date.now()
   const cachedResponse = jwksResponseCache.get(jwksUrl)
   const hasFreshCache = isFreshCachedJwks(cachedResponse, now)
+  const lastMissingKidCheckAtMs = hasFreshCache ? cachedResponse.missingKidCheckedAtMs : undefined
   const missingKidAlreadyChecked =
-    hasFreshCache &&
-    cachedResponse.missingKidCheckedAtMs !== undefined &&
-    now - cachedResponse.missingKidCheckedAtMs <= JWKS_CACHE_TTL_MS
+    lastMissingKidCheckAtMs !== undefined && now - lastMissingKidCheckAtMs <= JWKS_CACHE_TTL_MS
 
-  if (hasFreshNegativeCache(cacheKey, now) || (hasFreshCache && missingKidAlreadyChecked)) {
-    cacheMissingKid(cacheKey, now)
+  if (hasFreshNegativeCache(cacheKey, now)) {
+    throw createMissingKidError(jwksUrl, keyId)
+  }
+
+  if (missingKidAlreadyChecked) {
+    cacheMissingKid(cacheKey, lastMissingKidCheckAtMs)
     throw createMissingKidError(jwksUrl, keyId)
   }
 

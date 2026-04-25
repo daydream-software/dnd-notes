@@ -26,6 +26,10 @@ interface StartFakeJwksOptions {
   publicJwkOverrides?: Record<string, unknown>
 }
 
+interface MockedNowController {
+  advanceMs: (deltaMs: number) => void
+}
+
 function encodeBase64Url(value: Buffer | string): string {
   return Buffer.from(value)
     .toString('base64')
@@ -103,6 +107,25 @@ function makeClaims(issuer: string, overrides: Record<string, unknown> = {}) {
     exp: now + 300,
     nbf: now,
     ...overrides,
+  }
+}
+
+async function withMockedDateNow<T>(
+  initialNowMs: number,
+  run: (controller: MockedNowController) => Promise<T>,
+): Promise<T> {
+  const originalDateNow = Date.now
+  let currentNowMs = initialNowMs
+  Date.now = () => currentNowMs
+
+  try {
+    return await run({
+      advanceMs(deltaMs: number) {
+        currentNowMs += deltaMs
+      },
+    })
+  } finally {
+    Date.now = originalDateNow
   }
 }
 
@@ -362,6 +385,119 @@ test('verifyToken reuses a fresh JWKS response for repeated missing kids after o
   )
 
   assert.equal(fake.fetchCount(), 2)
+})
+
+test('verifyToken revalidates a repeatedly missing kid on a fixed interval instead of sliding the negative-cache TTL', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  await withMockedDateNow(1_700_000_000_000, async ({ advanceMs }) => {
+    const missingToken = fake.signRs256(
+      { alg: 'RS256', kid: `missing-${randomUUID()}`, typ: 'JWT' },
+      makeClaims(fake.issuer),
+    )
+
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    advanceMs(4_000)
+
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    advanceMs(1_001)
+
+    await assert.rejects(
+      verifyToken(missingToken, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 2)
+  })
+})
+
+test('verifyToken refetches on the next fixed missing-kid interval once the key appears in JWKS', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  await withMockedDateNow(1_700_000_000_000, async ({ advanceMs }) => {
+    const rotatedKid = `kid-${randomUUID()}`
+    const token = fake.signRs256(
+      { alg: 'RS256', kid: rotatedKid, typ: 'JWT' },
+      makeClaims(fake.issuer),
+    )
+
+    await assert.rejects(
+      verifyToken(token, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    advanceMs(4_000)
+
+    await assert.rejects(
+      verifyToken(token, {
+        issuer: fake.issuer,
+        audience: 'test-client',
+        jwksUrl: fake.jwksUrl,
+      }),
+      (error: unknown) =>
+        error instanceof KeycloakJwtVerificationError &&
+        error.code === 'jwks_key_missing',
+    )
+    assert.equal(fake.fetchCount(), 1)
+
+    fake.setKid(rotatedKid)
+    advanceMs(1_001)
+
+    const { claims } = await verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    })
+
+    assert.equal(fake.fetchCount(), 2)
+    assert.equal(claims.sub, 'subject-1')
+  })
 })
 
 test('verifyToken de-duplicates concurrent JWKS fetches for the same missing kid', async (t) => {
