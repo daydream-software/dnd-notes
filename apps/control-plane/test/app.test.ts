@@ -1328,7 +1328,7 @@ describe('Control Plane API', () => {
         'provisioner',
         'Provisioned successfully',
       )
-      await tenantRegistry.updateTenantStorageReference('tenant-123', 'pvc-tenant-123')
+      await tenantRegistry.updateTenantStorageReference('tenant-123', 'tenant_tenant_123')
       await tenantRegistry.updateTenantStorageProfile('tenant-123', {
         mode: 'postgres-dedicated-user',
         migrationStatus: 'failed',
@@ -1402,7 +1402,7 @@ describe('Control Plane API', () => {
         'provisioner',
         'Provisioned successfully',
       )
-      await tenantRegistry.updateTenantStorageReference('tenant-789', 'pvc-tenant-789')
+      await tenantRegistry.updateTenantStorageReference('tenant-789', 'tenant_tenant_789')
       await tenantRegistry.updateTenantStorageProfile('tenant-789', {
         mode: 'postgres-dedicated-user',
         migrationStatus: 'failed',
