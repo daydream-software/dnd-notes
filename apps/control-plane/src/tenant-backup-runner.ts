@@ -417,7 +417,20 @@ export function resolveTenantDatabaseName(tenant: Tenant): string {
     )
   }
 
+  if (!isExpectedTenantDatabaseName(storageReference)) {
+    throw new TenantBackupValidationError(
+      `Tenant ${tenant.id} has an unexpected Postgres database reference ${JSON.stringify(storageReference)}; expected a tenant_* database name.`,
+    )
+  }
+
   return storageReference
+}
+
+function isExpectedTenantDatabaseName(storageReference: string): boolean {
+  return (
+    storageReference.length <= 63 &&
+    /^tenant_[a-z0-9_]+$/.test(storageReference)
+  )
 }
 
 function sanitizePathComponent(value: string): string {

@@ -195,9 +195,10 @@ with a version override:
 3. For stateless Postgres-only tenants, Kubernetes now performs an overlapping
    rollout (`RollingUpdate`, `maxSurge: 1`, `maxUnavailable: 0`) with
    `minReadySeconds: 5`, `terminationGracePeriodSeconds: 30`, and a per-tenant
-   `PodDisruptionBudget` (`minAvailable: 1`). Legacy PVC-backed tenants remain on
-   the older drain-first replacement shape until the cutover work removes that
-   transitional storage path.
+   `PodDisruptionBudget` (`maxUnavailable: 1`) so single-replica tenants do not
+   block voluntary disruptions such as node drains. Legacy PVC-backed tenants
+   remain on the older drain-first replacement shape until the cutover work
+   removes that transitional storage path.
 4. The old pod flips `/ready` to `503` on `SIGTERM`, drains in-flight HTTP
    work, closes idle keep-alives, and only then closes the Postgres pool.
 5. When the new pod is fully rolled out (observedGeneration matches,

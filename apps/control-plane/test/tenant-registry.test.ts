@@ -283,7 +283,7 @@ describe('TenantRegistry', () => {
         ownerId: 'owner-1',
         version: '1.0.0',
       })
-      await tenantRegistry.updateTenantStorageReference('tenant-1', 'pvc-tenant-one')
+      await tenantRegistry.updateTenantStorageReference('tenant-1', 'tenant_tenant_one')
       await tenantRegistry.updateTenantStorageProfile('tenant-1', {
         mode: 'postgres-dedicated-user',
         migrationStatus: 'failed',
@@ -293,7 +293,7 @@ describe('TenantRegistry', () => {
       const storage = await tenantRegistry.getTenantStorageSnapshot('tenant-1')
 
       assert.ok(storage)
-      assert.equal(storage.storageReference, 'pvc-tenant-one')
+      assert.equal(storage.storageReference, 'tenant_tenant_one')
       assert.equal(storage.mode, 'postgres-dedicated-user')
       assert.equal(storage.migrationStatus, 'failed')
       assert.equal(storage.lastMigrationFailure, 'Synthetic cutover failure')

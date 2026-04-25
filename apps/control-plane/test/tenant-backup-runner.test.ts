@@ -697,4 +697,16 @@ describe('resolveTenantDatabaseName', () => {
       /does not have a Postgres database reference/i,
     )
   })
+
+  it('rejects legacy or malformed storage references before backup commands run', () => {
+    assert.throws(
+      () =>
+        resolveTenantDatabaseName(
+          createTenant({
+            storageReference: 'pvc-tenant-demo',
+          }),
+        ),
+      /unexpected Postgres database reference/i,
+    )
+  })
 })

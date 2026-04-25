@@ -82,7 +82,7 @@ class FakeInfrastructureManager {
     maxSurge: number | string | undefined
     maxUnavailable: number | string | undefined
     minReadySeconds: number | undefined
-    podDisruptionBudgetMinAvailable: number | string | undefined
+    podDisruptionBudgetMaxUnavailable: number | string | undefined
     podDisruptionBudgetName: string | undefined
     runtimeConnectionString: string | undefined
   }> = []
@@ -111,7 +111,7 @@ class FakeInfrastructureManager {
         name?: string
       }
       spec?: {
-        minAvailable?: number | string
+        maxUnavailable?: number | string
       }
     }
     ingress?: {
@@ -176,8 +176,8 @@ class FakeInfrastructureManager {
       maxUnavailable:
         bundle.deployment.spec?.strategy?.rollingUpdate?.maxUnavailable,
       minReadySeconds: bundle.deployment.spec?.minReadySeconds,
-      podDisruptionBudgetMinAvailable:
-        bundle.podDisruptionBudget?.spec?.minAvailable,
+      podDisruptionBudgetMaxUnavailable:
+        bundle.podDisruptionBudget?.spec?.maxUnavailable,
       podDisruptionBudgetName: bundle.podDisruptionBudget?.metadata?.name,
       runtimeConnectionString: bundle.secret?.data?.DATABASE_URL
         ? Buffer.from(bundle.secret.data.DATABASE_URL, 'base64').toString('utf8')
@@ -294,7 +294,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(infrastructureManager.bundles[0].minReadySeconds, 5)
       assert.equal(infrastructureManager.bundles[0].podDisruptionBudgetName, 'dnd-notes')
       assert.equal(
-        infrastructureManager.bundles[0].podDisruptionBudgetMinAvailable,
+        infrastructureManager.bundles[0].podDisruptionBudgetMaxUnavailable,
         1,
       )
       assert.equal(
@@ -1135,7 +1135,7 @@ describe('TenantProvisioningService', () => {
       })
 
       assert.equal(bundle.podDisruptionBudget?.metadata?.name, bundle.resources.deploymentName)
-      assert.equal(bundle.podDisruptionBudget?.spec?.minAvailable, 1)
+      assert.equal(bundle.podDisruptionBudget?.spec?.maxUnavailable, 1)
       assert.equal(bundle.ingress.metadata?.name, bundle.resources.serviceName)
       assert.equal(bundle.ingress.spec?.ingressClassName, 'nginx')
       assert.equal(bundle.ingress.spec?.rules?.[0]?.host, bundle.resources.hostname)

@@ -971,7 +971,7 @@ export function buildTenantInfrastructureBundle(
         labels: namespaceLabels,
       },
       spec: {
-        minAvailable: 1,
+        maxUnavailable: 1,
         selector: {
           matchLabels: buildTenantSelectorLabels(options.tenant),
         },
