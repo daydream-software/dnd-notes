@@ -283,6 +283,57 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('ignores completed backup rows with null completed_at when selecting latest summaries', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await tenantRegistry.createBackupRun({
+        id: 'backup-null-completed-at',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-null-completed-at', {
+        location: 'blob://backups/tenant-1/null-completed-at',
+        completedAt: '2026-04-25T03:00:00Z',
+      })
+      await pool.query(
+        `UPDATE backup_catalog
+         SET completed_at = NULL
+         WHERE id = $1`,
+        ['backup-null-completed-at'],
+      )
+
+      await tenantRegistry.createBackupRun({
+        id: 'backup-real-completed-at',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-real-completed-at', {
+        location: 'blob://backups/tenant-1/real-completed-at',
+        completedAt: '2026-04-25T04:00:00Z',
+      })
+
+      const backupSummary = await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([
+        'tenant-1',
+      ])
+
+      assert.equal(backupSummary.get('tenant-1')?.backupId, 'backup-real-completed-at')
+      assert.equal(
+        backupSummary.get('tenant-1')?.location,
+        'blob://backups/tenant-1/real-completed-at',
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('preserves audit log ids as strings', () => {
     const registry = Object.create(TenantRegistry.prototype) as TenantRegistry & {
       mapRowToAuditLogEntry(row: {

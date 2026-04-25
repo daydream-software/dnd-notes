@@ -175,7 +175,7 @@ function describeTenantCutoverBackupReadiness(
       ...backupStatus,
       status: 'missing',
       details:
-        'Record a successful backup (POST /tenants/:id/backup) before tenant cutover can start.',
+        'Record a successful backup (POST /internal/tenants/:tenantId/backup) before tenant cutover can start.',
     }
   }
 

@@ -1401,6 +1401,10 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.storage.migrationStatus, 'not-started')
       assert.strictEqual(response.body.storage.cutoverReady, false)
       assert.strictEqual(response.body.storage.backup.status, 'missing')
+      assert.strictEqual(
+        response.body.storage.backup.details,
+        'Record a successful backup (POST /internal/tenants/:tenantId/backup) before tenant cutover can start.',
+      )
       assert.match(
         response.body.storage.blockers.join(' '),
         /unknown|backup/i,

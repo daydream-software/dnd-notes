@@ -1382,7 +1382,7 @@ export class TenantRegistry {
        FROM backup_catalog bc
        WHERE bc.status = 'completed'
        ${tenantFilter}
-       ORDER BY bc.tenant_id, bc.completed_at DESC, bc.id DESC`,
+       ORDER BY bc.tenant_id, bc.completed_at DESC NULLS LAST, bc.id DESC`,
       tenantIdValues,
     )
 
