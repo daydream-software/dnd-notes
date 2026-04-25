@@ -636,9 +636,11 @@ export async function createNoteStore(
       }
 
       const existing = mapNoteRow(existingRow)
-      const editAttribution: NoteAttribution | null = membershipId
+      const membershipAttribution = membershipId
         ? await memberships.findMembershipAttribution(membershipId)
-        : existing.lastEditedBy
+        : null
+      const editAttribution: NoteAttribution | null =
+        membershipAttribution ?? existing.lastEditedBy
 
       const nextNote: NoteRecord = {
         ...existing,
