@@ -286,6 +286,13 @@ const shutdownController = createShutdownController({
   },
 })
 
+try {
+  await tenantRegistry.whenReady()
+} catch (error) {
+  console.error('Control-plane migrations failed; refusing to start:', error)
+  process.exit(1)
+}
+
 serverRef.current = app.listen(PORT, () => {
   console.log(`Control plane listening on port ${PORT}`)
   console.log('Registry backend: postgres')

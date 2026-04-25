@@ -1367,6 +1367,9 @@ function createPostgresManagerHarness() {
             return {
               async query(sql: string) {
                 tenantQueries.push(sql)
+                if (sql.includes('pg_try_advisory_lock')) {
+                  return { rows: [{ locked: true }] }
+                }
                 return { rows: [] }
               },
               release() {},
@@ -1430,6 +1433,10 @@ describe('PostgresTenantDatabaseManager', () => {
       harness.tenantQueries.some((sql) =>
         sql.includes('CREATE TABLE IF NOT EXISTS owner_accounts'),
       ),
+      true,
+    )
+    assert.equal(
+      harness.tenantQueries.some((sql) => sql.includes('schema_migrations_tenant_api')),
       true,
     )
     assert.equal(

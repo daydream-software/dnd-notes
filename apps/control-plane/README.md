@@ -285,6 +285,47 @@ Postgres-backed for this slice. The registry stores:
 - Tenant registry (primary source of truth for tenant metadata)
 - State transition audit log (full lifecycle history)
 
+Hosted rollouts assume a fresh control-plane Postgres bootstrap. This slice does
+not include an automated SQLite-to-Postgres migration path for pre-existing
+control-plane registries; local/dev SQLite metadata should be recreated or
+manually migrated only if an older non-production environment needs to keep it.
+
+## Database Migrations
+
+Schema changes are applied through the migration runner in `src/migrate.ts`,
+backed by [umzug](https://github.com/sequelize/umzug) and namespaced migration
+ledger tables. The control-plane owns two migration responsibilities:
+
+- `apps/control-plane/migrations/` — registry schema for the control-plane
+  database itself; applied automatically on boot before the HTTP server starts
+  listening, recorded in `schema_migrations_control_plane`, and guarded by the
+  advisory-lock pair `(930, 1)` so concurrent pods wait for in-flight runs.
+- `apps/api/migrations/` — the authoritative tenant API schema; invoked from
+  the provisioning path on each tenant database before the runtime role loses
+  `CREATE`/`ALTER` access, recorded in `schema_migrations_tenant_api`, and
+  guarded by the tenant API advisory-lock pair `(931, 1)`.
+
+### Adding a migration
+
+1. Create a new file `NNNN_short_name.sql` in the matching directory using the
+   next sequential prefix.
+2. Use `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, and idempotent
+   `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` so reruns are safe.
+3. Migrations are **roll-forward only**: never rename or drop existing columns
+   or tables that production code still reads. Use the expand/contract pattern
+   (add the new shape, ship code that writes both, then remove the old shape
+   in a follow-up release).
+4. Each migration runs inside its own transaction with the advisory lock held,
+   so a crashed pod leaves the database fully migrated or unchanged.
+
+### Running migrations manually
+
+```bash
+CONTROL_PLANE_DATABASE_URL=postgres://... npm run db:migrate
+```
+
+The control-plane registry migrations also run automatically as part of
+`TenantRegistry`'s boot so a freshly deployed pod self-applies pending changes.
 ## Design Constraints
 
 - **Thin by design**: No business logic beyond registry CRUD and state tracking
