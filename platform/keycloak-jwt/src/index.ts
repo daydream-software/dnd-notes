@@ -73,62 +73,78 @@ interface KeycloakJwksResponse {
   keys?: KeycloakJwk[]
 }
 
+interface CachedJwksResponse {
+  fetchedAtMs: number
+  missingKidCheckedAtMs?: number
+  payload: KeycloakJwksResponse
+}
+
 const jwkCache = new Map<string, KeyObject>()
+const jwksResponseCache = new Map<string, CachedJwksResponse>()
+const missingKidCache = new Map<string, number>()
+const inflightJwksFetches = new Map<string, Promise<KeycloakJwksResponse>>()
+const JWKS_CACHE_TTL_MS = 5_000
 
 export function clearJwkCache(): void {
   jwkCache.clear()
+  jwksResponseCache.clear()
+  missingKidCache.clear()
+  inflightJwksFetches.clear()
 }
 
-export async function getPublicKeyForKid(
+function getKeyCacheKey(jwksUrl: string, keyId: string): string {
+  return `${jwksUrl}#${keyId}`
+}
+
+function createMissingKidError(
   jwksUrl: string,
   keyId: string,
-): Promise<KeyObject> {
-  const cacheKey = `${jwksUrl}#${keyId}`
-  const cached = jwkCache.get(cacheKey)
+  detail = 'does not contain a usable RSA key',
+): KeycloakJwtVerificationError {
+  return new KeycloakJwtVerificationError(
+    'jwks_key_missing',
+    `JWKS at ${jwksUrl} ${detail} for kid=${keyId}.`,
+  )
+}
 
-  if (cached) {
-    return cached
+function hasFreshNegativeCache(cacheKey: string, now: number): boolean {
+  const expiresAt = missingKidCache.get(cacheKey)
+
+  if (expiresAt === undefined) {
+    return false
   }
 
-  let response: Response
+  if (expiresAt > now) {
+    return true
+  }
+
+  missingKidCache.delete(cacheKey)
+  return false
+}
+
+function cacheMissingKid(cacheKey: string, now: number): void {
+  missingKidCache.set(cacheKey, now + JWKS_CACHE_TTL_MS)
+}
+
+function clearMissingKidCacheForUrl(jwksUrl: string): void {
+  for (const cacheKey of missingKidCache.keys()) {
+    if (cacheKey.startsWith(`${jwksUrl}#`)) {
+      missingKidCache.delete(cacheKey)
+    }
+  }
+}
+
+function buildPublicKeyFromJwk(
+  jwksUrl: string,
+  keyId: string,
+  jwk: KeycloakJwk,
+): KeyObject {
+  if (jwk.kty !== 'RSA' || !jwk.n || !jwk.e) {
+    throw createMissingKidError(jwksUrl, keyId)
+  }
 
   try {
-    response = await fetch(jwksUrl)
-  } catch {
-    throw new KeycloakJwtVerificationError(
-      'jwks_fetch_failed',
-      `Failed to fetch JWKS from ${jwksUrl}.`,
-    )
-  }
-
-  if (!response.ok) {
-    throw new KeycloakJwtVerificationError(
-      'jwks_fetch_failed',
-      `JWKS endpoint ${jwksUrl} returned HTTP ${response.status}.`,
-    )
-  }
-
-  let payload: KeycloakJwksResponse
-  try {
-    payload = (await response.json()) as KeycloakJwksResponse
-  } catch {
-    throw new KeycloakJwtVerificationError(
-      'jwks_fetch_failed',
-      `JWKS endpoint ${jwksUrl} returned a non-JSON response.`,
-    )
-  }
-  const jwk = payload.keys?.find((candidate) => candidate.kid === keyId)
-
-  if (!jwk || jwk.kty !== 'RSA' || !jwk.n || !jwk.e) {
-    throw new KeycloakJwtVerificationError(
-      'jwks_key_missing',
-      `JWKS at ${jwksUrl} does not contain a usable RSA key for kid=${keyId}.`,
-    )
-  }
-
-  let publicKey: KeyObject
-  try {
-    publicKey = createPublicKey({
+    return createPublicKey({
       key: {
         kty: 'RSA',
         kid: jwk.kid,
@@ -138,13 +154,141 @@ export async function getPublicKeyForKid(
       format: 'jwk',
     })
   } catch {
-    throw new KeycloakJwtVerificationError(
-      'jwks_key_missing',
-      `JWKS at ${jwksUrl} contains malformed RSA key material for kid=${keyId}.`,
+    throw createMissingKidError(
+      jwksUrl,
+      keyId,
+      'contains malformed RSA key material',
     )
   }
+}
+
+function getPublicKeyFromCachedJwks(
+  jwksUrl: string,
+  keyId: string,
+): KeyObject | undefined {
+  const cacheKey = getKeyCacheKey(jwksUrl, keyId)
+  const cachedResponse = jwksResponseCache.get(jwksUrl)
+  const jwk = cachedResponse?.payload.keys?.find((candidate) => candidate.kid === keyId)
+
+  if (!jwk) {
+    return undefined
+  }
+
+  const publicKey = buildPublicKeyFromJwk(jwksUrl, keyId, jwk)
   jwkCache.set(cacheKey, publicKey)
   return publicKey
+}
+
+function markMissingKidChecked(jwksUrl: string, checkedAtMs: number): void {
+  const cachedResponse = jwksResponseCache.get(jwksUrl)
+
+  if (!cachedResponse) {
+    return
+  }
+
+  cachedResponse.missingKidCheckedAtMs = checkedAtMs
+}
+
+function isFreshCachedJwks(
+  cachedResponse: CachedJwksResponse | undefined,
+  now: number,
+): cachedResponse is CachedJwksResponse {
+  return cachedResponse !== undefined && now - cachedResponse.fetchedAtMs <= JWKS_CACHE_TTL_MS
+}
+
+async function fetchJwks(jwksUrl: string): Promise<KeycloakJwksResponse> {
+  const inflight = inflightJwksFetches.get(jwksUrl)
+
+  if (inflight) {
+    return inflight
+  }
+
+  const fetchPromise = (async () => {
+    let response: Response
+
+    try {
+      response = await fetch(jwksUrl)
+    } catch {
+      throw new KeycloakJwtVerificationError(
+        'jwks_fetch_failed',
+        `Failed to fetch JWKS from ${jwksUrl}.`,
+      )
+    }
+
+    if (!response.ok) {
+      throw new KeycloakJwtVerificationError(
+        'jwks_fetch_failed',
+        `JWKS endpoint ${jwksUrl} returned HTTP ${response.status}.`,
+      )
+    }
+
+    try {
+      return (await response.json()) as KeycloakJwksResponse
+    } catch {
+      throw new KeycloakJwtVerificationError(
+        'jwks_fetch_failed',
+        `JWKS endpoint ${jwksUrl} returned a non-JSON response.`,
+      )
+    }
+  })().finally(() => {
+    inflightJwksFetches.delete(jwksUrl)
+  })
+
+  inflightJwksFetches.set(jwksUrl, fetchPromise)
+  return fetchPromise
+}
+
+async function refreshJwks(jwksUrl: string): Promise<CachedJwksResponse> {
+  const payload = await fetchJwks(jwksUrl)
+  const cachedResponse: CachedJwksResponse = {
+    fetchedAtMs: Date.now(),
+    payload,
+  }
+
+  jwksResponseCache.set(jwksUrl, cachedResponse)
+  clearMissingKidCacheForUrl(jwksUrl)
+  return cachedResponse
+}
+
+export async function getPublicKeyForKid(
+  jwksUrl: string,
+  keyId: string,
+): Promise<KeyObject> {
+  const cacheKey = getKeyCacheKey(jwksUrl, keyId)
+  const cached = jwkCache.get(cacheKey)
+
+  if (cached) {
+    return cached
+  }
+
+  const cachedFromResponse = getPublicKeyFromCachedJwks(jwksUrl, keyId)
+  if (cachedFromResponse) {
+    return cachedFromResponse
+  }
+
+  const now = Date.now()
+  const cachedResponse = jwksResponseCache.get(jwksUrl)
+  const hasFreshCache = isFreshCachedJwks(cachedResponse, now)
+  const missingKidAlreadyChecked =
+    hasFreshCache &&
+    cachedResponse.missingKidCheckedAtMs !== undefined &&
+    now - cachedResponse.missingKidCheckedAtMs <= JWKS_CACHE_TTL_MS
+
+  if (hasFreshNegativeCache(cacheKey, now) || (hasFreshCache && missingKidAlreadyChecked)) {
+    cacheMissingKid(cacheKey, now)
+    throw createMissingKidError(jwksUrl, keyId)
+  }
+
+  const refreshedResponse = await refreshJwks(jwksUrl)
+  const refreshedPublicKey = getPublicKeyFromCachedJwks(jwksUrl, keyId)
+
+  if (refreshedPublicKey) {
+    return refreshedPublicKey
+  }
+
+  markMissingKidChecked(jwksUrl, refreshedResponse.fetchedAtMs)
+  cacheMissingKid(cacheKey, refreshedResponse.fetchedAtMs)
+  throw createMissingKidError(jwksUrl, keyId)
 }
 
 export interface VerifyTokenOptions {
@@ -178,7 +322,7 @@ function audienceMatches(claims: JwtClaims, audience: string): boolean {
 
 export async function verifyToken<TClaims extends JwtClaims = JwtClaims>(
   rawJwt: string,
-  { issuer, audience, jwksUrl, clockSkewSec = 30 }: VerifyTokenOptions,
+  { issuer, audience, jwksUrl, clockSkewSec = 0 }: VerifyTokenOptions,
 ): Promise<VerifiedToken<TClaims>> {
   const parts = rawJwt.split('.')
 

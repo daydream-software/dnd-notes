@@ -205,6 +205,27 @@ test('verifyToken rejects an expired token with code "expired"', async (t) => {
   )
 })
 
+test('verifyToken keeps default expiration checks strict unless callers opt into clock skew', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const now = Math.floor(Date.now() / 1000)
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer, { iat: now - 300, exp: now - 5, nbf: now - 300 }),
+  )
+
+  await assert.rejects(
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError && error.code === 'expired',
+  )
+})
+
 test('verifyToken accepts a token whose exp is within the allowed clock skew window', async (t) => {
   const fake = await startFakeJwks()
   t.after(() => fake.close())
@@ -223,6 +244,84 @@ test('verifyToken accepts a token whose exp is within the allowed clock skew win
   })
 
   assert.equal(claims.sub, 'subject-1')
+})
+
+test('verifyToken reuses a fresh JWKS response for repeated missing kids after one revalidation fetch', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const validToken = fake.signRs256(
+    { alg: 'RS256', kid: fake.kid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+  await verifyToken(validToken, {
+    issuer: fake.issuer,
+    audience: 'test-client',
+    jwksUrl: fake.jwksUrl,
+  })
+
+  const missingTokenA = fake.signRs256(
+    { alg: 'RS256', kid: `missing-${randomUUID()}`, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+  const missingTokenB = fake.signRs256(
+    { alg: 'RS256', kid: `missing-${randomUUID()}`, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  await assert.rejects(
+    verifyToken(missingTokenA, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'jwks_key_missing',
+  )
+  await assert.rejects(
+    verifyToken(missingTokenB, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    (error: unknown) =>
+      error instanceof KeycloakJwtVerificationError &&
+      error.code === 'jwks_key_missing',
+  )
+
+  assert.equal(fake.fetchCount(), 2)
+})
+
+test('verifyToken de-duplicates concurrent JWKS fetches for the same missing kid', async (t) => {
+  const fake = await startFakeJwks()
+  t.after(() => fake.close())
+
+  const missingKid = `missing-${randomUUID()}`
+  const token = fake.signRs256(
+    { alg: 'RS256', kid: missingKid, typ: 'JWT' },
+    makeClaims(fake.issuer),
+  )
+
+  const results = await Promise.allSettled([
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+    verifyToken(token, {
+      issuer: fake.issuer,
+      audience: 'test-client',
+      jwksUrl: fake.jwksUrl,
+    }),
+  ])
+
+  assert.equal(fake.fetchCount(), 1)
+  for (const result of results) {
+    assert.equal(result.status, 'rejected')
+    assert.ok(result.reason instanceof KeycloakJwtVerificationError)
+    assert.equal(result.reason.code, 'jwks_key_missing')
+  }
 })
 
 test('verifyToken rejects a token whose audience/azp does not match', async (t) => {
