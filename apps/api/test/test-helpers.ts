@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { newDb } from 'pg-mem'
+import { DataType, newDb } from 'pg-mem'
 import type { IMemoryDb } from 'pg-mem'
 import type { SuperTest, Test } from 'supertest'
 import { createApp } from '../src/app.js'
@@ -20,10 +20,27 @@ export interface CreateTestAppOptions {
   webDistPath?: string
 }
 
+export function registerPgMemMigrationSupport(db: IMemoryDb): void {
+  db.public.registerFunction({
+    name: 'pg_try_advisory_lock',
+    args: [DataType.integer, DataType.integer],
+    returns: DataType.bool,
+    implementation: () => true,
+  })
+  db.public.registerFunction({
+    name: 'pg_advisory_unlock',
+    args: [DataType.integer, DataType.integer],
+    returns: DataType.bool,
+    implementation: () => true,
+  })
+}
+
 export function createTestPgMemDb(): IMemoryDb {
-  return newDb({
+  const db = newDb({
     autoCreateForeignKeyIndices: true,
   })
+  registerPgMemMigrationSupport(db)
+  return db
 }
 
 export function createTestPgMemPool() {

@@ -9,12 +9,14 @@ import {
   createRuntimeNoteStore,
   initializeDatabaseOrClose,
 } from '../src/note-store.js'
-import { registerOwner, withAuth } from './test-helpers.js'
+import { registerOwner, registerPgMemMigrationSupport, withAuth } from './test-helpers.js'
 
 function createPostgresMemDb() {
-  return newDb({
+  const db = newDb({
     autoCreateForeignKeyIndices: true,
   })
+  registerPgMemMigrationSupport(db)
+  return db
 }
 
 async function createPostgresTestStore() {

@@ -25,6 +25,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/apps/control-plane/dist ./apps/control-plane/dist
 COPY --from=build /app/apps/control-plane/package.json ./apps/control-plane/
+COPY --from=build /app/apps/control-plane/migrations ./apps/control-plane/migrations
+COPY --from=build /app/apps/control-plane/migrations-tenant ./apps/control-plane/migrations-tenant
 COPY package.json ./
 
 RUN mkdir -p /app/data && \

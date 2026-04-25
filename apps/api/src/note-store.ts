@@ -12,10 +12,12 @@ import {
 } from './campaign.js'
 import { initializeNoteStoreDatabase } from './note-store-bootstrap.js'
 import {
+  createNoteStorePostgresPool,
   createPostgresDatabase,
   type NoteStoreDatabase,
   type PostgresPoolLike,
 } from './note-store-database.js'
+import { runTenantApiMigrations } from './migrations.js'
 import {
   composeNote,
   groupReferencesBySource,
@@ -478,13 +480,41 @@ export async function createNoteStore(
 ): Promise<NoteStore> {
   const databaseUrl = requirePostgresDatabaseUrl(options)
   const configuredSiteAdminEmails = resolveConfiguredSiteAdminEmails(options)
-  const database = createPostgresDatabase({
-    connectionString: databaseUrl ?? undefined,
-    pool: options.postgresPool,
-  })
 
-  await initializeDatabaseOrClose(database, () =>
-    initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
+  let pool: PostgresPoolLike
+  let ownedPool: PostgresPoolLike | undefined
+
+  if (options.postgresPool) {
+    pool = options.postgresPool
+  } else {
+    ownedPool = createNoteStorePostgresPool(databaseUrl ?? '')
+    pool = ownedPool
+  }
+
+  try {
+    await runTenantApiMigrations({ pool })
+  } catch (error) {
+    if (ownedPool) {
+      try {
+        await ownedPool.end()
+      } catch {
+        // Preserve the original failure.
+      }
+    }
+    throw error
+  }
+
+  const database = createPostgresDatabase({ pool })
+
+  await initializeDatabaseOrClose(
+    {
+      async close() {
+        if (ownedPool) {
+          await ownedPool.end()
+        }
+      },
+    },
+    () => initializeNoteStoreDatabase(database, configuredSiteAdminEmails),
   )
 
   const selectCampaignById = database.prepare(`
@@ -2389,7 +2419,11 @@ export async function createNoteStore(
       await checkDatabaseConnection.get()
     },
     close() {
-      return database.close()
+      const tasks: Array<Promise<unknown>> = [database.close()]
+      if (ownedPool) {
+        tasks.push(ownedPool.end())
+      }
+      return Promise.all(tasks).then(() => undefined)
     },
   }
 

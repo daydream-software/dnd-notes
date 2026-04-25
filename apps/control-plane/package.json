@@ -9,6 +9,8 @@
     "build": "tsc -p tsconfig.json",
     "lint": "eslint .",
     "start": "node dist/index.js",
+    "db:migrate": "node --import tsx src/migrate-cli.ts",
+    "db:migrate:prod": "node dist/migrate-cli.js",
     "test": "node --import tsx --test test/*.test.ts",
     "test:ci": "c8 --all --src src --extension .ts --report-dir ../../reports/coverage/control-plane --reporter text-summary --reporter lcov --reporter json-summary --reporter cobertura node --import tsx --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=../../reports/test-results/control-plane.junit.xml test/*.test.ts"
   },
@@ -18,6 +20,7 @@
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "pg": "^8.20.0",
+    "umzug": "^3.8.2",
     "zod": "^4.3.6"
   },
   "devDependencies": {

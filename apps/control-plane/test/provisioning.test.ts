@@ -1446,6 +1446,9 @@ function createPostgresManagerHarness() {
             return {
               async query(sql: string) {
                 tenantQueries.push(sql)
+                if (sql.includes('pg_try_advisory_lock')) {
+                  return { rows: [{ locked: true }] }
+                }
                 return { rows: [] }
               },
               release() {},

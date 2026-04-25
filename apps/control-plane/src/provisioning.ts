@@ -638,19 +638,19 @@ export class PostgresTenantDatabaseManager implements TenantDatabaseManager {
     )
 
     try {
-      const tenantClient = await tenantPool.connect()
+      await initializeTenantNoteStoreDatabase(tenantPool)
 
-      try {
-        await initializeTenantNoteStoreDatabase(tenantClient)
+      if (runtimeIdentity.mode === 'dedicated') {
+        const tenantClient = await tenantPool.connect()
 
-        if (runtimeIdentity.mode === 'dedicated') {
+        try {
           await applyLeastPrivilegeTenantGrants(
             tenantClient,
             runtimeIdentity.roleName,
           )
+        } finally {
+          tenantClient.release()
         }
-      } finally {
-        tenantClient.release()
       }
     } finally {
       await tenantPool.end()

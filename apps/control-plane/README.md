@@ -296,6 +296,43 @@ not include an automated SQLite-to-Postgres migration path for pre-existing
 control-plane registries; local/dev SQLite metadata should be recreated or
 manually migrated only if an older non-production environment needs to keep it.
 
+## Database Migrations
+
+Schema changes are applied through the migration runner in `src/migrate.ts`,
+backed by [umzug](https://github.com/sequelize/umzug) and a `schema_migrations`
+ledger table. Two migration sets live in this service:
+
+- `apps/control-plane/migrations/` — registry schema for the control-plane
+  database itself; applied automatically on boot before the HTTP server starts
+  listening, guarded by the advisory-lock pair `(930, 1)`.
+- `apps/control-plane/migrations-tenant/` — baseline migrations for newly
+  provisioned tenant Postgres databases; invoked from the provisioning path
+  on the freshly created tenant DB, guarded by `(930, 2)`.
+
+### Adding a migration
+
+1. Create a new file `NNNN_short_name.sql` in the matching directory using the
+   next sequential prefix.
+2. Use `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, and idempotent
+   `ALTER TABLE … ADD COLUMN IF NOT EXISTS …` so reruns are safe.
+3. Migrations are **roll-forward only**: never rename or drop existing columns
+   or tables that production code still reads. Use the expand/contract pattern
+   (add the new shape, ship code that writes both, then remove the old shape
+   in a follow-up release).
+4. Each migration runs inside its own transaction with the advisory lock held,
+   so a crashed pod leaves the database fully migrated or unchanged.
+
+### Running migrations manually
+
+```bash
+CONTROL_PLANE_DATABASE_URL=postgres://... npm run db:migrate
+```
+
+The same migrations also run automatically as part of `TenantRegistry`'s boot
+so a freshly deployed pod self-applies pending changes.
+
+
+
 ## Design Constraints
 
 - **Thin by design**: No business logic beyond registry CRUD and state tracking

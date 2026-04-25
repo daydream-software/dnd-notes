@@ -1,26 +1,65 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { newDb } from 'pg-mem'
 import { initializeTenantNoteStoreDatabase } from '../src/tenant-database-bootstrap.js'
+import { registerPgMemTenantRegistrySupport } from './tenant-registry-test-helpers.js'
 
-test('tenant database bootstrap includes owner_accounts.keycloak_sub in the provisioned schema', async () => {
-  const executedQueries: string[] = []
+test('tenant database bootstrap applies the baseline migration including owner_accounts.keycloak_sub', async () => {
+  const db = newDb({ autoCreateForeignKeyIndices: true })
+  registerPgMemTenantRegistrySupport(db)
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
 
-  const client = {
-    async query(text: string) {
-      executedQueries.push(text)
-      return {}
-    },
+  try {
+    await initializeTenantNoteStoreDatabase(pool)
+
+    const ownerAccountsTable = db.public.getTable('owner_accounts')
+    assert.ok(ownerAccountsTable, 'owner_accounts table exists after migrations')
+
+    const columns = await pool.query<{ column_name: string }>(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = current_schema()
+        AND table_name = 'owner_accounts'
+    `)
+    const columnNames = columns.rows.map((row) => row.column_name)
+    assert.ok(columnNames.includes('keycloak_sub'))
+    assert.ok(columnNames.includes('is_site_admin'))
+
+    assert.ok(
+      ownerAccountsTable.constraintsByName.has('idx_owner_accounts_email_lower'),
+    )
+    assert.ok(
+      ownerAccountsTable.constraintsByName.has('idx_owner_accounts_keycloak_sub'),
+    )
+
+    const migrations = await pool.query<{ name: string }>(
+      `SELECT name FROM schema_migrations ORDER BY name`,
+    )
+    assert.deepEqual(
+      migrations.rows.map((row) => row.name),
+      ['0001_baseline.sql'],
+    )
+  } finally {
+    await pool.end()
   }
+})
 
-  await initializeTenantNoteStoreDatabase(client)
+test('tenant database bootstrap is idempotent across repeated invocations', async () => {
+  const db = newDb({ autoCreateForeignKeyIndices: true })
+  registerPgMemTenantRegistrySupport(db)
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
 
-  assert.match(executedQueries[0] ?? '', /keycloak_sub TEXT/)
-  assert.doesNotMatch(executedQueries[0] ?? '', /keycloak_sub TEXT UNIQUE/)
-  assert.match(executedQueries[1] ?? '', /ADD COLUMN IF NOT EXISTS keycloak_sub TEXT/)
-  assert.match(
-    executedQueries[2] ?? '',
-    /CREATE UNIQUE INDEX IF NOT EXISTS idx_owner_accounts_keycloak_sub/,
-  )
-  assert.match(executedQueries[3] ?? '', /UPDATE owner_accounts SET email = LOWER\(email\)/)
-  assert.match(executedQueries[4] ?? '', /idx_owner_accounts_email_lower/)
+  try {
+    await initializeTenantNoteStoreDatabase(pool)
+    await initializeTenantNoteStoreDatabase(pool)
+
+    const migrations = await pool.query<{ name: string }>(
+      `SELECT name FROM schema_migrations ORDER BY name`,
+    )
+    assert.equal(migrations.rows.length, 1)
+  } finally {
+    await pool.end()
+  }
 })
