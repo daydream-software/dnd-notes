@@ -9,6 +9,10 @@ import {
 import type { NoteStore } from './note-store.js'
 import { registerAdminRoutes } from './routes/admin-routes.js'
 import { registerAuthRoutes } from './routes/auth-routes.js'
+import {
+  controlMaintenanceErrorCode,
+  registerControlRoutes,
+} from './routes/control-routes.js'
 import { registerOwnerCampaignRoutes } from './routes/owner-campaign-routes.js'
 import { registerOwnerNoteRoutes } from './routes/owner-note-routes.js'
 import { registerSharedRoutes } from './routes/shared-routes.js'
@@ -16,7 +20,13 @@ import {
   normalizePublicWebUrl,
   type RateLimitPolicy,
 } from './route-support.js'
+import { createControlState, type ControlState } from './control-state.js'
+import { tenantApiSchemaVersion } from './migrations.js'
 import type { ErrorResponse, HealthResponse } from './types.js'
+
+export const noteStoreSchemaVersion = tenantApiSchemaVersion
+const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
+const defaultMaintenanceDrainGraceMs = 5_000
 interface RateLimitBucket {
   count: number
   resetAt: number
@@ -30,6 +40,12 @@ interface CreateAppOptions {
   isShuttingDown?: () => boolean
   serveWeb?: boolean
   webDistPath?: string
+  controlPlaneToken?: string | null
+  appVersion?: string
+  schemaVersion?: string
+  tenantId?: string | null
+  maintenanceDrainGraceMs?: number
+  controlState?: ControlState
 }
 
 function readRateLimitClientId(request: Request) {
@@ -44,6 +60,12 @@ export function createApp({
   isShuttingDown = () => false,
   serveWeb = false,
   webDistPath,
+  controlPlaneToken = null,
+  appVersion = process.env.APP_VERSION ?? 'unknown',
+  schemaVersion = noteStoreSchemaVersion,
+  tenantId = null,
+  maintenanceDrainGraceMs = defaultMaintenanceDrainGraceMs,
+  controlState = createControlState(),
 }: CreateAppOptions): Express {
   const app = express()
   const noteStore = initialNoteStore
@@ -145,10 +167,73 @@ export function createApp({
     next()
   })
 
+  // Maintenance write gate. Reads keep working because only write methods are
+  // blocked, so readiness/liveness GET handlers still pass through and
+  // /_control/* stays reachable for toggles.
+  app.use((request, response: Response<ErrorResponse & { code?: string }>, next) => {
+    if (controlState.maintenance.mode !== 'enabled') {
+      next()
+      return
+    }
+
+    if (!writeMethods.has(request.method)) {
+      next()
+      return
+    }
+
+    if (request.path.startsWith('/_control/')) {
+      next()
+      return
+    }
+
+    response.set('Retry-After', '60')
+    response.status(503).json({
+      code: controlMaintenanceErrorCode,
+      error: 'Tenant is in maintenance mode; write operations are paused.',
+    })
+  })
+
+  // Track in-flight writes and last-write timestamp for /_control/info reporting
+  // and for the maintenance grace-window drain.
+  app.use((request, response, next) => {
+    const shouldTrackWrite =
+      writeMethods.has(request.method) &&
+      !request.path.startsWith('/_control/')
+
+    if (!shouldTrackWrite) {
+      next()
+      return
+    }
+
+    controlState.inflightWrites += 1
+    let settled = false
+    const settle = ({ updateLastWriteAt }: { updateLastWriteAt: boolean }) => {
+      if (settled) {
+        return
+      }
+
+      settled = true
+      controlState.inflightWrites = Math.max(
+        0,
+        controlState.inflightWrites - 1,
+      )
+
+      if (updateLastWriteAt && response.statusCode < 400) {
+        controlState.lastWriteAt = new Date().toISOString()
+      }
+    }
+
+    response.on('finish', () => settle({ updateLastWriteAt: true }))
+    response.on('close', () => settle({ updateLastWriteAt: false }))
+
+    next()
+  })
+
   app.use(express.json())
 
   // Liveness probe - process is alive
   app.get('/healthz', (_request: Request, response: Response<HealthResponse>) => {
+    controlState.lastProbeAt = new Date().toISOString()
     response.json({ status: 'ok', service: 'dnd-notes-api' })
   })
 
@@ -156,6 +241,8 @@ export function createApp({
     _request: Request,
     response: Response<HealthResponse | ErrorResponse>,
   ) => {
+    controlState.lastProbeAt = new Date().toISOString()
+
     if (isShuttingDown()) {
       response.status(503).json({
         error: 'Shutting down',
@@ -180,6 +267,16 @@ export function createApp({
   // Legacy health endpoint for backward compatibility
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {
     response.json({ status: 'ok', service: 'dnd-notes-api' })
+  })
+
+  registerControlRoutes(app, {
+    getNoteStore: () => noteStore,
+    controlState,
+    controlPlaneToken,
+    appVersion,
+    schemaVersion,
+    tenantId,
+    drainGraceMs: maintenanceDrainGraceMs,
   })
 
   registerAdminRoutes(app, routeContext)
@@ -209,6 +306,7 @@ export function createApp({
         looksLikeFileRequest ||
         path === '/api' ||
         path.startsWith('/api/') ||
+        path.startsWith('/_control/') ||
         path === '/health' ||
         path === '/healthz' ||
         path === '/ready' ||

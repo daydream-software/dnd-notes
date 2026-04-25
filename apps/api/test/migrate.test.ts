@@ -5,6 +5,7 @@ import {
   listTenantApiMigrations,
   runTenantApiMigrations,
   tenantApiMigrationLedgerTable,
+  tenantApiSchemaVersion,
 } from '../src/migrations.js'
 import { registerPgMemMigrationSupport } from './test-helpers.js'
 
@@ -53,7 +54,12 @@ test('tenant API migrations keep the .sql filename and use a namespaced ledger',
       /duplicate|already exists|unique|primary key/i,
     )
 
-    assert.deepEqual(await listTenantApiMigrations(), ['0001_baseline.sql'])
+    const migrationsOnDisk = await listTenantApiMigrations()
+    assert.deepEqual(migrationsOnDisk, ['0001_baseline.sql'])
+    assert.equal(
+      tenantApiSchemaVersion,
+      migrationsOnDisk.at(-1)?.replace(/\.sql$/i, ''),
+    )
   } finally {
     await pool.end()
   }
