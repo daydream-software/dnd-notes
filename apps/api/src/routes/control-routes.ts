@@ -168,15 +168,15 @@ export function registerControlRoutes(
         reason = trimmed.length > 0 ? trimmed : null
       }
 
-      const now = new Date().toISOString()
-
       if (mode === 'enable') {
+        const enableTime = new Date().toISOString()
+
         // Block new writes immediately; existing in-flight writes get a brief
         // grace window to finish before we tell the control plane the tenant
         // is drained.
         context.controlState.maintenance = {
           mode: 'enabled',
-          since: now,
+          since: enableTime,
           reason,
         }
         const drained = await waitForInflightWriteDrain(
@@ -188,7 +188,7 @@ export function registerControlRoutes(
           maintenance: { ...context.controlState.maintenance },
           drained,
           inflightWritesRemaining: context.controlState.inflightWrites,
-          serverTime: now,
+          serverTime: new Date().toISOString(),
         })
         return
       }
@@ -203,7 +203,7 @@ export function registerControlRoutes(
         maintenance: { ...context.controlState.maintenance },
         drained: true,
         inflightWritesRemaining: context.controlState.inflightWrites,
-        serverTime: now,
+        serverTime: new Date().toISOString(),
       })
     },
   )

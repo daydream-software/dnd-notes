@@ -330,9 +330,9 @@ test('POST /_control/maintenance enable then disable toggles the maintenance sta
     assert.equal(enableResponse.body.maintenance.reason, 'rolling restart')
     assert.equal(typeof enableResponse.body.maintenance.since, 'string')
     assert.equal(typeof enableResponse.body.serverTime, 'string')
-    assert.equal(
-      enableResponse.body.serverTime,
-      enableResponse.body.maintenance.since,
+    assert.ok(
+      Date.parse(enableResponse.body.serverTime) >=
+        Date.parse(enableResponse.body.maintenance.since),
     )
     assert.equal(enableResponse.body.drained, true)
 
@@ -402,6 +402,7 @@ test('POST /_control/maintenance drains only writes that started before maintena
       path: '/api/test-blocked',
       body: {},
     })
+    await sleep(30)
     inflightWrite.request.end('"}')
 
     const [inflightWriteResponse, enableMaintenanceResponse, blockedWriteResponse] =
@@ -422,6 +423,15 @@ test('POST /_control/maintenance drains only writes that started before maintena
         enableMaintenanceResponse.body as { inflightWritesRemaining: number }
       ).inflightWritesRemaining,
       0,
+    )
+    const maintenanceResponseBody = enableMaintenanceResponse.body as {
+      maintenance: { since: string | null }
+      serverTime: string
+    }
+    assert.equal(typeof maintenanceResponseBody.maintenance.since, 'string')
+    assert.ok(
+      Date.parse(maintenanceResponseBody.serverTime) >
+        Date.parse(maintenanceResponseBody.maintenance.since),
     )
     assert.equal(blockedWriteResponse.statusCode, 503)
   } finally {
