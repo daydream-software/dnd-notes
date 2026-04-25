@@ -10,6 +10,11 @@ import { registerPgMemTenantRegistrySupport } from './tenant-registry-test-helpe
 
 const expectedTenantStateSignature =
   'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+const expectedControlPlaneMigrations = [
+  '0001_baseline.sql',
+  '0002_backup_catalog.sql',
+  '0003_drop_backup_metadata.sql',
+]
 
 test('control-plane migrations seed schema metadata and use a namespaced ledger', async () => {
   const db = newDb({ autoCreateForeignKeyIndices: true })
@@ -23,10 +28,7 @@ test('control-plane migrations seed schema metadata and use a namespaced ledger'
     const migrations = await pool.query<{ applied_at: Date | null; name: string }>(
       `SELECT name, applied_at FROM ${controlPlaneMigrationLedgerTable} ORDER BY name`,
     )
-    assert.deepEqual(
-      migrations.rows.map((row) => row.name),
-      ['0001_baseline.sql'],
-    )
+    assert.deepEqual(migrations.rows.map((row) => row.name), expectedControlPlaneMigrations)
 
     const metadata = await pool.query<{ value: string }>(
       `SELECT value FROM schema_metadata WHERE key = 'tenant_state_signature'`,
@@ -58,7 +60,7 @@ test('control-plane migrations seed schema metadata and use a namespaced ledger'
       /duplicate|already exists|unique|primary key/i,
     )
 
-    assert.deepEqual(await listControlPlaneMigrations(), ['0001_baseline.sql'])
+    assert.deepEqual(await listControlPlaneMigrations(), expectedControlPlaneMigrations)
   } finally {
     await pool.end()
   }

@@ -7,12 +7,21 @@ import {
   assertPersistedTenantSubdomain,
 } from './tenant-subdomain.js'
 import {
+  backupRunStatuses,
   tenantStates,
+  type AuditLogEntry,
+  type AuditOutcome,
+  type BackupRun,
+  type BackupRunStatus,
+  type BackupVerificationStatus,
   type PortalAccount,
   type PortalBillingProvider,
   type PortalSession,
+  type RestoreRun,
   type StateTransition,
   type Tenant,
+  type TenantBackupSummary,
+  type TenantRestoreSummary,
   type TenantStorageMigrationStatus,
   type TenantStorageMode,
   type TenantStorageSnapshot,
@@ -25,15 +34,24 @@ const defaultTenantLockAcquireTimeoutMs = 30_000
 const defaultTenantLockRetryDelayMs = 250
 const tenantSelectColumns = `id, slug, subdomain, owner_id, display_name, plan_tier,
   initial_admin_email, desired_state, current_state, version, storage_reference,
-  backup_metadata, created_at, updated_at`
+  created_at, updated_at`
 const tenantStorageSelectColumns = `id, desired_state, current_state, storage_reference,
-  backup_metadata, storage_mode, storage_migration_status,
+  storage_mode, storage_migration_status,
   storage_migration_failure_reason, storage_migration_updated_at`
 const portalAccountSelectColumns = `id, email, display_name, billing_email,
   billing_provider, password_hash, auth_provider, keycloak_sub, created_at, updated_at`
 const portalSessionSelectColumns = `id, account_id, token_hash, expires_at, created_at`
 const stateTransitionSelectColumns = `id, tenant_id, from_state, to_state,
   triggered_by, reason, created_at`
+const backupCatalogSelectColumns = `id, tenant_id, status, format, location, size_bytes,
+  checksum, failure_reason, triggered_by, reason, requested_at, started_at, completed_at,
+  last_verified_at, last_verification_status, last_verification_details, scratch_target,
+  created_at, updated_at`
+const restoreLogSelectColumns = `id, tenant_id, backup_id, backup_location, status,
+  failure_reason, safety_snapshot_id, triggered_by, reason, requested_at, started_at,
+  completed_at, created_at, updated_at`
+const auditLogSelectColumns = `id, tenant_id, actor, action, resource_type, resource_id,
+  outcome, details, created_at`
 
 export interface TenantRegistryQueryable {
   query<Row extends QueryResultRow = QueryResultRow>(
@@ -73,7 +91,6 @@ interface TenantRow {
   current_state: TenantState
   version: string
   storage_reference: string | null
-  backup_metadata: string | null
   created_at: Date | string
   updated_at: Date | string
 }
@@ -83,7 +100,6 @@ interface TenantStorageRow {
   desired_state: TenantState
   current_state: TenantState
   storage_reference: string | null
-  backup_metadata: string | null
   storage_mode: TenantStorageMode
   storage_migration_status: TenantStorageMigrationStatus
   storage_migration_failure_reason: string | null
@@ -118,6 +134,57 @@ interface StateTransitionRow {
   to_state: TenantState
   triggered_by: string
   reason: string | null
+  created_at: Date | string
+}
+
+interface BackupCatalogRow {
+  id: string
+  tenant_id: string
+  status: BackupRunStatus
+  format: string
+  location: string | null
+  size_bytes: number | string | null
+  checksum: string | null
+  failure_reason: string | null
+  triggered_by: string
+  reason: string | null
+  requested_at: Date | string
+  started_at: Date | string | null
+  completed_at: Date | string | null
+  last_verified_at: Date | string | null
+  last_verification_status: BackupVerificationStatus | null
+  last_verification_details: string | null
+  scratch_target: string | null
+  created_at: Date | string
+  updated_at: Date | string
+}
+
+interface RestoreLogRow {
+  id: string
+  tenant_id: string
+  backup_id: string | null
+  backup_location: string
+  status: BackupRunStatus
+  failure_reason: string | null
+  safety_snapshot_id: string | null
+  triggered_by: string
+  reason: string | null
+  requested_at: Date | string
+  started_at: Date | string | null
+  completed_at: Date | string | null
+  created_at: Date | string
+  updated_at: Date | string
+}
+
+interface AuditLogRow {
+  id: bigint | number | string
+  tenant_id: string | null
+  actor: string
+  action: string
+  resource_type: string
+  resource_id: string | null
+  outcome: AuditOutcome
+  details: string | null
   created_at: Date | string
 }
 
@@ -1098,23 +1165,6 @@ export class TenantRegistry {
     this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
   }
 
-  async updateTenantBackupMetadata(
-    tenantId: string,
-    metadata: string,
-    executor: TenantRegistryQueryable = this.pool,
-  ): Promise<void> {
-    const result = await this.run(
-      `UPDATE tenants
-       SET backup_metadata = $1,
-            updated_at = CURRENT_TIMESTAMP
-       WHERE id = $2`,
-      [metadata, tenantId],
-      executor,
-    )
-
-    this.assertTenantUpdated(result.rowCount ?? 0, tenantId)
-  }
-
   async getStateTransitions(tenantId: string): Promise<StateTransition[]> {
     const rows = await this.run<StateTransitionRow>(
       `SELECT ${stateTransitionSelectColumns}
@@ -1153,6 +1203,497 @@ export class TenantRegistry {
         return [transition.tenantId, transition] as const
       }),
     )
+  }
+
+  async createBackupRun(params: {
+    id: string
+    tenantId: string
+    triggeredBy: string
+    reason?: string | null
+    format?: string
+    scratchTarget?: string | null
+  }): Promise<BackupRun> {
+    const result = await this.run<BackupCatalogRow>(
+      `INSERT INTO backup_catalog (
+         id, tenant_id, status, format, triggered_by, reason, scratch_target
+       )
+       VALUES ($1, $2, 'queued', $3, $4, $5, $6)
+       RETURNING ${backupCatalogSelectColumns}`,
+      [
+        params.id,
+        params.tenantId,
+        params.format ?? 'custom',
+        params.triggeredBy,
+        params.reason ?? null,
+        params.scratchTarget ?? null,
+      ],
+    )
+    const row = result.rows[0]
+
+    if (!row) {
+      throw new Error('Failed to retrieve created backup run')
+    }
+
+    return this.mapRowToBackupRun(row)
+  }
+
+  async markBackupRunRunning(id: string): Promise<BackupRun> {
+    return this.assertBackupRunReturned(
+      await this.run<BackupCatalogRow>(
+        `UPDATE backup_catalog
+         SET status = 'running',
+             started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING ${backupCatalogSelectColumns}`,
+        [id],
+      ),
+      id,
+    )
+  }
+
+  async markBackupRunCompleted(
+    id: string,
+    params: {
+      location: string
+      sizeBytes?: number | null
+      checksum?: string | null
+      completedAt?: string
+    },
+  ): Promise<BackupRun> {
+    return this.assertBackupRunReturned(
+      await this.run<BackupCatalogRow>(
+        `UPDATE backup_catalog
+         SET status = 'completed',
+             location = $1,
+             size_bytes = $2,
+             checksum = $3,
+             completed_at = COALESCE($4::timestamptz, CURRENT_TIMESTAMP),
+             failure_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5
+         RETURNING ${backupCatalogSelectColumns}`,
+        [
+          params.location,
+          params.sizeBytes ?? null,
+          params.checksum ?? null,
+          params.completedAt ?? null,
+          id,
+        ],
+      ),
+      id,
+    )
+  }
+
+  async markBackupRunFailed(
+    id: string,
+    failureReason: string,
+  ): Promise<BackupRun> {
+    return this.assertBackupRunReturned(
+      await this.run<BackupCatalogRow>(
+        `UPDATE backup_catalog
+         SET status = 'failed',
+             failure_reason = $1,
+             completed_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+         RETURNING ${backupCatalogSelectColumns}`,
+        [failureReason, id],
+      ),
+      id,
+    )
+  }
+
+  async recordBackupVerification(
+    id: string,
+    params: {
+      status: BackupVerificationStatus
+      verifiedAt?: string
+      details?: string | null
+      scratchTarget?: string | null
+    },
+  ): Promise<BackupRun> {
+    return this.assertBackupRunReturned(
+      await this.run<BackupCatalogRow>(
+        `UPDATE backup_catalog
+         SET last_verification_status = $1,
+             last_verified_at = COALESCE($2::timestamptz, CURRENT_TIMESTAMP),
+             last_verification_details = $3,
+             scratch_target = COALESCE($4, scratch_target),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $5
+         RETURNING ${backupCatalogSelectColumns}`,
+        [
+          params.status,
+          params.verifiedAt ?? null,
+          params.details ?? null,
+          params.scratchTarget ?? null,
+          id,
+        ],
+      ),
+      id,
+    )
+  }
+
+  async getBackupRun(id: string): Promise<BackupRun | null> {
+    const result = await this.run<BackupCatalogRow>(
+      `SELECT ${backupCatalogSelectColumns}
+       FROM backup_catalog
+       WHERE id = $1`,
+      [id],
+    )
+
+    return result.rows[0] ? this.mapRowToBackupRun(result.rows[0]) : null
+  }
+
+  async listTenantBackups(tenantId: string, limit = 50): Promise<BackupRun[]> {
+    const result = await this.run<BackupCatalogRow>(
+      `SELECT ${backupCatalogSelectColumns}
+       FROM backup_catalog
+       WHERE tenant_id = $1
+       ORDER BY requested_at DESC, created_at DESC, id DESC
+       LIMIT $2`,
+      [tenantId, limit],
+    )
+
+    return result.rows.map((row) => this.mapRowToBackupRun(row))
+  }
+
+  async getLatestSuccessfulBackupSummaries(): Promise<Map<string, TenantBackupSummary>> {
+    return this.getLatestSuccessfulBackupSummariesForTenantIds()
+  }
+
+  async getLatestSuccessfulBackupSummariesForTenantIds(
+    tenantIds?: readonly string[],
+  ): Promise<Map<string, TenantBackupSummary>> {
+    if (tenantIds?.length === 0) {
+      return new Map()
+    }
+
+    const tenantIdValues = tenantIds ? [...tenantIds] : []
+    const tenantFilter = tenantIds
+      ? ` AND bc.tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
+      : ''
+    const result = await this.run<BackupCatalogRow>(
+      `SELECT DISTINCT ON (bc.tenant_id) ${backupCatalogSelectColumns
+        .split(',')
+        .map((column) => `bc.${column.trim()}`)
+        .join(', ')}
+       FROM backup_catalog bc
+       WHERE bc.status = 'completed'
+       ${tenantFilter}
+       ORDER BY bc.tenant_id, bc.completed_at DESC NULLS LAST, bc.id DESC`,
+      tenantIdValues,
+    )
+
+    return new Map(
+      result.rows.map((row) => {
+        const run = this.mapRowToBackupRun(row)
+        const summary: TenantBackupSummary = {
+          backupId: run.id,
+          location: run.location,
+          lastBackupAt: run.completedAt,
+          lastBackupStatus: 'succeeded',
+          lastVerifiedAt: run.lastVerifiedAt,
+          lastVerificationStatus: run.lastVerificationStatus,
+          sizeBytes: run.sizeBytes,
+          checksum: run.checksum,
+        }
+        return [run.tenantId, summary] as const
+      }),
+    )
+  }
+
+  async getLatestRestoreSummaries(): Promise<Map<string, TenantRestoreSummary>> {
+    return this.getLatestRestoreSummariesForTenantIds()
+  }
+
+  async getLatestRestoreSummariesForTenantIds(
+    tenantIds?: readonly string[],
+  ): Promise<Map<string, TenantRestoreSummary>> {
+    if (tenantIds?.length === 0) {
+      return new Map()
+    }
+
+    const tenantIdValues = tenantIds ? [...tenantIds] : []
+    const tenantFilter = tenantIds
+      ? `WHERE rl.tenant_id IN (${tenantIdValues.map((_, index) => `$${index + 1}`).join(', ')})`
+      : ''
+    const result = await this.run<RestoreLogRow>(
+      `SELECT DISTINCT ON (rl.tenant_id) ${restoreLogSelectColumns
+        .split(',')
+        .map((column) => `rl.${column.trim()}`)
+        .join(', ')}
+       FROM restore_log rl
+       ${tenantFilter}
+       ORDER BY rl.tenant_id, rl.requested_at DESC, rl.created_at DESC, rl.id DESC`,
+      tenantIdValues,
+    )
+
+    return new Map(
+      result.rows.map((row) => {
+        const run = this.mapRowToRestoreRun(row)
+        const summary: TenantRestoreSummary = {
+          restoreId: run.id,
+          backupId: run.backupId,
+          backupLocation: run.backupLocation,
+          status: run.status,
+          requestedAt: run.requestedAt,
+          completedAt: run.completedAt,
+          failureReason: run.failureReason,
+        }
+        return [run.tenantId, summary] as const
+      }),
+    )
+  }
+
+  async createRestoreRun(params: {
+    id: string
+    tenantId: string
+    backupId?: string | null
+    backupLocation: string
+    triggeredBy: string
+    reason?: string | null
+  }): Promise<RestoreRun> {
+    const result = await this.run<RestoreLogRow>(
+      `INSERT INTO restore_log (
+         id, tenant_id, backup_id, backup_location, status, triggered_by, reason
+       )
+       VALUES ($1, $2, $3, $4, 'queued', $5, $6)
+       RETURNING ${restoreLogSelectColumns}`,
+      [
+        params.id,
+        params.tenantId,
+        params.backupId ?? null,
+        params.backupLocation,
+        params.triggeredBy,
+        params.reason ?? null,
+      ],
+    )
+    const row = result.rows[0]
+
+    if (!row) {
+      throw new Error('Failed to retrieve created restore run')
+    }
+
+    return this.mapRowToRestoreRun(row)
+  }
+
+  async markRestoreRunRunning(id: string): Promise<RestoreRun> {
+    return this.assertRestoreRunReturned(
+      await this.run<RestoreLogRow>(
+        `UPDATE restore_log
+         SET status = 'running',
+             started_at = COALESCE(started_at, CURRENT_TIMESTAMP),
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $1
+         RETURNING ${restoreLogSelectColumns}`,
+        [id],
+      ),
+      id,
+    )
+  }
+
+  async markRestoreRunCompleted(
+    id: string,
+    params: { safetySnapshotId?: string | null; completedAt?: string } = {},
+  ): Promise<RestoreRun> {
+    return this.assertRestoreRunReturned(
+      await this.run<RestoreLogRow>(
+        `UPDATE restore_log
+         SET status = 'completed',
+             safety_snapshot_id = COALESCE($1, safety_snapshot_id),
+             completed_at = COALESCE($2::timestamptz, CURRENT_TIMESTAMP),
+             failure_reason = NULL,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3
+         RETURNING ${restoreLogSelectColumns}`,
+        [params.safetySnapshotId ?? null, params.completedAt ?? null, id],
+      ),
+      id,
+    )
+  }
+
+  async markRestoreRunFailed(
+    id: string,
+    failureReason: string,
+  ): Promise<RestoreRun> {
+    return this.assertRestoreRunReturned(
+      await this.run<RestoreLogRow>(
+        `UPDATE restore_log
+         SET status = 'failed',
+             failure_reason = $1,
+             completed_at = CURRENT_TIMESTAMP,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $2
+         RETURNING ${restoreLogSelectColumns}`,
+        [failureReason, id],
+      ),
+      id,
+    )
+  }
+
+  async listTenantRestores(tenantId: string, limit = 50): Promise<RestoreRun[]> {
+    const result = await this.run<RestoreLogRow>(
+      `SELECT ${restoreLogSelectColumns}
+       FROM restore_log
+       WHERE tenant_id = $1
+       ORDER BY requested_at DESC, created_at DESC, id DESC
+       LIMIT $2`,
+      [tenantId, limit],
+    )
+
+    return result.rows.map((row) => this.mapRowToRestoreRun(row))
+  }
+
+  async appendAuditLogEntry(params: {
+    tenantId?: string | null
+    actor: string
+    action: string
+    resourceType: string
+    resourceId?: string | null
+    outcome: AuditOutcome
+    details?: string | null
+  }): Promise<AuditLogEntry> {
+    const result = await this.run<AuditLogRow>(
+      `INSERT INTO control_plane_audit_log (
+         tenant_id, actor, action, resource_type, resource_id, outcome, details
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING ${auditLogSelectColumns}`,
+      [
+        params.tenantId ?? null,
+        params.actor,
+        params.action,
+        params.resourceType,
+        params.resourceId ?? null,
+        params.outcome,
+        params.details ?? null,
+      ],
+    )
+    const row = result.rows[0]
+
+    if (!row) {
+      throw new Error('Failed to retrieve created audit log entry')
+    }
+
+    return this.mapRowToAuditLogEntry(row)
+  }
+
+  async listTenantAuditLog(
+    tenantId: string,
+    limit = 100,
+  ): Promise<AuditLogEntry[]> {
+    const result = await this.run<AuditLogRow>(
+      `SELECT ${auditLogSelectColumns}
+       FROM control_plane_audit_log
+       WHERE tenant_id = $1
+       ORDER BY id DESC
+       LIMIT $2`,
+      [tenantId, limit],
+    )
+
+    return result.rows.map((row) => this.mapRowToAuditLogEntry(row))
+  }
+
+  private assertBackupRunReturned(
+    result: { rows: BackupCatalogRow[] },
+    id: string,
+  ): BackupRun {
+    const row = result.rows[0]
+
+    if (!row) {
+      throw new Error(`Backup run ${id} not found`)
+    }
+
+    return this.mapRowToBackupRun(row)
+  }
+
+  private assertRestoreRunReturned(
+    result: { rows: RestoreLogRow[] },
+    id: string,
+  ): RestoreRun {
+    const row = result.rows[0]
+
+    if (!row) {
+      throw new Error(`Restore run ${id} not found`)
+    }
+
+    return this.mapRowToRestoreRun(row)
+  }
+
+  private mapRowToBackupRun(row: BackupCatalogRow): BackupRun {
+    if (!backupRunStatuses.includes(row.status)) {
+      throw new Error(`Unexpected backup run status: ${row.status}`)
+    }
+
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      status: row.status,
+      format: row.format,
+      location: row.location ?? null,
+      sizeBytes:
+        row.size_bytes === null || row.size_bytes === undefined
+          ? null
+          : Number(row.size_bytes),
+      checksum: row.checksum ?? null,
+      failureReason: row.failure_reason ?? null,
+      triggeredBy: row.triggered_by,
+      reason: row.reason ?? null,
+      requestedAt: normalizeTimestamp(row.requested_at),
+      startedAt: row.started_at ? normalizeTimestamp(row.started_at) : null,
+      completedAt: row.completed_at
+        ? normalizeTimestamp(row.completed_at)
+        : null,
+      lastVerifiedAt: row.last_verified_at
+        ? normalizeTimestamp(row.last_verified_at)
+        : null,
+      lastVerificationStatus: row.last_verification_status ?? null,
+      lastVerificationDetails: row.last_verification_details ?? null,
+      scratchTarget: row.scratch_target ?? null,
+      createdAt: normalizeTimestamp(row.created_at),
+      updatedAt: normalizeTimestamp(row.updated_at),
+    }
+  }
+
+  private mapRowToRestoreRun(row: RestoreLogRow): RestoreRun {
+    if (!backupRunStatuses.includes(row.status)) {
+      throw new Error(`Unexpected restore run status: ${row.status}`)
+    }
+
+    return {
+      id: row.id,
+      tenantId: row.tenant_id,
+      backupId: row.backup_id ?? null,
+      backupLocation: row.backup_location,
+      status: row.status,
+      failureReason: row.failure_reason ?? null,
+      safetySnapshotId: row.safety_snapshot_id ?? null,
+      triggeredBy: row.triggered_by,
+      reason: row.reason ?? null,
+      requestedAt: normalizeTimestamp(row.requested_at),
+      startedAt: row.started_at ? normalizeTimestamp(row.started_at) : null,
+      completedAt: row.completed_at
+        ? normalizeTimestamp(row.completed_at)
+        : null,
+      createdAt: normalizeTimestamp(row.created_at),
+      updatedAt: normalizeTimestamp(row.updated_at),
+    }
+  }
+
+  private mapRowToAuditLogEntry(row: AuditLogRow): AuditLogEntry {
+    return {
+      id: String(row.id),
+      tenantId: row.tenant_id ?? null,
+      actor: row.actor,
+      action: row.action,
+      resourceType: row.resource_type,
+      resourceId: row.resource_id ?? null,
+      outcome: row.outcome,
+      details: row.details ?? null,
+      createdAt: normalizeTimestamp(row.created_at),
+    }
   }
 
   private async recordTransition(
@@ -1219,7 +1760,6 @@ export class TenantRegistry {
       currentState: row.current_state,
       version: row.version,
       storageReference: row.storage_reference ?? null,
-      backupMetadata: row.backup_metadata ?? null,
       createdAt: normalizeTimestamp(row.created_at),
       updatedAt: normalizeTimestamp(row.updated_at),
     }
@@ -1231,7 +1771,6 @@ export class TenantRegistry {
       currentState: row.current_state,
       desiredState: row.desired_state,
       storageReference: row.storage_reference ?? null,
-      backupMetadata: row.backup_metadata ?? null,
       mode: row.storage_mode,
       migrationStatus: row.storage_migration_status,
       lastMigrationFailure: row.storage_migration_failure_reason ?? null,

@@ -88,6 +88,7 @@ describe('TenantRegistry', () => {
       )
 
       const portalSessionTable = db.public.getTable('portal_sessions')
+      const restoreLogTable = db.public.getTable('restore_log')
 
       assert.equal(
         portalSessionTable.constraintsByName.has('idx_portal_sessions_expires_at'),
@@ -99,9 +100,264 @@ describe('TenantRegistry', () => {
         ),
         false,
       )
+      assert.equal(
+        restoreLogTable.constraintsByName.has('idx_restore_log_tenant_requested_at'),
+        true,
+      )
+      assert.equal(
+        restoreLogTable.constraintsByName.has('idx_restore_log_tenant_completed_at'),
+        false,
+      )
     } finally {
       await cleanup()
     }
+  })
+
+  it('filters latest backup and restore summaries to the requested tenant ids', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.createTenant({
+        id: 'tenant-2',
+        slug: 'tenant-two',
+        ownerId: 'owner-2',
+        version: '1.0.0',
+      })
+
+      await tenantRegistry.createBackupRun({
+        id: 'backup-1',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-1', {
+        location: 'blob://backups/tenant-1',
+        completedAt: '2026-04-25T00:00:00Z',
+      })
+      await tenantRegistry.createBackupRun({
+        id: 'backup-2',
+        tenantId: 'tenant-2',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-2', {
+        location: 'blob://backups/tenant-2',
+        completedAt: '2026-04-25T01:00:00Z',
+      })
+
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-1',
+        tenantId: 'tenant-1',
+        backupId: 'backup-1',
+        backupLocation: 'blob://backups/tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markRestoreRunCompleted('restore-1', {
+        completedAt: '2026-04-25T02:00:00Z',
+      })
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-2',
+        tenantId: 'tenant-2',
+        backupId: 'backup-2',
+        backupLocation: 'blob://backups/tenant-2',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markRestoreRunCompleted('restore-2', {
+        completedAt: '2026-04-25T03:00:00Z',
+      })
+
+      const backupSummaries =
+        await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([
+          'tenant-1',
+        ])
+      const restoreSummaries = await tenantRegistry.getLatestRestoreSummariesForTenantIds([
+        'tenant-1',
+      ])
+
+      assert.equal(backupSummaries.size, 1)
+      assert.equal(backupSummaries.get('tenant-1')?.backupId, 'backup-1')
+      assert.equal(backupSummaries.has('tenant-2'), false)
+      assert.equal(restoreSummaries.size, 1)
+      assert.equal(restoreSummaries.get('tenant-1')?.restoreId, 'restore-1')
+      assert.equal(restoreSummaries.has('tenant-2'), false)
+      assert.equal(
+        (await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([])).size,
+        0,
+      )
+      assert.equal(
+        (await tenantRegistry.getLatestRestoreSummariesForTenantIds([])).size,
+        0,
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('uses deterministic tie-breakers for latest backup and restore lookups', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await tenantRegistry.createBackupRun({
+        id: 'backup-a',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-a', {
+        location: 'blob://backups/tenant-1/a',
+        completedAt: '2026-04-25T04:00:00Z',
+      })
+      await tenantRegistry.createBackupRun({
+        id: 'backup-b',
+        tenantId: 'tenant-1',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-b', {
+        location: 'blob://backups/tenant-1/b',
+        completedAt: '2026-04-25T04:00:00Z',
+      })
+
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-a',
+        tenantId: 'tenant-1',
+        backupId: 'backup-a',
+        backupLocation: 'blob://backups/tenant-1/a',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-b',
+        tenantId: 'tenant-1',
+        backupId: 'backup-b',
+        backupLocation: 'blob://backups/tenant-1/b',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.createRestoreRun({
+        id: 'restore-z',
+        tenantId: 'tenant-1',
+        backupId: 'backup-b',
+        backupLocation: 'blob://backups/tenant-1/b',
+        triggeredBy: 'test-suite',
+      })
+
+      await pool.query(
+        `UPDATE restore_log
+         SET requested_at = $1,
+              created_at = CASE id
+                WHEN 'restore-z' THEN $2
+                ELSE $3
+              END
+         WHERE id IN ('restore-a', 'restore-b', 'restore-z')`,
+        [
+          '2026-04-25T05:00:00Z',
+          '2026-04-25T05:01:00Z',
+          '2026-04-25T05:02:00Z',
+        ],
+      )
+
+      const backupSummary = await tenantRegistry.getLatestSuccessfulBackupSummariesForTenantIds([
+        'tenant-1',
+      ])
+      const restoreSummary = await tenantRegistry.getLatestRestoreSummariesForTenantIds([
+        'tenant-1',
+      ])
+      const restores = await tenantRegistry.listTenantRestores('tenant-1', 10)
+
+      assert.equal(backupSummary.get('tenant-1')?.backupId, 'backup-b')
+      assert.equal(restoreSummary.get('tenant-1')?.restoreId, 'restore-b')
+      assert.deepEqual(
+        restores.map((restore) => restore.id),
+        ['restore-b', 'restore-a', 'restore-z'],
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('requires completed backup rows to include both location and completed_at', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-1',
+        slug: 'tenant-one',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO backup_catalog (
+             id, tenant_id, status, triggered_by, completed_at
+           )
+           VALUES ($1, $2, 'completed', $3, $4)`,
+          [
+            'backup-missing-location',
+            'tenant-1',
+            'test-suite',
+            '2026-04-25T03:00:00Z',
+          ],
+        ),
+        /check/i,
+      )
+
+      await assert.rejects(
+        pool.query(
+          `INSERT INTO backup_catalog (
+             id, tenant_id, status, location, triggered_by
+           )
+           VALUES ($1, $2, 'completed', $3, $4)`,
+          [
+            'backup-missing-completed-at',
+            'tenant-1',
+            'blob://backups/tenant-1/missing-completed-at',
+            'test-suite',
+          ],
+        ),
+        /check/i,
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('preserves audit log ids as strings', () => {
+    const registry = Object.create(TenantRegistry.prototype) as TenantRegistry & {
+      mapRowToAuditLogEntry(row: {
+        id: string
+        tenant_id: string | null
+        actor: string
+        action: string
+        resource_type: string
+        resource_id: string | null
+        outcome: 'requested' | 'succeeded' | 'failed'
+        details: string | null
+        created_at: string
+      }): { id: string }
+    }
+
+    const entry = registry.mapRowToAuditLogEntry({
+      id: '9007199254740993',
+      tenant_id: 'tenant-audit',
+      actor: 'test-suite',
+      action: 'tenant.test',
+      resource_type: 'tenant',
+      resource_id: 'tenant-audit',
+      outcome: 'requested',
+      details: null,
+      created_at: '2026-04-25T00:00:00Z',
+    })
+
+    assert.equal(entry.id, '9007199254740993')
   })
 
   it('re-seeds tenant_state_signature when the baseline ledger is already applied', async () => {
