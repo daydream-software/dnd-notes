@@ -1514,6 +1514,10 @@ describe('PostgresTenantDatabaseManager', () => {
       true,
     )
     assert.equal(
+      harness.tenantQueries.some((sql) => sql.includes('schema_migrations_tenant_api')),
+      true,
+    )
+    assert.equal(
       harness.tenantQueries.some((sql) =>
         sql.includes('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES'),
       ),

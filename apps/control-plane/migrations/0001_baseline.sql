@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS portal_sessions (
   created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS schema_metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+INSERT INTO schema_metadata (key, value)
+VALUES (
+  'tenant_state_signature',
+  'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+)
+ON CONFLICT (key) DO NOTHING;
+
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tenants_subdomain
   ON tenants(subdomain)
   WHERE subdomain IS NOT NULL;

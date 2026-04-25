@@ -20,18 +20,29 @@ export interface CreateTestAppOptions {
   webDistPath?: string
 }
 
-export function registerPgMemMigrationSupport(db: IMemoryDb): void {
+export interface RegisterPgMemMigrationSupportOptions {
+  tryAdvisoryLockImpl?: (key1: unknown, key2: unknown) => boolean
+  advisoryUnlockImpl?: (key1: unknown, key2: unknown) => boolean
+}
+
+export function registerPgMemMigrationSupport(
+  db: IMemoryDb,
+  options: RegisterPgMemMigrationSupportOptions = {},
+): void {
+  const tryAdvisoryLockImpl = options.tryAdvisoryLockImpl ?? (() => true)
+  const advisoryUnlockImpl = options.advisoryUnlockImpl ?? (() => true)
+
   db.public.registerFunction({
     name: 'pg_try_advisory_lock',
     args: [DataType.integer, DataType.integer],
     returns: DataType.bool,
-    implementation: () => true,
+    implementation: tryAdvisoryLockImpl,
   })
   db.public.registerFunction({
     name: 'pg_advisory_unlock',
     args: [DataType.integer, DataType.integer],
     returns: DataType.bool,
-    implementation: () => true,
+    implementation: advisoryUnlockImpl,
   })
 }
 

@@ -9,6 +9,8 @@ import {
   createRuntimeNoteStore,
   initializeDatabaseOrClose,
 } from '../src/note-store.js'
+import { runTenantApiMigrations } from '../src/migrations.js'
+import type { PostgresPoolLike } from '../src/note-store-database.js'
 import { registerOwner, registerPgMemMigrationSupport, withAuth } from './test-helpers.js'
 
 function createPostgresMemDb() {
@@ -158,4 +160,55 @@ test('runtime note store rejects whitespace-only DATABASE_URL values', async (t)
     () => createRuntimeNoteStore(),
     /DATABASE_URL is required unless a postgresPool is provided\./,
   )
+})
+
+test('runtime note store verifies an existing schema without rerunning tenant migrations', async () => {
+  const db = createPostgresMemDb()
+  const { Pool } = db.adapters.createPg()
+  const seedPool = new Pool()
+
+  try {
+    await runTenantApiMigrations({ pool: seedPool })
+
+    const rawPool = new Pool()
+    const observedQueries: string[] = []
+    const instrumentedPool = {
+      query(text: string, values?: readonly unknown[]) {
+        observedQueries.push(text)
+        return rawPool.query(text, values)
+      },
+      async connect() {
+        const client = await rawPool.connect()
+        return {
+          query(text: string, values?: readonly unknown[]) {
+            observedQueries.push(text)
+            return client.query(text, values)
+          },
+          release() {
+            client.release()
+          },
+        }
+      },
+      end() {
+        return rawPool.end()
+      },
+    } satisfies PostgresPoolLike
+
+    const noteStore = await createRuntimeNoteStore({ postgresPool: instrumentedPool })
+
+    try {
+      await noteStore.close()
+    } finally {
+      await instrumentedPool.end()
+    }
+
+    assert.equal(
+      observedQueries.some((query) =>
+        /pg_try_advisory_lock|pg_advisory_unlock|schema_migrations_tenant_api/i.test(query),
+      ),
+      false,
+    )
+  } finally {
+    await seedPool.end()
+  }
 })

@@ -9,13 +9,14 @@ dedicated Postgres database created and bootstrapped by the
 
 Schema changes are applied through the migration runner in
 `src/migrate.ts`, backed by [umzug](https://github.com/sequelize/umzug) and a
-`schema_migrations` ledger table. Migration files live in
+`schema_migrations_tenant_api` ledger table. Migration files live in
 `apps/api/migrations/` and are applied:
 
-- Automatically when `createNoteStore()` boots, before the API serves traffic,
-  guarded by the advisory-lock pair `(931, 1)` so concurrent pods serialize
-  cleanly.
-- On demand via `npm run db:migrate` for one-off operational use.
+- By the control-plane during tenant provisioning and upgrade orchestration,
+  using admin database credentials before least-privilege runtime grants are
+  applied to the tenant workload.
+- On demand via `npm run db:migrate` for one-off operational use with
+  elevated database credentials.
 
 ### Adding a migration
 
@@ -29,9 +30,10 @@ Schema changes are applied through the migration runner in
 4. Each migration runs inside its own transaction with the advisory lock held;
    crashes leave the database either fully migrated or fully unchanged.
 
-After migrations run, a verifier in `note-store-bootstrap.ts` confirms that the
-expected tables, columns, and unique indexes are in place. The verifier never
-issues DDL — if a check fails, the operator is asked to run `npm run db:migrate`.
+At runtime, `createRuntimeNoteStore()` only runs the verifier in
+`note-store-bootstrap.ts`. The verifier confirms that the expected tables,
+columns, and unique indexes are in place, but it never issues DDL — if a check
+fails, the operator is asked to run `npm run db:migrate`.
 
 ### Running migrations manually
 
