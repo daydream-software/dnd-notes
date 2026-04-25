@@ -1463,28 +1463,27 @@ export function createApp({
       const isMaintenanceTransition =
         (previousState === 'ready' && state === 'maintenance') ||
         (previousState === 'maintenance' && state === 'ready')
+      const maintenanceMode = isMaintenanceTransition
+        ? state === 'maintenance'
+          ? 'enable'
+          : 'disable'
+        : null
 
       try {
-        await tenantRegistry.updateTenantState(
-          tenantId,
-          state,
-          triggeredBy,
-          reason,
-        )
-
-        const updatedTenant = await tenantRegistry.getTenant(tenantId)
-
-        if (!updatedTenant) {
-          response.status(500).json({ error: 'Failed to retrieve updated tenant' })
-          return
-        }
-
-        if (isMaintenanceTransition && tenantControlClient) {
-          const maintenanceMode = state === 'maintenance' ? 'enable' : 'disable'
+        if (maintenanceMode) {
+          if (!tenantControlClient) {
+            const details = `Cannot propagate maintenance transition ${previousState} -> ${state} for tenant ${tenantId}: tenant control client is not configured.`
+            console.error(details)
+            response.status(503).json({
+              error: 'Tenant maintenance propagation is not configured',
+              details,
+            })
+            return
+          }
 
           try {
             await tenantControlClient.setMaintenanceMode({
-              tenant: updatedTenant,
+              tenant,
               mode: maintenanceMode,
               reason,
             })
@@ -1503,6 +1502,20 @@ export function createApp({
             })
             return
           }
+        }
+
+        await tenantRegistry.updateTenantState(
+          tenantId,
+          state,
+          triggeredBy,
+          reason,
+        )
+
+        const updatedTenant = await tenantRegistry.getTenant(tenantId)
+
+        if (!updatedTenant) {
+          response.status(500).json({ error: 'Failed to retrieve updated tenant' })
+          return
         }
 
         response.json({ tenant: updatedTenant })

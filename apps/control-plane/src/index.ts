@@ -4,6 +4,7 @@ import { createApp } from './app.js'
 import { createControlPlaneAdminAuth } from './keycloak-auth.js'
 import {
   createLiveTenantProvisioningService,
+  defaultTenantReadyTimeoutMs,
   type TenantProvisioningPort,
 } from './provisioning.js'
 import { createShutdownController } from './shutdown.js'
@@ -224,7 +225,7 @@ if (ENABLE_TENANT_PROVISIONING) {
   const tenantReadyTimeoutMs = parsePositiveIntegerSetting(
     'TENANT_READY_TIMEOUT_MS',
     process.env.TENANT_READY_TIMEOUT_MS,
-    120_000,
+    defaultTenantReadyTimeoutMs,
   )
 
   tenantProvisioningService = createLiveTenantProvisioningService({

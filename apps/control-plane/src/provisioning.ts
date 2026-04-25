@@ -35,7 +35,7 @@ import type { TenantRegistry, TenantRegistryClientLike } from './tenant-registry
 
 const opaqueSubdomainPrefix = 't'
 const defaultTenantPort = 3000
-const defaultReadyTimeoutMs = 120_000
+export const defaultTenantReadyTimeoutMs = 240_000
 const defaultReadyPollIntervalMs = 2_000
 const defaultDeleteTimeoutMs = 120_000
 const defaultTenantStorageRequest = '1Gi'
@@ -235,7 +235,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.imagePullSecretName = options.imagePullSecretName
     this.publicScheme = options.publicScheme ?? 'https'
     this.tenantPort = options.tenantPort ?? defaultTenantPort
-    this.readyTimeoutMs = options.readyTimeoutMs ?? defaultReadyTimeoutMs
+    this.readyTimeoutMs = options.readyTimeoutMs ?? defaultTenantReadyTimeoutMs
     this.controlPlaneToken = options.controlPlaneToken
   }
 
@@ -773,7 +773,7 @@ export class KubernetesTenantInfrastructureManager
 
   async waitForTenantReady(
     resources: TenantProvisioningResources,
-    timeoutMs = defaultReadyTimeoutMs,
+    timeoutMs = defaultTenantReadyTimeoutMs,
   ): Promise<void> {
     const deadline = Date.now() + timeoutMs
 

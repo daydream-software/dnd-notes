@@ -126,6 +126,10 @@ wait_for_http() {
   return 1
 }
 
+resolve_tenant_ready_timeout_ms() {
+  printf '%s' "${TENANT_READY_TIMEOUT_MS:-240000}"
+}
+
 request_json_to_file() {
   local output_path="$1"
   shift
@@ -333,7 +337,7 @@ env \
   TENANT_DATABASE_RUNTIME_URL="${TENANT_DATABASE_RUNTIME_URL}" \
   TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME}" \
   TENANT_APP_PORT=3000 \
-  TENANT_READY_TIMEOUT_MS=120000 \
+  TENANT_READY_TIMEOUT_MS="$(resolve_tenant_ready_timeout_ms)" \
   node --import tsx "${ROOT}/apps/control-plane/src/index.ts" \
   >"${WORK_DIR}/control-plane.log" 2>&1 &
 control_plane_pid=$!

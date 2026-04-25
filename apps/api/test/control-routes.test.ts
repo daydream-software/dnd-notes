@@ -277,6 +277,10 @@ test('POST /_control/maintenance enable then disable toggles the maintenance sta
     assert.equal(enableResponse.body.maintenance.reason, 'rolling restart')
     assert.equal(typeof enableResponse.body.maintenance.since, 'string')
     assert.equal(typeof enableResponse.body.serverTime, 'string')
+    assert.equal(
+      enableResponse.body.serverTime,
+      enableResponse.body.maintenance.since,
+    )
     assert.equal(enableResponse.body.drained, true)
 
     const infoDuringMaintenance = await request(app)

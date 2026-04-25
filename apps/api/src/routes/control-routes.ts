@@ -188,7 +188,7 @@ export function registerControlRoutes(
           maintenance: { ...context.controlState.maintenance },
           drained,
           inflightWritesRemaining: context.controlState.inflightWrites,
-          serverTime: new Date().toISOString(),
+          serverTime: now,
         })
         return
       }

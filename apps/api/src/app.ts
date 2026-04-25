@@ -168,8 +168,8 @@ export function createApp({
 
   app.use(express.json())
 
-  // Maintenance write gate. Reads keep working; readiness/liveness handlers
-  // run before this middleware. Control-plane endpoints are always reachable.
+  // Maintenance write gate. Only non-control write methods are paused, so
+  // normal reads keep working and /_control/* stays reachable for toggles.
   app.use((request, response: Response<ErrorResponse & { code?: string }>, next) => {
     if (controlState.maintenance.mode !== 'enabled') {
       next()

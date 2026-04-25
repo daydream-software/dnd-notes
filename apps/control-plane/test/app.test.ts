@@ -1579,6 +1579,34 @@ describe('Control Plane API', () => {
         response.body.error,
         'Failed to propagate maintenance state to tenant',
       )
+      const tenant = await tenantRegistry.getTenant('tenant-123')
+      assert.ok(tenant)
+      assert.strictEqual(tenant.currentState, 'ready')
+    })
+
+    it('returns 503 when a maintenance transition is requested without a tenant control client', async () => {
+      await authedPost(tenantsPath).send({
+        id: 'tenant-123',
+        slug: 'test-tenant',
+        ownerId: 'owner-456',
+        version: '1.0.0',
+      })
+
+      await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'ready', triggeredBy: 'provisioner' })
+        .expect(200)
+
+      const response = await authedPatch(`${tenantPath('tenant-123')}/state`)
+        .send({ state: 'maintenance', triggeredBy: 'operator' })
+        .expect(503)
+
+      assert.strictEqual(
+        response.body.error,
+        'Tenant maintenance propagation is not configured',
+      )
+      const tenant = await tenantRegistry.getTenant('tenant-123')
+      assert.ok(tenant)
+      assert.strictEqual(tenant.currentState, 'ready')
     })
 
     it('logs the full maintenance transition when propagation fails', async () => {
