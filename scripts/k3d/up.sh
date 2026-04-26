@@ -15,6 +15,9 @@ TENANT_IMAGE_TAG="${TENANT_IMAGE_TAG:-k3d}"
 TENANT_IMAGE_REPOSITORY="${TENANT_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes}"
 CONTROL_PLANE_IMAGE_TAG="${CONTROL_PLANE_IMAGE_TAG:-k3d}"
 CONTROL_PLANE_IMAGE_REPOSITORY="${CONTROL_PLANE_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-control-plane}"
+IMAGE_IMPORT_MODE="${K3D_IMAGE_IMPORT_MODE:-direct}"
+IMAGE_IMPORT_FALLBACK_MODE="${K3D_IMAGE_IMPORT_FALLBACK_MODE:-tools}"
+IMAGE_IMPORT_TIMEOUT_SECONDS="${K3D_IMAGE_IMPORT_TIMEOUT_SECONDS:-180}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
 TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-http}"
 CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-http://keycloak.127.0.0.1.nip.io:${K3D_HTTP_PORT}}"
@@ -28,8 +31,8 @@ TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 DEV_TENANT_ID="${K3D_DEV_TENANT_ID:-k3d-dev}"
 DEV_TENANT_SUBDOMAIN="${K3D_DEV_TENANT_SUBDOMAIN:-dev}"
 DEV_TENANT_OWNER_ID="${K3D_DEV_TENANT_OWNER_ID:-k3d-dev-owner}"
-STATE_DIR="${ROOT}/.k3d-state"
-STATE_FILE="${STATE_DIR}/state.json"
+STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
+STATE_DIR="$(dirname "${STATE_FILE}")"
 WORK_DIR="${ROOT}/.k3d-up-work"
 
 NO_REBUILD=false
@@ -68,6 +71,9 @@ Environment overrides:
   POSTGRES_LOCAL_PORT
   TENANT_IMAGE_TAG
   CONTROL_PLANE_IMAGE_TAG
+  K3D_IMAGE_IMPORT_MODE
+  K3D_IMAGE_IMPORT_FALLBACK_MODE
+  K3D_IMAGE_IMPORT_TIMEOUT_SECONDS
   TENANT_BASE_DOMAIN
   TENANT_PUBLIC_SCHEME
   CONTROL_PLANE_KEYCLOAK_URL
@@ -81,6 +87,7 @@ Environment overrides:
   K3D_DEV_TENANT_ID
   K3D_DEV_TENANT_SUBDOMAIN
   K3D_DEV_TENANT_OWNER_ID
+  K3D_STATE_FILE
 EOF
 }
 
@@ -101,6 +108,62 @@ cluster_exists() {
 
 image_exists_locally() {
   docker image inspect "$1" >/dev/null 2>&1
+}
+
+run_k3d_image_import() {
+  local image_ref="$1"
+  local mode="$2"
+  local status=0
+
+  log "Importing ${image_ref} into k3d cluster ${CLUSTER_NAME} with mode ${mode}..."
+  if command -v timeout >/dev/null 2>&1; then
+    if timeout "${IMAGE_IMPORT_TIMEOUT_SECONDS}" \
+      k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${image_ref}"; then
+      return 0
+    fi
+
+    status=$?
+    return "${status}"
+  fi
+
+  if k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${image_ref}"; then
+    return 0
+  fi
+
+  status=$?
+  return "${status}"
+}
+
+ensure_image_imported_into_cluster() {
+  local image_ref="$1"
+
+  if ! run_k3d_image_import "${image_ref}" "${IMAGE_IMPORT_MODE}"; then
+    if [[ "${IMAGE_IMPORT_FALLBACK_MODE}" == "${IMAGE_IMPORT_MODE}" ]]; then
+      log "Image import failed for ${image_ref} with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured."
+      return 1
+    fi
+
+    log "Image import of ${image_ref} with mode ${IMAGE_IMPORT_MODE} failed or timed out; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}."
+    run_k3d_image_import "${image_ref}" "${IMAGE_IMPORT_FALLBACK_MODE}"
+  fi
+}
+
+ensure_image_ready() {
+  local image_name="$1"
+  local image_ref="$2"
+  local build_script="$3"
+
+  if [[ "${NO_REBUILD}" == "true" ]]; then
+    if image_exists_locally "${image_ref}"; then
+      log "${image_name} image ${image_ref} already present locally — skipping build."
+      ensure_image_imported_into_cluster "${image_ref}"
+    else
+      log "${image_name} image ${image_ref} not found locally despite --no-rebuild; building..."
+      run_visible "${build_script}"
+    fi
+  else
+    run_visible "${build_script}"
+  fi
 }
 
 wait_for_tcp() {
@@ -217,11 +280,14 @@ write_state() {
   local tenant_subdomain="${2:-}"
   local tenant_namespace="${3:-}"
   local tenant_hostname="${4:-}"
+  local state_dir="${STATE_DIR:-$(dirname "${STATE_FILE}")}"
 
-  mkdir -p "${STATE_DIR}"
+  mkdir -p "${state_dir}"
+  chmod 700 "${state_dir}"
 
   node -e '
     const fs = require("node:fs")
+    const path = require("node:path")
     const [
       clusterName, httpPort, cpPort,
       keycloakUrl, keycloakRealm, cpClientId, tenantClientId,
@@ -266,7 +332,11 @@ write_state() {
       },
     }
 
+    const stateDir = path.dirname(stateFile)
+    fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 })
+    fs.chmodSync(stateDir, 0o700)
     fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\n")
+    fs.chmodSync(stateFile, 0o600)
     process.stdout.write(stateFile)
   ' \
     "${CLUSTER_NAME}" \
@@ -399,24 +469,8 @@ kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 tenant_image_ref="${TENANT_IMAGE_REPOSITORY}:${TENANT_IMAGE_TAG}"
 cp_image_ref="${CONTROL_PLANE_IMAGE_REPOSITORY}:${CONTROL_PLANE_IMAGE_TAG}"
 
-if [[ "${NO_REBUILD}" == "true" ]]; then
-  if image_exists_locally "${tenant_image_ref}"; then
-    log "Tenant image ${tenant_image_ref} already present locally — skipping build."
-  else
-    log "Tenant image ${tenant_image_ref} not found locally despite --no-rebuild; building..."
-    run_visible "${ROOT}/scripts/k3d/build-tenant-image.sh"
-  fi
-
-  if image_exists_locally "${cp_image_ref}"; then
-    log "Control-plane image ${cp_image_ref} already present locally — skipping build."
-  else
-    log "Control-plane image ${cp_image_ref} not found locally despite --no-rebuild; building..."
-    run_visible "${ROOT}/scripts/k3d/build-control-plane-image.sh"
-  fi
-else
-  run_visible "${ROOT}/scripts/k3d/build-tenant-image.sh"
-  run_visible "${ROOT}/scripts/k3d/build-control-plane-image.sh"
-fi
+ensure_image_ready "Tenant" "${tenant_image_ref}" "${ROOT}/scripts/k3d/build-tenant-image.sh"
+ensure_image_ready "Control-plane" "${cp_image_ref}" "${ROOT}/scripts/k3d/build-control-plane-image.sh"
 
 # ---------------------------------------------------------------------------
 # Step 3: Deploy control plane

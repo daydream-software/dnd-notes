@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -25,6 +25,9 @@ const readStateFnMatch = statusScript.match(/^read_state\(\) \{\n[\s\S]*?^}/m)
 const probeTenantUrlFnMatch = statusScript.match(/^probe_tenant_url\(\) \{\n[\s\S]*?^}/m)
 const readStateFieldFnMatch = downScript.match(/^read_state_field\(\) \{\n[\s\S]*?^}/m)
 const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n[\s\S]*?^}/m)
+const runK3dImageImportFnMatch = upScript.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
+const ensureImageImportedFnMatch = upScript.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
+const ensureImageReadyFnMatch = upScript.match(/^ensure_image_ready\(\) \{\n[\s\S]*?^}/m)
 const writeStateFnMatch = upScript.match(/^write_state\(\) \{\n[\s\S]*?^}/m)
 
 if (!resetStateFnMatch) {
@@ -45,6 +48,18 @@ if (!readStateFieldFnMatch) {
 
 if (!localizePostgresUrlMatch) {
   throw new Error('Expected localize_postgres_url() in scripts/k3d/up.sh')
+}
+
+if (!runK3dImageImportFnMatch) {
+  throw new Error('Expected run_k3d_image_import() in scripts/k3d/up.sh')
+}
+
+if (!ensureImageImportedFnMatch) {
+  throw new Error('Expected ensure_image_imported_into_cluster() in scripts/k3d/up.sh')
+}
+
+if (!ensureImageReadyFnMatch) {
+  throw new Error('Expected ensure_image_ready() in scripts/k3d/up.sh')
 }
 
 if (!writeStateFnMatch) {
@@ -178,9 +193,14 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
 
 describe('k3d status read_state — corrupt state recovery', () => {
   it('returns non-zero for a missing state file', () => {
+    const missingStateFile = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-status-missing-state-${process.pid}.json`,
+    )
+
     const result = runBash(
       `${readStateSnippet}
-STATE_FILE="/tmp/does-not-exist-${process.pid}.json"
+STATE_FILE="${missingStateFile}"
 if read_state; then
   echo "should-not-reach"
   exit 1
@@ -317,9 +337,14 @@ printf '%s' "$ns"`,
   })
 
   it('returns empty string for a missing state file without error', () => {
+    const missingStateFile = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-down-missing-state-${process.pid}.json`,
+    )
+
     const result = runBash(
       `${readStateFieldFnMatch[0]}
-STATE_FILE="/tmp/does-not-exist-${process.pid}.json"
+STATE_FILE="${missingStateFile}"
 ns="$(read_state_field tenantNamespace)"
 printf 'got:[%s]' "$ns"`,
     )
@@ -411,6 +436,70 @@ localize_postgres_url \
   })
 })
 
+describe('k3d up ensure_image_ready', () => {
+  it('re-imports cached local images into the active cluster when --no-rebuild skips docker builds', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-image-ready-test-${process.pid}`,
+    )
+    const fakeBinDir = join(tmpDir, 'bin')
+    const logFile = join(tmpDir, 'invocations.log')
+
+    mkdirSync(fakeBinDir, { recursive: true })
+    writeFileSync(
+      join(fakeBinDir, 'timeout'),
+      `#!/usr/bin/env bash
+printf 'timeout:%s\n' "$*" >> "$LOG_FILE"
+seconds="$1"
+shift
+"$@"
+`,
+    )
+    chmodSync(join(fakeBinDir, 'timeout'), 0o755)
+    writeFileSync(
+      join(fakeBinDir, 'k3d'),
+      `#!/usr/bin/env bash
+printf 'k3d:%s\n' "$*" >> "$LOG_FILE"
+`,
+    )
+    chmodSync(join(fakeBinDir, 'k3d'), 0o755)
+
+    const result = runBash(
+      `${runK3dImageImportFnMatch[0]}
+${ensureImageImportedFnMatch[0]}
+${ensureImageReadyFnMatch[0]}
+log() { :; }
+run_visible() { printf 'build:%s\\n' "$*" >> "$LOG_FILE"; }
+image_exists_locally() { return 0; }
+CLUSTER_NAME="dnd-notes"
+IMAGE_IMPORT_MODE="direct"
+IMAGE_IMPORT_FALLBACK_MODE="tools"
+IMAGE_IMPORT_TIMEOUT_SECONDS="180"
+NO_REBUILD=true
+ensure_image_ready "Tenant" "ghcr.io/daydream-software/dnd-notes:k3d" "/fake/build.sh"`,
+      {
+        LOG_FILE: logFile,
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
+      },
+    )
+
+    const invocations = readFileSync(logFile, 'utf8')
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.doesNotMatch(invocations, /^build:/m)
+    assert.match(
+      invocations,
+      /timeout:180 k3d image import --mode direct -c dnd-notes ghcr\.io\/daydream-software\/dnd-notes:k3d/,
+    )
+    assert.match(
+      invocations,
+      /k3d:image import --mode direct -c dnd-notes ghcr\.io\/daydream-software\/dnd-notes:k3d/,
+    )
+  })
+})
+
 // ---------------------------------------------------------------------------
 // write_state (up.sh) — state.json schema contract
 // ---------------------------------------------------------------------------
@@ -456,8 +545,6 @@ cat "${stateFile}"`,
       assert.fail(`write_state did not produce valid JSON.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`)
     }
 
-    rmSync(tmpDir, { recursive: true, force: true })
-
     // Stable schema contract assertions
     assert.strictEqual(state.tenantId, 'k3d-dev', 'tenantId')
     assert.strictEqual(state.tenantSubdomain, 'dev', 'tenantSubdomain')
@@ -474,6 +561,10 @@ cat "${stateFile}"`,
     const snippets = state.tokenSnippets as Record<string, unknown>
     assert.ok(typeof snippets.controlPlane === 'string', 'tokenSnippets.controlPlane')
     assert.ok(typeof snippets.tenant === 'string', 'tokenSnippets.tenant')
+    assert.strictEqual(statSync(tmpDir).mode & 0o777, 0o700, 'state dir permissions')
+    assert.strictEqual(statSync(stateFile).mode & 0o777, 0o600, 'state file permissions')
+
+    rmSync(tmpDir, { recursive: true, force: true })
   })
 })
 
@@ -503,84 +594,47 @@ describe('k3d status --json schema', () => {
   })
 
   it('reports the effective cluster name when K3D_CLUSTER_NAME env override is set', () => {
-    const repoRootResult = spawnSync('git', ['rev-parse', '--show-toplevel'], {
-      encoding: 'utf8',
-      cwd: fileURLToPath(new URL('.', import.meta.url)),
-    })
-    assert.strictEqual(
-      repoRootResult.status,
-      0,
-      repoRootResult.error?.message ?? repoRootResult.stderr,
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-status-cluster-name-test-${process.pid}`,
     )
-    const repoRoot = repoRootResult.stdout.trim()
-    assert.ok(repoRoot, 'git rev-parse --show-toplevel returned an empty repo root')
+    const stateFile = join(tmpDir, 'state.json')
 
-    const stateDir = join(repoRoot, '.k3d-state')
-    const stateFile = join(stateDir, 'state.json')
-    const stateDirExisted = existsSync(stateDir)
-
-    // Back up the real state file if it exists
-    let backupContent: string | null = null
-    try {
-      backupContent = readFileSync(stateFile, 'utf8')
-    } catch {
-      // No existing state file, nothing to back up
-    }
-
-    try {
-      mkdirSync(stateDir, { recursive: true })
-
-      // Write state with one cluster name to the REAL state path that status.sh reads
-      const state = {
-        clusterName: 'dnd-notes',
-        tenantId: 'k3d-dev',
-        tenantSubdomain: 'dev',
-        tenantNamespace: 'tenant-platform-dev',
-      }
-      writeFileSync(stateFile, JSON.stringify(state, null, 2))
-
-      // Run status.sh with K3D_CLUSTER_NAME override pointing to different cluster
-      const result = runBash(
-        `bash "${statusScriptPath}" --json`,
+    mkdirSync(tmpDir, { recursive: true })
+    writeFileSync(
+      stateFile,
+      JSON.stringify(
         {
-          K3D_CLUSTER_NAME: 'custom-cluster',
+          clusterName: 'dnd-notes',
+          tenantId: 'k3d-dev',
+          tenantSubdomain: 'dev',
+          tenantNamespace: 'tenant-platform-dev',
         },
-      )
+        null,
+        2,
+      ),
+    )
 
-      assert.strictEqual(result.status, 0, result.stderr)
+    const result = runBash(`bash "${statusScriptPath}" --json`, {
+      K3D_CLUSTER_NAME: 'custom-cluster',
+      K3D_STATE_FILE: stateFile,
+    })
 
-      let statusJson: Record<string, unknown>
-      try {
-        statusJson = JSON.parse(result.stdout)
-      } catch {
-        assert.fail(`status.sh did not produce valid JSON.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`)
-      }
+    rmSync(tmpDir, { recursive: true, force: true })
 
-      // The JSON output must report the effective cluster name (from K3D_CLUSTER_NAME),
-      // not the persisted one from state.json
-      assert.strictEqual(
-        statusJson.clusterName,
-        'custom-cluster',
-        'status.sh --json must report the effective cluster name when K3D_CLUSTER_NAME is set, not the persisted one',
-      )
-    } finally {
-      // Restore the original state file or clean up
-      if (backupContent !== null) {
-        writeFileSync(stateFile, backupContent)
-      } else {
-        try {
-          rmSync(stateFile, { force: true })
-        } catch {
-          // Ignore cleanup errors
-        }
-        if (!stateDirExisted) {
-          try {
-            rmSync(stateDir, { recursive: true, force: true })
-          } catch {
-            // Ignore cleanup errors
-          }
-        }
-      }
+    assert.strictEqual(result.status, 0, result.stderr)
+
+    let statusJson: Record<string, unknown>
+    try {
+      statusJson = JSON.parse(result.stdout)
+    } catch {
+      assert.fail(`status.sh did not produce valid JSON.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`)
     }
+
+    assert.strictEqual(
+      statusJson.clusterName,
+      'custom-cluster',
+      'status.sh --json must report the effective cluster name when K3D_CLUSTER_NAME is set, not the persisted one',
+    )
   })
 })

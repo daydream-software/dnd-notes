@@ -7,8 +7,8 @@ fi
 
 ROOT="$(git rev-parse --show-toplevel)"
 PLATFORM_NAMESPACE="dnd-notes-platform"
-STATE_DIR="${ROOT}/.k3d-state"
-STATE_FILE="${STATE_DIR}/state.json"
+STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
+STATE_DIR="$(dirname "${STATE_FILE}")"
 
 KEEP_CLUSTER=false
 
@@ -26,6 +26,7 @@ Flags:
 
 Environment overrides:
   K3D_CLUSTER_NAME
+  K3D_STATE_FILE
 EOF
 }
 
