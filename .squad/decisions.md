@@ -5742,3 +5742,115 @@ This keeps the runtime contract explicit: one env var, one pool, one backend. It
 - Control-plane persistence is now exclusively Postgres-backed in all runtime/test paths.
 - Operator setup documentation updated to require `CONTROL_PLANE_DATABASE_URL` environment variable.
 - Bootstrap and health-check paths now depend on Postgres availability; local-dev fallback removed.
+
+---
+
+# Epic #87 Validation — Data (2026-04-26)
+
+**Validated by:** Data (Backend Dev)  
+**Status:** All 4 criteria PASS
+
+Performed read-only validation of four acceptance criteria for Epic #87 (multi-tenancy foundation). All criteria met implementation requirements. No blocking issues.
+
+## Findings
+
+### Criterion 1: Tenant API Control Endpoints (PASS)
+- Routes: `apps/api/src/app.ts:272-280` via `registerControlRoutes`
+- Handlers: `apps/api/src/routes/control-routes.ts:120-225`
+- Maintenance drain genuinely drains: blocks writes (line 173–194), tracks inflight (line 208), waits with timeout (line 198–201)
+- Not a stub; passes skepticism
+
+### Criterion 2: Control-Plane Backup/Restore (PASS)
+- Backup catalog in `backup_catalog`, `restore_log`, `control_plane_audit_log` tables (migration 0002)
+- Real `pg_dump` at `apps/control-plane/src/tenant-backup-runner.ts:281–294`
+- Real `pg_restore` at same file:349–360
+- Audit log writes for backup/restore complete
+- Not placeholders; passes skepticism
+
+### Criterion 5: Note-Store Split (PASS)
+- Main file: 880 lines (target <1000)
+- 8 modules: 143 + 188 + 484 + 371 + 596 + 432 + 512 + 288 = 3014 lines
+
+### Criterion 6: Tenant-Registry Migrations (PASS)
+- Zero defensive DDL in `apps/control-plane/src/tenant-registry-postgres.ts`
+- Versioned migrations: `schema_migrations_control_plane` table
+- Umzug framework with advisory-lock serialization
+
+## Recommendation
+
+All criteria pass. Epic #87 ready to close.
+
+---
+
+# Epic #87 Validation — Chunk: Test & CI (2026-04-26)
+
+**Author:** Chunk (Tester)  
+**Status:** blocking-gap
+
+Epic #87 acceptance criteria have strong test coverage across all 6 items, but **two test suites don't run in CI**, creating a false-green risk:
+
+1. `platform/keycloak-jwt/test/*.test.ts` — 19 tests, security-critical
+2. `packages/portal-utils/src/base-path.test.ts` — 8 tests
+
+Both modules correctly consumed (api/control-plane import keycloak-jwt, operator-portal/customer-portal import portal-utils) but missing from `scripts/run-ci-tests.mjs:13–19`.
+
+## Why this blocks #87
+
+Criteria require:
+- **Item 3:** "keycloak-jwt exists as shared module; **duplication removed**." ✅ True, but new module must be regression-locked in CI (security-critical).
+- **Item 4:** "normalizeBasePath defined once; **existing test coverage extends to both**." ✅ True, but coverage must actually run.
+
+Without CI wiring, future changes to shared modules could regress silently.
+
+## All other items: PASS
+
+- ✅ Item 1: `apps/api/test/control-routes.test.ts:381` validates drain
+- ✅ Item 2: `apps/control-plane/test/` covers backup/restore/audit/catalog
+- ✅ Item 5: 880-line split with comprehensive module coverage
+- ✅ Item 6: `apps/control-plane/test/migrate.test.ts` validates ledger
+
+All passing items run in CI via `.github/workflows/ci.yml` → `scripts/run-ci-tests.mjs`.
+
+---
+
+# Epic #87 Validation Verdict (2026-04-26)
+
+**Decided by:** Mikey (Lead)  
+**Context:** Team completed read-only validation pass on epic #87 (6 acceptance criteria)
+
+## Decision
+
+**Close epic #87 as completed.** Open one P1 follow-up issue to wire `keycloak-jwt` and `portal-utils` tests into CI.
+
+## Rationale
+
+### All 6 acceptance criteria COMPLETE from code perspective:
+
+1. **Tenant API control endpoints** — Real drain, real write gate, proper API wiring
+2. **Control-plane backup/restore** — Real pg_dump/pg_restore, full audit trail, catalog persistence
+3. **Shared keycloak-jwt** — Zero duplication, both apps import from `@dnd-notes/keycloak-jwt`
+4. **normalizeBasePath consolidation** — Zero portal duplication, shared `@dnd-notes/portal-utils`
+5. **Note-store split** — 880-line monolith → 8 focused modules
+6. **Tenant-registry migrations** — Zero defensive DDL, Umzug + advisory locks
+
+### However: Two shared modules have tests not in CI
+
+- **`platform/keycloak-jwt`** (19 tests, security-critical) — test:ci exists but not in run-ci-tests.mjs
+- **`packages/portal-utils`** (8 tests, config logic) — same gap
+
+**Risk:** Test drift. Especially critical for keycloak-jwt (auth vulnerability vector).
+
+### Why close now instead of holding:
+
+1. Epic #87 scope was items 1–6 (code implementation) — complete and functional
+2. CI gap is quality-enforcement, not missing feature
+3. Follow-up is small (5-minute change) and P1-tagged
+4. Holding close artificially inflates epic time for infrastructure oversight
+
+## Impact
+
+- Epic #87: Close as completed
+- Follow-up issue: "Wire shared module tests into CI (keycloak-jwt, portal-utils)" — P1, labels: qa/ci
+- Pattern: Separate "feature complete" from "quality tooling wired" to avoid blocking epic on infrastructure churn
+
+---
