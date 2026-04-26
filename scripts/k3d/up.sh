@@ -585,7 +585,7 @@ local_db_url="$(localize_postgres_url "${raw_db_url}" "${POSTGRES_LOCAL_PORT}")"
 DATABASE_URL="${local_db_url}" node --import tsx "${ROOT}/apps/api/src/seed.ts" seed \
   >"${WORK_DIR}/seed-output.log" 2>&1 \
   && log "Seed complete." \
-  || log "Seed skipped or already seeded ($(cat "${WORK_DIR}/seed-output.log" 2>/dev/null | tail -1))."
+  || log "Seed skipped or already seeded ($(tail -1 "${WORK_DIR}/seed-output.log" 2>/dev/null))."
 
 kill "${postgres_forward_pid}" >/dev/null 2>&1 || true
 wait "${postgres_forward_pid}" 2>/dev/null || true
