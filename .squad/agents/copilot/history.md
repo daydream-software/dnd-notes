@@ -12,6 +12,8 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 ## Recent Updates
 
+📌 PR #119 review follow-up addressed locally (2026-04-25T23:57:34Z): Closed the open review comment on `squad/118-wire-shared-module-tests` by extending the root `npm run test` aggregate to include `test:keycloak-jwt`, so local and CI shared-module coverage stay aligned. Re-ran the repo-level validation path (`npm run test && npm run lint && npm run test:ci && npm run build`) successfully before pushing the follow-up commit. — Copilot
+
 📌 Issue #118 CI wiring completed locally (2026-04-25T23:37:06Z): On `squad/118-wire-shared-module-tests`, added the missing root `test:keycloak-jwt` / `test:ci:keycloak-jwt` aliases and extended `scripts/run-ci-tests.mjs` so the validate lane now runs both shared-module suites (`keycloak-jwt`, `portal-utils`) before the app suites. Revalidated from the repo root with `npm run lint && npm run test:ci && npm run build`; the consolidated CI summary now reports both shared modules as passing. — Copilot
 
 📌 Issue #118 CI wiring started locally (2026-04-25T23:37:06Z): Picked up `squad:brand` follow-up issue #118 on branch `squad/118-wire-shared-module-tests`. Confirmed the validate workflow already enters through `npm run test:ci`, and the gap is isolated to root CI wiring: `scripts/run-ci-tests.mjs` currently omits `platform/keycloak-jwt` and `packages/portal-utils`, even though both workspaces already expose CI-capable test scripts. Current plan is to keep `.github/workflows/ci.yml` unchanged, wire both suites into the root CI runner, then rerun the existing validation paths before updating the issue. — Copilot
