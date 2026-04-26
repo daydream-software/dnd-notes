@@ -58,7 +58,7 @@ if (!writeStateFnMatch) {
 const readStateSnippet = `${resetStateFnMatch[0]}\n${readStateFnMatch[0]}`
 
 function runBash(script: string, env?: NodeJS.ProcessEnv) {
-  return spawnSync('bash', ['-lc', script], {
+  return spawnSync('bash', ['-c', script], {
     encoding: 'utf8',
     env: { ...process.env, ...env },
   })

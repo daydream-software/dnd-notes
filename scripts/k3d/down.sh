@@ -6,7 +6,6 @@ if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
-CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 STATE_DIR="${ROOT}/.k3d-state"
 STATE_FILE="${STATE_DIR}/state.json"
@@ -42,24 +41,8 @@ require_tool() {
 }
 
 cluster_exists() {
-  k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${CLUSTER_NAME}" >/dev/null
-}
-
-json_get() {
-  local path="$1"
-
-  node -e '
-    const fs = require("node:fs")
-    const path = process.argv[1].split(".")
-    let value = JSON.parse(fs.readFileSync(0, "utf8"))
-    for (const segment of path) {
-      value = value?.[segment]
-    }
-    if (value === undefined) {
-      process.exit(1)
-    }
-    process.stdout.write(typeof value === "string" ? value : JSON.stringify(value))
-  ' "$path"
+  local name="$1"
+  k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${name}" >/dev/null
 }
 
 # Read a field from the state file. Returns empty string on any error (missing
@@ -110,15 +93,24 @@ for arg in "$@"; do
   esac
 done
 
-for tool in k3d kubectl; do
-  require_tool "$tool"
-done
+require_tool k3d
+
+# Determine the target cluster name: use K3D_CLUSTER_NAME if explicitly set,
+# otherwise try to read from state.json, finally fall back to "dnd-notes".
+if [[ -n "${K3D_CLUSTER_NAME:-}" ]]; then
+  CLUSTER_NAME="${K3D_CLUSTER_NAME}"
+else
+  state_cluster="$(read_state_field clusterName)"
+  CLUSTER_NAME="${state_cluster:-dnd-notes}"
+fi
 
 if [[ "${KEEP_CLUSTER}" == "true" ]]; then
   # -------------------------------------------------------------------------
   # Soft teardown: remove only tenant namespace(s) and control-plane workload
   # -------------------------------------------------------------------------
-  if ! cluster_exists; then
+  require_tool kubectl
+
+  if ! cluster_exists "${CLUSTER_NAME}"; then
     log "Cluster ${CLUSTER_NAME} does not exist — nothing to tear down."
     exit 0
   fi
@@ -153,7 +145,7 @@ else
   # -------------------------------------------------------------------------
   # Full teardown: delete the cluster
   # -------------------------------------------------------------------------
-  if ! cluster_exists; then
+  if ! cluster_exists "${CLUSTER_NAME}"; then
     log "Cluster ${CLUSTER_NAME} does not exist — nothing to tear down."
     rm -rf "${STATE_DIR}"
     exit 0

@@ -6,7 +6,6 @@ if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
-CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 STATE_DIR="${ROOT}/.k3d-state"
 STATE_FILE="${STATE_DIR}/state.json"
@@ -41,7 +40,8 @@ require_tool() {
 }
 
 cluster_exists() {
-  k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${CLUSTER_NAME}" >/dev/null
+  local name="$1"
+  k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${name}" >/dev/null
 }
 
 reset_state() {
@@ -144,6 +144,32 @@ for tool in k3d kubectl node; do
 done
 
 # ---------------------------------------------------------------------------
+# Determine target cluster name
+# ---------------------------------------------------------------------------
+# Prefer K3D_CLUSTER_NAME if explicitly set, otherwise try to read from state.json,
+# finally fall back to "dnd-notes".
+if [[ -n "${K3D_CLUSTER_NAME:-}" ]]; then
+  CLUSTER_NAME="${K3D_CLUSTER_NAME}"
+else
+  # Try to read from state file first
+  if [[ -f "${STATE_FILE}" ]] && command -v node >/dev/null 2>&1; then
+    state_cluster="$(node -e '
+      const fs = require("node:fs")
+      try {
+        const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+        const value = state.clusterName
+        if (value !== null && value !== undefined) {
+          process.stdout.write(String(value))
+        }
+      } catch {}
+    ' "${STATE_FILE}" 2>/dev/null || true)"
+    CLUSTER_NAME="${state_cluster:-dnd-notes}"
+  else
+    CLUSTER_NAME="dnd-notes"
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # Read state file (corrupt/missing → degrade gracefully)
 # ---------------------------------------------------------------------------
 state_clusterName=""
@@ -164,7 +190,7 @@ fi
 # Query live cluster
 # ---------------------------------------------------------------------------
 cluster_running=false
-if cluster_exists; then
+if cluster_exists "${CLUSTER_NAME}"; then
   cluster_running=true
 fi
 
