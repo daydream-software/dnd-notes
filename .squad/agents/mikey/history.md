@@ -23,10 +23,14 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 
 **Roadmap Planning (2026-04-21):** Created #68 (operator control portal), #70 (landing/signup), #71 (per-tenant creds) to fill scope gaps. Admin/operator platform was missing from original scope — platform visibility exists (#57), auth exists (#56), but operator control surface (#68) was implicit.
 
-## Recent Updates
+## Recent Updates (2026-04-26)
 
-
-
+**Epic #82 Kickoff Reframe (2026-04-26T17:00Z):**
+- Clarified execution model: sub-issues (#83, #84, #85, #86) are the unit of work, not the epic itself.
+- Epic-level prototype branch (`squad/82-full-local-k3d-dev-loop`) attempted all four tracks at once; Chunk rejected for missing corrupt-state recovery.
+- Decision: Return to issue-first sequencing. Start with #83 (k3d orchestration + state file), then #84 (portal containerization), then #85 (override scripts), then #86 (JSON polish).
+- Rationale: Thin slices, explicit contracts, state-recovery validation before fanning out. Issue #83 becomes the blocking gate.
+- Decision written to `.squad/decisions/inbox/mikey-reframe-epic-82-subissues.md` for Scribe merge.
 
 ## Key Decisions & Patterns
 
@@ -260,3 +264,10 @@ Platform is **ready for #82 execution**:
 Decision document: `.squad/decisions/inbox/mikey-epic-82-kickoff.md`
 
 **Decision Point Triage:** Blocking questions force explicit answers (auth strategy, versioning, backup ownership, Keycloak timing) before execution. Architecture spike → decision resolution → execution kickoff.
+
+## Learnings
+
+**Epic Decomposition Discipline (2026-04-26):** When an epic is properly decomposed into sub-issues, the team must work **only** on the sub-issues, never on the epic branch itself. Attempting to deliver all tracks in a single epic-level PR invites massive review friction and makes it hard to validate contracts independently. Each sub-issue must have its own worktree and land independently. This prevents cross-cutting changes from getting tangled and makes rollback/pivot straightforward. Key pattern: thin contract first (e.g., orchestration + state file in #83), then everything else depends on that locked interface.
+
+**Corrupt State as a Blocker (2026-04-26):** When a prototype is rejected for missing state-recovery logic, that gap must be resolved in the foundational issue before the team fans out. State corruption can cascade; it's not a polish-later item. The rejection of the #82 prototype for missing recovery logic is correct — that validation must happen in #83.
+

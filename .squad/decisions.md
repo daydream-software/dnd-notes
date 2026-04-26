@@ -6327,3 +6327,111 @@ Removed worktrees: squad/100, squad/101, squad/102, squad/111, squad/55, squad/5
 Stale worktrees accumulate cognitive load and disk bloat. Shipped work should not leave behind artifacts. Commit history and refs available for recovery if revisiting needed.
 
 ---
+
+---
+
+### 2026-04-26T16:00:48Z: User directive
+
+**Decided by:** FFMikha (via Copilot)  
+**What:** Start work from the sub-issues of epic #82 rather than implementing the epic issue directly.  
+**Why:** User request — captured for team memory
+
+---
+
+### 2026-04-26T17:00:00Z: Epic #82 Reframe: Sub-Issue-First Execution Model
+
+**Decided by:** Mikey (Lead)
+
+**What:**
+
+All implementation work on #82 must flow through the sub-issues (#83–#86), not the epic directly.
+
+1. Each sub-issue gets its own worktree branch (`squad/83-*`, `squad/84-*`, etc.)
+2. Sub-issues sequenced by dependency (not parallelized):
+   - **#83** (Persistent full-stack k3d deployment): Core orchestration contract
+   - **#84** (Containerize portals): Requires #83 orchestration
+   - **#85** (Portal override scripts): Requires #84 containerization
+   - **#86** (Agent-friendly JSON output): Polish after #83–#85 stable
+3. Epic-level `squad/82-full-local-k3d-dev-loop` branch is parked (do not continue; reference-only)
+
+**Why:**
+
+- **Thin slices win**: 1200-line prototype impossible to review; focused #83 PR will be 2–3x easier
+- **Boundaries first**: #83 defines state-file contract; #84–#86 depend on it
+- **State recovery is not optional**: Rejected prototype had corrupt-state gap; must resolve in #83
+- **PR quality**: Brand to create `squad/83-*` from main (not from epic branch)
+
+**Next action:**
+1. Brand creates `squad/83-*` worktree from main
+2. Brand implements #83 scope only (orchestration + state file)
+3. After #83 merged, Brand moves to #84 on fresh `squad/84-*` branch
+4. Chunk prepares validation per sub-issue independently
+
+---
+
+### 2026-04-26T16:24:00Z: Slice 1 QA Contract: k3d Orchestration Core & Persistent Deployment Lane
+
+**Decided by:** Chunk (Tester)  
+**Issue:** #82 Epic - Full local k3d deployment and agent-friendly dev loop  
+**Scope:** Slice 1 acceptance validation for persistent `k3d:up` / `k3d:down` / `k3d:status` orchestration
+
+**What:**
+
+QA expectations formalized for Slice 1 of #82 (persistent deployment lane).
+
+**Commands:**
+- `npm run k3d:up` — bring up full persistent platform (bootstrap → postgres → keycloak → control-plane → seed tenant `dev`)
+- `npm run k3d:down` — tear down cluster cleanly
+- `npm run k3d:status` — query current platform state
+- `npm run k3d:status -- --json` — machine-readable state
+
+**State artifact:** `.k3d-state/state.json` with schema:
+```json
+{
+  "clusterName", "clusterStatus", "bootstrapVersion",
+  "controlPlane": { "status", "port", "internalUrl", "health" },
+  "keycloak": { "status", "url", "realm" },
+  "postgres": { "status", "port" },
+  "ingress": { "http_port", "https_port", "base_domain" },
+  "tenants": [{ "id", "slug", "status", "namespace", "ingress_host", "database_name" }]
+}
+```
+
+**Test scenarios (6 required):**
+1. Fresh bring-up: clean environment → `k3d:up` → full stack running
+2. Idempotency: re-run `k3d:up` reuses state, no duplicate tenants
+3. Stale state recovery: cluster down but state.json present → `k3d:up` recovers
+4. JSON output contract: `k3d:status --json` is valid JSON, matches schema
+5. State atomicity: state.json never corrupted (even on SIGTERM)
+6. Error handling: clear, actionable messages <200 chars for each failure case
+
+**Failure modes guarded:**
+- Cluster creation timeout → graceful cleanup + clear error
+- Port conflicts → suggest override env var
+- Docker missing → suggest `docker ps`
+- k3d binary missing → suggest install command
+- Control-plane health check fails → include container logs
+- Tenant provisioning fails → include control-plane logs
+
+**Acceptance bar (8 criteria):**
+1. All must-have tests pass in isolation and sequence
+2. Regression checks from #42 pass (no regressions)
+3. `k3d:status --json` valid JSON matching schema
+4. State file never corrupted (atomicity test passes)
+5. Error messages clear and actionable (section 6 examples covered)
+6. CI workflow `.github/workflows/k3d-smoke.yml` updated
+7. `platform/k3d/README.md` updated with commands
+8. No manual setup beyond `npm install` and `docker` running
+
+**Why:**
+
+State-file contract must be locked before #84–#86 depend on it. Atomicity is critical (SIGTERM mid-run cannot corrupt). JSON schema drives agent parsing; consistency required. Error messages enable self-service debugging.
+
+**Integration with future tracks:**
+- Track B (portal containerization): Extends state.json (not replaces); adds ingress hosts
+- Track C (portal overrides): Reads state.json; must fail gracefully if stale
+- Track D (JSON polish): All `k3d:*` scripts support `--json`; no breaking schema changes
+
+**Next step:** When Brand's implementation ready, Chunk runs full suite; report pass/fail in PR.
+
+---
