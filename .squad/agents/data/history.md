@@ -38,6 +38,28 @@ Data is the Backend Dev responsible for control-plane, tenant orchestration, dat
 
 ## Recent Updates
 
+### 2026-04-26: PR #120 Review Blocker — status.sh Output Contract
+**Context:** Chunk's review of Brand's f461fe8 commit found an inconsistency: `status.sh` used the env-override cluster for live checks but reported the persisted `clusterName` in JSON output.
+
+**Fix Applied:**
+- Changed `status.sh` line 258: now always reports `${CLUSTER_NAME}` (the effective cluster name) instead of `${state_clusterName:-${CLUSTER_NAME}}`
+- Added regression test: verifies `--json` output reports effective cluster when `K3D_CLUSTER_NAME` is set
+- Preserved Brand's other fixes from commit f461fe8
+
+**Why:** The JSON output contract must align with script behavior. When K3D_CLUSTER_NAME is explicitly set, both live checks AND reported output must use that override, not fall back to persisted state.
+
+**Validation:** ✓ bash -n, ✓ lint, ✓ 202 tests pass, ✓ build
+
+## Learnings
+
+### K3D State vs Effective Config Pattern
+Scripts with env-override support must distinguish:
+- **Persisted state** (from `.k3d-state/state.json`) — what was last provisioned
+- **Effective config** (env override > state > default) — what the script actually targets
+
+When reporting status, always report the effective config, not the persisted state, to avoid operator confusion during env-override scenarios.
+
+**Files:** `scripts/k3d/status.sh`, `scripts/k3d/down.sh`
 
 
 
