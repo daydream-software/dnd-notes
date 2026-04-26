@@ -6,9 +6,33 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context (Summarized 2026-04-22T18:24:34Z)
+## Core Context (Summarized 2026-04-26T15:45:50Z)
 
-Copilot enabled as autonomous coding agent for squad via auto-assignment to squad:copilot issues.
+Copilot enabled as autonomous coding agent for squad via auto-assignment to squad:copilot issues. Primary domains: review loops for infrastructure, backend, and shared services; PR follow-ups across control-plane, API, and deployment artifacts; code consolidation and pattern library support.
+
+**Key Patterns & Skills:**
+- PR review loop closure: systematic gap identification, regression design, validation pass verification
+- Complex migrations: SQLite→Postgres conversion, storage backend changes, async refactoring
+- Shared module consolidation: keycloak-jwt extraction, portal-utils de-duplication, test wiring
+- Platform diagnostics: smoke harness debugging, control-plane error surfacing, k3d bootstrap validation
+- Code quality gates: null-safety hardening, deterministic query ordering, whitespace normalization
+
+**Recent PRs Closed (2026-04-24 to 2026-04-25):**
+- PR #107: Smoke failure diagnostics (Postgres type casting, RBAC, transaction handling)
+- PR #108: PR #78 rebase & merge conflict resolution (backup path hashing, error formatting)
+- PR #110: SQLite removal completion (statement splitting, database URL validation)
+- PR #112: Keycloak-JWT shared module (JWKS caching, missing-kid suppression, expiry strictness)
+- PR #114: Control endpoints & maintenance gate (inflight write tracking, tenant timeouts)
+- PR #117: Backup catalog APIs (storage mode tracking, cutover readiness gates)
+- PR #118: CI wiring for shared modules (keycloak-jwt, portal-utils test integration)
+- PR #119: Final shared-module cleanup (test aggregate alignment)
+
+**Historical Work (Phases 0–2, 2026-04-11 to 2026-04-23):**
+- Issue #95–#102: Per-tenant Postgres & zero-downtime rollout groundwork (18 stale worktrees cleaned by Brand)
+- Issue #42: Platform architecture decisions, control-plane skeleton, k3d scaffolding
+- Issue #76: Keycloak runtime auth integration (realm seeding, ConfigMap wiring, docs)
+- Issue #87: Shared module consolidation validation (keycloak-jwt code-complete, tests not wired)
+- Issue #97: Control-plane Postgres migration (async registry, PVC removal)
 
 ## Recent Updates
 
@@ -16,7 +40,6 @@ Copilot enabled as autonomous coding agent for squad via auto-assignment to squa
 
 📌 PR #119 review follow-up addressed locally (2026-04-25T23:57:34Z): Closed the open review comment on `squad/118-wire-shared-module-tests` by extending the root `npm run test` aggregate to include `test:keycloak-jwt`, so local and CI shared-module coverage stay aligned. Re-ran the repo-level validation path (`npm run test && npm run lint && npm run test:ci && npm run build`) successfully before pushing the follow-up commit. — Copilot
 
-📌 Issue #118 CI wiring completed locally (2026-04-25T23:37:06Z): On `squad/118-wire-shared-module-tests`, added the missing root `test:keycloak-jwt` / `test:ci:keycloak-jwt` aliases and extended `scripts/run-ci-tests.mjs` so the validate lane now runs both shared-module suites (`keycloak-jwt`, `portal-utils`) before the app suites. Revalidated from the repo root with `npm run lint && npm run test:ci && npm run build`; the consolidated CI summary now reports both shared modules as passing. — Copilot
 
 📌 Issue #118 CI wiring started locally (2026-04-25T23:37:06Z): Picked up `squad:brand` follow-up issue #118 on branch `squad/118-wire-shared-module-tests`. Confirmed the validate workflow already enters through `npm run test:ci`, and the gap is isolated to root CI wiring: `scripts/run-ci-tests.mjs` currently omits `platform/keycloak-jwt` and `packages/portal-utils`, even though both workspaces already expose CI-capable test scripts. Current plan is to keep `.github/workflows/ci.yml` unchanged, wire both suites into the root CI runner, then rerun the existing validation paths before updating the issue. — Copilot
 
