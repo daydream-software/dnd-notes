@@ -258,11 +258,41 @@ Code consolidation PASS. Tests exist but not wired to CI — security-critical m
 - **PR #120 Review Thread Resolution (2026-04-27T17:10:21Z):** Orchestrated completion of 4 review threads on README wording, kubectl context guards, and tokenSnippets quoting. Commit b73017f validated and passed focused tests. Orchestration log: `.squad/orchestration-log/20260427-171021-brand.md`. Session log: `.squad/log/20260427-171021-pr120-b73017f-review-closure.md`. — Brand (Agent)
 
 
+### PR #120 Review Fixes (2026-04-26T22:10:00Z)
+
+Addressed 5 Copilot reviewer comments on persistent k3d deployment lane:
+
+**Key pattern: deferred cluster name resolution**
+- Scripts now prefer persisted `clusterName` from `.k3d-state/state.json` unless `K3D_CLUSTER_NAME` explicitly overrides
+- `down.sh`: moved cluster name resolution after arg parsing, reads state with `read_state_field()`
+- `status.sh`: inline node snippet reads `clusterName` from state before any cluster probes
+- `cluster_exists()` now takes cluster name as parameter instead of using global
+- **Rationale:** State file is source of truth for what was provisioned; env override still wins if user explicitly sets it
+
+**Lazy tool requirements**
+- `down.sh` now requires `kubectl` only for `--keep-cluster` path (soft teardown)
+- Full cluster deletion (`k3d cluster delete`) doesn't need kubectl
+- Follows existing pattern in `up.sh` of checking tools only when needed
+
+**Test hygiene: non-login shell**
+- `k3d-persistent-lane.test.ts`: changed `spawnSync('bash', ['-lc', ...])` to `['-c', ...]`
+- Login shell (`-l`) loads profile/bashrc which is unnecessary and slower for inline script snippets
+- Non-login shell sufficient when script is self-contained (no dot-sourcing external profile)
+
+**Dead code removal**
+- Removed unused `json_get()` helper from `down.sh` (replaced by simpler `read_state_field()` which handles errors gracefully)
+
+**Files touched:** `scripts/k3d/down.sh`, `scripts/k3d/status.sh`, `apps/control-plane/test/k3d-persistent-lane.test.ts`  
+**Commit:** f461fe8
+
+---
+
 See **Recent Skills Documented** above for detailed patterns. Key themes:
 - Filesystem path normalization and collision prevention (backup naming)
 - Database backend migration patterns (async conversion, PVC removal)
 - Error handling and platform diagnostics (smoke test artifacts, error string formatting)
 - Local dev override isolation (KEYCLOAK_JWKS_URL pod vs host scoping)
 - Post-merge recovery procedures for documentation/decision commits
+
 
 
