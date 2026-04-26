@@ -6476,3 +6476,29 @@ if (storedState.tenant?.namespace && !storedState.tenant?.subdomain) {
 
 **Status:** Awaiting Copilot assignment and revision.
 
+
+---
+
+### 2026-04-26: PR #120 Canonical for Issue #83; PR #121 Closed as Duplicate
+
+**Decided by:** Mikey (Lead)  
+**Issue:** #83 (k3d persistent deployment lane)  
+**PRs:** #120 (canonical), #121 (closed)
+
+**What:**
+
+PR #120 is the canonical solution for issue #83. PR #121 is closed as a duplicate.
+
+**Why:**
+
+1. **Naming Convention Adherence:** PR #120 (`up.sh`, `down.sh`, `status.sh`) matches the established `scripts/k3d/` pattern (`smoke.sh`, `bootstrap.sh`, `build-tenant-image.sh`). PR #121's `k3d-` prefix deviates from convention.
+
+2. **Test Coverage:** PR #120 has 404 lines of tests vs. PR #121's 306 lines. PR #120's namespace-preservation validation is more comprehensive — critical for issue #83's state-file bug fix.
+
+3. **Implementation Maturity:** PR #120's `up.sh` is 611 lines; PR #121's `k3d-up.sh` is 473 lines. Larger scope suggests more complete feature coverage and edge-case handling.
+
+4. **Conceptual Clarity:** PR #120's test naming (`k3d-persistent-lane.test.ts`) captures the architectural feature; PR #121's (`k3d-up-down-status-scripts.test.ts`) focuses only on scripts.
+
+**Lesson:**
+When parallel implementations emerge, naming consistency is a strong tiebreaker. Convention deviations should be rejected in favor of uniformity — it improves scannability and reduces cognitive load.
+
