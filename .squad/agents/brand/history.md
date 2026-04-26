@@ -23,6 +23,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Recent Updates
 
+📌 **Team update (2026-04-26T21:37:02Z):** PR #120 review fixes completed and approved — Brand fixed status.sh HTTP probe, read_state() clearing, read_state_field() non-blocking behavior, and updated PR description. Chunk performed final reviewer pass and approved. Commit: 18101a1. Ready for merge and CI bookkeeping. — Brand, Chunk
+
 
 
 
