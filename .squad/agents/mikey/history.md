@@ -114,3 +114,22 @@ Feature implementation is **complete**. CI wiring gap is **infrastructure config
 - Orchestration logs: All 5 agents in `.squad/orchestration-log/2026-04-25T22:54:46Z-*`
 - Decisions merged to `.squad/decisions.md`
 
+---
+
+### PR #120 Regression Test False-Green Fix (2026-04-26)
+
+**Problem:** Data's revision fixed the runtime behavior but the regression test had a critical flaw: it set `STATE_FILE` env var in the test, but `status.sh` hardcodes `STATE_FILE="${ROOT}/.k3d-state/state.json"` from git root and never respects that env var. The test wrote fixtures to a temporary location the script never read, creating false-green coverage — it would pass on both broken and fixed implementations.
+
+**Solution:** Changed the test to populate the REAL state path that `status.sh` actually reads (`${repo_root}/.k3d-state/state.json`), with backup/restore to avoid test pollution. Now the test genuinely proves:
+1. Persisted cluster name is the default when no env override is set
+2. `K3D_CLUSTER_NAME` override wins for both actual targeting and reported JSON output
+3. The script reads the real state source/path contract used in production
+
+**Key lesson:** When testing shell scripts that hardcode their config source paths, never fake the source by setting an env var the script doesn't read. Either populate the real path (with backup/restore for safety) or extract the config resolution into a sourceable helper that can be tested in isolation.
+
+**Pattern applied:** Env-override contract testing (captured in `.squad/skills/env-override-contract-testing/SKILL.md`). The skill now documents the anti-pattern of setting unused env vars and the correct approach of exercising the real config path.
+
+**Validation:** All 202 tests pass, lint clean, build green. Pushed as commit `6a00d3a`.
+
+**Key files:** `apps/control-plane/test/k3d-persistent-lane.test.ts`, `scripts/k3d/status.sh`, `.squad/skills/env-override-contract-testing/SKILL.md`.
+
