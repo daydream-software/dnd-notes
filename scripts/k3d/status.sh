@@ -255,7 +255,7 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
 
     process.stdout.write(JSON.stringify(status, null, 2) + "\n")
   ' \
-    "${state_clusterName:-${CLUSTER_NAME}}" \
+    "${CLUSTER_NAME}" \
     "${cluster_running}" \
     "${control_plane_ready}" \
     "${keycloak_ready}" \

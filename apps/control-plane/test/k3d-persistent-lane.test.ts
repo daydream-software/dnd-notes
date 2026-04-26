@@ -501,4 +501,71 @@ describe('k3d status --json schema', () => {
       'status.sh must not re-derive namespace from subdomain',
     )
   })
+
+  it('reports the effective cluster name when K3D_CLUSTER_NAME env override is set', () => {
+    const repoRoot = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+      cwd: fileURLToPath(new URL('.', import.meta.url)),
+    }).stdout.trim()
+    
+    const stateDir = join(repoRoot, '.k3d-state')
+    const stateFile = join(stateDir, 'state.json')
+
+    // Back up the real state file if it exists
+    let backupContent: string | null = null
+    try {
+      backupContent = readFileSync(stateFile, 'utf8')
+    } catch {
+      // No existing state file, nothing to back up
+    }
+
+    try {
+      mkdirSync(stateDir, { recursive: true })
+
+      // Write state with one cluster name to the REAL state path that status.sh reads
+      const state = {
+        clusterName: 'dnd-notes',
+        tenantId: 'k3d-dev',
+        tenantSubdomain: 'dev',
+        tenantNamespace: 'tenant-platform-dev',
+      }
+      writeFileSync(stateFile, JSON.stringify(state, null, 2))
+
+      // Run status.sh with K3D_CLUSTER_NAME override pointing to different cluster
+      const result = runBash(
+        `bash "${statusScriptPath}" --json`,
+        {
+          K3D_CLUSTER_NAME: 'custom-cluster',
+        },
+      )
+
+      assert.strictEqual(result.status, 0, result.stderr)
+
+      let statusJson: Record<string, unknown>
+      try {
+        statusJson = JSON.parse(result.stdout)
+      } catch {
+        assert.fail(`status.sh did not produce valid JSON.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`)
+      }
+
+      // The JSON output must report the effective cluster name (from K3D_CLUSTER_NAME),
+      // not the persisted one from state.json
+      assert.strictEqual(
+        statusJson.clusterName,
+        'custom-cluster',
+        'status.sh --json must report the effective cluster name when K3D_CLUSTER_NAME is set, not the persisted one',
+      )
+    } finally {
+      // Restore the original state file or clean up
+      if (backupContent !== null) {
+        writeFileSync(stateFile, backupContent)
+      } else {
+        try {
+          rmSync(stateFile, { force: true })
+        } catch {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  })
 })
