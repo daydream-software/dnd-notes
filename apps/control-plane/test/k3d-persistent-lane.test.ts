@@ -20,13 +20,23 @@ const statusScript = readFileSync(statusScriptPath, 'utf8')
 const downScript = readFileSync(downScriptPath, 'utf8')
 const upScript = readFileSync(upScriptPath, 'utf8')
 
+const resetStateFnMatch = statusScript.match(/^reset_state\(\) \{\n[\s\S]*?^}/m)
 const readStateFnMatch = statusScript.match(/^read_state\(\) \{\n[\s\S]*?^}/m)
+const probeTenantUrlFnMatch = statusScript.match(/^probe_tenant_url\(\) \{\n[\s\S]*?^}/m)
 const readStateFieldFnMatch = downScript.match(/^read_state_field\(\) \{\n[\s\S]*?^}/m)
 const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n[\s\S]*?^}/m)
 const writeStateFnMatch = upScript.match(/^write_state\(\) \{\n[\s\S]*?^}/m)
 
+if (!resetStateFnMatch) {
+  throw new Error('Expected reset_state() in scripts/k3d/status.sh')
+}
+
 if (!readStateFnMatch) {
   throw new Error('Expected read_state() in scripts/k3d/status.sh')
+}
+
+if (!probeTenantUrlFnMatch) {
+  throw new Error('Expected probe_tenant_url() in scripts/k3d/status.sh')
 }
 
 if (!readStateFieldFnMatch) {
@@ -44,6 +54,8 @@ if (!writeStateFnMatch) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+const readStateSnippet = `${resetStateFnMatch[0]}\n${readStateFnMatch[0]}`
 
 function runBash(script: string, env?: NodeJS.ProcessEnv) {
   return spawnSync('bash', ['-lc', script], {
@@ -88,7 +100,7 @@ describe('k3d status read_state — namespace preservation', () => {
     writeFileSync(stateFile, JSON.stringify(state, null, 2))
 
     const result = runBash(
-      `${readStateFnMatch[0]}
+      `${readStateSnippet}
 STATE_FILE="${stateFile}"
 if read_state; then
   printf '%s' "$state_tenantNamespace"
@@ -130,7 +142,7 @@ fi`,
     writeFileSync(stateFile, JSON.stringify(state, null, 2))
 
     const result = runBash(
-      `${readStateFnMatch[0]}
+      `${readStateSnippet}
 STATE_FILE="${stateFile}"
 read_state
 printf '%s|%s|%s|%s|%s|%s|%s|%s' \
@@ -167,7 +179,7 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
 describe('k3d status read_state — corrupt state recovery', () => {
   it('returns non-zero for a missing state file', () => {
     const result = runBash(
-      `${readStateFnMatch[0]}
+      `${readStateSnippet}
 STATE_FILE="/tmp/does-not-exist-${process.pid}.json"
 if read_state; then
   echo "should-not-reach"
@@ -192,7 +204,7 @@ fi`,
     writeFileSync(stateFile, '{"tenantNamespace": "tenant-dev"')  // truncated
 
     const result = runBash(
-      `${readStateFnMatch[0]}
+      `${readStateSnippet}
 STATE_FILE="${stateFile}"
 if read_state; then
   echo "should-not-reach"
@@ -206,6 +218,68 @@ fi`,
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.match(result.stdout, /correctly-failed/)
+  })
+
+  it('clears previously populated variables when a later read fails', () => {
+    const missingStateFile = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-missing-state-${process.pid}.json`,
+    )
+
+    const result = runBash(
+      `${readStateSnippet}
+state_clusterName="stale-cluster"
+state_keycloakUrl="http://stale.example.com"
+state_keycloakRealm="stale-realm"
+state_tenantId="stale-tenant"
+state_tenantSubdomain="stale-subdomain"
+state_tenantNamespace="stale-namespace"
+state_tenantHostname="stale-hostname"
+state_tenantOrigin="http://stale-origin"
+STATE_FILE="${missingStateFile}"
+if read_state; then
+  echo "should-not-reach"
+  exit 1
+fi
+printf '%s|%s|%s|%s|%s|%s|%s|%s' \
+  "$state_clusterName" \
+  "$state_keycloakUrl" \
+  "$state_keycloakRealm" \
+  "$state_tenantId" \
+  "$state_tenantSubdomain" \
+  "$state_tenantNamespace" \
+  "$state_tenantHostname" \
+  "$state_tenantOrigin"`,
+    )
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, '|||||||')
+  })
+})
+
+describe('k3d status probe_tenant_url', () => {
+  it('skips the HTTP reachability probe when curl is unavailable', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-status-probe-test-${process.pid}`,
+    )
+    const fakeBinDir = join(tmpDir, 'bin')
+
+    mkdirSync(fakeBinDir, { recursive: true })
+
+    const result = runBash(
+      `${probeTenantUrlFnMatch[0]}
+tenant_url_reachable=true
+tenant_url_probe_skipped=false
+PATH="${fakeBinDir}"
+probe_tenant_url "http://dev.127.0.0.1.nip.io:8080"
+printf '%s|%s' "$tenant_url_reachable" "$tenant_url_probe_skipped"`,
+    )
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, 'false|true')
   })
 })
 
@@ -267,6 +341,31 @@ printf 'got:[%s]' "$ns"`,
     const result = runBash(
       `${readStateFieldFnMatch[0]}
 STATE_FILE="${stateFile}"
+ns="$(read_state_field tenantNamespace)"
+printf 'got:[%s]' "$ns"`,
+    )
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, 'got:[]')
+  })
+
+  it('returns empty string without error when node is unavailable', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-down-no-node-test-${process.pid}`,
+    )
+    const stateFile = join(tmpDir, 'state.json')
+    const fakeBinDir = join(tmpDir, 'bin')
+
+    mkdirSync(fakeBinDir, { recursive: true })
+    writeFileSync(stateFile, JSON.stringify({ tenantNamespace: 'tenant-platform-dev' }))
+
+    const result = runBash(
+      `${readStateFieldFnMatch[0]}
+STATE_FILE="${stateFile}"
+PATH="${fakeBinDir}"
 ns="$(read_state_field tenantNamespace)"
 printf 'got:[%s]' "$ns"`,
     )
@@ -394,6 +493,7 @@ describe('k3d status --json schema', () => {
     assert.match(statusScript, /keycloak/)
     assert.match(statusScript, /postgres/)
     assert.match(statusScript, /tenantNamespace/)
+    assert.match(statusScript, /urlProbeSkipped/)
     // namespace in the JSON output comes from the state — verify it is not re-derived
     assert.doesNotMatch(
       statusScript,

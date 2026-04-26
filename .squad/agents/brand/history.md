@@ -100,6 +100,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Backup Restore Guardrails:** For `apps/control-plane/src/tenant-backup-runner.ts`, a restore flow that refuses active sessions must check `pg_stat_activity` both before the safety snapshot and immediately before `pg_restore`; the snapshot window otherwise reintroduces a TOCTOU gap. Treat the filesystem artifact store as hostile input too: reject symlinks on every path segment for both stored tenant directories and inbound artifact locations, and make `scripts/k3d/smoke.sh` print non-2xx response bodies so CI failures surface the real control-plane error instead of only a log tail.
 
+- **Optional Tool Guards for k3d Helpers:** In contributor-facing k3d scripts, treat tools used only for diagnostics or best-effort state parsing as optional guards instead of hard prerequisites. `scripts/k3d/status.sh` now skips the `/ready` curl probe when curl is absent, and `scripts/k3d/down.sh` keeps `--keep-cluster` safe by returning an empty state field when Node is missing or the state file is unreadable; lock both behaviors with focused shell-level regressions in `apps/control-plane/test/k3d-persistent-lane.test.ts`.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.
@@ -204,4 +206,3 @@ Completed read-only validation of keycloak-jwt consolidation (Epic #87 item 3):
 Code consolidation PASS. Tests exist but not wired to CI — security-critical module must be regression-locked. Session: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`.
 
 **P1 Follow-up:** Add to scripts/run-ci-tests.mjs: `{ name: 'keycloak-jwt', script: 'test:ci --workspace platform/keycloak-jwt' }`.
-

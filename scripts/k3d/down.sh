@@ -71,6 +71,10 @@ read_state_field() {
     return 0
   fi
 
+  if ! command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+
   node -e '
     const fs = require("node:fs")
     const field = process.argv[1]
@@ -83,7 +87,9 @@ read_state_field() {
     } catch {
       // corrupt or truncated state — silently ignore
     }
-  ' "${field}" "${STATE_FILE}"
+  ' "${field}" "${STATE_FILE}" 2>/dev/null || true
+
+  return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -126,7 +132,7 @@ if [[ "${KEEP_CLUSTER}" == "true" ]]; then
     log "Deleting tenant namespace '${tenant_namespace}'..."
     kubectl delete namespace "${tenant_namespace}" --ignore-not-found=true
   else
-    log "No tenant namespace in state file; scanning for tenant-* namespaces..."
+    log "No readable tenant namespace in state file; scanning for tenant-* namespaces..."
     while IFS= read -r ns; do
       if [[ "${ns}" == tenant-* ]]; then
         log "Deleting namespace '${ns}'..."

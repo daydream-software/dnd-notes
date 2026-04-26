@@ -44,9 +44,24 @@ cluster_exists() {
   k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${CLUSTER_NAME}" >/dev/null
 }
 
+reset_state() {
+  state_clusterName=""
+  state_keycloakUrl=""
+  state_keycloakRealm=""
+  state_tenantId=""
+  state_tenantSubdomain=""
+  state_tenantNamespace=""
+  state_tenantHostname=""
+  state_tenantOrigin=""
+}
+
 # Read the state file into a set of variables. Returns non-zero if the file is
 # missing or unparseable; in that case all variables are set to empty strings.
 read_state() {
+  local state_json
+
+  reset_state
+
   if [[ ! -f "${STATE_FILE}" ]]; then
     return 1
   fi
@@ -73,6 +88,26 @@ read_state() {
   state_tenantHostname="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantHostname??"")' "${state_json}")"
   state_tenantOrigin="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantOrigin??"")'  "${state_json}")"
   return 0
+}
+
+probe_tenant_url() {
+  local origin="$1"
+
+  tenant_url_reachable=false
+  tenant_url_probe_skipped=false
+
+  if [[ -z "${origin}" ]]; then
+    return 0
+  fi
+
+  if ! command -v curl >/dev/null 2>&1; then
+    tenant_url_probe_skipped=true
+    return 0
+  fi
+
+  if curl -fsS "${origin}/ready" >/dev/null 2>&1; then
+    tenant_url_reachable=true
+  fi
 }
 
 # Query a deployment's ready replica count. Outputs "N/M" or "unavailable".
@@ -138,6 +173,7 @@ keycloak_ready="unavailable"
 postgres_ready="unavailable"
 tenant_ready="unavailable"
 tenant_url_reachable=false
+tenant_url_probe_skipped=false
 
 if [[ "${cluster_running}" == "true" ]]; then
   kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null 2>&1 || true
@@ -151,11 +187,7 @@ if [[ "${cluster_running}" == "true" ]]; then
     tenant_ready="$(deployment_ready_count "${state_tenantNamespace}" dnd-notes)"
   fi
 
-  if [[ -n "${state_tenantOrigin}" ]]; then
-    if curl -fsS "${state_tenantOrigin}/ready" >/dev/null 2>&1; then
-      tenant_url_reachable=true
-    fi
-  fi
+  probe_tenant_url "${state_tenantOrigin}"
 fi
 
 # ---------------------------------------------------------------------------
@@ -167,7 +199,7 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
       clusterName, clusterRunning,
       cpReady, kcReady, pgReady,
       tenantId, tenantSubdomain, tenantNamespace, tenantHostname, tenantOrigin,
-      tenantReady, tenantUrlReachable,
+      tenantReady, tenantUrlReachable, tenantUrlProbeSkipped,
       stateValid, stateFile,
     ] = process.argv.slice(1)
 
@@ -190,6 +222,7 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
             origin: tenantOrigin,
             ready: tenantReady,
             urlReachable: tenantUrlReachable === "true",
+            urlProbeSkipped: tenantUrlProbeSkipped === "true",
           }
         : null,
     }
@@ -208,6 +241,7 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
     "${state_tenantOrigin}" \
     "${tenant_ready}" \
     "${tenant_url_reachable}" \
+    "${tenant_url_probe_skipped}" \
     "${state_valid}" \
     "${STATE_FILE}"
 else
@@ -241,10 +275,12 @@ else
     echo "  Namespace:   ${state_tenantNamespace}"
     echo "  URL:         ${state_tenantOrigin}"
     echo "  Deployment:  ${tenant_ready}"
-    if [[ "${tenant_url_reachable}" == "true" ]]; then
-      echo "  HTTP /ready: ok"
-    else
-      echo "  HTTP /ready: unreachable"
+    if [[ "${tenant_url_probe_skipped}" == "true" ]]; then
+      echo "  HTTP /ready: skipped (curl unavailable)"
+    elif [[ "${tenant_url_reachable}" == "true" ]]; then
+       echo "  HTTP /ready: ok"
+     else
+       echo "  HTTP /ready: unreachable"
     fi
   else
     echo
