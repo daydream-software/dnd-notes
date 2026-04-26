@@ -120,3 +120,5 @@ Code consolidation PASS. Tests exist but not wired to CI — config logic in sha
 
 **P1 Follow-up:** Add to scripts/run-ci-tests.mjs: `{ name: 'portal-utils', script: 'test:ci:portal-utils' }`.
 
+
+
