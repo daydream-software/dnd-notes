@@ -277,3 +277,7 @@ Decision document: `.squad/decisions/inbox/mikey-epic-82-kickoff.md`
 
 **Script Naming Convention in `scripts/k3d/` (2026-04-26):** When two parallel PRs (#120, #121) both implement the same feature, naming consistency breaks a tie. The `scripts/k3d/` directory uses simple names without `k3d-` prefix: `smoke.sh`, `bootstrap.sh`, `build-tenant-image.sh`, etc. PR #120's approach (`up.sh`, `down.sh`, `status.sh`) aligns with this established pattern; PR #121's `k3d-up.sh` violates it. Canonical: PR #120. This reinforces that naming conventions, once set, should apply uniformly across new scripts in the same directory — consistency beats explicit prefixing for clarity.
 
+## PR #120 Final Approval (2026-04-26T22:06:15Z)
+
+📌 Team update: PR #120 (k3d orchestration with regression proof) approved by Chunk after Mikey's revision 3 (false-green regression test fix). All blockers closed. Handoff sequence: Brand → Data → Mikey → Chunk completed successfully. Ready for merge. Issue #83 unblocked.
+
