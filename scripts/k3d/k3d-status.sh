@@ -9,6 +9,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 K3D_HTTP_PORT="${K3D_HTTP_PORT:-8080}"
+TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-http}"
 STATE_DIR="${ROOT}/.k3d-state"
 STATE_FILE="${STATE_DIR}/state.json"
 

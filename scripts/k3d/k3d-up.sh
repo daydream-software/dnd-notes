@@ -177,6 +177,11 @@ write_state() {
 
   mkdir -p "${STATE_DIR}"
 
+  # Build the bearer-token convenience snippet without single-quote nesting issues.
+  local token_curl_prefix="curl -fsS -X POST -H \"Content-Type: application/x-www-form-urlencoded\""
+  local token_url="${TENANT_KEYCLOAK_URL}/realms/${TENANT_KEYCLOAK_REALM}/protocol/openid-connect/token"
+  local token_snippet="${token_curl_prefix} --data-urlencode grant_type=password --data-urlencode client_id=${TENANT_KEYCLOAK_CLIENT_ID} --data-urlencode username=${TENANT_KEYCLOAK_USERNAME} --data-urlencode password=${TENANT_KEYCLOAK_PASSWORD} ${token_url}"
+
   node -e '
     const [
       clusterName, controlPlaneUrl,
@@ -184,6 +189,7 @@ write_state() {
       keycloakUrl, keycloakRealm, keycloakClientId,
       tenantKeycloakUrl, tenantKeycloakRealm, tenantKeycloakClientId,
       ownerEmail, ownerPassword,
+      tokenSnippet,
     ] = process.argv.slice(1)
 
     const state = {
@@ -202,13 +208,13 @@ write_state() {
         credentials: {
           owner: { email: ownerEmail, password: ownerPassword },
         },
-        tokenSnippet: `curl -fsS -X POST -H "Content-Type: application/x-www-form-urlencoded" --data-urlencode "grant_type=password" --data-urlencode "client_id=${tenantKeycloakClientId}" --data-urlencode "username=${ownerEmail}" --data-urlencode "password=${ownerPassword}" "${tenantKeycloakUrl}/realms/${tenantKeycloakRealm}/protocol/openid-connect/token" | node -e "process.stdout.write(JSON.parse(require(\\"node:fs\\").readFileSync(0,\\"utf8\\")).access_token)"`,
+        tokenSnippet,
       },
     }
     process.stdout.write(JSON.stringify(state, null, 2))
   ' \
     "${CLUSTER_NAME}" \
-    "${TENANT_PUBLIC_SCHEME}://${CONTROL_PLANE_KEYCLOAK_URL%/keycloak*}" \
+    "${TENANT_PUBLIC_SCHEME}://${TENANT_BASE_DOMAIN}:${K3D_HTTP_PORT}" \
     "${tenant_id_val}" \
     "${tenant_subdomain_val}" \
     "${tenant_namespace_val}" \
@@ -221,6 +227,7 @@ write_state() {
     "${TENANT_KEYCLOAK_CLIENT_ID}" \
     "${TENANT_KEYCLOAK_USERNAME}" \
     "${TENANT_KEYCLOAK_PASSWORD}" \
+    "${token_snippet}" \
     >"${STATE_FILE}"
 }
 
