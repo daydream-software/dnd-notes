@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 ) )); then
+  shopt -s inherit_errexit
+fi
+
+ROOT="$(git rev-parse --show-toplevel)"
+CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
+PLATFORM_NAMESPACE="dnd-notes-platform"
+STATE_DIR="${ROOT}/.k3d-state"
+STATE_FILE="${STATE_DIR}/state.json"
+
+JSON_OUTPUT=false
+
+usage() {
+  cat <<'EOF'
+Check the health of the persistent k3d platform.
+
+Reads .k3d-state/state.json, then queries the live cluster for component
+readiness and prints a status summary.
+
+Flags:
+  --json     Print machine-readable JSON on stdout
+  --help     Show this help and exit
+
+Environment overrides:
+  K3D_CLUSTER_NAME
+EOF
+}
+
+log() {
+  echo "$*" >&2
+}
+
+require_tool() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    log "Missing required tool: $1"
+    exit 1
+  fi
+}
+
+cluster_exists() {
+  k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${CLUSTER_NAME}" >/dev/null
+}
+
+# Read the state file into a set of variables. Returns non-zero if the file is
+# missing or unparseable; in that case all variables are set to empty strings.
+read_state() {
+  if [[ ! -f "${STATE_FILE}" ]]; then
+    return 1
+  fi
+
+  state_json="$(node -e '
+    const fs = require("node:fs")
+    try {
+      const raw = fs.readFileSync(process.argv[1], "utf8")
+      JSON.parse(raw)           // validate
+      process.stdout.write(raw)
+    } catch {
+      process.exit(1)
+    }
+  ' "${STATE_FILE}" 2>/dev/null)" || return 1
+
+  # Parse individual fields using node so we avoid any in-shell JSON munging.
+  # tenantNamespace is read verbatim — never re-derived from tenantSubdomain.
+  state_clusterName="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.clusterName??"")'  "${state_json}")"
+  state_keycloakUrl="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.keycloakUrl??"")'  "${state_json}")"
+  state_keycloakRealm="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.keycloakRealm??"")' "${state_json}")"
+  state_tenantId="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantId??"")'       "${state_json}")"
+  state_tenantSubdomain="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantSubdomain??"")' "${state_json}")"
+  state_tenantNamespace="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantNamespace??"")' "${state_json}")"
+  state_tenantHostname="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantHostname??"")' "${state_json}")"
+  state_tenantOrigin="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantOrigin??"")'  "${state_json}")"
+  return 0
+}
+
+# Query a deployment's ready replica count. Outputs "N/M" or "unavailable".
+deployment_ready_count() {
+  local namespace="$1"
+  local deployment="$2"
+
+  local out
+  out="$(kubectl get deployment "${deployment}" -n "${namespace}" \
+    -o jsonpath='{.status.readyReplicas}/{.status.replicas}' 2>/dev/null)" || true
+  echo "${out:-unavailable}"
+}
+
+# ---------------------------------------------------------------------------
+# Argument parsing
+# ---------------------------------------------------------------------------
+for arg in "$@"; do
+  case "${arg}" in
+    --json) JSON_OUTPUT=true ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      log "Unknown argument: ${arg}"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+for tool in k3d kubectl node; do
+  require_tool "$tool"
+done
+
+# ---------------------------------------------------------------------------
+# Read state file (corrupt/missing → degrade gracefully)
+# ---------------------------------------------------------------------------
+state_clusterName=""
+state_keycloakUrl=""
+state_keycloakRealm=""
+state_tenantId=""
+state_tenantSubdomain=""
+state_tenantNamespace=""
+state_tenantHostname=""
+state_tenantOrigin=""
+
+state_valid=false
+if read_state; then
+  state_valid=true
+fi
+
+# ---------------------------------------------------------------------------
+# Query live cluster
+# ---------------------------------------------------------------------------
+cluster_running=false
+if cluster_exists; then
+  cluster_running=true
+fi
+
+control_plane_ready="unavailable"
+keycloak_ready="unavailable"
+postgres_ready="unavailable"
+tenant_ready="unavailable"
+tenant_url_reachable=false
+
+if [[ "${cluster_running}" == "true" ]]; then
+  kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null 2>&1 || true
+
+  control_plane_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" dnd-notes-control-plane)"
+  keycloak_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-keycloak)"
+  postgres_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-postgres)"
+
+  # Use the stored namespace verbatim — never re-derive it from the subdomain.
+  if [[ -n "${state_tenantNamespace}" ]]; then
+    tenant_ready="$(deployment_ready_count "${state_tenantNamespace}" dnd-notes)"
+  fi
+
+  if [[ -n "${state_tenantOrigin}" ]]; then
+    if curl -fsS "${state_tenantOrigin}/ready" >/dev/null 2>&1; then
+      tenant_url_reachable=true
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Emit status
+# ---------------------------------------------------------------------------
+if [[ "${JSON_OUTPUT}" == "true" ]]; then
+  node -e '
+    const [
+      clusterName, clusterRunning,
+      cpReady, kcReady, pgReady,
+      tenantId, tenantSubdomain, tenantNamespace, tenantHostname, tenantOrigin,
+      tenantReady, tenantUrlReachable,
+      stateValid, stateFile,
+    ] = process.argv.slice(1)
+
+    const status = {
+      clusterName,
+      clusterRunning: clusterRunning === "true",
+      stateValid: stateValid === "true",
+      stateFile,
+      components: {
+        controlPlane: { ready: cpReady },
+        keycloak:     { ready: kcReady },
+        postgres:     { ready: pgReady },
+      },
+      tenant: tenantId
+        ? {
+            id: tenantId,
+            subdomain: tenantSubdomain,
+            namespace: tenantNamespace,
+            hostname: tenantHostname,
+            origin: tenantOrigin,
+            ready: tenantReady,
+            urlReachable: tenantUrlReachable === "true",
+          }
+        : null,
+    }
+
+    process.stdout.write(JSON.stringify(status, null, 2) + "\n")
+  ' \
+    "${state_clusterName:-${CLUSTER_NAME}}" \
+    "${cluster_running}" \
+    "${control_plane_ready}" \
+    "${keycloak_ready}" \
+    "${postgres_ready}" \
+    "${state_tenantId}" \
+    "${state_tenantSubdomain}" \
+    "${state_tenantNamespace}" \
+    "${state_tenantHostname}" \
+    "${state_tenantOrigin}" \
+    "${tenant_ready}" \
+    "${tenant_url_reachable}" \
+    "${state_valid}" \
+    "${STATE_FILE}"
+else
+  echo "k3d platform status"
+  echo "==================="
+  echo
+  if [[ "${cluster_running}" == "true" ]]; then
+    echo "Cluster:        k3d-${CLUSTER_NAME} (running)"
+  else
+    echo "Cluster:        k3d-${CLUSTER_NAME} (NOT running)"
+  fi
+
+  if [[ "${state_valid}" == "true" ]]; then
+    echo "State file:     ${STATE_FILE} (ok)"
+  elif [[ -f "${STATE_FILE}" ]]; then
+    echo "State file:     ${STATE_FILE} (CORRUPT — run k3d:up to recover)"
+  else
+    echo "State file:     not found (run k3d:up)"
+  fi
+
+  echo
+  echo "Components:"
+  echo "  control-plane: ${control_plane_ready}"
+  echo "  keycloak:      ${keycloak_ready}"
+  echo "  postgres:      ${postgres_ready}"
+
+  if [[ -n "${state_tenantId}" ]]; then
+    echo
+    echo "Tenant: ${state_tenantId}"
+    echo "  Subdomain:   ${state_tenantSubdomain}"
+    echo "  Namespace:   ${state_tenantNamespace}"
+    echo "  URL:         ${state_tenantOrigin}"
+    echo "  Deployment:  ${tenant_ready}"
+    if [[ "${tenant_url_reachable}" == "true" ]]; then
+      echo "  HTTP /ready: ok"
+    else
+      echo "  HTTP /ready: unreachable"
+    fi
+  else
+    echo
+    echo "Tenant: none provisioned"
+  fi
+fi
