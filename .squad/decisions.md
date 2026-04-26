@@ -6273,3 +6273,57 @@ Revision owner stays with **Brand** because the remaining work is platform-scrip
 ## Audit status
 
 Brand's local worktree patch satisfies this gate: `status.sh` removes the dead variable, `down.sh` help text is now honest, and both scripts pass `bash -n`. Once that patch is committed and pushed to PR #120, the two remaining Copilot threads should be replied-to/resolved without widening scope.
+### 2026-04-25: Epic #82 Kickoff: Full Local k3d Deployment
+
+**Status:** READY TO START  
+**By:** Mikey
+
+**What:**
+
+Epic #82 (Full Local k3d Deployment) approved for immediate kickoff. Work decomposed into 4 ordered slices:
+- Slice 1: Persistent k3d orchestration core (Brand, Track A)
+- Slice 2A: Operator portal containerization (Brand, Track B)
+- Slice 2B: Customer portal containerization (Stef, Track B)  
+- Slice 3: Portal dev override flow (Brand, Track C)
+- Slice 4: Agent-friendliness polish (Brand + Scribe, Track D)
+
+**Why:**
+
+- PR #78 merged (2026-04-22); operator portal ready
+- Epic #87 complete (all 6 acceptance criteria code-complete)
+- Platform foundation solid; zero architectural blockers
+- #82 depends on validated work: #42 (platform shape), #79 (tenant-api override pattern)
+- Stack order is clear; minimal blocker risk with parallel execution
+
+**Key decisions for #82:**
+1. Containerization: Nginx serving pre-built dist (not Vite in container)
+2. Idempotency: All k3d:* scripts idempotent on state file
+3. Override pattern: Reuse tenant-api-override.sh model
+4. Non-goal: No production CD wiring; CI image builds separate
+
+**Timeline:** 2–3 weeks at current velocity
+
+---
+
+### 2026-04-26: Worktree Cleanup Procedure Established
+
+**Status:** Implemented  
+**By:** Brand
+
+**What:**
+
+18 stale worktrees removed from `.worktrees/` (issues #55–#102, #111). All associated branches deleted. Repository now clean with only main working tree.
+
+Cleanup criteria documented for future automation:
+1. Associated GitHub issue is CLOSED
+2. Worktree directory is clean (no uncommitted work)
+3. Branch is unmerged locally
+4. No active development indicated
+
+Removed worktrees: squad/100, squad/101, squad/102, squad/111, squad/55, squad/56, squad/69, squad/70, squad/88, squad/89, squad/90, squad/92, squad/93, copilot/91, squad/96, squad/97, squad/98, squad/99.
+
+**Why:**
+
+Stale worktrees accumulate cognitive load and disk bloat. Shipped work should not leave behind artifacts. Commit history and refs available for recovery if revisiting needed.
+
+---

@@ -226,3 +226,38 @@ rm -rf "${STATE_DIR}"
 - **PR #120 Smoke & Review Gate Audit (2026-04-27T15:23:12Z):** Independently audited PR #120 smoke failure and verified review resolution. Classified smoke failure as transient CI/k3d bootstrap noise (agent NotReady, flannel sandbox failures, network startup EOF) rather than code regression; gate only on rerun or narrow hardening patch. Verified all five review comments resolved by Brand patch 6cd1545; all threads closed. Approved JSON-quote-escaping refactor gate (move snippet construction outside node -e, add shell-syntax regression test, ~27 lines). Five decisions merged to squad/decisions.md. Orchestration log: `.squad/orchestration-log/2026-04-27T15:23:12Z-mikey.md`. PR ready for merge pending CI smoke rerun. — Mikey (Agent)
 
 - **PR #120 Review Gate Pass (2026-04-27T17:10:21Z):** Completed audit and resolution of all 4 review threads on commit b73017f. All threads resolved by reviewer. Gate clear from review side. Checks (smoke, validate x2) in progress. Orchestration log: `.squad/orchestration-log/20260427-171021-mikey.md`. Session log: `.squad/log/20260427-171021-pr120-b73017f-review-closure.md`. — Mikey (Agent)
+## Epic #82 Triage & Kickoff Plan (2026-04-25T23:30Z)
+
+**Status:** READY TO START (no blockers).
+
+**Context:** PR #78 (operator portal, issue #68) merged 2026-04-22. Focus file stale. Epic #82 is next (labeled `squad:mikey`).
+
+### Assessment
+
+Platform is **ready for #82 execution**:
+- Both portals (`apps/operator-portal`, `apps/customer-portal`) exist
+- k3d scaffolding in place from #42 (control plane, Keycloak, Postgres, ingress)
+- `tenant-api-override.sh` pattern proven from #79
+- Zero architectural gaps; scope is infrastructure + orchestration only
+
+### Decomposition (4 slices, 2–3 week delivery)
+
+**Slice 1 (Brand):** Persistent k3d orchestration (`npm run k3d:up/down/status`, idempotent, `.k3d-state/state.json`, `--json` output). Unblocks Slices 2–3.
+
+**Slice 2A (Brand):** Operator portal containerization (Dockerfile, k3d manifests, ingress). Parallel with 2B. Depends on Slice 1.
+
+**Slice 2B (Stef):** Customer portal containerization (mirrors operator pattern). Parallel with 2A. Depends on Slice 1.
+
+**Slice 3 (Brand):** Portal dev override scripts (`operator-portal-override.sh`, `customer-portal-override.sh`). Pattern: vite dev locally, rest in k3d. Depends on Slices 1–2.
+
+**Slice 4 (Brand + Scribe):** Agent-friendliness polish (JSON schema, single-source-of-truth docs). Depends on Slices 1–3.
+
+### Key Decisions
+
+- **Containerization:** Nginx serving pre-built dist for production-like consistency
+- **Idempotency:** All `k3d:*` scripts safe to re-run; state file drives reconciliation
+- **Override pattern:** Reuse `tenant-api-override.sh` approach (local dev + routing), no new DX patterns
+- **Non-goal:** No production CD changes; CI image builds optional per #42
+
+Decision document: `.squad/decisions/inbox/mikey-epic-82-kickoff.md`
+

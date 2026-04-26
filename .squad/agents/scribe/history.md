@@ -114,3 +114,5 @@ Scribe initialized as the team's memory and decision merger.
 ## Learnings
 
 Initial squad setup complete. Pattern observed: Data's code-review classification (blocking/deferred/N/A) applied across review cycles; transient squad logs require explicit cleanup on commit; operator-portal session/auth hardening is defensive against malformed token state and UI cleanup post-logout.
+
+
