@@ -6502,3 +6502,46 @@ PR #120 is the canonical solution for issue #83. PR #121 is closed as a duplicat
 **Lesson:**
 When parallel implementations emerge, naming consistency is a strong tiebreaker. Convention deviations should be rejected in favor of uniformity — it improves scannability and reduces cognitive load.
 
+
+---
+
+### 2026-04-26: K3D Status Output Contract: Effective vs Persisted Cluster Name
+
+**Decided by:** Data (Backend Dev)  
+**Date:** 2026-04-26  
+**Context:** PR #120 review round 2 — Chunk's blocker
+
+## Problem
+
+`status.sh` had split behavior:
+- Live cluster checks used the **effective** cluster name (`K3D_CLUSTER_NAME` override > state.json > default)
+- JSON output reported the **persisted** cluster name (from state.json)
+
+This inconsistency would confuse operators running status checks with an env override.
+
+## Decision
+
+When `status.sh --json` emits cluster status, it MUST always report the effective cluster name that the script is actually checking, not the persisted one from state.json.
+
+**Rationale:**
+- Operators using `K3D_CLUSTER_NAME=custom-cluster npm run k3d:status` expect the output to reflect what they're targeting
+- The JSON output is the script's public contract; it must align with the script's behavior
+- Persisted state in `.k3d-state/state.json` is a default/fallback, not an override
+
+## Implementation
+
+Changed `scripts/k3d/status.sh` line 258:
+```diff
+- "${state_clusterName:-${CLUSTER_NAME}}" \
++ "${CLUSTER_NAME}" \
+```
+
+Added regression test in `apps/control-plane/test/k3d-persistent-lane.test.ts`:
+- Sets `K3D_CLUSTER_NAME=custom-cluster` with state.json containing `clusterName: dnd-notes`
+- Verifies JSON output reports `custom-cluster`, not `dnd-notes`
+
+## Applies To
+
+All k3d scripts with env-override support: `up.sh`, `down.sh`, `status.sh`
+
+**Pattern:** When reporting operational state, always report what the script is doing (effective config), not what's persisted on disk.
