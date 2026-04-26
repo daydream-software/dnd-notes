@@ -369,3 +369,4 @@ Code consolidation for all 6 items is complete and functional. Test infrastructu
 5. **Consider extracting common shell helpers** (wait_for_http, request_json_to_file, etc.) from smoke.sh into a reusable library for consistency
 
 
+
