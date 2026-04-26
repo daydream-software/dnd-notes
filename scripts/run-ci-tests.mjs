@@ -11,6 +11,8 @@ const rootDir = path.resolve(__dirname, '..')
 const reportsDir = path.join(rootDir, 'reports')
 
 const suites = [
+  { name: 'keycloak-jwt', script: 'test:ci:keycloak-jwt' },
+  { name: 'portal-utils', script: 'test:ci:portal-utils' },
   { name: 'web', script: 'test:ci:web' },
   { name: 'api', script: 'test:ci:api' },
   { name: 'control-plane', script: 'test:ci:control-plane' },

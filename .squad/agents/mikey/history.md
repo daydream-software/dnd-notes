@@ -24,6 +24,8 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 
 ## Recent Updates (Last 10)
 
+- **Epic #87 Validation Verdict (2026-04-23):** Completed team read-only validation pass on all 6 acceptance criteria (tenant control endpoints, control-plane backup/restore, shared keycloak-jwt, normalizeBasePath consolidation, note-store split, tenant-registry migrations). Verdict: ALL PASS from code perspective — implementations are production-grade, real (not stubs), well-tested. However: two shared modules (`keycloak-jwt` security-critical, `portal-utils` config) have tests not wired into `scripts/run-ci-tests.mjs`. Decision: CLOSE #87 as completed + open P1 follow-up to wire both into CI. Rationale: epic scope was code items 1-6 (complete), but test drift risk requires CI enforcement. Posted consolidated comment: https://github.com/daydream-software/dnd-notes/issues/87#issuecomment-4320751015
+
 - **Roadmap Issues Created (2026-04-21T22:45Z):** Per FFMikha request, created three GitHub issues to fill scope gaps:
   - #68 "Build the operator control portal for platform administration" — distinct from #57 (fleet observability). This is the control surface: provision/deprovision, manage lifecycle, trigger operations. Operator persona + UI layer for the control-plane API.
   - #70 "Build the public landing and self-serve signup portal" — customer-facing front door. Marketing site + self-serve signup + instance dashboard. Drives control-plane provisioning (#53) from customer actions instead of manual operator scripts.
@@ -77,3 +79,38 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 - **PR #78 triage — two unresolved review comments (2026-04-22T19:25Z):** Operator-portal feature PR has 2 unresolved comments. (1) Test mock handlers for POST /internal/tenants* do not return error Response when called unexpectedly; they return `undefined`, causing confusing test failures. Route to Brand to fix test harness. (2) `.squad/agents/stef/history.md` has duplicate "## Core Context" headers (lines 16+22) with identical timestamps; documentation clarity issue. Route to Scribe for history cleanup. Both are low-risk, isolated fixes with clear ownership. No architecture questions needed.
 
 - **PR #78 final unresolved comment — normalizeBasePath duplication (2026-04-22T19:50Z):** One unresolved thread remains on PR #78. Review comment flags `normalizeBasePath()` duplication in `vite.config.ts:5-17` and `src/config.ts:3-15`; requests extraction into shared utility (`src/normalize-base-path.ts`) to prevent config-logic drift. Scope: remove function from both sites, create utility, add imports. Routed to Brand (platform owner). No architecture blocker; straightforward 5-minute refactor.
+
+## Epic #87 Validation — Synthesis & Close Verdict (2026-04-25)
+
+Led team synthesis after Data, Brand, Stef, Chunk completed validation pass on Epic #87 (6 acceptance criteria). Formulated and posted verdict to GitHub issue #87 (comment link in decisions.md).
+
+### Verdict
+
+**Close Epic #87 as completed.** Open P1 follow-up issue: "Wire shared module tests into CI (keycloak-jwt, portal-utils)".
+
+### Key Findings
+
+All 6 criteria are **code-complete and functional**:
+1. Tenant API control endpoints — Real drain + gate
+2. Control-plane backup/restore — Real pg_dump/pg_restore, full audit trail
+3. Keycloak-jwt consolidation — Zero duplication, shared module wired
+4. normalizeBasePath consolidation — Zero duplication, shared module wired
+5. Note-store split — 880 lines → 8 focused modules
+6. Tenant-registry migrations — Umzug + advisory locks, production-grade
+
+### CI Gap
+
+Two shared modules have tests not in CI:
+- **keycloak-jwt**: 19 tests, security-critical, must lock token verification
+- **portal-utils**: 8 tests, shared config, must lock API proxy setup
+
+### Decision Rationale
+
+Feature implementation is **complete**. CI wiring gap is **infrastructure configuration**, not missing functionality. Separating "feature complete" from "quality tooling wired" prevents artificial epic inflation and keeps roadmap signals clean.
+
+### Session
+
+- Log: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`
+- Orchestration logs: All 5 agents in `.squad/orchestration-log/2026-04-25T22:54:46Z-*`
+- Decisions merged to `.squad/decisions.md`
+

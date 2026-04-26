@@ -622,3 +622,18 @@ Addressed Copilot review comments on PR #67 (issue #55 rolling-update choreograp
 - Validation command for this slice is `npm run lint --workspace apps/control-plane && npm run build --workspace apps/control-plane && npm run test --workspace apps/control-plane` from the repo root.
 - Tenant advisory locks in `apps/control-plane/src/tenant-registry-postgres.ts` should hand the checked-out registry client into the callback and let tenant reads/writes reuse that same session; bounded `pg_try_advisory_lock` retries avoid pool stalls and indefinite hangs while preserving serialized per-tenant provisioning.
 - PR #108 follow-up: keep `scripts/k3d/smoke.sh` Bash-3.2-safe by capturing the last curl URL with `${!#}` before the call instead of using negative-offset `${*: -1}`, and keep control-plane internal tenant route 500s on `getErrorMessage()` + `logUnexpectedError()` so structured non-Error failures surface consistent `details` text.
+- Epic #87 backend validation (2026-04-26): Verified four acceptance criteria for multi-tenancy foundation. Tenant API control endpoints (`GET /_control/info`, `POST /_control/maintenance`) exist in `apps/api/src/routes/control-routes.ts` and genuinely drain writes (not stubs) via `apps/api/src/control-state.ts` inflight-write tracking. Control-plane backup/restore uses real `pg_dump`/`pg_restore` in `apps/control-plane/src/tenant-backup-runner.ts`, persists catalog in `backup_catalog`/`restore_log` tables (migration 0002), and writes audit log entries for requested/succeeded/failed outcomes in `apps/control-plane/src/app.ts`. Note-store split reduced `note-store.ts` to 880 lines (down from 1000+), with responsibilities genuinely moved into 8 focused modules totaling 3014 lines. Tenant-registry migrations eliminated try/catch ALTER patterns; `apps/control-plane/src/tenant-registry-postgres.ts` now delegates to versioned `schema_migrations_control_plane` ledger via `packages/postgres-migrations` Umzug framework with advisory-lock serialization. All four criteria PASS; no blocking issues for closing #87.
+
+## Epic #87 Validation — Data Items (2026-04-25)
+
+Completed read-only validation of Backend items 1, 2, 5, 6 for Epic #87 multi-tenancy foundation:
+
+- ✅ **Item 1:** Tenant API control endpoints — Real drain, real write gate, routes + handlers properly wired
+- ✅ **Item 2:** Control-plane backup/restore — Real pg_dump/pg_restore, full audit trail, catalog persistence
+- ✅ **Item 5:** Note-store split — 880 lines (target <1000), 8 focused modules
+- ✅ **Item 6:** Tenant-registry migrations — Zero defensive DDL, Umzug + advisory locks
+
+All criteria pass skepticism test (not stubs). Verdict: code-complete for closure. Session: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`.
+
+**P1 Follow-up:** Wire keycloak-jwt and portal-utils tests into CI (Chunk flagged gaps; Mikey formulated verdict). Both modules exist but tests missing from scripts/run-ci-tests.mjs.
+

@@ -84,6 +84,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 📌 Team update (2026-04-22T15:44:09Z): PR #77 JSON payload follow-up complete. Brand replaced manual tenant-create payload construction with Node JSON.stringify in scripts/k3d/smoke.sh; Chunk added regression coverage in apps/control-plane/test/k3d-smoke-payload.test.ts validating emitted JSON before live smoke run; all gates green (lint/test/build/platform:validate). Two decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:44:09Z-pr77-json-fix.md`. — Scribe
 
+- **Epic #87 Platform Validation (2026-04-26):** Completed read-only platform validation of epic #87 criterion 3 (shared keycloak-jwt module) and criterion 6 (Postgres migration framework). **Criterion 3 PASS**: `platform/keycloak-jwt` exists as workspace module, exports `verifyToken` and JWT primitives, consumed by both apps/api and apps/control-plane via workspace dependency wiring, zero jwks-rsa or duplicated JWT verification logic remaining in either app (confirmed via grep). **Criterion 6 PASS**: Postgres migration framework uses umzug 3.8.2 via `packages/postgres-migrations`, both control-plane and tenant API schemas use it with namespaced ledger tables (`schema_migrations_control_plane`, `schema_migrations_tenant_api`), advisory-lock concurrency guards per service, ordered migration files present (control-plane: 3 migrations, tenant-api: 1 baseline), npm scripts `db:migrate` + `db:migrate:prod` present in both apps, k3d-smoke workflow validates provisioning end-to-end but does not explicitly run migrations in CI (migrations run during control-plane boot and tenant provisioning). No blocking gaps identified; both items ready for #87 closure. Validation report delivered to requester.
+
 - **PR Hygiene for Runtime Squad Artifacts:** `.squad/log/` and `.squad/orchestration-log/` are runtime-state paths already ignored in `.gitignore`, so if a branch accidentally tracks one of those files, fix the PR by deleting only the stray log artifacts and leave durable tracked coordination files alone. Current example: PR #78 cleanup removed `.squad/log/2026-04-22T17:38:00Z-issue68-rollout-failure-hardening.md` and `.squad/orchestration-log/2026-04-22T17:38:00Z-data.md` while preserving `.squad/identity/now.md` and inbox directives.
 
 - **CI Duplicate-Check Triage:** `.github/workflows/ci.yml` runs `npm run test:ci`, publishes JUnit via EnricoMi as a separate `Test Results` check, then fails the `validate` job if any suite failed. On PR #78, red `validate` + red `Test Results` mapped to one underlying control-plane test (`apps/control-plane/test/provisioning.test.ts` namespace-deletion wait) rather than two independent failures. When the head commit only touches docs and the prior branch SHA was green, treat this pattern as a flaky/timing-sensitive repo test first, not an Actions outage. Key files: `.github/workflows/ci.yml`, `scripts/run-ci-tests.mjs`, `apps/control-plane/test/provisioning.test.ts`, `apps/control-plane/src/provisioning.ts`.
@@ -189,3 +191,17 @@ Recovered orphaned commit `9cccb60` (k3d platform final fixes) after PR #81 squa
 - `platform/control-plane/base/*.yaml` (removed PVC, updated config/secret)
 - `scripts/k3d/bootstrap.sh` (create control_plane database)
 - `scripts/k3d/full-stack-smoke.sh` (wire CONTROL_PLANE_DATABASE_URL)
+
+## Epic #87 Validation — Item 3 Keycloak-JWT (2026-04-25)
+
+Completed read-only validation of keycloak-jwt consolidation (Epic #87 item 3):
+
+- ✅ Keycloak-jwt extracted to `@dnd-notes/keycloak-jwt` shared module
+- ✅ Zero duplication: api + control-plane both import from shared module
+- ✅ Token verification consolidated (RS256, JWKS rotation, claim validation)
+- ⚠️ **CI gap:** 19 tests exist in `platform/keycloak-jwt/test/*.test.ts` but not in `scripts/run-ci-tests.mjs`
+
+Code consolidation PASS. Tests exist but not wired to CI — security-critical module must be regression-locked. Session: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`.
+
+**P1 Follow-up:** Add to scripts/run-ci-tests.mjs: `{ name: 'keycloak-jwt', script: 'test:ci --workspace platform/keycloak-jwt' }`.
+

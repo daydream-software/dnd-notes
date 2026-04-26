@@ -95,3 +95,28 @@ Stef initialized as Frontend Dev for the initial project squad.
 - Operator portal Keycloak restore should mirror the main web app’s defensive token parsing: in `apps/operator-portal/src/keycloak-client.ts`, require stored `accessToken` and `refreshToken` to be strings, drop non-string `idToken`, and clear the localStorage entry before returning `null` when the payload is malformed.
 - Logged-out cleanup in `apps/operator-portal/src/OperatorPortal.tsx` belongs in `clearSession()`, not scattered across callers: clear auth token, fleet data, notice/error banners, loading state, and open lifecycle dialogs so the sign-in screen never inherits stale session UI.
 - Focused regressions for this auth/session lane now live in `apps/operator-portal/src/keycloak-client.test.ts` (storage validation) and `apps/operator-portal/src/App.test.tsx` (logout/session-clear UI reset).
+
+### Epic #87 validation — normalizeBasePath consolidation (2026-04-23)
+
+- **Criterion 4 validation (read-only review):** Verified that `normalizeBasePath` and `joinBasePath` are now fully consolidated into `packages/portal-utils` as the single canonical definition.
+- **Customer-portal usage:** Imports from `@dnd-notes/portal-utils` in both `apps/customer-portal/vite.config.ts:4` (build-time proxy config) and `apps/customer-portal/src/config.ts:1` (runtime API base path).
+- **Operator-portal usage:** Imports from `@dnd-notes/portal-utils` in both `apps/operator-portal/vite.config.ts:4` (build-time proxy config) and `apps/operator-portal/src/config.ts:2` (runtime API base path).
+- **No duplicate definitions remain:** Grep confirms zero `function normalizeBasePath` declarations in either portal; all inline copies removed per PR #78 follow-up and issue #88 consolidation.
+- **Test coverage:** `packages/portal-utils/src/base-path.test.ts` provides 8 focused tests covering blank/undefined fallback (both portal API strings), root-path preservation, trailing-slash trimming, missing-leading-slash normalization, and the critical all-slash-input case (`///` → fallback) that diverged between portals.
+- **Divergence resolved:** The original operator-portal implementation used a simple `replace(/\/+$/, '')` approach that did NOT add a leading slash or detect all-slash inputs; customer-portal's more complete logic became the canonical source, and the follow-up commit 886f5a5 added the all-slash fallback case to prevent routing misconfigurations.
+- **Result:** PASS — consolidation complete, test coverage extends to both portals' original divergent behaviors, and no duplicate definitions remain.
+
+## Epic #87 Validation — Item 4 normalizeBasePath (2026-04-25)
+
+Completed read-only validation of normalizeBasePath consolidation (Epic #87 item 4):
+
+- ✅ normalizeBasePath + joinBasePath consolidated to `packages/portal-utils`
+- ✅ Zero duplicate definitions: customer-portal + operator-portal both import from shared
+- ✅ Test coverage extends to both portals' original behaviors
+- ✅ Divergence resolved: all-slash input (`///` → fallback) now consistent
+- ⚠️ **CI gap:** 8 tests in `packages/portal-utils/src/base-path.test.ts` but not in `scripts/run-ci-tests.mjs`
+
+Code consolidation PASS. Tests exist but not wired to CI — config logic in shared module must be regression-locked. Session: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`.
+
+**P1 Follow-up:** Add to scripts/run-ci-tests.mjs: `{ name: 'portal-utils', script: 'test:ci:portal-utils' }`.
+

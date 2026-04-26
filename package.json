@@ -35,6 +35,8 @@
     "build:web": "npm run build --workspace apps/web",
     "build:operator-portal": "npm run build --workspace apps/operator-portal",
     "build:customer-portal": "npm run build --workspace apps/customer-portal",
+    "test:keycloak-jwt": "npm run test --workspace platform/keycloak-jwt --",
+    "test:ci:keycloak-jwt": "npm run test:ci --workspace platform/keycloak-jwt --",
     "test:portal-utils": "npm run test --workspace packages/portal-utils --",
     "test:ci:portal-utils": "npm run test:ci --workspace packages/portal-utils --",
     "test:web": "npm run test --workspace apps/web --",
@@ -53,7 +55,7 @@
     "reset:data": "npm run reset:data --workspace apps/api",
     "build": "npm run build --workspaces --if-present",
     "lint": "npm run lint --workspaces --if-present",
-    "test": "npm run test:portal-utils && npm run test:web && npm run test:api && npm run test:control-plane && npm run test:operator-portal && npm run test:customer-portal",
+    "test": "npm run test:keycloak-jwt && npm run test:portal-utils && npm run test:web && npm run test:api && npm run test:control-plane && npm run test:operator-portal && npm run test:customer-portal",
     "prepare": "node ./scripts/prepare.mjs",
     "postinstall": "node ./scripts/build-portal-utils.mjs"
   },
