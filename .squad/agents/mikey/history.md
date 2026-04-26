@@ -6,37 +6,35 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Core Context
+## Core Context (Summarized 2026-04-26T15:45:50Z)
 
-Mikey is the Lead for the squad, responsible for architecture alignment, blocking decision resolution, and planning oversight across the platform.
+Mikey is the Lead for the squad, responsible for architecture alignment, blocking decision resolution, and planning oversight across the platform. Primary domains: epic planning, architecture reviews, gatekeeper decisions, cross-team coordination.
 
 **Historical Milestones (2026-04-11 to 2026-04-19):**
 - Initialized squad on 2026-04-11 with Stef (Frontend), Data (Backend), Chunk (QA), Brand (Platform), Ralph (infra), Scribe (memory)
-- Guided Issue #27 to completion (session browsing UI); PR #36 merged
-- Resolved Issue #33 parallel-lane decision (activity UI post-Issue-#27)
-- Approved Phase 2 notes UX roadmap (compact header + Lexical editor + inline references)
-- Completed origin-model audit; recommended same-origin reverse proxy for production
-- Led Issue #42 epic planning: confirmed thin control-plane + per-instance provisioning model; deferred Keycloak and K8s operator to Phase 2+
-- Resolved Issue #42 architecture blockers: tenant contract (control-plane sole orchestrator), Postgres isolation (SERIALIZABLE), backend gating (`DATABASE_URL` env var)
+- Guided Issue #27 to completion (session browsing); approved Phase 2 roadmap (Lexical editor + inline references)
+- Led Issue #42 epic planning: confirmed thin control-plane + per-instance provisioning, deferred K8s operator
+- Resolved Issue #42 architecture blockers: tenant contract (control-plane sole orchestrator), Postgres isolation (SERIALIZABLE)
 - Closed Phase 0 gate: PR #67 completes Issue #55 (rollout contract). Phase 0 → Phase 1 transition ready
 
-**Key Pattern:** Architecture spike (reviews) → blocking questions → explicit decisions → execution gates with measured acceptance criteria.
+**Key Pattern:** Architecture spike (reviews) → blocking questions → explicit decisions → execution gates with measured acceptance.
 
-## Recent Updates (Last 10)
+**Phase 2 Architecture (2026-04-21):** Sequencing: #69 (per-tenant Postgres credentials) → #56 (Keycloak auth boundaries) → #40 (restore orchestration). Security seam is provisioning.ts; auth/restore follow boundaries.
 
-- **Epic #87 Validation Verdict (2026-04-23):** Completed team read-only validation pass on all 6 acceptance criteria (tenant control endpoints, control-plane backup/restore, shared keycloak-jwt, normalizeBasePath consolidation, note-store split, tenant-registry migrations). Verdict: ALL PASS from code perspective — implementations are production-grade, real (not stubs), well-tested. However: two shared modules (`keycloak-jwt` security-critical, `portal-utils` config) have tests not wired into `scripts/run-ci-tests.mjs`. Decision: CLOSE #87 as completed + open P1 follow-up to wire both into CI. Rationale: epic scope was code items 1-6 (complete), but test drift risk requires CI enforcement. Posted consolidated comment: https://github.com/daydream-software/dnd-notes/issues/87#issuecomment-4320751015
+**Roadmap Planning (2026-04-21):** Created #68 (operator control portal), #70 (landing/signup), #71 (per-tenant creds) to fill scope gaps. Admin/operator platform was missing from original scope — platform visibility exists (#57), auth exists (#56), but operator control surface (#68) was implicit.
 
-- **Roadmap Issues Created (2026-04-21T22:45Z):** Per FFMikha request, created three GitHub issues to fill scope gaps:
-  - #68 "Build the operator control portal for platform administration" — distinct from #57 (fleet observability). This is the control surface: provision/deprovision, manage lifecycle, trigger operations. Operator persona + UI layer for the control-plane API.
-  - #70 "Build the public landing and self-serve signup portal" — customer-facing front door. Marketing site + self-serve signup + instance dashboard. Drives control-plane provisioning (#53) from customer actions instead of manual operator scripts.
-  - #71 "Implement per-tenant Postgres credentials and database isolation" — **CRITICAL SECURITY issue**. Current provisioning (#54) injects admin credentials into all tenant pods (tenant isolation violation). Each tenant needs credentials that grant access ONLY to its own database. Blocks Phase 1 production readiness.
+## Recent Updates
 
 
 
 
+## Key Decisions & Patterns
 
+**Phase 0 → Phase 1 Boundary (Issue #55):** Rollout contract complete — stateless control-plane with per-instance Postgres provisioning. Single-replica RollingUpdate (maxSurge:0, maxUnavailable:1) + graceful shutdown validated.
 
+**Issue #42 Control-Plane Contract (LOCKED):** Thin control-plane is sole orchestrator; tenant app never calls back. Surfaces: /health (liveness), /ready (readiness), /_control/info (state), /_control/maintenance (drain). Kubernetes handles reconciliation. No /_control/bootstrap in Phase 1.
 
+**Gatekeeper Race Condition (PR #60):** Check-then-merge is not atomic. Lesson: gates must either re-check immediately before merge, lock PR state during evaluation, or use GitHub-native branch protection.
 
 
 ## Learnings
@@ -261,3 +259,4 @@ Platform is **ready for #82 execution**:
 
 Decision document: `.squad/decisions/inbox/mikey-epic-82-kickoff.md`
 
+**Decision Point Triage:** Blocking questions force explicit answers (auth strategy, versioning, backup ownership, Keycloak timing) before execution. Architecture spike → decision resolution → execution kickoff.

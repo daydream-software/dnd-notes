@@ -1,38 +1,32 @@
 # Brand — Platform Dev
 
-## Core Context (Summarized 2026-04-22T18:24:34Z)
+## Core Context (Summarized 2026-04-26T15:45:50Z)
 
-Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestration, deployment artifacts, and platform-layer integrations.
-
-## Recent Updates
-
-📌 Issue #97 control-plane manifest adaptation (2026-04-23T19:20:50Z): Adapted k3d control-plane manifests for Postgres backend migration. Removed PVC dependencies per issue #97 requirements. Updated smoke-test lane configuration. Coordinated with Data for database schema changes and Chunk for QA validation. Orchestration log at `.squad/orchestration-log/2026-04-23T19:20:50Z-brand.md`. Session log at `.squad/log/2026-04-23T19:20:50Z-issue-97-control-plane-postgres.md`. All changes committed to worktree branch. Ready for deployment validation. — Brand (Agent)
-
-**Historical Milestones (2026-04-11 to 2026-04-20):**
-- Executed Issue #28 handoff and branch cleanup after PR #37 merged (2026-04-12 to 2026-04-14)
-- Conducted origin/deployment config audit; recommended same-origin reverse proxy for production (2026-04-16)
-- Implemented GH_TOKEN passthrough in copilot_yolo.sh (2026-04-17)
-- Co-authored Issue #42 platform direction: managed K8s, provider-managed control plane, scale-to-zero with PVC retention, shared ingress/cert-manager (2026-04-18)
-- Led backup/restore strategy for Phase 1: two-layer approach (managed PITR + daily per-tenant pg_dump), locked with Data co-authorship (2026-04-18)
-- Identified 13 blind spots for Phase 0–3 across single-writer enforcement, PVC lifecycle, ingress/DNS/TLS, observability, disaster recovery (2026-04-18)
-- Consolidated Issue #42 Phase 0–1 decisions; prepared execution readiness analysis (2026-04-19)
-- Published Issue #43 QA brief identifying 5 critical deployment-artifact checkers (2026-04-20)
-- Diagnosed and fixed npm test infrastructure (missing root npm install) (2026-04-20)
-- Produced Dockerfile multi-stage build, RUNTIME.md environment contract, platform K8s manifests (postgres.yaml, k3d bootstrap) (Phase 0 artifacts)
+Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestration, deployment artifacts, and platform-layer integrations. Maintains the k3d local dev environment, control-plane manifests, Docker builds, and platform-layer contract documentation (RUNTIME.md).
 
 **Key Pattern:** Infrastructure-first approach — lock platform topology and deployment contracts before application code churn.
 
-## Recent Updates (Last 5)
+**Historical Work (2026-04-11 to 2026-04-22):**
+- Executed Issue #28 handoff and branch cleanup; conducted deployment config audit; recommended same-origin reverse proxy
+- Co-authored Issue #42 platform direction: managed K8s, scale-to-zero with PVC retention, shared ingress/cert-manager
+- Led backup/restore strategy (two-layer: managed PITR + per-tenant pg_dump) with Data co-authorship
+- Consolidated Phase 0–1 decisions, published QA brief, diagnosed npm test infrastructure
+- Produced Dockerfile multi-stage build, RUNTIME.md environment contract, platform K8s manifests (postgres.yaml, k3d bootstrap)
 
-- **PR #108 Rebase, Merge-Conflict Resolution & Final Review (2026-04-24):** Rebased squad/100-per-tenant-backup-restore (Issue #100 per-tenant backup-restore feature) onto current main, resolved merge conflicts in control-plane files, and addressed final Copilot review feedback. Fixed two critical issues: (1) **whitespace-only string error handling** — apps/control-plane/src/error-formatting.ts now trims string throwables and collapses whitespace-only strings to "Unknown error" instead of blank operator messages (8-line regression); (2) **deterministic backup path suffixes** — apps/control-plane/src/tenant-backup-runner.ts replaced UUID-based suffixes with MD5-hash-based suffixes (MD5 of tenant-id + ISO-timestamp) to ensure consistent paths on case-insensitive filesystems like macOS HFS+ and Windows NTFS (10-line fix + 32-line regression coverage). Created `.squad/skills/filesystem-safe-path-components/SKILL.md` documenting the deterministic-suffix pattern for team reuse. All gates validated: lint/test/build/platform:validate/smoke/GitHub Actions green. PR restored to mergeable_state: clean with all review threads resolved. Final commit: `6a24105` (fix: address PR #108 review for #100, co-authored with Copilot). Orchestration log: `.squad/orchestration-log/2026-04-24-145502-brand-pr108-rebase.md`. Session log: `.squad/log/2026-04-24-145502-pr108-rebase.md`. PR ready for merge. — Brand (Agent)
+**Recent Skills Documented:**
+- `filesystem-safe-path-components`: Deterministic MD5-hash-based path suffixes for case-insensitive filesystems (macOS HFS+, Windows NTFS)
+- `postgres-null-parameter-casts`: Explicit casting for nullable Postgres placeholders across branching logic
+- `smoke-harness-failure-artifacts`: Preserved workdir capture and filtered error output for CI-only failures
+- `control-plane-unknown-error-strings`: Trim and collapse whitespace-only strings to `Unknown error`
+- `local-override-vs-pod-network-auth`: Override scripts treat pod-scoped URLs (*.svc) separately from host-side fallbacks
+- `post-merge-orphan-recovery`: Fast-forward main, cherry-pick missing commits for post-merge docs
 
-- **PR #107 Smoke Failure Diagnosis & Fix (2026-04-24):** Completed comprehensive platform diagnostics for smoke test failures across storage, RBAC, transaction handling, and DevOps pipeline. Delivered two commits: (1) `74a57a3` fixed nullable Postgres storage parameter type casting in tenant-registry-postgres.ts with 65 lines regression test coverage, created `.squad/skills/postgres-null-parameter-casts/SKILL.md` for team reuse; (2) `c0e9955` addressed PR follow-ups—added ClusterRole permissions for poddisruptionbudgets, fixed transaction rollback handling for poisoned clients, corrected smoke.sh artifact copy behavior, fixed inaccurate Copilot history note, added 61 additional lines regression coverage. All fixes validated: local tests pass, GitHub smoke rerun `24893104515` green, zero unresolved review threads. Orchestration log: `.squad/orchestration-log/20260424-135825-brand-pr107-smoke.md`. Session log: `.squad/log/20260424-135825-pr107-smoke-fix.md`. PR ready for merge. — Brand (Agent)
+## Recent Updates
 
-- **Phase 2 Platform Readiness Assessment (2026-04-21):** Conducted full audit of #56 (Keycloak OIDC) and #69 (per-tenant Postgres roles) platform prerequisites. Identified 8 critical areas: Keycloak bootstrap (partial, needs control-plane integration), database secret wiring (CRITICAL GAP: all tenants share one runtime URL, must split to per-tenant role + secret), local dev experience (k3d works, docs missing), CI coverage (smoke test gaps for auth/privileges), K8s manifests (RBAC ready, network policy not documented), secrets strategy (defer Sealed Secrets to Phase 2+), rollout dependencies (#69 independent of #56 after foundational work), and documentation gaps. Produced 8-item readiness list with 3-4 PR decomposition for #69 work.
 
-- **Issue #76 Keycloak Runtime Auth Platform Lane (2026-04-22):** Owned platform/config side of runtime Keycloak auth integration. Updated k3d Keycloak realm to seed tenant-app and control-plane service-account clients with test users (owner@example.com, site-admin@example.com). Wired Keycloak environment variables across control-plane overlays (k3d and hosted-reference) with AUTH_MODE switch (local|keycloak) and per-environment ConfigMap/Secret placeholders. Updated RUNTIME.md with Keycloak Runtime Authentication section (env vars, auth flows, modes). Created comprehensive docs/KEYCLOAK_RUNTIME_AUTH.md guide covering architecture, configuration, local testing, hosted setup, troubleshooting. Updated platform/k3d/README.md with seeded client credentials and k3d test flow validation. Updated platform/control-plane/README.md with admin auth modes (static vs Keycloak service-account) and k3d/hosted setup instructions. Preserved backward compat: AUTH_MODE=local remains default, guest/share-link flows anonymous. All platform manifests validated (platform:validate passed). Committed as commit da15a38 on squad/76 branch.
 
-📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
+
+
 
 📌 Team update (2026-04-27T16:12:05Z): PR #120 final review resolution complete. Brand addressed last two open Copilot review threads: removed unused `STATE_DIR` from scripts/k3d/status.sh, updated scripts/k3d/down.sh help text for accurate teardown behavior description. Patch committed and pushed (7d2d7fc). Mikey gated the patch, confirmed on PR head, posted targeted replies closing both threads. No open review threads remain. Two decisions merged: brand-final-review-fixes.md, mikey-final-review-gate.md. Session log: `.squad/log/2026-04-27T16:12:05Z-pr120-review-closure.md`. — Scribe
 
@@ -262,3 +256,9 @@ Code consolidation PASS. Tests exist but not wired to CI — security-critical m
 - **PR #120 Review Thread Resolution (2026-04-27T17:10:21Z):** Orchestrated completion of 4 review threads on README wording, kubectl context guards, and tokenSnippets quoting. Commit b73017f validated and passed focused tests. Orchestration log: `.squad/orchestration-log/20260427-171021-brand.md`. Session log: `.squad/log/20260427-171021-pr120-b73017f-review-closure.md`. — Brand (Agent)
 
 
+See **Recent Skills Documented** above for detailed patterns. Key themes:
+- Filesystem path normalization and collision prevention (backup naming)
+- Database backend migration patterns (async conversion, PVC removal)
+- Error handling and platform diagnostics (smoke test artifacts, error string formatting)
+- Local dev override isolation (KEYCLOAK_JWKS_URL pod vs host scoping)
+- Post-merge recovery procedures for documentation/decision commits

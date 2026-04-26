@@ -6,25 +6,29 @@
 - **Stack:** React, Material UI, Node.js
 - **Created:** 2026-04-11T19:00:21.594Z
 
-## Recent Updates
+## Core Context (Summarized 2026-04-26T15:45:50Z)
 
-📌 Epic #87 test & CI validation complete (2026-04-26): Verified test coverage and CI wiring for all 6 acceptance criteria. **Found two blocking CI gaps:** `platform/keycloak-jwt` and `packages/portal-utils` have comprehensive test suites (19 + 8 tests respectively) but don't run in CI because they're missing from `scripts/run-ci-tests.mjs:13-19`. Both are correctly consumed by parent apps and close the deduplication goals, but without CI wiring they create false-green risk for security-critical token verification and shared base-path logic. All other items PASS: maintenance drain transition (control-routes.test.ts:381), backup/restore/audit/catalog (tenant-backup-runner + app.test.ts), note-store split (880 lines, full module coverage), and migration runner (migrate.test.ts with advisory locks). Wrote blocking-gap decision to `.squad/decisions/inbox/chunk-87-validation.md`. — Chunk (Tester)
-
-📌 Issue #97 acceptance bar & QA notes (2026-04-23T19:20:50Z): Reviewed acceptance bar for issue #97 control-plane registry Postgres migration. Added QA notes documenting validation expectations and test coverage requirements. Coordinated with Data and Brand on multi-agent delivery. Session log at `.squad/log/2026-04-23T19:20:50Z-issue-97-control-plane-postgres.md`. Unit tests passing in control-plane; full smoke test pending Docker broker image resolution. — Chunk (Agent)
-
-## Core Context (Summarized 2026-04-22T18:24:34Z)
-
-Chunk is the QA/Tester for the squad, responsible for regression coverage, gate validation, and identifying high-risk parity gaps.
-
-**Early milestones (2026-04-11 to 2026-04-20, archived from history):** Initialized on 2026-04-11; validated SQLite regression, approved share-link/session-browsing slices, caught guest-token backdoor and state-machine isolation gaps, identified route shadowing + decoding traps, led Phase 0 QA (5 critical checkers), resolved npm test infrastructure.
+Chunk is the QA/Tester for the squad, responsible for regression coverage, gate validation, and identifying high-risk parity gaps. Primary domains: acceptance validation, test infrastructure design, CI wiring, cross-agent testing coordination.
 
 **Key Pattern:** Find parity gaps early (SQLite ↔ Postgres), gate on measurable regression coverage, propagate learnings to future issues.
 
-## Recent Updates (Last 5)
+**Historical Work (2026-04-11 to 2026-04-22, archived):**
+- Initialized QA role; validated SQLite regression, approved share-link/session-browsing slices
+- Caught guest-token backdoor and state-machine isolation gaps, identified route shadowing + decoding traps
+- Led Phase 0 QA (5 critical deployment-artifact checkers)
+- Resolved npm test infrastructure gaps
 
-📌 Team update (2026-04-22T17:38:00Z): Issue #68 rollout-failure hardening landed locally by Data. Ready-tenant rolling updates now return stable control-plane responses: `400 unsupported_target_version` for same-version/no-op targets, `409 tenant_rollout_in_progress` / `tenant_rollout_disallowed` for concurrent or non-ready requests, and `500 tenant_rollout_failed` with operator guidance instead of raw backend text. Focused control-plane tests and operator-portal validation passed. Shared worktree stayed dirty, so no code commit was cut. Next: Chunk QA should validate operator-facing failure copy + regression coverage before batching. — Scribe
+**Recent QA Validations (2026-04-22 to 2026-04-25):**
+- Issue #68: Rolling-update lifecycle action (ready-only guardrail, audit visibility, operator confirmation flow)
+- Issue #78: Auth cleanup + CI-safe polling (token normalization, localStorage clearance, state resets)
+- Issue #97: Control-plane Postgres migration (acceptance bar, test coverage requirements)
+- Epic #87: Comprehensive test audit (code consolidation PASS; 2 CI gaps identified: keycloak-jwt, portal-utils tests not wired)
 
-📌 Team update (2026-04-22T17:27:18Z): Issue #68 rolling-update lifecycle action completed by Stef. Reuses POST /internal/tenants/:tenantId/provision with version override, exposed only for ready tenants, requires operator reason + typed target-version confirmation. Focused regression in OperatorPortal.actions.test.tsx. Portal lint/build/test passing. Next: Chunk owns QA/reviewer pass on rolling-update action. — Scribe
+**Key Learnings:**
+- Keycloak token storage must normalize strings, reject malformed blobs, clear localStorage immediately
+- Session state clearance should be comprehensive: tokens, fleet/loading state, errors, lifecycle dialogs
+- CI polling assertions need modest explicit timeout budgets to avoid scheduler jitter
+- Epic completion should distinguish "code complete" from "quality tooling wired"
 
 📌 Issue #68 rolling-update lifecycle action QA review (2026-04-22T17:31:44Z): Chunk approved rolling-update slice. Verified ready-only guardrail, audit visibility, operator-facing confirmation flow. Added focused regression lock in OperatorPortal.actions.test.tsx. Portal validation passing (lint/test/build). Ready for merge. Orchestration log at `.squad/orchestration-log/2026-04-22T17:31:44Z-chunk.md`. Session log at `.squad/log/2026-04-22T17:31:44Z-issue68-lifecycle-review.md`. — Chunk (QA/Tester)
 
@@ -276,6 +280,7 @@ Risk: test drift on shared modules. Both already have test:ci scripts ready.
 ### Verdict
 
 Code consolidation for all 6 items is complete and functional. Test infrastructure is in place but CI wiring is missing. Marked as P1 follow-up. Session: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`.
+## Recent Updates
 
 ### PR #120 final QA review (2026-04-26)
 - `scripts/k3d/status.sh` is safe to approve only when the tenant `/ready` probe is optional: `probe_tenant_url()` must skip cleanly when `curl` is missing and surface that branch in both text output (`HTTP /ready: skipped`) and JSON output (`tenant.urlProbeSkipped`).
