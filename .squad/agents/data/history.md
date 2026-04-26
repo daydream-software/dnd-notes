@@ -50,6 +50,8 @@ Data is the Backend Dev responsible for control-plane, tenant orchestration, dat
 
 **Validation:** ✓ bash -n, ✓ lint, ✓ 202 tests pass, ✓ build
 
+📌 Team update (2026-04-26T22:06:15Z): PR #120 revision 3 approved by Chunk. New bug (namespace mutation) was discovered and resolved by Mikey in revision 3 (false-green regression proof fix). Lockout pattern applied successfully: first author locked after rejection (discovery of new bug), second author locked after review discovery (namespace gap), Mikey as gate closer with surgical fix (isolated scope, clear spec, failing test). — Chunk
+
 ## Learnings
 
 ### K3D State vs Effective Config Pattern
