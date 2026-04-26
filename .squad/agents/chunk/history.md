@@ -296,3 +296,76 @@ Code consolidation for all 6 items is complete and functional. Test infrastructu
 ---
 
 
+
+## Slice 1 QA Work (Issue #82, 2026-04-26)
+
+**Task:** Proactive QA audit for Slice 1 orchestration core (k3d:up/down/status commands).
+
+**Findings:**
+
+1. **Existing Validation Surface (from #42):**
+   - `smoke.sh`: 13KB bash script with HTTP health checks, readiness probes, Keycloak token flows, tenant provisioning validation
+   - `full-stack-smoke.sh`: 12KB full-stack orchestration test including operator-portal provisioning UI harness
+   - `k3d-smoke-payload.test.ts`: Unit tests on shell payload builders (tenant JSON, request helpers)
+   - `live-smoke.test.tsx`: Mock-based operator portal provisioning flow tests (6 scenarios including slow provisioning, failures, timeouts)
+   - Control-plane test files: provisioning.test.ts, shutdown.test.ts, full-stack-smoke-script.test.ts
+
+2. **Slice 1 Missing Pieces:**
+   - No `k3d:up` / `down` / `status` npm scripts (only bootstrap → smoke → full-stack-smoke progression)
+   - No persistent state.json artifact (.k3d-state/)
+   - No JSON output contract or schema
+   - No idempotency contract (re-running bootstrap should be safe)
+   - No stale-state recovery (if cluster dies, how do we recover?)
+
+3. **Key Regression Checks (Highest Value):**
+   - Tenant provisioning through control-plane API works end-to-end
+   - Keycloak JWT validation in control-plane + tenant-api flows
+   - Ingress routing to tenant pods via nip.io domain
+   - Port-forward paths (postgres, control-plane, keycloak) work correctly
+   - Image import into k3d succeeds without stalling
+   - Guest token routes (share-link) work without Keycloak auth
+
+4. **Agent-Friendly Patterns Observed:**
+   - `K3D_SMOKE_OUTPUT=json` flag on full-stack-smoke.sh (returns provisioning result with namespace/hostname)
+   - Environment variable overrides for all tunable parameters (K3D_CLUSTER_NAME, K3D_HTTP_PORT, etc.)
+   - Health check helpers in smoke.sh (wait_for_http, wait_for_tcp, wait_for_rollout)
+   - Request helper with clear error logging (request_json_to_file includes response body on HTTP errors)
+
+**Deliverables:**
+
+1. ✅ **QA Contract Document** (.squad/decisions/inbox/chunk-issue-82-slice-1-qa.md):
+   - 6 core validation scenarios (happy path, idempotency, stale recovery, JSON contract, state atomicity, error handling)
+   - Explicit acceptance bar for Slice 1 implementation
+   - Must-have tests and regression checks
+   - JSON schema for k3d:status --json output
+   - Integration points with future Tracks B, C, D
+
+2. ✅ **Validation Script** (scripts/k3d/validate-status-json.js):
+   - Standalone Node.js validator for JSON schema compliance
+   - Enforces field presence, type checking, and status enum validation
+   - Reusable for all k3d:* scripts once --json support is added
+   - Exit codes for CI integration
+
+**Learnings for Future Issues:**
+
+- k3d/k3s testing demands both local speed (bootstrap fast) and real orchestration validation (full provisioning flow)
+- State management is critical for agent-friendly workflows; JSON contract must be stable and documented before implementation
+- HTTP health checks must have configurable timeouts to avoid scheduler jitter (CI vs local variance)
+- Shell-based orchestration benefits from extracted helper functions (makes testing easier via test extraction)
+- Guest/share-link token flows are orthogonal to control-plane provisioning but must not regress
+
+**Key File Paths:**
+- Decision doc: `.squad/decisions/inbox/chunk-issue-82-slice-1-qa.md`
+- Validator: `scripts/k3d/validate-status-json.js`
+- Existing tests: `apps/control-plane/test/k3d-smoke-payload.test.ts`, `apps/operator-portal/src/live-smoke.test.tsx`
+- Bootstrap/smoke scripts: `scripts/k3d/bootstrap.sh`, `smoke.sh`, `full-stack-smoke.sh`
+
+**Recommendations:**
+
+1. **Brand should consult the QA contract before implementation** to understand acceptance bar upfront
+2. **Validator script can be called in CI** once k3d:status is implemented (e.g., `npm run k3d:status -- --json | node scripts/k3d/validate-status-json.js`)
+3. **Slice 1 should re-run existing smoke/full-stack-smoke tests** as regression gates
+4. **Once Slice 1 lands**, Track B (portal containerization) and Track C (overrides) must re-run full suite to ensure no breaks
+5. **Consider extracting common shell helpers** (wait_for_http, request_json_to_file, etc.) from smoke.sh into a reusable library for consistency
+
+
