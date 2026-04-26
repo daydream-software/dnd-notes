@@ -108,6 +108,28 @@ only auto-hardens newly provisioned tenants.
 
 Issue `#63` formalizes the daily local Kubernetes lane for platform work.
 
+### Persistent deployment lane (issue `#83`)
+
+```bash
+npm run k3d:up          # bring up cluster + control plane + seeded tenant (idempotent)
+npm run k3d:status      # check component health and print URLs
+npm run k3d:down        # tear everything down
+```
+
+- `k3d:up` bootstraps the cluster, builds/imports images, deploys the control
+  plane in-cluster, provisions a deterministic `dev` tenant, seeds sample data,
+  and writes a state file to `.k3d-state/state.json` (gitignored). Running it a
+  second time is a no-op when the tenant is already `ready`.
+- `k3d:status` reads `.k3d-state/state.json` and queries the cluster for
+  component readiness. Use `--json` for machine-readable output.
+- `k3d:down` deletes the cluster and removes `.k3d-state/`. Use `--keep-cluster`
+  to preserve the cluster infrastructure and only delete tenant namespaces
+  (faster reset).
+
+Flags for `k3d:up`: `--no-rebuild`, `--reset-tenant`, `--no-tenant`, `--json`.
+
+### Smoke lanes
+
 ```bash
 npm run k3d:bootstrap
 npm run k3d:smoke

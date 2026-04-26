@@ -14,6 +14,38 @@ This lane intentionally uses **k3d for daily iteration** and keeps the control p
 
 ## Quick start
 
+### Persistent deployment lane (recommended for manual exploration)
+
+```bash
+npm run k3d:up          # bring up cluster + control plane + seeded tenant
+npm run k3d:status      # check component health and URLs
+npm run k3d:down        # tear everything down
+```
+
+`k3d:up` is idempotent — running it a second time is a no-op when the `dev`
+tenant is already `ready`. State is persisted to `.k3d-state/state.json`
+(gitignored). See the flag reference below for `--no-rebuild`, `--reset-tenant`,
+`--no-tenant`, and `--json`.
+
+`k3d:status --json` returns a stable schema for agent/script consumption:
+```json
+{
+  "up": true,
+  "clusterName": "dnd-notes",
+  "controlPlane": { "readyReplicas": 1 },
+  "tenant": {
+    "id": "dev",
+    "subdomain": "dev",
+    "namespace": "tenant-platform-dev",
+    "hostname": "dev.127.0.0.1.nip.io",
+    "origin": "http://dev.127.0.0.1.nip.io:8080",
+    "readyReplicas": 1
+  }
+}
+```
+
+### Smoke lanes (for CI or one-shot validation)
+
 ```bash
 npm run k3d:bootstrap
 npm run k3d:smoke
@@ -111,6 +143,31 @@ different from their browser-facing Keycloak URLs in k3d: the public hostname
 resolves to `127.0.0.1`, which in-cluster pods cannot use to fetch JWKS. The
 in-cluster Service URL keeps bearer-token validation working
 inside the workload while the frontend still points users at the public issuer URL.
+
+## k3d:up / k3d:down / k3d:status flag reference
+
+### `npm run k3d:up`
+
+| Flag | Purpose |
+| --- | --- |
+| `--no-rebuild` | Skip image builds when images are already imported into k3d. |
+| `--reset-tenant` | Deprovision the existing `dev` tenant and re-provision fresh. |
+| `--no-tenant` | Bring up only the platform (cluster + control-plane). No tenant. |
+| `--json` | Machine-readable summary on stdout (contents of `.k3d-state/state.json`). |
+
+Environment overrides: `K3D_NO_REBUILD`, `K3D_RESET_TENANT`, `K3D_NO_TENANT`, `K3D_UP_JSON`.
+
+### `npm run k3d:down`
+
+| Flag | Purpose |
+| --- | --- |
+| `--keep-cluster` | Only delete tenant namespaces and the control-plane deployment; keep cluster infra (faster reset). |
+
+### `npm run k3d:status`
+
+| Flag | Purpose |
+| --- | --- |
+| `--json` | Machine-readable output (stable schema, suitable for agent consumption). |
 
 ## Supported workflows
 
