@@ -6435,3 +6435,44 @@ State-file contract must be locked before #84–#86 depend on it. Atomicity is c
 **Next step:** When Brand's implementation ready, Chunk runs full suite; report pass/fail in PR.
 
 ---
+
+---
+
+### 2026-04-26: Issue #83 Revision Strategy & Reviewer Lockout Resolution
+
+**Decider:** Mikey (Lead)  
+**Status:** Decided  
+**Affected Issue:** #83 (persistent k3d deployment lane)
+
+**What:** 
+After two reviewer rejections of issue #83 (Brand, then Data), both authors are now locked from further revision cycles. The precise remaining bug is identified: custom tenant namespace `tenant-platform-dev` mutates to default `tenant-dev` during state reads. Assign narrow surgical fix to Copilot (Coding Agent) with locked acceptance criteria.
+
+**Root cause:** In `scripts/k3d/local-platform.mjs`, the `mergeStoredState()` → `normalizeState()` flow recalculates namespace from subdomain but never preserves explicitly-stored custom namespaces.
+
+**Why:**
+- Blockage pattern emerging: multiple author rejections lock both domain owners; team needs mechanism to prevent indefinite stalling
+- Copilot is good fit: bug is surgical, test-driven, isolated scope, and minimal context needed
+- Fresh perspective breaks rejection cycle while respecting reviewer lockout semantics
+- Unblocks critical gate: #83 state contract is prerequisite for #84, #85, #86 parallel tracks
+
+**Narrowest fix applied (Copilot's acceptance bar):**
+After `normalizeState(mergedState)` call in `mergeStoredState()`, preserve the stored namespace if it was explicitly set (stored with slug but no subdomain):
+```javascript
+// Preserve explicitly-stored namespace if no subdomain was stored
+// (means namespace was set manually, not derived from subdomain)
+if (storedState.tenant?.namespace && !storedState.tenant?.subdomain) {
+  normalizedState.tenant.namespace = storedState.tenant.namespace
+  normalizedState.tenant.resources.namespace = storedState.tenant.namespace
+}
+```
+
+**Acceptance criteria for Copilot's revision:**
+1. Test "keeps stored tenant identifiers while still inheriting new defaults" passes
+2. All other k3d tests remain green  
+3. No new warnings or mutations in state persistence
+4. Decision rationale documented in PR description
+
+**Long-term pattern captured:** When reviewer lockout blocks revision and domain owners are unavailable, evaluate if Copilot meets "Good fit" criteria. If YES, assign with narrow acceptance. If NO (architecture-heavy, ambiguous, security-critical), escalate to Lead.
+
+**Status:** Awaiting Copilot assignment and revision.
+

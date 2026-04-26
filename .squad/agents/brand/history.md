@@ -263,3 +263,4 @@ See **Recent Skills Documented** above for detailed patterns. Key themes:
 - Local dev override isolation (KEYCLOAK_JWKS_URL pod vs host scoping)
 - Post-merge recovery procedures for documentation/decision commits
 
+
