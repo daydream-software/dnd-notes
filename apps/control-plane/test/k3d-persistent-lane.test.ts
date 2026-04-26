@@ -1,6 +1,6 @@
 import assert from 'node:assert'
 import { spawnSync } from 'node:child_process'
-import { readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -503,13 +503,21 @@ describe('k3d status --json schema', () => {
   })
 
   it('reports the effective cluster name when K3D_CLUSTER_NAME env override is set', () => {
-    const repoRoot = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+    const repoRootResult = spawnSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
       cwd: fileURLToPath(new URL('.', import.meta.url)),
-    }).stdout.trim()
-    
+    })
+    assert.strictEqual(
+      repoRootResult.status,
+      0,
+      repoRootResult.error?.message ?? repoRootResult.stderr,
+    )
+    const repoRoot = repoRootResult.stdout.trim()
+    assert.ok(repoRoot, 'git rev-parse --show-toplevel returned an empty repo root')
+
     const stateDir = join(repoRoot, '.k3d-state')
     const stateFile = join(stateDir, 'state.json')
+    const stateDirExisted = existsSync(stateDir)
 
     // Back up the real state file if it exists
     let backupContent: string | null = null
@@ -564,6 +572,13 @@ describe('k3d status --json schema', () => {
           rmSync(stateFile, { force: true })
         } catch {
           // Ignore cleanup errors
+        }
+        if (!stateDirExisted) {
+          try {
+            rmSync(stateDir, { recursive: true, force: true })
+          } catch {
+            // Ignore cleanup errors
+          }
         }
       }
     }
