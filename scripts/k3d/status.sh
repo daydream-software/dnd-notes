@@ -39,6 +39,10 @@ require_tool() {
   fi
 }
 
+has_tool() {
+  command -v "$1" >/dev/null 2>&1
+}
+
 cluster_exists() {
   local name="$1"
   k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${name}" >/dev/null
@@ -139,9 +143,17 @@ for arg in "$@"; do
   esac
 done
 
-for tool in k3d kubectl node; do
-  require_tool "$tool"
-done
+require_tool node
+k3d_available=false
+kubectl_available=false
+
+if has_tool k3d; then
+  k3d_available=true
+fi
+
+if has_tool kubectl; then
+  kubectl_available=true
+fi
 
 # ---------------------------------------------------------------------------
 # Determine target cluster name
@@ -190,7 +202,7 @@ fi
 # Query live cluster
 # ---------------------------------------------------------------------------
 cluster_running=false
-if cluster_exists "${CLUSTER_NAME}"; then
+if [[ "${k3d_available}" == "true" ]] && cluster_exists "${CLUSTER_NAME}"; then
   cluster_running=true
 fi
 
@@ -202,15 +214,24 @@ tenant_url_reachable=false
 tenant_url_probe_skipped=false
 
 if [[ "${cluster_running}" == "true" ]]; then
-  kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null 2>&1 || true
+  if [[ "${kubectl_available}" == "true" ]]; then
+    kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null 2>&1 || true
 
-  control_plane_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" dnd-notes-control-plane)"
-  keycloak_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-keycloak)"
-  postgres_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-postgres)"
+    control_plane_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" dnd-notes-control-plane)"
+    keycloak_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-keycloak)"
+    postgres_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-postgres)"
 
-  # Use the stored namespace verbatim — never re-derive it from the subdomain.
-  if [[ -n "${state_tenantNamespace}" ]]; then
-    tenant_ready="$(deployment_ready_count "${state_tenantNamespace}" dnd-notes)"
+    # Use the stored namespace verbatim — never re-derive it from the subdomain.
+    if [[ -n "${state_tenantNamespace}" ]]; then
+      tenant_ready="$(deployment_ready_count "${state_tenantNamespace}" dnd-notes)"
+    fi
+  else
+    control_plane_ready="skipped (kubectl unavailable)"
+    keycloak_ready="skipped (kubectl unavailable)"
+    postgres_ready="skipped (kubectl unavailable)"
+    if [[ -n "${state_tenantNamespace}" ]]; then
+      tenant_ready="skipped (kubectl unavailable)"
+    fi
   fi
 
   probe_tenant_url "${state_tenantOrigin}"
@@ -276,6 +297,8 @@ else
   echo
   if [[ "${cluster_running}" == "true" ]]; then
     echo "Cluster:        k3d-${CLUSTER_NAME} (running)"
+  elif [[ "${k3d_available}" != "true" ]]; then
+    echo "Cluster:        k3d-${CLUSTER_NAME} (unknown — k3d unavailable)"
   else
     echo "Cluster:        k3d-${CLUSTER_NAME} (NOT running)"
   fi
