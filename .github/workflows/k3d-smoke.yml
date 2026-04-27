@@ -58,6 +58,7 @@ jobs:
       K3D_VERSION: v5.8.3
       K3D_K3S_IMAGE: rancher/k3s:v1.35.3-k3s1
       KUBECTL_VERSION: v1.35.4
+      TENANT_READY_TIMEOUT_MS: '480000'
 
     steps:
       - name: Checkout code
@@ -95,6 +96,13 @@ jobs:
           k3d version
           echo "k3s image: ${K3D_K3S_IMAGE}"
 
+      - name: Reclaim Docker disk headroom
+        run: |
+          docker system df || true
+          docker image prune -af || true
+          docker builder prune -af || true
+          docker system df || true
+
       - name: Install dependencies
         run: npm ci
 
@@ -106,8 +114,10 @@ jobs:
         run: |
           mkdir -p reports/k3d-smoke
 
+          df -h > reports/k3d-smoke/disk-usage.txt || true
           docker ps -a > reports/k3d-smoke/docker-ps.txt || true
           docker images > reports/k3d-smoke/docker-images.txt || true
+          docker system df > reports/k3d-smoke/docker-system-df.txt || true
           k3d cluster list > reports/k3d-smoke/k3d-cluster-list.txt || true
           kubectl config get-contexts > reports/k3d-smoke/kube-contexts.txt || true
           kubectl get nodes -o wide > reports/k3d-smoke/nodes.txt || true

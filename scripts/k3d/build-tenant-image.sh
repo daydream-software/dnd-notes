@@ -75,6 +75,17 @@ run_image_import() {
   return "${status}"
 }
 
+cleanup_ci_host_images() {
+  if [[ "${CI:-}" != "true" ]]; then
+    return 0
+  fi
+
+  echo "CI=true; pruning host-side Docker images after k3d import to keep runner disk headroom..."
+  docker image rm "${IMAGE_REF}" >/dev/null 2>&1 || true
+  docker image prune -af >/dev/null 2>&1 || true
+  docker builder prune -af >/dev/null 2>&1 || true
+}
+
 if ! run_image_import "${IMAGE_IMPORT_MODE}"; then
   if [[ "${IMAGE_IMPORT_FALLBACK_MODE}" == "${IMAGE_IMPORT_MODE}" ]]; then
     echo "Image import failed with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured." >&2
@@ -84,5 +95,7 @@ if ! run_image_import "${IMAGE_IMPORT_MODE}"; then
   echo "Image import with mode ${IMAGE_IMPORT_MODE} failed or timed out; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}." >&2
   run_image_import "${IMAGE_IMPORT_FALLBACK_MODE}"
 fi
+
+cleanup_ci_host_images
 
 echo "Tenant image ready in k3d: ${IMAGE_REF}"

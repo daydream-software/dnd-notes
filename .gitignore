@@ -18,6 +18,8 @@ reports/
 npm-debug.log*
 .k3d-smoke-work/
 .k3d-full-stack-smoke-work/
+.k3d-up-work/
+.k3d-state/
 
 # Local environment files
 .env
