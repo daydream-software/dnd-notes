@@ -58,6 +58,7 @@ jobs:
       K3D_VERSION: v5.8.3
       K3D_K3S_IMAGE: rancher/k3s:v1.35.3-k3s1
       KUBECTL_VERSION: v1.35.4
+      TENANT_READY_TIMEOUT_MS: '480000'
 
     steps:
       - name: Checkout code
