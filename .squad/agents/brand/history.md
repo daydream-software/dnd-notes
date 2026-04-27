@@ -297,3 +297,11 @@ See **Recent Skills Documented** above for detailed patterns. Key themes:
 ## PR #120 Final Approval (2026-04-26T22:06:15Z)
 
 📌 Team update: PR #120 revision 3 approved by Chunk. Initial false-green regression proof gap resolved by Mikey. Lockout correctly applied after rejection on first author (new bug discovered). Handoff sequence: Brand → Data → Mikey → Chunk completed. All blockers closed. Issue #83 unblocked.
+
+## PR #120 CI Failure & Recovery (2026-04-26T22:36:26Z)
+
+📌 Team update (2026-04-26T22:36:26Z): PR #120 CI failure diagnosed. Root cause: `status.sh` hard-required `k3d`/`kubectl` on runners without these tools. Implemented graceful degradation: return valid JSON with `status:unknown` instead of errors when tools unavailable. Narrow fix scope targets status probes only. Commit: 1a57607. GitHub checks restarted. — Brand, Mikey (triage)
+
+## PR #120 Final Resolution (2026-04-27T00:01:25Z)
+
+📌 Team update (2026-04-27T00:01:25Z): PR #120 final fixes completed. Commit 86fc630 resolved three remaining blockers: image import under `--no-rebuild`, `.k3d-state` owner-only permissions, regression test `K3D_STATE_FILE` isolation. Chunk approved. No hidden regressions. Ready for merge. — Brand, Chunk
