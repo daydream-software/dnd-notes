@@ -298,6 +298,8 @@ Code consolidation for all 6 items is complete and functional. Test infrastructu
 
 📌 **Team update (2026-04-26T22:06:15Z):** PR #120 revision 3 approved after Mikey's false-green regression proof fix. Test now validates real `.k3d-state/state.json` path. All prior fixes (corrupt state recovery) remain valid. No new regressions. Ready for merge. Lockout-compliant handoff complete: Brand → Data → Mikey → Chunk. — Chunk
 
+📌 **Team update (2026-04-27T00:01:25Z):** PR #120 final approval: Brand pushed 86fc630 fixing image import `--no-rebuild` gate, `.k3d-state` permissions, and regression test isolation via `K3D_STATE_FILE`. All three blockers confirmed resolved. No regressions detected. Smoke failure (e5d146f, separate fix) no longer rejection basis. Review round closed. — Chunk
+
 
 
 

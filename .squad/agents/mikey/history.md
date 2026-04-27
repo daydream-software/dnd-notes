@@ -281,3 +281,7 @@ Decision document: `.squad/decisions/inbox/mikey-epic-82-kickoff.md`
 
 📌 Team update: PR #120 (k3d orchestration with regression proof) approved by Chunk after Mikey's revision 3 (false-green regression test fix). All blockers closed. Handoff sequence: Brand → Data → Mikey → Chunk completed successfully. Ready for merge. Issue #83 unblocked.
 
+## PR #120 CI Failure & Recovery (2026-04-26T22:36:26Z)
+
+📌 Team update (2026-04-26T22:36:26Z): PR #120 review triage completed. No new formal rejections or lockout triggers. Five open bot threads identified as stale: three outdated, two already fixed. Cleared for merge pending CI completion. — Mikey
+
