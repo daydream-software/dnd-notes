@@ -63,35 +63,23 @@ reset_state() {
 # Read the state file into a set of variables. Returns non-zero if the file is
 # missing or unparseable; in that case all variables are set to empty strings.
 read_state() {
-  local state_json
-
   reset_state
 
   if [[ ! -f "${STATE_FILE}" ]]; then
     return 1
   fi
 
-  state_json="$(node -e '
-    const fs = require("node:fs")
-    try {
-      const raw = fs.readFileSync(process.argv[1], "utf8")
-      JSON.parse(raw)           // validate
-      process.stdout.write(raw)
-    } catch {
-      process.exit(1)
-    }
-  ' "${STATE_FILE}" 2>/dev/null)" || return 1
-
-  # Parse individual fields using node so we avoid any in-shell JSON munging.
-  # tenantNamespace is read verbatim — never re-derived from tenantSubdomain.
-  state_clusterName="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.clusterName??"")'  "${state_json}")"
-  state_keycloakUrl="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.keycloakUrl??"")'  "${state_json}")"
-  state_keycloakRealm="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.keycloakRealm??"")' "${state_json}")"
-  state_tenantId="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantId??"")'       "${state_json}")"
-  state_tenantSubdomain="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantSubdomain??"")' "${state_json}")"
-  state_tenantNamespace="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantNamespace??"")' "${state_json}")"
-  state_tenantHostname="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantHostname??"")' "${state_json}")"
-  state_tenantOrigin="$(node -e 'const s=JSON.parse(process.argv[1]);process.stdout.write(s.tenantOrigin??"")'  "${state_json}")"
+  # Parse individual fields directly from STATE_FILE in node so raw JSON never
+  # passes through shell quoting. tenantNamespace is read verbatim — never
+  # re-derived from tenantSubdomain.
+  state_clusterName="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.clusterName??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  state_keycloakUrl="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.keycloakUrl??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  state_keycloakRealm="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.keycloakRealm??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  state_tenantId="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantId??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  state_tenantSubdomain="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantSubdomain??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  state_tenantNamespace="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantNamespace??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  state_tenantHostname="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantHostname??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  state_tenantOrigin="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantOrigin??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
   return 0
 }
 

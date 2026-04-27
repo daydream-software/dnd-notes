@@ -190,6 +190,51 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
     assert.strictEqual(fields[6], 'http://keycloak.example.com:8080', 'keycloakUrl')
     assert.strictEqual(fields[7], 'my-realm', 'keycloakRealm')
   })
+
+  it('reads fields even when tokenSnippets contains escaped quotes', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-status-token-snippets-test-${process.pid}`,
+    )
+    const stateFile = join(tmpDir, 'state.json')
+
+    mkdirSync(tmpDir, { recursive: true })
+
+    const state = {
+      clusterName: 'quoted-cluster',
+      tenantId: 'k3d-dev',
+      tenantSubdomain: 'dev',
+      tenantNamespace: 'tenant-platform-dev',
+      tenantHostname: 'dev.127.0.0.1.nip.io',
+      tenantOrigin: 'http://dev.127.0.0.1.nip.io:8080',
+      keycloakUrl: 'http://keycloak.example.com:8080',
+      keycloakRealm: 'quoted-realm',
+      tokenSnippets: {
+        controlPlane: 'curl -H "Authorization: Bearer abc\\\"def"',
+        tenant: 'curl -H "Authorization: Bearer xyz\\\"uvw"',
+      },
+    }
+    writeFileSync(stateFile, JSON.stringify(state, null, 2))
+
+    const result = runBash(
+      `${readStateSnippet}
+STATE_FILE="${stateFile}"
+read_state
+printf '%s|%s|%s' \
+  "$state_clusterName" \
+  "$state_tenantNamespace" \
+  "$state_keycloakRealm"`,
+    )
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(
+      result.stdout,
+      'quoted-cluster|tenant-platform-dev|quoted-realm',
+      'read_state should parse the state file directly instead of routing raw JSON through shell argv',
+    )
+  })
 })
 
 // ---------------------------------------------------------------------------
