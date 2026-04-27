@@ -189,3 +189,13 @@ rm -rf "${STATE_DIR}"
 
 **Next:** Confirm Brand's patch addresses all five + validate smoke re-runs green.
 
+
+### PR #120 Smoke Audit — failure category and gate (2026-04-27)
+
+**Verdict:** The current `smoke` failure on head `d3f6fd6` is most likely **transient CI/bootstrap noise**, not a code regression from the latest diff. The only head change was another tweak inside `apps/control-plane/test/k3d-persistent-lane.test.ts`, while the failing evidence comes from the live GitHub Actions k3d lane: diagnostics show `k3d-dnd-notes-agent-0` stuck `NotReady`, early flannel sandbox errors (`subnet.env` missing), and agent startup aborting with `failed to start networking ... unexpected EOF`. The control plane then times out waiting for the tenant workload because the cluster never reaches a healthy enough state to schedule it; the later Postgres `Connection terminated unexpectedly` is teardown fallout, not the initiating cause.
+
+**Resolution threshold:** Do not churn product code on this evidence alone. Minimum acceptable proof to call this resolved is one clean `smoke` rerun on the same implementation (or an equivalent no-behavior-change head) with diagnostics showing a healthy agent node and actual tenant resources appearing, or a narrowly scoped workflow/bootstrap hardening patch that directly addresses the agent/flannel instability and then turns the lane green. Until one of those happens, treat this as an infra-flake under observation rather than a merged runtime fix.
+
+**Key paths / artifacts:** `.github/workflows/k3d-smoke.yml`, `scripts/k3d/smoke.sh`, `apps/control-plane/test/k3d-persistent-lane.test.ts`, Actions run `25002615780` job `73216625906`, artifact `k3d-smoke-diagnostics` (`nodes.txt`, `events.txt`, `live-workdir/control-plane.log`, `k3d-dnd-notes-agent-0.log`).
+
+- **PR #120 Smoke & Review Gate Audit (2026-04-27T15:23:12Z):** Independently audited PR #120 smoke failure and verified review resolution. Classified smoke failure as transient CI/k3d bootstrap noise (agent NotReady, flannel sandbox failures, network startup EOF) rather than code regression; gate only on rerun or narrow hardening patch. Verified all five review comments resolved by Brand patch 6cd1545; all threads closed. Approved JSON-quote-escaping refactor gate (move snippet construction outside node -e, add shell-syntax regression test, ~27 lines). Five decisions merged to squad/decisions.md. Orchestration log: `.squad/orchestration-log/2026-04-27T15:23:12Z-mikey.md`. PR ready for merge pending CI smoke rerun. — Mikey (Agent)
