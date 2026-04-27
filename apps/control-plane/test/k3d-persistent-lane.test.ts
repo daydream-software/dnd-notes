@@ -295,6 +295,59 @@ fi`,
     assert.match(result.stdout, /correctly-failed/)
   })
 
+  it('clears all state variables when the parser emits only a partial payload', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-partial-state-payload-${process.pid}`,
+    )
+    const stateFile = join(tmpDir, 'state.json')
+    const fakeBinDir = join(tmpDir, 'bin')
+    const fakeNodePath = join(fakeBinDir, 'node')
+
+    mkdirSync(fakeBinDir, { recursive: true })
+    writeFileSync(stateFile, JSON.stringify({ clusterName: 'fresh-cluster' }))
+    writeFileSync(
+      fakeNodePath,
+      `#!/usr/bin/env bash
+printf 'fresh-cluster\\0'
+exit 1
+`,
+    )
+    chmodSync(fakeNodePath, 0o755)
+
+    const result = runBash(
+      `${readStateSnippet}
+state_clusterName="stale-cluster"
+state_keycloakUrl="http://stale.example.com"
+state_keycloakRealm="stale-realm"
+state_tenantId="stale-tenant"
+state_tenantSubdomain="stale-subdomain"
+state_tenantNamespace="stale-namespace"
+state_tenantHostname="stale-hostname"
+state_tenantOrigin="http://stale-origin"
+STATE_FILE="${stateFile}"
+PATH="${fakeBinDir}:$PATH"
+if read_state; then
+  echo "should-not-reach"
+  exit 1
+fi
+printf '%s|%s|%s|%s|%s|%s|%s|%s' \
+  "$state_clusterName" \
+  "$state_keycloakUrl" \
+  "$state_keycloakRealm" \
+  "$state_tenantId" \
+  "$state_tenantSubdomain" \
+  "$state_tenantNamespace" \
+  "$state_tenantHostname" \
+  "$state_tenantOrigin"`,
+    )
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, '|||||||')
+  })
+
   it('clears previously populated variables when a later read fails', () => {
     const missingStateFile = join(
       fileURLToPath(new URL('.', import.meta.url)),

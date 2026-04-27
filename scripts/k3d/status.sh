@@ -68,17 +68,50 @@ read_state() {
     return 1
   fi
 
-  # Parse individual fields directly from STATE_FILE in node so raw JSON never
-  # passes through shell quoting. tenantNamespace is read verbatim — never
-  # re-derived from tenantSubdomain.
-  state_clusterName="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.clusterName??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
-  state_keycloakUrl="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.keycloakUrl??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
-  state_keycloakRealm="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.keycloakRealm??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
-  state_tenantId="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantId??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
-  state_tenantSubdomain="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantSubdomain??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
-  state_tenantNamespace="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantNamespace??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
-  state_tenantHostname="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantHostname??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
-  state_tenantOrigin="$(node -e 'const fs=require("node:fs");const s=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));process.stdout.write(s.tenantOrigin??"")' "${STATE_FILE}" 2>/dev/null)" || return 1
+  # Parse STATE_FILE once and emit a NUL-delimited payload. Only populate the
+  # shell variables after the full payload arrives so partial parser failures
+  # cannot leave a half-populated state behind.
+  local fields=()
+  local field
+
+  while IFS= read -r -d '' field; do
+    fields+=("${field}")
+  done < <(
+    node -e '
+      const fs = require("node:fs")
+      const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+      const fields = [
+        state.clusterName ?? "",
+        state.keycloakUrl ?? "",
+        state.keycloakRealm ?? "",
+        state.tenantId ?? "",
+        state.tenantSubdomain ?? "",
+        state.tenantNamespace ?? "",
+        state.tenantHostname ?? "",
+        state.tenantOrigin ?? "",
+        "__K3D_STATE_PARSE_OK__",
+      ]
+
+      for (const value of fields) {
+        process.stdout.write(String(value))
+        process.stdout.write("\0")
+      }
+    ' "${STATE_FILE}" 2>/dev/null
+  )
+
+  if [[ "${#fields[@]}" -ne 9 || "${fields[8]}" != "__K3D_STATE_PARSE_OK__" ]]; then
+    reset_state
+    return 1
+  fi
+
+  state_clusterName="${fields[0]}"
+  state_keycloakUrl="${fields[1]}"
+  state_keycloakRealm="${fields[2]}"
+  state_tenantId="${fields[3]}"
+  state_tenantSubdomain="${fields[4]}"
+  state_tenantNamespace="${fields[5]}"
+  state_tenantHostname="${fields[6]}"
+  state_tenantOrigin="${fields[7]}"
   return 0
 }
 

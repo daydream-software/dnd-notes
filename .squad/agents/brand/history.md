@@ -38,6 +38,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Learnings
 
+- **PR #120 k3d Review Fixes (2026-04-27):** In `scripts/k3d/status.sh`, parse `.k3d-state/state.json` once in Node and emit a NUL-delimited payload plus a success sentinel before assigning any `state_*` shell vars; that keeps the documented “all empty on failure” contract true even when the parser dies mid-stream. In `scripts/k3d/down.sh`, namespace teardown for `--keep-cluster` should use `kubectl delete namespace ... --wait=false --timeout=30s` so stuck finalizers do not hang the helper forever. Regression anchor: `apps/control-plane/test/k3d-persistent-lane.test.ts`. User preference: do not use `claude-opus-4.7` without asking first.
+
 - **PR #120 Validate Triage:** When a PR shows multiple checks named `validate`, use the workflow name before assuming they cover the same gate. On PR #120, CI `validate` failed deterministically on `apps/control-plane/test/k3d-persistent-lane.test.ts` (`no-useless-escape` on the new `tokenSnippets` fixture) while Deployment Artifacts `validate` passed on the same SHA, so the fix was to remove the unnecessary JavaScript quote escapes rather than treating the red check as transient.
 
 - **Shell JSON State Readers:** For contributor-facing Bash helpers that already require Node, do not capture a whole JSON file into a shell variable and feed it back through `process.argv[1]`. Parse the file directly in Node for each requested field (or in one Node process) so embedded `\\\"` sequences like the `tokenSnippets` in `.k3d-state/state.json` survive unchanged; lock it with a focused shell-level regression in `apps/control-plane/test/k3d-persistent-lane.test.ts`.

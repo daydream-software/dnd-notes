@@ -132,13 +132,19 @@ if [[ "${KEEP_CLUSTER}" == "true" ]]; then
 
   if [[ -n "${tenant_namespace}" ]]; then
     log "Deleting tenant namespace '${tenant_namespace}'..."
-    kubectl --context "${target_kube_context}" delete namespace "${tenant_namespace}" --ignore-not-found=true
+    kubectl --context "${target_kube_context}" delete namespace "${tenant_namespace}" \
+      --ignore-not-found=true \
+      --wait=false \
+      --timeout=30s
   else
     log "No readable tenant namespace in state file; scanning for tenant-* namespaces..."
     while IFS= read -r ns; do
       if [[ "${ns}" == tenant-* ]]; then
         log "Deleting namespace '${ns}'..."
-        kubectl --context "${target_kube_context}" delete namespace "${ns}" --ignore-not-found=true
+        kubectl --context "${target_kube_context}" delete namespace "${ns}" \
+          --ignore-not-found=true \
+          --wait=false \
+          --timeout=30s
       fi
     done < <(kubectl --context "${target_kube_context}" get namespaces --no-headers -o custom-columns='NAME:.metadata.name' 2>/dev/null || true)
   fi

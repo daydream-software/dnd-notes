@@ -15,6 +15,7 @@ Use this when a contributor-facing shell helper reads a repo-managed JSON state 
 
 ## Patterns
 - Parse `STATE_FILE` directly in `node -e` calls, or fan out all needed fields from one Node process.
+- When a Bash helper needs several fields, have one Node invocation emit a NUL-delimited payload plus a success sentinel, then assign shell variables only after validating the full payload arrived.
 - Keep Bash responsible for control flow and Node responsible for JSON parsing.
 - Return empty strings for missing fields, but fail the helper for unreadable or invalid JSON when the state is required.
 - Add a regression with a real JSON fixture that includes `\\\"` sequences so shell quoting bugs cannot hide.
@@ -22,6 +23,7 @@ Use this when a contributor-facing shell helper reads a repo-managed JSON state 
 
 ## Examples
 - `scripts/k3d/status.sh` reads `clusterName`, `tenantNamespace`, and related fields by parsing `${STATE_FILE}` directly in Node instead of passing the entire JSON blob through shell quoting.
+- `scripts/k3d/status.sh` stages all exported `state_*` values behind a `__K3D_STATE_PARSE_OK__` sentinel so partial parser output cannot leak stale state into the shell.
 - `apps/control-plane/test/k3d-persistent-lane.test.ts` writes a state file whose `tokenSnippets` include escaped quotes and proves `read_state` still loads the targeted fields.
 
 ## Anti-Patterns
