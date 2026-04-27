@@ -210,8 +210,8 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
       keycloakUrl: 'http://keycloak.example.com:8080',
       keycloakRealm: 'quoted-realm',
       tokenSnippets: {
-        controlPlane: 'curl -H "Authorization: Bearer abc\\\"def"',
-        tenant: 'curl -H "Authorization: Bearer xyz\\\"uvw"',
+        controlPlane: 'curl -H "Authorization: Bearer abc\\"def"',
+        tenant: 'curl -H "Authorization: Bearer xyz\\"uvw"',
       },
     }
     writeFileSync(stateFile, JSON.stringify(state, null, 2))

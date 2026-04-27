@@ -36,6 +36,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 ## Learnings
 
+- **PR #120 Validate Triage:** When a PR shows multiple checks named `validate`, use the workflow name before assuming they cover the same gate. On PR #120, CI `validate` failed deterministically on `apps/control-plane/test/k3d-persistent-lane.test.ts` (`no-useless-escape` on the new `tokenSnippets` fixture) while Deployment Artifacts `validate` passed on the same SHA, so the fix was to remove the unnecessary JavaScript quote escapes rather than treating the red check as transient.
+
 - **Shell JSON State Readers:** For contributor-facing Bash helpers that already require Node, do not capture a whole JSON file into a shell variable and feed it back through `process.argv[1]`. Parse the file directly in Node for each requested field (or in one Node process) so embedded `\\\"` sequences like the `tokenSnippets` in `.k3d-state/state.json` survive unchanged; lock it with a focused shell-level regression in `apps/control-plane/test/k3d-persistent-lane.test.ts`.
 
 - **Backup Artifact Path Components:** When a filesystem-backed backup store derives directory/file names from tenant-controlled IDs, normalize with `NFKC` before sanitizing for readability, but hash the raw ID whenever normalization, sanitization, or case-folding changes the component. That keeps lowercase-safe IDs readable while preventing cross-tenant collisions on case-insensitive or Unicode-normalizing filesystems. Lock it with regressions for both unsafe-character collisions and case-only collisions in `apps/control-plane/test/tenant-backup-runner.test.ts`.
