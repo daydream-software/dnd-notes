@@ -16,7 +16,8 @@ usage() {
   cat <<'EOF'
 Tear down the local k3d platform.
 
-By default deletes the k3d cluster entirely and removes .k3d-state/.
+By default deletes the k3d cluster entirely, removes .k3d-state/state.json,
+and removes the default .k3d-state/ directory only when it is empty.
 
 Flags:
   --keep-cluster   Delete only the tenant namespace(s) and control-plane

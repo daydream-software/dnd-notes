@@ -8,7 +8,6 @@ fi
 ROOT="$(git rev-parse --show-toplevel)"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
-STATE_DIR="$(dirname "${STATE_FILE}")"
 
 JSON_OUTPUT=false
 

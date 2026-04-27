@@ -110,6 +110,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Optional Tool Guards for k3d Helpers:** In contributor-facing k3d scripts, treat tools used only for diagnostics or best-effort state parsing as optional guards instead of hard prerequisites. `scripts/k3d/status.sh` now skips the `/ready` curl probe when curl is absent, and `scripts/k3d/down.sh` keeps `--keep-cluster` safe by returning an empty state field when Node is missing or the state file is unreadable; lock both behaviors with focused shell-level regressions in `apps/control-plane/test/k3d-persistent-lane.test.ts`.
 
+- **PR #120 Final Review Fixes:** Keep review-follow-up edits on the persistent k3d helpers as thin as possible: remove truly unused shell state like `STATE_DIR` from `scripts/k3d/status.sh`, and make `scripts/k3d/down.sh --help` describe the real cleanup contract (`.k3d-state/state.json` deletion plus best-effort removal of the default `.k3d-state/` directory only when empty). Focused validation path: `bash -n scripts/k3d/status.sh scripts/k3d/down.sh`, `bash scripts/k3d/down.sh --help`, and `npm run test:control-plane -- --test-name-pattern 'k3d '`.
+
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
 Recovered orphaned local commit `bbbcba8` (docs: merge PR #77 JSON payload decisions and session logs) that existed locally but was not pushed before PR #77 merged. Used non-destructive cherry-pick to safely reapply to main without conflicts, then pushed to origin. Recovery complete: new commit on main is `e8b6b9b`, origin/main now in sync.
