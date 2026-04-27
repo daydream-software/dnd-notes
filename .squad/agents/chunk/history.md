@@ -282,3 +282,11 @@ Code consolidation for all 6 items is complete and functional. Test infrastructu
 - `scripts/k3d/status.sh` now needs an explicit `reset_state()` before each `read_state()` attempt so stale `state_*` values cannot leak forward after missing/corrupt `.k3d-state/state.json`.
 - `scripts/k3d/down.sh` should keep `read_state_field()` best-effort for `--keep-cluster`: when `node` is missing or the state file is unreadable, return empty output and fall back to scanning `tenant-*` namespaces instead of aborting under `set -Eeuo pipefail`.
 - High-signal reviewer proof for this lane is `npm run lint --workspace apps/control-plane && npm run test --workspace apps/control-plane && npm run build --workspace apps/control-plane`, because `apps/control-plane/test/k3d-persistent-lane.test.ts` now locks the curl-missing, stale-state, and node-missing regressions directly against the shipped shell functions.
+
+### PR #120 follow-up blocker QA bar (2026-04-26)
+- Smoke CI is already green again on `e5d146f`; the remaining review scope is surgical: `scripts/k3d/up.sh` must still import both tenant and control-plane images into the target cluster on `--no-rebuild`, not just skip the Docker builds when host tags exist.
+- Because `write_state()` persists plaintext creds + token snippets, approval now requires filesystem-hardening proof too: `.k3d-state/` should end up owner-only (700-ish) and `state.json` owner-readable/writable only (600-ish), with a regression that inspects actual modes after the real write path.
+- The current env-override status test still mutates the repo-root `.k3d-state/state.json`; the fix is only safe when tests stop touching that live path while exercising the same contract (for example via a script-supported state-path override or isolated repo fixture). Reviewer proof should include an interrupted-run thought experiment: no developer state corruption, no race with someone running `npm run k3d:status`, same shell entrypoint contract preserved.
+
+---
+

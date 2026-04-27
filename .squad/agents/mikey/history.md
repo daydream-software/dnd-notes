@@ -133,3 +133,13 @@ Feature implementation is **complete**. CI wiring gap is **infrastructure config
 
 **Key files:** `apps/control-plane/test/k3d-persistent-lane.test.ts`, `scripts/k3d/status.sh`, `.squad/skills/env-override-contract-testing/SKILL.md`.
 
+### PR #120 Review Gate Verdict (2026-04-27)
+
+**Review threads:** The four still-open GitHub review threads do not appear to need fresh implementation on current head. `scripts/k3d/up.sh` already re-imports cached images during `--no-rebuild`, locks `.k3d-state` to `0700/0600`, and `apps/control-plane/test/k3d-persistent-lane.test.ts` now asserts those permissions while using temp fixtures via `K3D_STATE_FILE` instead of the repo-default state path.
+
+**Smoke verdict:** The failing `smoke` check looks like cluster/bootstrap fragility in CI, not a clear regression from the persistent-lane PR. The uploaded diagnostics show the agent node stuck `NotReady`, `CIDRAssignmentFailed`, repeated flannel `subnet.env` sandbox failures, no captured tenant resources, and the control plane timing out waiting for tenant readiness after the cluster was already unhealthy.
+
+**Key files:** `scripts/k3d/up.sh`, `apps/control-plane/test/k3d-persistent-lane.test.ts`, `.github/workflows/k3d-smoke.yml`, and the `k3d-smoke-diagnostics` artifact files `events.txt`, `nodes.txt`, `live-workdir/control-plane.log`.
+
+---
+

@@ -5854,3 +5854,135 @@ All passing items run in CI via `.github/workflows/ci.yml` → `scripts/run-ci-t
 - Pattern: Separate "feature complete" from "quality tooling wired" to avoid blocking epic on infrastructure churn
 
 ---
+
+---
+
+## 2026-04-27: Mikey — PR #120 review gate
+
+**Decided by:** Mikey (Lead)  
+**Context:** PR #120 (k3d persistent lane follow-up) unresolved review threads + failing smoke check
+
+### Decision
+
+Treat the four remaining review threads as **reply-and-resolve items**, not new implementation scope, unless GitHub is missing commits from current head.
+
+### Why
+
+1. `scripts/k3d/up.sh` already imports cached local images into k3d when `--no-rebuild` skips Docker builds, covering both tenant and control-plane images through `ensure_image_ready()`.
+2. `write_state()` now creates the state directory with `0700`, writes the file with `0600`, and the regression test asserts both permissions.
+3. The test thread about touching the repo-default `.k3d-state/state.json` is stale against current head: the current tests use temp fixtures plus `K3D_STATE_FILE`, not the hardcoded repo path.
+4. The failing smoke job does not show an image-import regression or tenant-app rollout failure first; it shows k3s/flannel bootstrap instability (`CIDRAssignmentFailed`, agent node `NotReady`, missing `/run/flannel/subnet.env`) before tenant rollout can succeed.
+
+### Coordinator Note
+
+When replying on GitHub, frame the fixes as:
+- stale threads now satisfied on head, with file/line citations
+- smoke failure likely environmental CI fragility unless a rerun reproduces with tenant resources actually created
+
+---
+
+## 2026-04-26: Brand — Optional tool guards in contributor-facing k3d scripts
+
+**Decided by:** Brand (Platform Dev)  
+**Context:** PR #120 review follow-up for the persistent k3d lane.
+
+### Decision
+
+When a local k3d helper script uses an external tool only for advisory behavior (for example, a status probe or best-effort state parsing), prefer graceful degradation over making that tool a hard prerequisite.
+
+### Why
+
+- `k3d:status` should still report cluster/deployment health on machines that do not have `curl`, instead of aborting before printing anything useful.
+- `k3d:down --keep-cluster` should still fall back to namespace scanning when `node` is unavailable or `.k3d-state/state.json` is unreadable.
+- Hard requirements should stay reserved for the tools the lane truly cannot run without.
+
+### Impact
+
+- Optional checks must be guarded explicitly in shell scripts that run under `set -Eeuo pipefail`.
+- Regression coverage should exercise the "tool missing" path whenever that guard affects teardown/status behavior.
+
+---
+
+## 2026-04-26: Chunk — PR #120 acceptance bar
+
+**Decided by:** Chunk (QA)  
+**Context:** Acceptance bar for the current unresolved review round on PR #120
+
+### Decision
+
+Chunk's acceptance bar for the current unresolved review round is:
+
+1. **Persisted cluster fallback:** with no `K3D_CLUSTER_NAME` in the environment, both `scripts/k3d/down.sh` and `scripts/k3d/status.sh` must resolve the target cluster from `.k3d-state/state.json` `clusterName` before falling back to `dnd-notes`.
+2. **Explicit override wins everywhere:** when `K3D_CLUSTER_NAME` is set, both scripts must target that override even if state says otherwise, and `k3d:status --json`/text output must report the override cluster rather than the persisted one.
+3. **`kubectl` gating is branch-specific:** `scripts/k3d/down.sh` must not require `kubectl` for full cluster delete, but must still fail clearly on `--keep-cluster` when `kubectl` is absent.
+4. **Unused helper removal stays behavior-preserving:** removing `json_get()` from `scripts/k3d/down.sh` is acceptable only if `read_state_field()` still covers every state-file read path needed by teardown and there are no leftover references/docs assuming the helper exists.
+5. **Test harness stays non-login:** `apps/control-plane/test/k3d-persistent-lane.test.ts` must use non-login shell execution (`bash -c`) and add/retain focused regressions for cluster-name precedence and conditional `kubectl` requirements.
+
+### Evidence Gathered
+
+- Local worktree already shows the intended direction in `scripts/k3d/down.sh`, `scripts/k3d/status.sh`, and `apps/control-plane/test/k3d-persistent-lane.test.ts`.
+- Focused validation passed in the worktree: `npm run test --workspace apps/control-plane -- --test-name-pattern='k3d'`, `npm run lint --workspace apps/control-plane`, `npm run build --workspace apps/control-plane`.
+- Stubbed script probes confirmed:
+  - `down.sh` full teardown now uses persisted `clusterName` when env is absent.
+  - `down.sh` explicit env override wins and full teardown does not touch `kubectl`.
+  - `status.sh` targets the override cluster for `kubectl config use-context`, **but its current `--json` output still reports the persisted `clusterName` instead of the override**. Treat that as the likely last reviewer trap.
+
+### Reviewer Note
+
+When Brand says "fixed," re-check both the command target **and** the reported status payload. This slice is the kind that looks green if you only watch the happy-path shell calls.
+
+---
+
+## 2026-04-26: Chunk — PR #120 final reviewer verdict (rejection context)
+
+**Decided by:** Chunk (QA)  
+**Context:** Earlier review decision on PR #120 (now resolved)
+
+### Decision (Earlier)
+
+Reject the PR revision due to regression test false-green condition.
+
+### Why (Earlier)
+
+The runtime blocker in `scripts/k3d/status.sh` is fixed: direct smoke simulation shows persisted `clusterName` still drives the default path, `K3D_CLUSTER_NAME` overrides both the `kubectl` target and emitted JSON, and the earlier `down.sh` full-teardown behavior still looks intact.
+
+However, the new regression in `apps/control-plane/test/k3d-persistent-lane.test.ts` does **not** prove the contract it claims to cover. The test writes a temporary `state.json` and passes `STATE_FILE` in the environment, but `scripts/k3d/status.sh` hardcodes `STATE_FILE="${ROOT}/.k3d-state/state.json"` and never reads that env var. In a clean repo (no real `.k3d-state/state.json`), the old broken implementation would also pass, so the review bar for durable regression coverage is not met yet.
+
+### Required Follow-Up (Earlier)
+
+1. Rewrite the regression to exercise the actual consumed state path, or extract cluster-name resolution into a sourceable helper and test that helper directly.
+2. Lock both precedence branches:
+   - no override => persisted `clusterName` reported and used
+   - `K3D_CLUSTER_NAME` override => override reported and used
+3. Keep earlier comment fixes intact, especially the `down.sh` kubectl gating and persisted-namespace behavior.
+
+### Update
+
+Brand's revision fixed the regression test flaw by populating the REAL state path with backup/restore safety. Now the test genuinely proves the contract.
+
+---
+
+## 2026-04-26: Chunk — PR #120 final QA verdict (approval)
+
+**Decided by:** Chunk (QA)  
+**Context:** Final reviewer pass after Brand's review-fix commit `18101a1` on PR #120.
+
+### Decision
+
+Approve PR #120 on the current head.
+
+### Why
+
+- The four unresolved review concerns are now genuinely addressed in code and docs:
+  1. `scripts/k3d/status.sh` treats `curl` as optional and reports skipped probing instead of aborting.
+  2. `read_state()` clears exported `state_*` variables before each read attempt.
+  3. `scripts/k3d/down.sh` keeps `read_state_field()` non-blocking when `node` is unavailable or state parsing fails.
+  4. The PR description now matches the implemented contract for corrupt/missing state handling.
+- Regression coverage in `apps/control-plane/test/k3d-persistent-lane.test.ts` now exercises the three shell-edge cases directly.
+- Focused validation passed in the review worktree: `npm run lint --workspace apps/control-plane && npm run test --workspace apps/control-plane && npm run build --workspace apps/control-plane`.
+
+### Impact
+
+- No further revision pass is needed for the four review comments.
+- Remaining risk is the usual lane-wide smoke depth, not the addressed review feedback.
+
