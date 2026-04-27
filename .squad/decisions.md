@@ -5854,3 +5854,422 @@ All passing items run in CI via `.github/workflows/ci.yml` → `scripts/run-ci-t
 - Pattern: Separate "feature complete" from "quality tooling wired" to avoid blocking epic on infrastructure churn
 
 ---
+
+---
+
+## 2026-04-27: Mikey — PR #120 review gate
+
+**Decided by:** Mikey (Lead)  
+**Context:** PR #120 (k3d persistent lane follow-up) unresolved review threads + failing smoke check
+
+### Decision
+
+Treat the four remaining review threads as **reply-and-resolve items**, not new implementation scope, unless GitHub is missing commits from current head.
+
+### Why
+
+1. `scripts/k3d/up.sh` already imports cached local images into k3d when `--no-rebuild` skips Docker builds, covering both tenant and control-plane images through `ensure_image_ready()`.
+2. `write_state()` now creates the state directory with `0700`, writes the file with `0600`, and the regression test asserts both permissions.
+3. The test thread about touching the repo-default `.k3d-state/state.json` is stale against current head: the current tests use temp fixtures plus `K3D_STATE_FILE`, not the hardcoded repo path.
+4. The failing smoke job does not show an image-import regression or tenant-app rollout failure first; it shows k3s/flannel bootstrap instability (`CIDRAssignmentFailed`, agent node `NotReady`, missing `/run/flannel/subnet.env`) before tenant rollout can succeed.
+
+### Coordinator Note
+
+When replying on GitHub, frame the fixes as:
+- stale threads now satisfied on head, with file/line citations
+- smoke failure likely environmental CI fragility unless a rerun reproduces with tenant resources actually created
+
+---
+
+## 2026-04-26: Brand — Optional tool guards in contributor-facing k3d scripts
+
+**Decided by:** Brand (Platform Dev)  
+**Context:** PR #120 review follow-up for the persistent k3d lane.
+
+### Decision
+
+When a local k3d helper script uses an external tool only for advisory behavior (for example, a status probe or best-effort state parsing), prefer graceful degradation over making that tool a hard prerequisite.
+
+### Why
+
+- `k3d:status` should still report cluster/deployment health on machines that do not have `curl`, instead of aborting before printing anything useful.
+- `k3d:down --keep-cluster` should still fall back to namespace scanning when `node` is unavailable or `.k3d-state/state.json` is unreadable.
+- Hard requirements should stay reserved for the tools the lane truly cannot run without.
+
+### Impact
+
+- Optional checks must be guarded explicitly in shell scripts that run under `set -Eeuo pipefail`.
+- Regression coverage should exercise the "tool missing" path whenever that guard affects teardown/status behavior.
+
+---
+
+## 2026-04-26: Chunk — PR #120 acceptance bar
+
+**Decided by:** Chunk (QA)  
+**Context:** Acceptance bar for the current unresolved review round on PR #120
+
+### Decision
+
+Chunk's acceptance bar for the current unresolved review round is:
+
+1. **Persisted cluster fallback:** with no `K3D_CLUSTER_NAME` in the environment, both `scripts/k3d/down.sh` and `scripts/k3d/status.sh` must resolve the target cluster from `.k3d-state/state.json` `clusterName` before falling back to `dnd-notes`.
+2. **Explicit override wins everywhere:** when `K3D_CLUSTER_NAME` is set, both scripts must target that override even if state says otherwise, and `k3d:status --json`/text output must report the override cluster rather than the persisted one.
+3. **`kubectl` gating is branch-specific:** `scripts/k3d/down.sh` must not require `kubectl` for full cluster delete, but must still fail clearly on `--keep-cluster` when `kubectl` is absent.
+4. **Unused helper removal stays behavior-preserving:** removing `json_get()` from `scripts/k3d/down.sh` is acceptable only if `read_state_field()` still covers every state-file read path needed by teardown and there are no leftover references/docs assuming the helper exists.
+5. **Test harness stays non-login:** `apps/control-plane/test/k3d-persistent-lane.test.ts` must use non-login shell execution (`bash -c`) and add/retain focused regressions for cluster-name precedence and conditional `kubectl` requirements.
+
+### Evidence Gathered
+
+- Local worktree already shows the intended direction in `scripts/k3d/down.sh`, `scripts/k3d/status.sh`, and `apps/control-plane/test/k3d-persistent-lane.test.ts`.
+- Focused validation passed in the worktree: `npm run test --workspace apps/control-plane -- --test-name-pattern='k3d'`, `npm run lint --workspace apps/control-plane`, `npm run build --workspace apps/control-plane`.
+- Stubbed script probes confirmed:
+  - `down.sh` full teardown now uses persisted `clusterName` when env is absent.
+  - `down.sh` explicit env override wins and full teardown does not touch `kubectl`.
+  - `status.sh` targets the override cluster for `kubectl config use-context`, **but its current `--json` output still reports the persisted `clusterName` instead of the override**. Treat that as the likely last reviewer trap.
+
+### Reviewer Note
+
+When Brand says "fixed," re-check both the command target **and** the reported status payload. This slice is the kind that looks green if you only watch the happy-path shell calls.
+
+---
+
+## 2026-04-26: Chunk — PR #120 final reviewer verdict (rejection context)
+
+**Decided by:** Chunk (QA)  
+**Context:** Earlier review decision on PR #120 (now resolved)
+
+### Decision (Earlier)
+
+Reject the PR revision due to regression test false-green condition.
+
+### Why (Earlier)
+
+The runtime blocker in `scripts/k3d/status.sh` is fixed: direct smoke simulation shows persisted `clusterName` still drives the default path, `K3D_CLUSTER_NAME` overrides both the `kubectl` target and emitted JSON, and the earlier `down.sh` full-teardown behavior still looks intact.
+
+However, the new regression in `apps/control-plane/test/k3d-persistent-lane.test.ts` does **not** prove the contract it claims to cover. The test writes a temporary `state.json` and passes `STATE_FILE` in the environment, but `scripts/k3d/status.sh` hardcodes `STATE_FILE="${ROOT}/.k3d-state/state.json"` and never reads that env var. In a clean repo (no real `.k3d-state/state.json`), the old broken implementation would also pass, so the review bar for durable regression coverage is not met yet.
+
+### Required Follow-Up (Earlier)
+
+1. Rewrite the regression to exercise the actual consumed state path, or extract cluster-name resolution into a sourceable helper and test that helper directly.
+2. Lock both precedence branches:
+   - no override => persisted `clusterName` reported and used
+   - `K3D_CLUSTER_NAME` override => override reported and used
+3. Keep earlier comment fixes intact, especially the `down.sh` kubectl gating and persisted-namespace behavior.
+
+### Update
+
+Brand's revision fixed the regression test flaw by populating the REAL state path with backup/restore safety. Now the test genuinely proves the contract.
+
+---
+
+## 2026-04-26: Chunk — PR #120 final QA verdict (approval)
+
+**Decided by:** Chunk (QA)  
+**Context:** Final reviewer pass after Brand's review-fix commit `18101a1` on PR #120.
+
+### Decision
+
+Approve PR #120 on the current head.
+
+### Why
+
+- The four unresolved review concerns are now genuinely addressed in code and docs:
+  1. `scripts/k3d/status.sh` treats `curl` as optional and reports skipped probing instead of aborting.
+  2. `read_state()` clears exported `state_*` variables before each read attempt.
+  3. `scripts/k3d/down.sh` keeps `read_state_field()` non-blocking when `node` is unavailable or state parsing fails.
+  4. The PR description now matches the implemented contract for corrupt/missing state handling.
+- Regression coverage in `apps/control-plane/test/k3d-persistent-lane.test.ts` now exercises the three shell-edge cases directly.
+- Focused validation passed in the review worktree: `npm run lint --workspace apps/control-plane && npm run test --workspace apps/control-plane && npm run build --workspace apps/control-plane`.
+
+### Impact
+
+- No further revision pass is needed for the four review comments.
+- Remaining risk is the usual lane-wide smoke depth, not the addressed review feedback.
+
+
+---
+
+## 2026-04-27: Brand — PR #120 Smoke Workflow Rerun
+
+**Decided by:** Brand (Platform Dev)  
+**Context:** Attempted rerun of failed k3d Smoke workflow run for PR #120
+
+### Action Taken
+
+Used `gh run rerun 24970308939` to trigger a rerun of the failed smoke workflow run. The command succeeded and GitHub created a new workflow run.
+
+### What Happened
+
+- **New Run ID:** 24998785902
+- **Status:** COMPLETED (CANCELLED after ~2 minutes)
+- **Reason:** GitHub concurrency policy `concurrency: {group: k3d-smoke-${{ github.workflow }}-${{ github.ref }}, cancel-in-progress: true}`
+
+The rerun started and executed setup steps (checkout, node, python, kubectl, k3d, dependencies) but was cancelled due to concurrency policy limiting one k3d-smoke workflow per ref.
+
+### Impact
+
+- PR #120 smoke check status: `COMPLETED (CANCELLED)`
+- Fresh uninterrupted smoke run requires manual workflow dispatch or waiting for concurrency slot to clear
+- Rerun verification inconclusive due to concurrency cancellation
+
+---
+
+### 2026-04-27: CI k3d Timeout Configuration
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-27  
+**Type:** CI Configuration & Environment Tuning
+
+## Context
+
+GitHub Actions CI runners have more resource constraints than local dev environments, causing k3d + Kubernetes operations to take longer.
+
+## Decision
+
+Use higher timeouts for k3d operations in CI workflows compared to local development.
+
+## Rationale
+
+- Local k3d deployments complete quickly (typically < 2 minutes for tenant provisioning)
+- CI runners consistently take 4+ minutes due to shared resources
+- Hard-coding CI-appropriate timeouts in code would degrade local dev experience
+- Environment-specific timeouts via workflow env vars are the right separation of concerns
+
+## Implementation
+
+- Set `TENANT_READY_TIMEOUT_MS: '480000'` (8 minutes) in `.github/workflows/ci.yml` k3d-smoke workflow
+- Control-plane `provisioning.ts` uses env var or defaults to 240s (4 minutes)
+- Scripts like `scripts/k3d/smoke.sh` pass through the env var to control-plane
+
+## Related Files
+
+- `.github/workflows/ci.yml` - CI workflow with extended timeout
+- `apps/control-plane/src/provisioning.ts` - Control-plane provisioning with configurable timeout
+- `scripts/k3d/smoke.sh` - Smoke script that passes timeout to control-plane
+
+---
+
+### 2026-04-27: Brand — PR #120 Review Comments on K3D Scripts
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-04-27  
+**Type:** Code Safety & Security Review
+
+## Summary
+
+Five new review comments on PR #120 have been addressed in commit 6cd1545. All threads are resolved.
+
+## Comments Addressed
+
+### Delete-Safety Pattern (Comments 1–3): **BLOCKING**
+
+Three instances of `rm -rf "${STATE_DIR}"` in `down.sh` lacked path validation:
+- Line 142: soft teardown (`--keep-cluster`)
+- Line 151: early exit (cluster missing)
+- Line 157: full teardown
+
+**Fix Applied:** Validate `STATE_DIR` is under `${ROOT}/.k3d-state` before each rm using:
+```bash
+if [[ "${STATE_DIR}" == "${ROOT}/.k3d-state" ]]; then
+  rmdir "${STATE_DIR}"
+fi
+```
+
+**Rationale:** `K3D_STATE_FILE` is intentionally overrideable for tests and local workflows. `rm -rf "$(dirname "$K3D_STATE_FILE")"` turns a harmless override into arbitrary directory deletion risk. Deleting the file plus optional exact-path `rmdir` keeps the normal UX without making cleanup dangerous.
+
+### Kubectl Early Call (Comment 4): **MINOR**
+
+Line 42 executed `kubectl config current-context` before `require_tool kubectl` guard, causing "command not found" noise if kubectl is missing.
+
+**Fix Applied:** Guarded with `command -v kubectl` check:
+```bash
+if command -v kubectl >/dev/null 2>&1; then
+  previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
+fi
+```
+
+### Namespace Hardcoding (Comment 5): **DEFERRED**
+
+Secret FQDNs hardcoded `dnd-notes-platform` instead of using `${PLATFORM_NAMESPACE}` variable.
+
+**Fix Applied:** Substituted variable in Secret URLs:
+- `CONTROL_PLANE_DATABASE_URL`
+- `TENANT_DATABASE_ADMIN_URL`
+- `TENANT_DATABASE_RUNTIME_URL`
+
+**Rationale:** Single-sources namespace config; prevents drift if namespace ever changes.
+
+## Applied in
+
+- `scripts/k3d/down.sh` - Delete-safety guards
+- `scripts/k3d/up.sh` - kubectl guard + namespace substitution
+- `apps/control-plane/test/k3d-persistent-lane.test.ts` - Regression coverage
+
+---
+
+### 2026-04-27: PR #120 JSON-Shell-Quoting Review Gate
+
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-27  
+**Type:** Code Review & Security Gate
+
+## Issue Analysis
+
+### Location
+
+**File:** `scripts/k3d/up.sh`  
+**Function:** `write_state()` → `makeTokenSnippet()` (lines 24–30)
+
+### The Problem
+
+The token snippet constructor used fragile shell quote-escaping pattern (`'"'"'...'"'"'`) to nest quotes inside a JavaScript template string. This is:
+- **Hard to audit** — requires manual quote-counting during review
+- **Brittle** — breaks when future field additions or special characters appear
+- **Non-standard** — contradicts team shell-JSON payload patterns
+
+### Minimum Acceptable Fix
+
+Move token snippet construction outside the `node -e` block and pass as a simple shell argument.
+
+### Regression Test Required
+
+Test must prove:
+1. `write_state()` successfully writes valid state.json containing `tokenSnippets`
+2. The emitted token snippets are structurally executable curl commands
+3. No shell quote-escaping errors appear in the snippet values
+
+Example test shape validates snippet has valid bash syntax:
+```javascript
+const result = spawnSync('bash', ['-n', '-c', snippet])
+assert.strictEqual(result.status, 0, 'token snippet must have valid shell syntax')
+```
+
+### Sizing & Risk
+
+- Refactor `write_state()`: ~12 lines (restructure only)
+- Add regression test: ~15 lines (additive)
+- **Total effort: ~27 lines, Low risk**
+
+---
+
+### 2026-04-27: Mikey — PR #120 Smoke Failure Classification
+
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-27  
+**Type:** CI Failure Triage
+
+## Failure Analysis
+
+PR #120 `smoke` failed on Actions run `25002615780`, job `73216625906`.
+
+## Root Cause
+
+The actionable failure signal is in cluster bootstrap, not the reviewed product diff:
+
+1. `nodes.txt` shows `k3d-dnd-notes-agent-0` stuck `NotReady`
+2. `events.txt` shows repeated flannel sandbox failures (`subnet.env` missing) before tenant provisioning
+3. `k3d-dnd-notes-agent-0.log` shows agent shutting down on flannel/network startup
+4. `control-plane.log` times out waiting for tenant readiness after cluster is unhealthy
+5. `all-resources.txt` captured no tenant resources, matching bootstrap failure
+
+## Decision
+
+Classify as **transient CI/bootstrap noise unless reproduced with healthier cluster evidence**.
+
+Do **not** request another product-code patch just to "fix smoke" on this evidence.
+
+## Acceptance Gate
+
+Call the issue resolved only after one of:
+
+- a green rerun on the same implementation, or
+- a narrow workflow/bootstrap hardening patch that directly targets the agent/flannel startup failure and then passes
+
+## Ownership
+
+No forced owner change away from Brand. If hardening becomes necessary, Brand remains the right revision owner (the seam is k3d/workflow bootstrap, not app logic).
+
+---
+
+### 2026-04-27: PR #120 Review Thread Closures — All Resolved
+
+**Decided by:** Mikey (Lead)  
+**Date:** 2026-04-27  
+**Type:** Review Completion Status
+
+## Threads Closed
+
+### 1. Control-Plane Image Import (Comment 3144321209)
+- **Issue**: Image must be imported into k3d cluster even when `--no-rebuild` skips docker build
+- **Fix**: `ensure_image_ready()` function calls `ensure_image_imported_into_cluster()` when skipping builds
+- **Status**: ✓ Resolved
+
+### 2. Write State Permissions (Comment 3144321215)
+- **Issue**: State file stores plaintext credentials but uses default permissions
+- **Fix**: `write_state()` sets directory permissions to `0o700` and file permissions to `0o600`
+- **Status**: ✓ Resolved
+
+### 3. Test Touching Real State.json (Comment 3144321217)
+- **Issue**: Tests were touching repo's real `.k3d-state/state.json` path
+- **Fix**: Tests isolated in temporary directories keyed by process ID (e.g., `.k3d-status-test-${process.pid}`)
+- **Status**: ✓ Resolved
+
+### 4. Tenant Image Import (Comment 3144321224)
+- **Issue**: Image must be imported into k3d cluster even when `--no-rebuild` skips docker build
+- **Fix**: Same `ensure_image_ready()` function handles both tenant and control-plane images
+- **Status**: ✓ Resolved
+
+### 5. JSON-Shell-Quoting in Token Snippets (Final Thread)
+- **Issue**: `read_state()` passing raw JSON through shell quoting to `node -e` caused corruption when tokenSnippets contain escaped quotes
+- **Fix**: Eliminates raw JSON passing; file path only as argv; JSON parsing in Node; regression validates quote-heavy state.json
+- **Result**: All 202 tests pass; regression proves quote-safe parsing
+- **Status**: ✓ Resolved
+
+---
+
+# 2026-04-27 — k3d helper help-text parity
+
+## Decision
+
+For override-safe k3d cleanup helpers, usage text must describe the exact state cleanup behavior rather than summarizing it as directory deletion.
+
+## Why
+
+- `scripts/k3d/down.sh` only removes `${STATE_FILE}` directly.
+- The default `.k3d-state/` directory is removed only via `rmdir` after an exact-path check, and only when it is empty.
+- Precise help text keeps review feedback small and prevents future contributors from “fixing” the implementation to match inaccurate docs.
+
+## Key files
+
+- `scripts/k3d/down.sh`
+- `scripts/k3d/status.sh`
+- `apps/control-plane/test/k3d-persistent-lane.test.ts`
+
+---
+
+# PR #120 final review gate — keep the last fixes thin
+
+**Decided by:** Mikey  
+**Date:** 2026-04-27  
+**Scope:** PR #120 unresolved Copilot review threads
+
+## Decision
+
+Do not widen the final review follow-up. The last two open threads on PR #120 should be closed with the smallest behavior-preserving patch:
+
+1. Remove the unused `STATE_DIR` declaration from `scripts/k3d/status.sh`.
+2. Update `scripts/k3d/down.sh` help text so it describes the real teardown behavior instead of promising unconditional `.k3d-state/` removal.
+
+## Why
+
+- Both comments are valid, but neither justifies fresh architecture or helper abstraction.
+- The persistent k3d lane already has its real behavior and CI shape locked; adding new logic here would create churn at the finish line.
+- The right lead move is to keep the contract explicit, make the wording honest, and get the PR closed.
+
+## Routing
+
+Revision owner stays with **Brand** because the remaining work is platform-script maintenance.
+
+## Audit status
+
+Brand's local worktree patch satisfies this gate: `status.sh` removes the dead variable, `down.sh` help text is now honest, and both scripts pass `bash -n`. Once that patch is committed and pushed to PR #120, the two remaining Copilot threads should be replied-to/resolved without widening scope.

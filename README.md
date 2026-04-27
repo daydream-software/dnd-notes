@@ -108,6 +108,30 @@ only auto-hardens newly provisioned tenants.
 
 Issue `#63` formalizes the daily local Kubernetes lane for platform work.
 
+### Persistent interactive lane (issue #83)
+
+```bash
+npm run k3d:up          # bring up cluster + tenant, keep it running
+npm run k3d:status      # check health of the running platform
+npm run k3d:down        # tear everything down
+```
+
+- `k3d:up` is the **one-command interactive setup**: it bootstraps the cluster
+  (if needed), builds and imports images, deploys the control plane in k3d,
+  provisions a deterministic `dev` tenant, seeds sample data, writes
+  `.k3d-state/state.json`, and prints a summary with the tenant URL and
+  credentials.  Use `--no-rebuild` to skip image builds when the tags already
+  exist, `--reset-tenant` to deprovision and re-create the dev tenant, and
+  `--json` for machine-readable output.
+- `k3d:status` reads `.k3d-state/state.json` and queries the live cluster for
+  component readiness.  Use `--json` for agent-consumable output.
+- `k3d:down` deletes the cluster and removes `.k3d-state/`.  Use
+  `--keep-cluster` to delete only the tenant namespace and control-plane
+  deployment while leaving Postgres, Keycloak, and ingress intact (faster
+  reset cycle).
+
+### CI smoke lanes
+
 ```bash
 npm run k3d:bootstrap
 npm run k3d:smoke

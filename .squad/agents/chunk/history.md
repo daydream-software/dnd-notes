@@ -32,6 +32,15 @@ Chunk is the QA/Tester for the squad, responsible for regression coverage, gate 
 
 ## Learnings
 
+### PR #120 k3d persistent lane review bar (2026-04-26)
+- `scripts/k3d/down.sh` and `scripts/k3d/status.sh` should treat `K3D_CLUSTER_NAME` as highest priority, then fall back to `.k3d-state/state.json` `clusterName`, then `dnd-notes`; reviewer proof must check the live `k3d`/`kubectl` target and the emitted status payload, not just one branch.
+- `scripts/k3d/down.sh` should require `kubectl` only for `--keep-cluster`; full teardown must still work with just `k3d`, while `--keep-cluster` proves `kubectl config use-context` and namespace/deployment deletes against the resolved cluster.
+- `apps/control-plane/test/k3d-persistent-lane.test.ts` already dropped login-shell semantics (`spawnSync('bash', ['-c', ...])`), but this review round still needs focused regression coverage for cluster-name precedence and `kubectl` gating because those behaviors are not locked yet.
+- Reviewer trap: `scripts/k3d/status.sh` can probe the env-override cluster while still emitting the persisted `state_clusterName` in `--json`; acceptance for “env override wins” must include the reported `clusterName`, not only the context switch.
+- Key paths for this slice: `scripts/k3d/down.sh`, `scripts/k3d/status.sh`, `apps/control-plane/test/k3d-persistent-lane.test.ts`.
+- Final verdict nuance: the runtime fix in `scripts/k3d/status.sh` now aligns behavior/output for `K3D_CLUSTER_NAME`, but the added regression test is false-green because it sets an env `STATE_FILE` that `status.sh` never reads; unless the repo-root `.k3d-state/state.json` is populated, the test passes even on the old broken output path.
+- Review proof for this lane should simulate both precedence branches with the real consumed state location (or extract cluster resolution into a sourceable helper) so coverage locks: persisted default when no override is set, env override in both live context switch and JSON, and prior `down.sh` gating behavior.
+
 ### PR #78 auth cleanup + CI-safe polling QA review (2026-04-22)
 - `apps/operator-portal/src/keycloak-client.ts` should normalize restored Keycloak token blobs by requiring string `accessToken`/`refreshToken`, treating `idToken` as optional, and clearing malformed localStorage immediately so bootstrap falls back to a clean signed-out state.
 - `apps/operator-portal/src/keycloak-client.test.ts` is the focused regression layer for malformed token storage; keep app-shell auth tests (`apps/operator-portal/src/App.test.tsx`) focused on visible UX resets like stale error cleanup after `clearSession()`.
@@ -267,4 +276,17 @@ Risk: test drift on shared modules. Both already have test:ci scripts ready.
 ### Verdict
 
 Code consolidation for all 6 items is complete and functional. Test infrastructure is in place but CI wiring is missing. Marked as P1 follow-up. Session: `.squad/log/2026-04-25T22:54:46Z-87-validation.md`.
+
+### PR #120 final QA review (2026-04-26)
+- `scripts/k3d/status.sh` is safe to approve only when the tenant `/ready` probe is optional: `probe_tenant_url()` must skip cleanly when `curl` is missing and surface that branch in both text output (`HTTP /ready: skipped`) and JSON output (`tenant.urlProbeSkipped`).
+- `scripts/k3d/status.sh` now needs an explicit `reset_state()` before each `read_state()` attempt so stale `state_*` values cannot leak forward after missing/corrupt `.k3d-state/state.json`.
+- `scripts/k3d/down.sh` should keep `read_state_field()` best-effort for `--keep-cluster`: when `node` is missing or the state file is unreadable, return empty output and fall back to scanning `tenant-*` namespaces instead of aborting under `set -Eeuo pipefail`.
+- High-signal reviewer proof for this lane is `npm run lint --workspace apps/control-plane && npm run test --workspace apps/control-plane && npm run build --workspace apps/control-plane`, because `apps/control-plane/test/k3d-persistent-lane.test.ts` now locks the curl-missing, stale-state, and node-missing regressions directly against the shipped shell functions.
+
+### PR #120 follow-up blocker QA bar (2026-04-26)
+- Smoke CI is already green again on `e5d146f`; the remaining review scope is surgical: `scripts/k3d/up.sh` must still import both tenant and control-plane images into the target cluster on `--no-rebuild`, not just skip the Docker builds when host tags exist.
+- Because `write_state()` persists plaintext creds + token snippets, approval now requires filesystem-hardening proof too: `.k3d-state/` should end up owner-only (700-ish) and `state.json` owner-readable/writable only (600-ish), with a regression that inspects actual modes after the real write path.
+- The current env-override status test still mutates the repo-root `.k3d-state/state.json`; the fix is only safe when tests stop touching that live path while exercising the same contract (for example via a script-supported state-path override or isolated repo fixture). Reviewer proof should include an interrupted-run thought experiment: no developer state corruption, no race with someone running `npm run k3d:status`, same shell entrypoint contract preserved.
+
+---
 

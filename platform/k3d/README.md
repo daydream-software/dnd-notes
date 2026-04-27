@@ -14,6 +14,26 @@ This lane intentionally uses **k3d for daily iteration** and keeps the control p
 
 ## Quick start
 
+### Persistent interactive lane (recommended for manual exploration)
+
+```bash
+npm run k3d:up          # bootstrap cluster, deploy, provision dev tenant
+npm run k3d:status      # check running state at any time
+npm run k3d:down        # tear down when finished
+```
+
+`k3d:up` is safe to re-run: it reconciles the cluster and tenant into the
+expected healthy state if they already exist. Use `--no-rebuild` to skip image
+builds when the Docker tags already exist, `--reset-tenant` to deprovision and
+re-create the `dev` tenant from scratch, and `--json` for a machine-readable
+summary on stdout.
+
+The tenant is reachable at `http://dev.127.0.0.1.nip.io:8080/` after a
+successful `k3d:up`.  State (URLs, credentials, token snippets) is persisted
+to `.k3d-state/state.json` (gitignored).
+
+### CI smoke lanes
+
 ```bash
 npm run k3d:bootstrap
 npm run k3d:smoke
@@ -228,6 +248,14 @@ All three scripts honor a few env overrides when you need a different local shap
 | `K3D_TENANT_OVERRIDE_LISTEN_PORT` | `38080` | public port for the tenant override front proxy |
 | `K3D_TENANT_OVERRIDE_NAMESPACE` | derived | reuse an existing tenant namespace for the override lane |
 | `K3D_TENANT_OVERRIDE_SUBDOMAIN` | derived | reuse an existing tenant subdomain for the override lane |
+
+Additional overrides for the persistent lane (`k3d:up / down / status`):
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `K3D_DEV_TENANT_ID` | `k3d-dev` | deterministic tenant ID for the `dev` tenant |
+| `K3D_DEV_TENANT_SUBDOMAIN` | `dev` | subdomain assigned to the `dev` tenant |
+| `K3D_DEV_TENANT_OWNER_ID` | `k3d-dev-owner` | owner ID stored in the control-plane tenant record |
 
 ## k3d vs later k3s/stateful rehearsal scope
 

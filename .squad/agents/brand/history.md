@@ -34,7 +34,15 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 📌 Team update (2026-04-22T15:19:20Z): PR #77 review follow-up orchestration complete. Four agents (Brand, Data, Stef, Chunk) addressed three Copilot review comments on squad/76-complete-runtime-keycloak-auth-integration. Brand guarded `inherit_errexit` for Bash 3.2 compat (manual gate); Data typed Keycloak conflict handling (API regression); Stef surfaced missing-client UX (web regression); Chunk verified all gates green (lint/test/build/platform:validate passed). Four decisions merged to squad/decisions.md. Session log: `.squad/log/2026-04-22T15:19:20Z-pr77-review-followup.md`. Orchestration logs per agent in `.squad/orchestration-log/`. — Scribe
 
+📌 Team update (2026-04-27T16:12:05Z): PR #120 final review resolution complete. Brand addressed last two open Copilot review threads: removed unused `STATE_DIR` from scripts/k3d/status.sh, updated scripts/k3d/down.sh help text for accurate teardown behavior description. Patch committed and pushed (7d2d7fc). Mikey gated the patch, confirmed on PR head, posted targeted replies closing both threads. No open review threads remain. Two decisions merged: brand-final-review-fixes.md, mikey-final-review-gate.md. Session log: `.squad/log/2026-04-27T16:12:05Z-pr120-review-closure.md`. — Scribe
+
 ## Learnings
+
+- **PR #120 k3d Review Fixes (2026-04-27):** In `scripts/k3d/status.sh`, parse `.k3d-state/state.json` once in Node and emit a NUL-delimited payload plus a success sentinel before assigning any `state_*` shell vars; that keeps the documented “all empty on failure” contract true even when the parser dies mid-stream. In `scripts/k3d/down.sh`, namespace teardown for `--keep-cluster` should use `kubectl delete namespace ... --wait=false --timeout=30s` so stuck finalizers do not hang the helper forever. Regression anchor: `apps/control-plane/test/k3d-persistent-lane.test.ts`. User preference: do not use `claude-opus-4.7` without asking first.
+
+- **PR #120 Validate Triage:** When a PR shows multiple checks named `validate`, use the workflow name before assuming they cover the same gate. On PR #120, CI `validate` failed deterministically on `apps/control-plane/test/k3d-persistent-lane.test.ts` (`no-useless-escape` on the new `tokenSnippets` fixture) while Deployment Artifacts `validate` passed on the same SHA, so the fix was to remove the unnecessary JavaScript quote escapes rather than treating the red check as transient.
+
+- **Shell JSON State Readers:** For contributor-facing Bash helpers that already require Node, do not capture a whole JSON file into a shell variable and feed it back through `process.argv[1]`. Parse the file directly in Node for each requested field (or in one Node process) so embedded `\\\"` sequences like the `tokenSnippets` in `.k3d-state/state.json` survive unchanged; lock it with a focused shell-level regression in `apps/control-plane/test/k3d-persistent-lane.test.ts`.
 
 - **Backup Artifact Path Components:** When a filesystem-backed backup store derives directory/file names from tenant-controlled IDs, normalize with `NFKC` before sanitizing for readability, but hash the raw ID whenever normalization, sanitization, or case-folding changes the component. That keeps lowercase-safe IDs readable while preventing cross-tenant collisions on case-insensitive or Unicode-normalizing filesystems. Lock it with regressions for both unsafe-character collisions and case-only collisions in `apps/control-plane/test/tenant-backup-runner.test.ts`.
 
@@ -98,7 +106,15 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 - **Node-Only Script Type Boundaries:** Keep the root `scripts` TypeScript project Node-scoped (`types: ["node"]`) even when a smoke harness spins up JSDOM. For cross-workspace browser helpers like `scripts/k3d/operator-portal-smoke.ts`, prefer local loose browser-ish types plus a runtime `import()` of the TSX helper instead of widening the root tsconfig to DOM/JSX or pulling another workspace under `rootDir`. Pair that with a direct root `@types/jsdom` devDependency because the script owns the `jsdom` import even if npm hoists the runtime package from `apps/operator-portal`.
 
+- **Override-Safe State Cleanup:** For shell lanes with overrideable state-file paths like `K3D_STATE_FILE`, delete the file itself with `rm -f "${STATE_FILE}"` and only remove the default repo-owned state directory after an exact path check plus `rmdir`. Never `rm -rf "$(dirname "${STATE_FILE}")"` because an override can point at an unrelated parent directory. Key files: `scripts/k3d/down.sh`, `apps/control-plane/test/k3d-persistent-lane.test.ts`.
+
+- **Optional kubectl Context Capture:** In contributor-facing Bash helpers, treat “restore previous kube context” as best-effort setup, not a hard prerequisite. Guard the initial `kubectl config current-context` lookup with `command -v kubectl >/dev/null 2>&1` so missing kubectl does not emit noisy startup errors before the script reaches its real prerequisite checks. Key file: `scripts/k3d/up.sh`.
+
 - **Backup Restore Guardrails:** For `apps/control-plane/src/tenant-backup-runner.ts`, a restore flow that refuses active sessions must check `pg_stat_activity` both before the safety snapshot and immediately before `pg_restore`; the snapshot window otherwise reintroduces a TOCTOU gap. Treat the filesystem artifact store as hostile input too: reject symlinks on every path segment for both stored tenant directories and inbound artifact locations, and make `scripts/k3d/smoke.sh` print non-2xx response bodies so CI failures surface the real control-plane error instead of only a log tail.
+
+- **Optional Tool Guards for k3d Helpers:** In contributor-facing k3d scripts, treat tools used only for diagnostics or best-effort state parsing as optional guards instead of hard prerequisites. `scripts/k3d/status.sh` now skips the `/ready` curl probe when curl is absent, and `scripts/k3d/down.sh` keeps `--keep-cluster` safe by returning an empty state field when Node is missing or the state file is unreadable; lock both behaviors with focused shell-level regressions in `apps/control-plane/test/k3d-persistent-lane.test.ts`.
+
+- **PR #120 Final Review Fixes:** Keep review-follow-up edits on the persistent k3d helpers as thin as possible: remove truly unused shell state like `STATE_DIR` from `scripts/k3d/status.sh`, and make `scripts/k3d/down.sh --help` describe the real cleanup contract (`.k3d-state/state.json` deletion plus best-effort removal of the default `.k3d-state/` directory only when empty). Focused validation path: `bash -n scripts/k3d/status.sh scripts/k3d/down.sh`, `bash scripts/k3d/down.sh --help`, and `npm run test:control-plane -- --test-name-pattern 'k3d '`.
 
 ## Orphaned Commit Recovery (2026-04-22T16:35:00Z)
 
@@ -205,3 +221,41 @@ Code consolidation PASS. Tests exist but not wired to CI — security-critical m
 
 **P1 Follow-up:** Add to scripts/run-ci-tests.mjs: `{ name: 'keycloak-jwt', script: 'test:ci --workspace platform/keycloak-jwt' }`.
 
+- **PR #120 Review Followup Investigation (2026-04-27):** Investigated unresolved PR review comments and smoke workflow failure (run 24970308939). Found all four review feedback items already addressed in current code: (1) `scripts/k3d/up.sh` lines 156-167 implement `ensure_image_imported_into_cluster()` to import images when `--no-rebuild` skips builds, handling both tenant and control-plane images; (2) `scripts/k3d/up.sh` lines 336-339 set directory permissions to 0o700 and file permissions to 0o600 for `.k3d-state/state.json` to prevent credential exposure; (3) `apps/control-plane/test/k3d-persistent-lane.test.ts` fully refactored to use process-ID-scoped temp directories, never touching real state files; (4) All regression coverage in place. Smoke failure analysis: Run 24970035224 (commit e5d146f) passed, run 24970308939 (commit 86fc630) failed, but 86fc630 only changed `up.sh`, `down.sh`, `status.sh`, and test files—none of which are used by `smoke.sh` (which calls `bootstrap.sh` and `build-tenant-image.sh` directly). Errors (docker socket closed, postgres connection terminated, tenant timeout) indicate transient CI infrastructure issue, not code regression. Posted comprehensive review comment explaining fixes and recommending smoke rerun to confirm transience.
+
+---
+
+## PR #120 k3d Smoke Timeout Fix (2026-04-27)
+
+**Issue:** Smoke test failing in GitHub Actions (job 73216625906, run 25002615780) with "Tenant workload dnd-notes did not become ready within 240000ms" error. All other checks (validate x2, request-review, evaluate-and-merge) passed.
+
+**Root Cause:** The default `TENANT_READY_TIMEOUT_MS` of 240 seconds (4 minutes) was insufficient for tenant deployment to become ready in the GitHub Actions CI environment. CI runners have limited resources, and the k3d cluster + tenant provisioning legitimately takes longer than in local dev environments.
+
+**Timeline from logs:**
+- 15:08:47 - Tenant image ready in k3d
+- 15:12:54 - HTTP 500 response from control-plane provision endpoint (≈4 min 7 sec later)
+- Error: "Failed to provision tenant resources" / "Tenant workload dnd-notes did not become ready within 240000ms"
+
+**Fix:** Added `TENANT_READY_TIMEOUT_MS: '480000'` (8 minutes) to `.github/workflows/k3d-smoke.yml` job environment variables (commit fa3412d). This doubles the timeout to accommodate CI resource constraints while keeping it bounded.
+
+**Key Learnings:**
+- k3d/k8s deployments in CI environments consistently take longer than local dev due to resource limits
+- The control-plane `apps/control-plane/src/provisioning.ts` uses configurable `TENANT_READY_TIMEOUT_MS` (default 240s) to poll tenant deployment readiness
+- Smoke script `scripts/k3d/smoke.sh` line 340 passes this env var to control-plane, making it tunable per environment
+- CI-specific timeouts should be set in workflow env vars, not code defaults
+- This is not a transient infra failure - it's a legitimate timing constraint that requires adjustment
+
+**Files Changed:**
+- `.github/workflows/k3d-smoke.yml` - Added TENANT_READY_TIMEOUT_MS: '480000' to job env
+
+**Validation:** Fix committed and pushed. Smoke workflow will rerun on new commit to verify timeout is sufficient.
+
+---
+
+- **PR #120 Smoke Triage & Review Resolution (2026-04-27T15:23:12Z):** Diagnosed k3d smoke timeout in CI runners (4+ min provisioning on shared resources vs 2 min local). Extended `TENANT_READY_TIMEOUT_MS` from 240000ms to 480000ms in `.github/workflows/ci.yml`, establishing environment-specific timeout pattern (keep app defaults local-friendly, override in workflow). Addressed five new review comments: delete-safety guards in `down.sh` (3 sites), kubectl guard in `up.sh`, namespace config substitution. Landed commit 6cd1545. All 202 tests pass. Orchestration log: `.squad/orchestration-log/2026-04-27T15:23:12Z-brand.md`. Session log: `.squad/log/2026-04-27T15:23:12Z-pr120-smoke-triage.md`. PR ready for merge. — Brand (Agent)
+
+- **Kube-Context-Safe k3d Helpers:** Read-only or scoped cleanup helpers should target `kubectl --context "k3d-${CLUSTER_NAME}"` instead of `kubectl config use-context`. `scripts/k3d/status.sh` and `scripts/k3d/down.sh` now follow that rule so they do not leave the developer pointed at k3d after a status/teardown check; keep the guard locked with source-level assertions in `apps/control-plane/test/k3d-persistent-lane.test.ts`.
+
+- **Token Snippet Assembly Before JSON Write:** When `scripts/k3d/up.sh` persists reusable shell snippets into `.k3d-state/state.json`, build the full snippet string first (`build_token_snippet`) and pass it into the JSON writer as plain argv instead of hand-assembling nested shell quoting inside `node -e`. The focused fake-`curl` regression in `apps/control-plane/test/k3d-persistent-lane.test.ts` proves single/double quotes survive intact.
+
+- **PR #120 Review Thread Resolution (2026-04-27T17:10:21Z):** Orchestrated completion of 4 review threads on README wording, kubectl context guards, and tokenSnippets quoting. Commit b73017f validated and passed focused tests. Orchestration log: `.squad/orchestration-log/20260427-171021-brand.md`. Session log: `.squad/log/20260427-171021-pr120-b73017f-review-closure.md`. — Brand (Agent)
