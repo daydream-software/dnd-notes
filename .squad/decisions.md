@@ -6227,3 +6227,49 @@ No forced owner change away from Brand. If hardening becomes necessary, Brand re
 
 ---
 
+# 2026-04-27 — k3d helper help-text parity
+
+## Decision
+
+For override-safe k3d cleanup helpers, usage text must describe the exact state cleanup behavior rather than summarizing it as directory deletion.
+
+## Why
+
+- `scripts/k3d/down.sh` only removes `${STATE_FILE}` directly.
+- The default `.k3d-state/` directory is removed only via `rmdir` after an exact-path check, and only when it is empty.
+- Precise help text keeps review feedback small and prevents future contributors from “fixing” the implementation to match inaccurate docs.
+
+## Key files
+
+- `scripts/k3d/down.sh`
+- `scripts/k3d/status.sh`
+- `apps/control-plane/test/k3d-persistent-lane.test.ts`
+
+---
+
+# PR #120 final review gate — keep the last fixes thin
+
+**Decided by:** Mikey  
+**Date:** 2026-04-27  
+**Scope:** PR #120 unresolved Copilot review threads
+
+## Decision
+
+Do not widen the final review follow-up. The last two open threads on PR #120 should be closed with the smallest behavior-preserving patch:
+
+1. Remove the unused `STATE_DIR` declaration from `scripts/k3d/status.sh`.
+2. Update `scripts/k3d/down.sh` help text so it describes the real teardown behavior instead of promising unconditional `.k3d-state/` removal.
+
+## Why
+
+- Both comments are valid, but neither justifies fresh architecture or helper abstraction.
+- The persistent k3d lane already has its real behavior and CI shape locked; adding new logic here would create churn at the finish line.
+- The right lead move is to keep the contract explicit, make the wording honest, and get the PR closed.
+
+## Routing
+
+Revision owner stays with **Brand** because the remaining work is platform-script maintenance.
+
+## Audit status
+
+Brand's local worktree patch satisfies this gate: `status.sh` removes the dead variable, `down.sh` help text is now honest, and both scripts pass `bash -n`. Once that patch is committed and pushed to PR #120, the two remaining Copilot threads should be replied-to/resolved without widening scope.

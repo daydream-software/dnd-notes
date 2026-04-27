@@ -49,6 +49,8 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 
 - **Admin/Operator Platform Gap Analysis (2026-04-21T10:30Z):** Reviewed epic #42 and all remaining open issues to answer: "Does remaining scope cover the operator/admin application?" Found: (1) Fleet status #57 is read-only observability dashboard; (2) Keycloak #56 supplies auth boundaries but not operator UI; (3) Restore #40 assumes manual control-plane triggering without specifying operator surface. Verdict: No dedicated operator portal issue exists. Current scope covers *what* operators see (#57) and *how to authenticate them* (#56), but not *how they control the platform*. Recommendation: Split Phase 3 into two explicit issues — #57 (fleet status, observability) + NEW (control-plane operator portal, control surface). This unblocks architecture clarity on whether the control plane stays a headless API or needs a paired UI.
 
+- **PR #120 Final Review Gate & Thread Resolution (2026-04-27T16:12:05Z):** Gated Brand's final patch for PR #120. Confirmed 7d2d7fc on PR head containing two review fixes: (1) removed unused `STATE_DIR` declaration from scripts/k3d/status.sh; (2) updated scripts/k3d/down.sh help text to describe exact teardown behavior instead of promising unconditional `.k3d-state/` removal. Decision: keep final fixes thin (no architecture changes or fresh abstractions). Posted targeted replies on both remaining Copilot threads, resolving both without widening scope. All review threads now closed. Decisions merged: mikey-final-review-gate.md. Session log: `.squad/log/2026-04-27T16:12:05Z-pr120-review-closure.md`. PR #120 ready for merge gate checks. — Mikey (Lead)
+
 - **PR #60 Eligibility at Gatekeeper Trigger — Timeline Reconstruction (2026-04-19T00:28):** FFMikha's correction is CORRECT and COMPLETE. Root cause: gatekeeper design flaw — the script does not atomically check both conditions + merge; instead, it checks conditions, decides "merge", then issues merge API call asynchronously. By the time GitHub executed the merge, unresolved thread already existed. Lesson: Gatekeeper must either (a) re-check gates immediately before merge() call, (b) lock the PR state during evaluation, or (c) implement explicit gates via branch protection (GitHub-native). Current async check→merge window allows race conditions.
 
 - **Issue #42 Control-Plane ↔ Tenant Contract Decision Locked (2026-04-19):** Accepted Option 1 (compromise shape) — control plane is sole orchestrator, tenant app never calls back. Tenant internal surface: probes (`/health`, `/ready`) + `/_control/info` (runtime state) + `/_control/maintenance` (drain mode). Kubernetes is coordination layer. No `/_control/bootstrap` in Phase 1. Key lesson: The contract got thin by asking "what must cross the boundary?" instead of "what could cross?" — three surfaces suffice when K8s already provides the reconciliation loop.
@@ -79,6 +81,8 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
 - **PR #78 triage — two unresolved review comments (2026-04-22T19:25Z):** Operator-portal feature PR has 2 unresolved comments. (1) Test mock handlers for POST /internal/tenants* do not return error Response when called unexpectedly; they return `undefined`, causing confusing test failures. Route to Brand to fix test harness. (2) `.squad/agents/stef/history.md` has duplicate "## Core Context" headers (lines 16+22) with identical timestamps; documentation clarity issue. Route to Scribe for history cleanup. Both are low-risk, isolated fixes with clear ownership. No architecture questions needed.
 
 - **PR #78 final unresolved comment — normalizeBasePath duplication (2026-04-22T19:50Z):** One unresolved thread remains on PR #78. Review comment flags `normalizeBasePath()` duplication in `vite.config.ts:5-17` and `src/config.ts:3-15`; requests extraction into shared utility (`src/normalize-base-path.ts`) to prevent config-logic drift. Scope: remove function from both sites, create utility, add imports. Routed to Brand (platform owner). No architecture blocker; straightforward 5-minute refactor.
+
+- **PR #120 final thread closure pattern (2026-04-27):** For thin review-follow-up on platform scripts, verify the exact fix commit is the PR head before touching GitHub threads, then reply on each stale thread with the commit SHA and the specific file-level change before resolving it. This kept the closure honest for the last two PR #120 comments: `scripts/k3d/status.sh` only needed the dead `STATE_DIR` removal, and `scripts/k3d/down.sh` only needed help text that matches `remove_state_artifacts`. Key paths: `scripts/k3d/status.sh`, `scripts/k3d/down.sh`, `.squad/agents/mikey/history.md`.
 
 ## Epic #87 Validation — Synthesis & Close Verdict (2026-04-25)
 
@@ -188,6 +192,22 @@ rm -rf "${STATE_DIR}"
 **Status:** All five comments are non-conflicting and can be batched into one patch. No rework of functional logic required—purely defensive + config coherence. Ready for Brand to land as platform patch.
 
 **Next:** Confirm Brand's patch addresses all five + validate smoke re-runs green.
+
+---
+
+### PR #120 Review Gate — Two Remaining Copilot Threads (2026-04-27)
+
+**Verdict:** Current PR head `fa3412d` is still not ready to close. I replied on both unresolved Copilot threads and requested changes so the scope stays explicit.
+
+**Minimum acceptable fix:**
+1. `scripts/k3d/status.sh` — remove the dead `STATE_DIR` declaration. This is cleanup, not a reason to add new logic.
+2. `scripts/k3d/down.sh` — narrow the help text so it matches `remove_state_artifacts`: delete `state.json`, and remove the default `.k3d-state/` directory only when it is empty.
+
+**Revision owner:** Brand. This is platform-script follow-up, isolated to shell maintenance and user-facing CLI wording.
+
+**Audit update:** Brand's worktree patch is acceptable. `scripts/k3d/status.sh` now drops the dead `STATE_DIR` declaration, and `scripts/k3d/down.sh --help` now states the real `remove_state_artifacts` behavior. `bash -n` passes on both helpers, so the two GitHub threads can be resolved as soon as that patch is committed and pushed.
+
+**Key files:** `scripts/k3d/status.sh`, `scripts/k3d/down.sh`, `.github/workflows/k3d-smoke.yml`, PR #120 review threads `discussion_r3148441136` and `discussion_r3148441222`.
 
 
 ### PR #120 Smoke Audit — failure category and gate (2026-04-27)
