@@ -102,13 +102,15 @@ probe_tenant_url() {
   fi
 }
 
-# Query a deployment's ready replica count. Outputs "N/M" or "unavailable".
+# Query a deployment's ready replica count in the target context. Outputs "N/M"
+# or "unavailable".
 deployment_ready_count() {
-  local namespace="$1"
-  local deployment="$2"
+  local context="$1"
+  local namespace="$2"
+  local deployment="$3"
 
   local out
-  out="$(kubectl get deployment "${deployment}" -n "${namespace}" \
+  out="$(kubectl --context "${context}" get deployment "${deployment}" -n "${namespace}" \
     -o jsonpath='{.status.readyReplicas}/{.status.replicas}' 2>/dev/null)" || true
   echo "${out:-unavailable}"
 }
@@ -203,15 +205,15 @@ tenant_url_probe_skipped=false
 
 if [[ "${cluster_running}" == "true" ]]; then
   if [[ "${kubectl_available}" == "true" ]]; then
-    kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null 2>&1 || true
+    target_kube_context="k3d-${CLUSTER_NAME}"
 
-    control_plane_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" dnd-notes-control-plane)"
-    keycloak_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-keycloak)"
-    postgres_ready="$(deployment_ready_count "${PLATFORM_NAMESPACE}" platform-postgres)"
+    control_plane_ready="$(deployment_ready_count "${target_kube_context}" "${PLATFORM_NAMESPACE}" dnd-notes-control-plane)"
+    keycloak_ready="$(deployment_ready_count "${target_kube_context}" "${PLATFORM_NAMESPACE}" platform-keycloak)"
+    postgres_ready="$(deployment_ready_count "${target_kube_context}" "${PLATFORM_NAMESPACE}" platform-postgres)"
 
     # Use the stored namespace verbatim — never re-derive it from the subdomain.
     if [[ -n "${state_tenantNamespace}" ]]; then
-      tenant_ready="$(deployment_ready_count "${state_tenantNamespace}" dnd-notes)"
+      tenant_ready="$(deployment_ready_count "${target_kube_context}" "${state_tenantNamespace}" dnd-notes)"
     fi
   else
     control_plane_ready="skipped (kubectl unavailable)"

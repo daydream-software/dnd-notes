@@ -22,11 +22,11 @@ npm run k3d:status      # check running state at any time
 npm run k3d:down        # tear down when finished
 ```
 
-`k3d:up` is idempotent: a second run is a no-op if the cluster and tenant are
-already up and healthy.  Use `--no-rebuild` to skip image builds when the
-Docker tags already exist, `--reset-tenant` to deprovision and re-create the
-`dev` tenant from scratch, and `--json` for a machine-readable summary on
-stdout.
+`k3d:up` is safe to re-run: it reconciles the cluster and tenant into the
+expected healthy state if they already exist. Use `--no-rebuild` to skip image
+builds when the Docker tags already exist, `--reset-tenant` to deprovision and
+re-create the `dev` tenant from scratch, and `--json` for a machine-readable
+summary on stdout.
 
 The tenant is reachable at `http://dev.127.0.0.1.nip.io:8080/` after a
 successful `k3d:up`.  State (URLs, credentials, token snippets) is persisted

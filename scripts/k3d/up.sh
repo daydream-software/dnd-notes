@@ -276,6 +276,33 @@ localize_postgres_url() {
   ' "${raw_url}" "${local_port}"
 }
 
+build_token_snippet() {
+  local keycloak_url="$1"
+  local keycloak_realm="$2"
+  local client_id="$3"
+  local username="$4"
+  local password="$5"
+
+  node - "${keycloak_url}" "${keycloak_realm}" "${client_id}" "${username}" "${password}" <<'NODE'
+const [, , keycloakUrl, keycloakRealm, clientId, username, password] = process.argv
+
+const shellQuote = (value) => "'" + String(value).replace(/'/g, "'\"'\"'") + "'"
+const tokenUrl = `${keycloakUrl}/realms/${keycloakRealm}/protocol/openid-connect/token`
+const tokenReader = 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).access_token)'
+
+process.stdout.write([
+  "curl -fsS -X POST",
+  `-H ${shellQuote("Content-Type: application/x-www-form-urlencoded")}`,
+  `--data-urlencode ${shellQuote("grant_type=password")}`,
+  `--data-urlencode ${shellQuote(`client_id=${clientId}`)}`,
+  `--data-urlencode ${shellQuote(`username=${username}`)}`,
+  `--data-urlencode ${shellQuote(`password=${password}`)}`,
+  shellQuote(tokenUrl),
+  `| node -e ${shellQuote(tokenReader)}`,
+].join(" "))
+NODE
+}
+
 # Write the state file. tenantNamespace is stored explicitly from the API
 # response so that status/down scripts never need to re-derive it from subdomain.
 write_state() {
@@ -288,6 +315,24 @@ write_state() {
   mkdir -p "${state_dir}"
   chmod 700 "${state_dir}"
 
+  local control_plane_token_snippet
+  control_plane_token_snippet="$(build_token_snippet \
+    "${CONTROL_PLANE_KEYCLOAK_URL}" \
+    "${CONTROL_PLANE_KEYCLOAK_REALM}" \
+    "${CONTROL_PLANE_KEYCLOAK_CLIENT_ID}" \
+    "${CONTROL_PLANE_KEYCLOAK_USERNAME}" \
+    "${CONTROL_PLANE_KEYCLOAK_PASSWORD}")"
+
+  local tenant_token_snippet=""
+  if [[ -n "${tenant_id}" ]]; then
+    tenant_token_snippet="$(build_token_snippet \
+      "${CONTROL_PLANE_KEYCLOAK_URL}" \
+      "${CONTROL_PLANE_KEYCLOAK_REALM}" \
+      "${TENANT_KEYCLOAK_CLIENT_ID}" \
+      "${TENANT_KEYCLOAK_USERNAME}" \
+      "${TENANT_KEYCLOAK_PASSWORD}")"
+  fi
+
   node -e '
     const fs = require("node:fs")
     const path = require("node:path")
@@ -297,19 +342,11 @@ write_state() {
       siteAdminEmail, siteAdminPassword,
       tenantOwnerEmail, tenantOwnerPassword,
       tenantId, tenantSubdomain, tenantNamespace, tenantHostname, tenantPublicScheme,
+      controlPlaneTokenSnippet, tenantTokenSnippet,
       stateFile,
     ] = process.argv.slice(1)
 
     const tenantOrigin = `${tenantPublicScheme}://${tenantHostname}:${httpPort}`
-
-    const makeTokenSnippet = (clientId, username, password) =>
-      `curl -fsS -X POST -H '"'"'Content-Type: application/x-www-form-urlencoded'"'"'` +
-      ` --data-urlencode '"'"'grant_type=password'"'"'` +
-      ` --data-urlencode '"'"'client_id=${clientId}'"'"'` +
-      ` --data-urlencode '"'"'username=${username}'"'"'` +
-      ` --data-urlencode '"'"'password=${password}'"'"'` +
-      ` '"'"'${keycloakUrl}/realms/${keycloakRealm}/protocol/openid-connect/token'"'"'` +
-      ` | node -e '"'"'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).access_token)'"'"'`
 
     const state = {
       clusterName,
@@ -328,9 +365,9 @@ write_state() {
       tenantOwnerEmail,
       tenantOwnerPassword,
       tokenSnippets: {
-        controlPlane: makeTokenSnippet(cpClientId, siteAdminEmail, siteAdminPassword),
+        controlPlane: controlPlaneTokenSnippet,
         tenant: tenantId
-          ? makeTokenSnippet(tenantClientId, tenantOwnerEmail, tenantOwnerPassword)
+          ? tenantTokenSnippet
           : null,
       },
     }
@@ -358,6 +395,8 @@ write_state() {
     "${tenant_namespace}" \
     "${tenant_hostname}" \
     "${TENANT_PUBLIC_SCHEME}" \
+    "${control_plane_token_snippet}" \
+    "${tenant_token_snippet}" \
     "${STATE_FILE}"
 }
 

@@ -125,26 +125,26 @@ if [[ "${KEEP_CLUSTER}" == "true" ]]; then
     exit 0
   fi
 
-  kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
+  target_kube_context="k3d-${CLUSTER_NAME}"
 
   # Read the persisted tenant namespace directly — never re-derive from subdomain.
   tenant_namespace="$(read_state_field tenantNamespace)"
 
   if [[ -n "${tenant_namespace}" ]]; then
     log "Deleting tenant namespace '${tenant_namespace}'..."
-    kubectl delete namespace "${tenant_namespace}" --ignore-not-found=true
+    kubectl --context "${target_kube_context}" delete namespace "${tenant_namespace}" --ignore-not-found=true
   else
     log "No readable tenant namespace in state file; scanning for tenant-* namespaces..."
     while IFS= read -r ns; do
       if [[ "${ns}" == tenant-* ]]; then
         log "Deleting namespace '${ns}'..."
-        kubectl delete namespace "${ns}" --ignore-not-found=true
+        kubectl --context "${target_kube_context}" delete namespace "${ns}" --ignore-not-found=true
       fi
-    done < <(kubectl get namespaces --no-headers -o custom-columns='NAME:.metadata.name' 2>/dev/null || true)
+    done < <(kubectl --context "${target_kube_context}" get namespaces --no-headers -o custom-columns='NAME:.metadata.name' 2>/dev/null || true)
   fi
 
   log "Removing control-plane deployment from ${PLATFORM_NAMESPACE}..."
-  kubectl delete deployment dnd-notes-control-plane \
+  kubectl --context "${target_kube_context}" delete deployment dnd-notes-control-plane \
     -n "${PLATFORM_NAMESPACE}" \
     --ignore-not-found=true
 

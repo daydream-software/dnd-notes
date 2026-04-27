@@ -26,6 +26,7 @@ const probeTenantUrlFnMatch = statusScript.match(/^probe_tenant_url\(\) \{\n[\s\
 const readStateFieldFnMatch = downScript.match(/^read_state_field\(\) \{\n[\s\S]*?^}/m)
 const removeStateArtifactsFnMatch = downScript.match(/^remove_state_artifacts\(\) \{\n[\s\S]*?^}/m)
 const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n[\s\S]*?^}/m)
+const buildTokenSnippetFnMatch = upScript.match(/^build_token_snippet\(\) \{\n[\s\S]*?^}/m)
 const runK3dImageImportFnMatch = upScript.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
 const ensureImageImportedFnMatch = upScript.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
 const ensureImageReadyFnMatch = upScript.match(/^ensure_image_ready\(\) \{\n[\s\S]*?^}/m)
@@ -53,6 +54,10 @@ if (!removeStateArtifactsFnMatch) {
 
 if (!localizePostgresUrlMatch) {
   throw new Error('Expected localize_postgres_url() in scripts/k3d/up.sh')
+}
+
+if (!buildTokenSnippetFnMatch) {
+  throw new Error('Expected build_token_snippet() in scripts/k3d/up.sh')
 }
 
 if (!runK3dImageImportFnMatch) {
@@ -516,6 +521,16 @@ printf '%s|%s' \
   })
 })
 
+describe('k3d down context handling', () => {
+  it('uses --context instead of mutating the active kube context', () => {
+    assert.match(downScript, /target_kube_context="k3d-\$\{CLUSTER_NAME\}"/)
+    assert.match(downScript, /kubectl --context "\$\{target_kube_context\}" delete namespace/)
+    assert.match(downScript, /kubectl --context "\$\{target_kube_context\}" get namespaces/)
+    assert.match(downScript, /kubectl --context "\$\{target_kube_context\}" delete deployment/)
+    assert.doesNotMatch(downScript, /kubectl config use-context/)
+  })
+})
+
 // ---------------------------------------------------------------------------
 // localize_postgres_url (up.sh)
 // ---------------------------------------------------------------------------
@@ -643,6 +658,58 @@ describe('k3d up script guards', () => {
 // ---------------------------------------------------------------------------
 
 describe('k3d up write_state — stable JSON contract', () => {
+  it('shell-quotes token snippet argv before persisting them in state.json', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-build-token-snippet-test-${process.pid}`,
+    )
+    const fakeBinDir = join(tmpDir, 'bin')
+    const argsFile = join(tmpDir, 'curl-args.txt')
+
+    mkdirSync(fakeBinDir, { recursive: true })
+    writeFileSync(
+      join(fakeBinDir, 'curl'),
+      `#!/usr/bin/env bash
+printf '%s\n' "$@" > "$ARGS_FILE"
+printf '{"access_token":"stub-token"}'
+`,
+    )
+    chmodSync(join(fakeBinDir, 'curl'), 0o755)
+
+    const result = runBash(
+      `${buildTokenSnippetFnMatch[0]}
+snippet="$(build_token_snippet "http://keycloak.example.com:8080" "dnd-notes-dev" "client'id" "user\\"name" "pass'both\\"")"
+bash -c "$snippet"`,
+      {
+        ARGS_FILE: argsFile,
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
+      },
+    )
+
+    const curlArgs = readFileSync(argsFile, 'utf8').trim().split('\n')
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, 'stub-token')
+    assert.deepStrictEqual(curlArgs, [
+      '-fsS',
+      '-X',
+      'POST',
+      '-H',
+      'Content-Type: application/x-www-form-urlencoded',
+      '--data-urlencode',
+      'grant_type=password',
+      '--data-urlencode',
+      "client_id=client'id",
+      '--data-urlencode',
+      'username=user"name',
+      '--data-urlencode',
+      `password=pass'both"`,
+      'http://keycloak.example.com:8080/realms/dnd-notes-dev/protocol/openid-connect/token',
+    ])
+  })
+
   it('writes a valid state.json with all required fields including explicit tenantNamespace', () => {
     const tmpDir = join(
       fileURLToPath(new URL('.', import.meta.url)),
@@ -653,8 +720,8 @@ describe('k3d up write_state — stable JSON contract', () => {
     mkdirSync(tmpDir, { recursive: true })
 
     const result = runBash(
-      // We need the full write_state function and its json_get helper
-      `${writeStateFnMatch[0]}
+      `${buildTokenSnippetFnMatch[0]}
+${writeStateFnMatch[0]}
 STATE_FILE="${stateFile}"
 K3D_HTTP_PORT=8080
 CONTROL_PLANE_PORT=3101
@@ -729,6 +796,12 @@ describe('k3d status --json schema', () => {
       /`tenant-\$\{.*subdomain.*\}`/,
       'status.sh must not re-derive namespace from subdomain',
     )
+  })
+
+  it('uses --context for live kubectl reads instead of switching the active kube context', () => {
+    assert.match(statusScript, /kubectl --context "\$\{context\}" get deployment/)
+    assert.match(statusScript, /target_kube_context="k3d-\$\{CLUSTER_NAME\}"/)
+    assert.doesNotMatch(statusScript, /kubectl config use-context/)
   })
 
   it('reports the effective cluster name when K3D_CLUSTER_NAME env override is set', () => {
