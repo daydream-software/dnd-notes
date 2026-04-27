@@ -143,3 +143,49 @@ Feature implementation is **complete**. CI wiring gap is **infrastructure config
 
 ---
 
+
+### PR #120 Review Gate — Five Open Comments (2026-04-27)
+
+**Scope:** FFMikha has addressed the first batch of 5 comments with merged fixes (image import, file permissions, test isolation, state read contract). Five NEW comments have surfaced in current head requiring review gate assessment.
+
+**Five open comments:**
+1. **down.sh:142** — `rm -rf "${STATE_DIR}"` during `--keep-cluster` lacks path validation
+2. **down.sh:151** — Same `rm -rf` risk during early exit (cluster missing)
+3. **down.sh:157** — Same `rm -rf` risk during full teardown
+4. **up.sh:42** — `previous_kube_context` calls kubectl before `require_tool kubectl` runs → noisy error if kubectl missing
+5. **up.sh:485-487** — Secret FQDNs hardcode `dnd-notes-platform` instead of `${PLATFORM_NAMESPACE}` variable
+
+**Acceptance criteria per comment:**
+
+| Comment | Criterion | Category | Path | Rationale |
+|---------|-----------|----------|------|-----------|
+| 1, 2, 3 | **Delete-safety:** Validate `STATE_DIR` is under repo root before `rm -rf` (or delete only state.json) | **Blocking** | down.sh, lines 142/151/157 | Arbitrary env override of `K3D_STATE_FILE` could delete system dirs; same pattern repeated 3x |
+| 4 | **Startup clarity:** Guard kubectl call or move after `require_tool` check to avoid "command not found" noise | **Minor** | up.sh:42 | Doesn't affect correctness, only startup message clarity |
+| 5 | **Config coherence:** Replace hardcoded `dnd-notes-platform` with `${PLATFORM_NAMESPACE}` in 3 Secret URIs | **Deferred** | up.sh:485-487 | Single-source principle; namespace is already a variable; safe refactor but not urgent |
+
+**Patch scope assessment:**
+- **Comments 1–3:** One surgical fix — extract path validation helper, apply to all 3 `rm -rf` sites. ~10 lines.
+- **Comment 4:** One-line guard or simple reorder. ~3 lines.
+- **Comment 5:** Variable substitution in 3 literal strings. ~1 line.
+- **Total:** Addressable in one small platform patch (~15 lines, no logic changes, purely defensive).
+
+**Delete-safety pattern risk:**
+The three delete calls all derive `STATE_DIR` from `K3D_STATE_FILE` env var without validation:
+```bash
+STATE_DIR="$(dirname "${STATE_FILE}")"  # line 11
+# ... later ...
+rm -rf "${STATE_DIR}"  # lines 142, 151, 157
+```
+If `K3D_STATE_FILE=/tmp` (or unset, causing literal path mangling), `STATE_DIR` could be `/tmp`, `/`, or repo root. 
+**Proposed fix:** Before each rm, validate:
+```bash
+if [[ ! "${STATE_DIR}" =~ ^"${ROOT}/.k3d-state" ]]; then
+  log "ERROR: STATE_DIR validation failed"; exit 1
+fi
+rm -rf "${STATE_DIR}"
+```
+
+**Status:** All five comments are non-conflicting and can be batched into one patch. No rework of functional logic required—purely defensive + config coherence. Ready for Brand to land as platform patch.
+
+**Next:** Confirm Brand's patch addresses all five + validate smoke re-runs green.
+

@@ -39,7 +39,10 @@ NO_REBUILD=false
 RESET_TENANT=false
 NO_TENANT=false
 JSON_OUTPUT=false
-previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
+previous_kube_context=""
+if command -v kubectl >/dev/null 2>&1; then
+  previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
+fi
 control_plane_port_forward_pid=""
 postgres_forward_pid=""
 tenant_namespace=""
@@ -482,9 +485,9 @@ run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"
 kubectl create secret generic dnd-notes-control-plane-secrets \
   -n "${PLATFORM_NAMESPACE}" \
   --from-literal=CONTROL_PLANE_ADMIN_TOKEN='local-admin-token' \
-  --from-literal=CONTROL_PLANE_DATABASE_URL='postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/control_plane' \
-  --from-literal=TENANT_DATABASE_ADMIN_URL='postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres' \
-  --from-literal=TENANT_DATABASE_RUNTIME_URL='postgresql://runtime-template:placeholder@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres?sslmode=disable' \
+  --from-literal=CONTROL_PLANE_DATABASE_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/control_plane" \
+  --from-literal=TENANT_DATABASE_ADMIN_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres" \
+  --from-literal=TENANT_DATABASE_RUNTIME_URL="postgresql://runtime-template:placeholder@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres?sslmode=disable" \
   --dry-run=client -o yaml \
   | kubectl apply -f - >/dev/null
 

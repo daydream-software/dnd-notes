@@ -33,6 +33,9 @@ dependencies.
 - `scripts/k3d/down.sh` returns an empty `read_state_field` value when Node is
   unavailable, allowing `--keep-cluster` to fall back to scanning `tenant-*`
   namespaces.
+- `scripts/k3d/up.sh` captures `previous_kube_context` only when `kubectl` is
+  installed, so the script does not print startup noise before its real
+  prerequisite checks.
 - `apps/control-plane/test/k3d-persistent-lane.test.ts` shells into both helpers
   with a fake empty `PATH` to lock the degraded behavior.
 

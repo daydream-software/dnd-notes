@@ -76,6 +76,14 @@ read_state_field() {
   return 0
 }
 
+remove_state_artifacts() {
+  rm -f "${STATE_FILE}"
+
+  if [[ "${STATE_DIR}" == "${ROOT}/.k3d-state" ]]; then
+    rmdir "${STATE_DIR}" 2>/dev/null || true
+  fi
+}
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -139,7 +147,7 @@ if [[ "${KEEP_CLUSTER}" == "true" ]]; then
     -n "${PLATFORM_NAMESPACE}" \
     --ignore-not-found=true
 
-  rm -rf "${STATE_DIR}"
+  remove_state_artifacts
   log "Done. Cluster, Postgres, ingress, and Keycloak are still running."
   log "Run 'npm run k3d:up' to re-provision."
 else
@@ -148,12 +156,12 @@ else
   # -------------------------------------------------------------------------
   if ! cluster_exists "${CLUSTER_NAME}"; then
     log "Cluster ${CLUSTER_NAME} does not exist — nothing to tear down."
-    rm -rf "${STATE_DIR}"
+    remove_state_artifacts
     exit 0
   fi
 
   log "Deleting k3d cluster '${CLUSTER_NAME}'..."
   k3d cluster delete "${CLUSTER_NAME}"
-  rm -rf "${STATE_DIR}"
+  remove_state_artifacts
   log "Done. Run 'npm run k3d:up' to start fresh."
 fi

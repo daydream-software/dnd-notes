@@ -24,6 +24,7 @@ const resetStateFnMatch = statusScript.match(/^reset_state\(\) \{\n[\s\S]*?^}/m)
 const readStateFnMatch = statusScript.match(/^read_state\(\) \{\n[\s\S]*?^}/m)
 const probeTenantUrlFnMatch = statusScript.match(/^probe_tenant_url\(\) \{\n[\s\S]*?^}/m)
 const readStateFieldFnMatch = downScript.match(/^read_state_field\(\) \{\n[\s\S]*?^}/m)
+const removeStateArtifactsFnMatch = downScript.match(/^remove_state_artifacts\(\) \{\n[\s\S]*?^}/m)
 const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n[\s\S]*?^}/m)
 const runK3dImageImportFnMatch = upScript.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
 const ensureImageImportedFnMatch = upScript.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
@@ -44,6 +45,10 @@ if (!probeTenantUrlFnMatch) {
 
 if (!readStateFieldFnMatch) {
   throw new Error('Expected read_state_field() in scripts/k3d/down.sh')
+}
+
+if (!removeStateArtifactsFnMatch) {
+  throw new Error('Expected remove_state_artifacts() in scripts/k3d/down.sh')
 }
 
 if (!localizePostgresUrlMatch) {
@@ -402,6 +407,70 @@ printf 'got:[%s]' "$ns"`,
   })
 })
 
+describe('k3d down remove_state_artifacts', () => {
+  it('removes only the configured state file when K3D_STATE_FILE points outside the default state dir', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-down-remove-state-test-${process.pid}`,
+    )
+    const rootDir = join(tmpDir, 'repo-root')
+    const customStateDir = join(tmpDir, 'custom-state')
+    const stateFile = join(customStateDir, 'state.json')
+    const keepFile = join(customStateDir, 'keep.txt')
+
+    mkdirSync(rootDir, { recursive: true })
+    mkdirSync(customStateDir, { recursive: true })
+    writeFileSync(stateFile, '{"clusterName":"dnd-notes"}')
+    writeFileSync(keepFile, 'keep')
+
+    const result = runBash(
+      `${removeStateArtifactsFnMatch[0]}
+ROOT="${rootDir}"
+STATE_FILE="${stateFile}"
+STATE_DIR="$(dirname "\${STATE_FILE}")"
+remove_state_artifacts
+printf '%s|%s|%s' \
+  "$(test -f "\${STATE_FILE}" && echo file || echo missing)" \
+  "$(test -d "\${STATE_DIR}" && echo dir || echo nodir)" \
+  "$(test -f "\${STATE_DIR}/keep.txt" && echo keep || echo lost)"`,
+    )
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, 'missing|dir|keep')
+  })
+
+  it('removes the empty default .k3d-state directory after deleting the state file', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-down-default-state-test-${process.pid}`,
+    )
+    const rootDir = join(tmpDir, 'repo-root')
+    const stateDir = join(rootDir, '.k3d-state')
+    const stateFile = join(stateDir, 'state.json')
+
+    mkdirSync(stateDir, { recursive: true })
+    writeFileSync(stateFile, '{"clusterName":"dnd-notes"}')
+
+    const result = runBash(
+      `${removeStateArtifactsFnMatch[0]}
+ROOT="${rootDir}"
+STATE_FILE="${stateFile}"
+STATE_DIR="$(dirname "\${STATE_FILE}")"
+remove_state_artifacts
+printf '%s|%s' \
+  "$(test -f "\${STATE_FILE}" && echo file || echo missing)" \
+  "$(test -d "\${STATE_DIR}" && echo dir || echo nodir)"`,
+    )
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, 'missing|nodir')
+  })
+})
+
 // ---------------------------------------------------------------------------
 // localize_postgres_url (up.sh)
 // ---------------------------------------------------------------------------
@@ -496,6 +565,30 @@ ensure_image_ready "Tenant" "ghcr.io/daydream-software/dnd-notes:k3d" "/fake/bui
     assert.match(
       invocations,
       /k3d:image import --mode direct -c dnd-notes ghcr\.io\/daydream-software\/dnd-notes:k3d/,
+    )
+  })
+})
+
+describe('k3d up script guards', () => {
+  it('guards the previous kube context lookup behind a kubectl availability check', () => {
+    assert.match(
+      upScript,
+      /previous_kube_context=""[\s\S]*?if command -v kubectl >\/dev\/null 2>&1; then[\s\S]*?previous_kube_context="\$\(kubectl config current-context 2>\/dev\/null \|\| true\)"/,
+    )
+    assert.doesNotMatch(
+      upScript,
+      /^previous_kube_context="\$\(kubectl config current-context 2>\/dev\/null \|\| true\)"$/m,
+    )
+  })
+
+  it('uses PLATFORM_NAMESPACE when constructing in-cluster Postgres service URLs', () => {
+    assert.match(
+      upScript,
+      /platform-postgres\.\$\{PLATFORM_NAMESPACE\}\.svc\.cluster\.local/g,
+    )
+    assert.doesNotMatch(
+      upScript,
+      /platform-postgres\.dnd-notes-platform\.svc\.cluster\.local/,
     )
   })
 })
