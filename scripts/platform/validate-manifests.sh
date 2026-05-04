@@ -73,4 +73,6 @@ require_tool node
 
 validate_overlay "${ROOT}/platform/control-plane/overlays/k3d"
 validate_overlay "${ROOT}/platform/control-plane/overlays/hosted-reference"
+validate_overlay "${ROOT}/platform/operator-portal/overlays/k3d"
+validate_overlay "${ROOT}/platform/customer-portal/overlays/k3d"
 validate_keycloak_realm_seed "${ROOT}/platform/k3d/keycloak.yaml"

@@ -19,6 +19,7 @@ apps/web/.vite
 .copilot_here
 .worktrees
 docker/
+!docker/portal/
 scripts/*
 !scripts/prepare.mjs
 !scripts/build-portal-utils.mjs

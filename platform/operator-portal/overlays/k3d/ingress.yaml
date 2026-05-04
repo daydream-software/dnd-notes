@@ -1,0 +1,20 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: operator-portal
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: operator-portal
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: operator.127.0.0.1.nip.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: operator-portal
+                port:
+                  name: http

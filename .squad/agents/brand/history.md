@@ -305,3 +305,9 @@ See **Recent Skills Documented** above for detailed patterns. Key themes:
 ## PR #120 Final Resolution (2026-04-27T00:01:25Z)
 
 📌 Team update (2026-04-27T00:01:25Z): PR #120 final fixes completed. Commit 86fc630 resolved three remaining blockers: image import under `--no-rebuild`, `.k3d-state` owner-only permissions, regression test `K3D_STATE_FILE` isolation. Chunk approved. No hidden regressions. Ready for merge. — Brand, Chunk
+
+## Issue #84 — Portal Containerization (2026-05-04)
+
+- **Vite SPA Containerization**: Designed a single multi-stage Dockerfile that supports building multiple distinct workspaces via `PORTAL_NAME` build arguments. Using `nginx:alpine` and an `/etc/nginx/templates/` reverse proxy config ensures identical base-path routing rules and API proxy logic without requiring complex CORS setups.
+- **Runtime SPA Configuration**: Injected runtime variables (`API_BASE_PATH`, Keycloak settings) directly into `/usr/share/nginx/html/env.js` via a custom `/docker-entrypoint.d/40-generate-env.sh` script. This fulfills the `ConfigMap` runtime injection requirement by serving `window.__ENV__` configuration directly to the frontend, preventing image rebuilds for different environments.
+- **Keycloak Web Origins**: Replaced wildcards that omitted ports with precise port configurations (`http://*.127.0.0.1.nip.io:8080`) so the `dnd-notes-tenant-app` and `dnd-notes-control-plane` Keycloak clients authorize local k3d portals correctly.

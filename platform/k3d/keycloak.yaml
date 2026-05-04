@@ -80,11 +80,13 @@ data:
           "directAccessGrantsEnabled": true,
           "redirectUris": [
             "http://*.127.0.0.1.nip.io/*",
+            "http://*.127.0.0.1.nip.io:8080/*",
             "http://localhost:5173/*",
             "http://localhost:3000/*"
           ],
           "webOrigins": [
             "http://*.127.0.0.1.nip.io",
+            "http://*.127.0.0.1.nip.io:8080",
             "http://localhost:5173",
             "http://localhost:3000"
           ]
@@ -93,10 +95,20 @@ data:
           "clientId": "dnd-notes-control-plane",
           "enabled": true,
           "publicClient": true,
-          "standardFlowEnabled": false,
+          "standardFlowEnabled": true,
           "bearerOnly": false,
           "implicitFlowEnabled": false,
-          "directAccessGrantsEnabled": true
+          "directAccessGrantsEnabled": true,
+          "redirectUris": [
+            "http://operator.127.0.0.1.nip.io:8080/*",
+            "http://localhost:5173/*",
+            "http://localhost:5174/*"
+          ],
+          "webOrigins": [
+            "http://operator.127.0.0.1.nip.io:8080",
+            "http://localhost:5173",
+            "http://localhost:5174"
+          ]
         }
       ],
       "roles": {
