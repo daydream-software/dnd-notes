@@ -1,0 +1,38 @@
+# Stage 1: Base with package.json files
+FROM node:22.21.1-bookworm-slim AS base
+WORKDIR /app
+COPY package*.json ./
+COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
+COPY packages/portal-utils ./packages/portal-utils
+COPY packages/postgres-migrations ./packages/postgres-migrations
+COPY platform/keycloak-jwt ./platform/keycloak-jwt
+COPY apps/api/package*.json ./apps/api/
+COPY apps/web/package*.json ./apps/web/
+COPY apps/control-plane/package*.json ./apps/control-plane/
+COPY apps/operator-portal/package*.json ./apps/operator-portal/
+COPY apps/customer-portal/package*.json ./apps/customer-portal/
+
+# Stage 2: Install all dependencies for build
+FROM base AS build-deps
+RUN npm ci
+
+# Stage 3: Build application
+FROM build-deps AS build
+ARG PORTAL_NAME
+COPY tsconfig.json commitlint.config.cjs ./
+COPY . ./
+RUN node ./scripts/build-portal-utils.mjs
+RUN npm run build --workspace apps/${PORTAL_NAME}
+
+# Stage 4: Runtime image
+FROM nginx:alpine AS runtime
+ARG PORTAL_NAME
+WORKDIR /usr/share/nginx/html
+RUN rm -rf ./*
+COPY --from=build /app/apps/${PORTAL_NAME}/dist ./
+
+COPY docker/portal/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY docker/portal/generate-env.sh /docker-entrypoint.d/40-generate-env.sh
+RUN chmod +x /docker-entrypoint.d/40-generate-env.sh
+
+EXPOSE 8080

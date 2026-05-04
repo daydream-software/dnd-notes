@@ -510,14 +510,20 @@ kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 # ---------------------------------------------------------------------------
 tenant_image_ref="${TENANT_IMAGE_REPOSITORY}:${TENANT_IMAGE_TAG}"
 cp_image_ref="${CONTROL_PLANE_IMAGE_REPOSITORY}:${CONTROL_PLANE_IMAGE_TAG}"
+op_image_ref="${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-operator-portal}:${OPERATOR_PORTAL_IMAGE_TAG:-k3d}"
+cust_image_ref="${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}:${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}"
 
 ensure_image_ready "Tenant" "${tenant_image_ref}" "${ROOT}/scripts/k3d/build-tenant-image.sh"
 ensure_image_ready "Control-plane" "${cp_image_ref}" "${ROOT}/scripts/k3d/build-control-plane-image.sh"
+ensure_image_ready "Operator-portal" "${op_image_ref}" "${ROOT}/scripts/k3d/build-operator-portal-image.sh"
+ensure_image_ready "Customer-portal" "${cust_image_ref}" "${ROOT}/scripts/k3d/build-customer-portal-image.sh"
 
 # ---------------------------------------------------------------------------
-# Step 3: Deploy control plane
+# Step 3: Deploy control plane and portals
 # ---------------------------------------------------------------------------
 run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"
+run_visible kubectl apply -k "${ROOT}/platform/operator-portal/overlays/k3d"
+run_visible kubectl apply -k "${ROOT}/platform/customer-portal/overlays/k3d"
 
 # The k3d overlay keeps placeholder Secret values in source control; replace the
 # rendered Secret after apply before waiting on the deployment.
@@ -531,7 +537,11 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
   | kubectl apply -f - >/dev/null
 
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane
+run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/operator-portal
+run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/customer-portal
 run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane --timeout=240s
+run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/operator-portal --timeout=120s
+run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/customer-portal --timeout=120s
 
 # ---------------------------------------------------------------------------
 # Step 4 (optional): Provision the deterministic dev tenant

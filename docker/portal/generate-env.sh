@@ -1,0 +1,9 @@
+#!/bin/sh
+cat <<ENVEOF > /usr/share/nginx/html/env.js
+window.__ENV__ = {
+  API_BASE_PATH: "${API_BASE_PATH}",
+  KEYCLOAK_URL: "${KEYCLOAK_URL}",
+  KEYCLOAK_REALM: "${KEYCLOAK_REALM}",
+  KEYCLOAK_CLIENT_ID: "${KEYCLOAK_CLIENT_ID}"
+};
+ENVEOF
