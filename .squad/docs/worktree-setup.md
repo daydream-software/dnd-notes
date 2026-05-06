@@ -28,8 +28,8 @@ If `workTreesFolder` is omitted but `worktrees` stays enabled, Squad falls back 
 - Fallback without `workTreesFolder`: `{repo-parent}/{repo-name}-{issue-number}`
 
 Example:
-- Configured folder: `/workspace/dnd-notes/.worktrees/42`
-- Fallback sibling path: `/workspace/dnd-notes-42`
+- Configured folder: `~/workspace/dnd-notes/.worktrees/42`
+- Fallback sibling path: `~/workspace/dnd-notes-42`
 
 ## How Worktrees Are Resolved
 
@@ -83,7 +83,7 @@ dnd-notes/
 Create a worktree with the configured repo-local folder:
 
 ```bash
-cd /workspace/dnd-notes
+cd ~/workspace/dnd-notes
 git worktree add .worktrees/42 -b squad/42-descriptive-slug main
 cd .worktrees/42
 ln -s ../../node_modules node_modules
@@ -92,7 +92,7 @@ ln -s ../../node_modules node_modules
 If `workTreesFolder` is not configured, use the fallback sibling path instead:
 
 ```bash
-cd /workspace/dnd-notes
+cd ~/workspace/dnd-notes
 git worktree add ../dnd-notes-42 -b squad/42-descriptive-slug main
 cd ../dnd-notes-42
 ln -s ../dnd-notes/node_modules node_modules
@@ -107,7 +107,7 @@ git worktree list
 Remove a worktree after merge:
 
 ```bash
-cd /workspace/dnd-notes
+cd ~/workspace/dnd-notes
 git worktree remove .worktrees/42
 git branch -d squad/42-descriptive-slug
 ```
@@ -115,7 +115,7 @@ git branch -d squad/42-descriptive-slug
 Fallback cleanup without `workTreesFolder`:
 
 ```bash
-cd /workspace/dnd-notes
+cd ~/workspace/dnd-notes
 git worktree remove ../dnd-notes-42
 git branch -d squad/42-descriptive-slug
 ```

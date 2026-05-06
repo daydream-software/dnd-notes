@@ -2103,7 +2103,7 @@ If rejected, require **Data** (backend) or **Stef** (frontend) revision dependin
 ## Next Steps
 
 1. Wait for Stef to land initial search implementation
-2. Run full test validation: `cd /workspace/dnd-notes/.worktrees/24 && npm run lint && npm run test && npm run build`
+2. Run full test validation: `cd ~/workspace/dnd-notes/.worktrees/24 && npm run lint && npm run test && npm run build`
 3. Review changes against this QA strategy
 4. Either approve with evidence or reject with concrete next steps
 # Issue #30 Implementation REJECTED
@@ -2126,7 +2126,7 @@ The current implementation for note-to-note links breaks existing tests and has 
 ✖ legacy note databases are upgraded in place for membership attribution columns
   SyntaxError: "undefined" is not valid JSON
     at JSON.parse (<anonymous>)
-    at mapNoteRow (/workspace/dnd-notes/.worktrees/30/apps/api/src/note-store.ts:314:25)
+    at mapNoteRow (~/workspace/dnd-notes/.worktrees/30/apps/api/src/note-store.ts:314:25)
 ```
 
 **Root cause:** The `mapNoteRow()` function tries to parse `row.linked_notes_json` even when the column doesn't exist yet. This breaks the legacy database upgrade path that the project explicitly requires for backward compatibility.

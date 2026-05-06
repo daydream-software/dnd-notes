@@ -1,3 +1,20 @@
+@font-face {
+  font-family: 'Geist';
+  src: url('/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
 html,
 body,
 #root {
@@ -6,4 +23,7 @@ body,
 
 body {
   margin: 0;
+  background:
+    radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
+    linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
 }

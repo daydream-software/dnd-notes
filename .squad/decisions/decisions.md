@@ -148,7 +148,7 @@ Main worktree is clean (all #33 work merged to commit 762fe1d). Issue #28 scope 
 ### 1. Create Feature Branch
 
 ```bash
-cd /workspace/dnd-notes
+cd ~/workspace/dnd-notes
 git fetch origin
 git checkout -b issue/28-tag-facets-autocomplete origin/main
 ```

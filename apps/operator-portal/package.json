@@ -12,6 +12,7 @@
     "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=../../reports/test-results/operator-portal.junit.xml --coverage.enabled --coverage.provider=v8 --coverage.reporter=text-summary --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reporter=cobertura --coverage.reportsDirectory=../../reports/coverage/operator-portal"
   },
   "dependencies": {
+    "@dnd-notes/theme": "*",
     "@dnd-notes/portal-utils": "*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",

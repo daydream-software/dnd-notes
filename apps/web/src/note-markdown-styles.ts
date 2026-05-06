@@ -44,7 +44,7 @@ export const markdownSx = {
     bgcolor: 'action.hover',
     borderRadius: 1,
     fontFamily:
-      'ui-monospace, SFMono-Regular, SFMono-Regular, Consolas, Liberation Mono, Menlo, monospace',
+      "'Geist Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace",
     fontSize: '0.9em',
     px: 0.75,
     py: 0.25,

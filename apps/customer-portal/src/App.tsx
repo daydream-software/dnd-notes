@@ -371,7 +371,7 @@ export default function App() {
   }
 
   return (
-    <Box sx={{ minHeight: '100vh', background: 'linear-gradient(180deg, #020617 0%, #111827 100%)' }}>
+    <Box sx={{ minHeight: '100vh', background: 'radial-gradient(circle at top, rgba(124,58,237,0.28), transparent 35%), linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%)' }}>
       <AppBar position="static" color="transparent" elevation={0}>
         <Toolbar sx={{ justifyContent: 'space-between', gap: 2 }}>
           <Typography variant="h6" sx={{ fontWeight: 700 }}>
@@ -718,6 +718,7 @@ export default function App() {
                         variant="contained"
                         size="large"
                         disabled={isSubmittingSignup || isLoadingCatalog}
+                        sx={{ alignSelf: 'flex-start' }}
                       >
                         {isSubmittingSignup ? 'Creating portal account…' : 'Create portal account'}
                       </Button>
@@ -826,6 +827,7 @@ export default function App() {
                         type="submit"
                         variant="contained"
                         disabled={isSubmittingCreateTenant}
+                        sx={{ alignSelf: 'flex-start' }}
                       >
                         {isSubmittingCreateTenant
                           ? 'Submitting tenant request…'
@@ -854,7 +856,7 @@ export default function App() {
                         onChange={(event) => setLoginPassword(event.target.value)}
                         required
                       />
-                      <Button type="submit" variant="outlined">
+                      <Button type="submit" variant="outlined" sx={{ alignSelf: 'flex-start' }}>
                         Restore dashboard
                       </Button>
                     </Stack>
