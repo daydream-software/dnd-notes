@@ -12,6 +12,7 @@
     "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=../../reports/test-results/web.junit.xml --coverage.enabled --coverage.provider=v8 --coverage.reporter=text-summary --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reporter=cobertura --coverage.reportsDirectory=../../reports/coverage/web"
   },
   "dependencies": {
+    "@dnd-notes/theme": "*",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
     "@lexical/code": "^0.43.0",

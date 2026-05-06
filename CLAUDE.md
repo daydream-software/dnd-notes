@@ -1,0 +1,62 @@
+# D&D Notes — Agent Guidelines
+
+See `AGENTS.md` for the full project overview, commands, and contribution rules.
+This file adds Claude Code-specific guidance on top of that.
+
+---
+
+## Design system
+
+This project uses a defined design system. **Do not introduce tokens, fonts, or colors that contradict it.**
+
+### Single source of truth — `packages/theme`
+
+The MUI theme lives in `packages/theme/src/index.ts` and is imported by all three frontend apps via `@dnd-notes/theme`. **Never call `createTheme` inside an app.** If a change to the palette, typography, or radii is needed, edit the package — the apps pick it up automatically on next build.
+
+### Typography
+
+- **Font family:** Geist (sans) + Geist Mono. Font files are self-hosted in each app's `public/fonts/`. **Do not use Inter or any other font.**
+- Swap rule: if you add or modify a `fontFamily` anywhere (MUI theme, inline `sx`, CSS), it must reference `'Geist'` or `'Geist Mono'`.
+
+### Palette
+
+| Token | Value | Usage |
+|---|---|---|
+| Primary | `#a78bfa` | Buttons, chips, focus rings, links |
+| Secondary | `#f59e0b` | Amber accent |
+| Background default | `#0f172a` | MUI `background.default` |
+| Paper | `rgba(15, 23, 42, 0.9)` | Cards, dialogs, surfaces |
+
+**Forbidden values:** `#38bdf8` (sky blue), `#8b5cf6` (violet-600 used by old portals), `#020617` as `background.default`. If you see these anywhere outside a gradient stop, replace them.
+
+### Background gradient
+
+The page body background is:
+```css
+radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
+linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%)
+```
+This is set in each app's `src/index.css`. Do not override it with a flat color or a simpler gradient.
+
+### Surfaces & borders
+
+- `borderRadius: 18` globally (MUI `shape.borderRadius`). No sharp-cornered surfaces.
+- Borders are always `1px` and purple-tinted-translucent (`rgba(167, 139, 250, 0.18–0.22)`). No solid neutral borders.
+- Cards use `backdrop-filter: blur(12–16px)` and slate-tinted shadows (`rgba(2, 6, 23, 0.26)`).
+
+### Buttons
+
+- **Do not add `fullWidth` to submit buttons in forms.** Use `sx={{ alignSelf: 'flex-start' }}` on the `Button` when it sits inside a flex-column `Stack` without explicit `alignItems`. Full-width is only appropriate inside `Dialog` action rows.
+- MUI **Rounded** icon variants only — never Outlined or Sharp.
+
+### Copy & tone
+
+- Sentence case everywhere: buttons, headings, labels. No Title Case, no ALL CAPS except the brand pill (`D&D NOTES` with `letter-spacing: 0.08em`).
+- No emoji in UI copy or code. Use MUI Rounded icons instead.
+- Voice is calm and declarative — no exclamation points, no marketing puff.
+
+---
+
+## Memory
+
+Project memories are stored in the standard Claude Code memory directory for this workspace. Check `MEMORY.md` there for the index.

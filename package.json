@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "D&D note-taking app starter with React, Material UI, and Node.js",
   "workspaces": [
+    "packages/theme",
     "packages/portal-utils",
     "packages/postgres-migrations",
     "platform/keycloak-jwt",
