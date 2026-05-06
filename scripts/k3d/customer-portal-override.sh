@@ -11,6 +11,7 @@ LOCAL_PORT="${K3D_CUSTOMER_PORTAL_OVERRIDE_LOCAL_PORT:-5174}"
 PROXY_PORT="${K3D_CUSTOMER_PORTAL_OVERRIDE_LISTEN_PORT:-38081}"
 CHECK_ONLY="${K3D_CUSTOMER_PORTAL_OVERRIDE_CHECK_ONLY:-false}"
 WORK_DIR="${ROOT}/.k3d-smoke-work/customer-portal-override"
+JSON_OUTPUT=false
 
 portal_pid=""
 proxy_pid=""
@@ -22,6 +23,13 @@ Run the customer-portal live override workflow.
 Starts `apps/customer-portal` locally in watch mode and exposes a proxy
 at http://<tenant>.127.0.0.1.nip.io:38081 where the portal is local but
 talks to the k3d tenant API.
+
+Flags:
+  --json   Print a machine-readable JSON readiness summary on stdout once
+           the proxy is up, then continue streaming logs. With --json the
+           summary is printed before the tail so agents can consume the
+           first complete JSON line then decide whether to wait.
+  --help   Show this help and exit
 
 Environment overrides:
   K3D_STATE_FILE
@@ -97,10 +105,20 @@ cleanup() {
 
 trap cleanup EXIT
 
-if [[ "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+for arg in "$@"; do
+  case "${arg}" in
+    --json)   JSON_OUTPUT=true ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      log "Unknown argument: ${arg}"
+      usage
+      exit 1
+      ;;
+  esac
+done
 
 for tool in curl node npm; do
   require_tool "$tool"
@@ -115,11 +133,38 @@ rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
 cluster_name="$(json_get clusterName <"${STATE_FILE}")"
-keycloak_url="$(json_get keycloakUrl <"${STATE_FILE}")"
-keycloak_realm="$(json_get keycloakRealm <"${STATE_FILE}")"
-tenant_subdomain="$(json_get tenantSubdomain <"${STATE_FILE}")"
-tenant_hostname="$(json_get tenantHostname <"${STATE_FILE}")"
-tenant_origin="$(json_get tenantOrigin <"${STATE_FILE}")"
+# Support v1 schema (keycloak sub-object, tenants array) and v0 flat fields
+keycloak_url="$(node -e '
+  const fs = require("node:fs")
+  const state = JSON.parse(fs.readFileSync(0, "utf8"))
+  const url = state.keycloak?.url ?? state.keycloakUrl ?? ""
+  process.stdout.write(url)
+' <"${STATE_FILE}")"
+keycloak_realm="$(node -e '
+  const fs = require("node:fs")
+  const state = JSON.parse(fs.readFileSync(0, "utf8"))
+  const realm = state.keycloak?.realm ?? state.keycloakRealm ?? ""
+  process.stdout.write(realm)
+' <"${STATE_FILE}")"
+# v1 schema: first entry in tenants[]; v0: flat tenantSubdomain/tenantHostname/tenantOrigin
+tenant_subdomain="$(node -e '
+  const fs = require("node:fs")
+  const state = JSON.parse(fs.readFileSync(0, "utf8"))
+  const t = Array.isArray(state.tenants) && state.tenants[0]
+  process.stdout.write((t ? t.subdomain : state.tenantSubdomain) ?? "")
+' <"${STATE_FILE}")"
+tenant_hostname="$(node -e '
+  const fs = require("node:fs")
+  const state = JSON.parse(fs.readFileSync(0, "utf8"))
+  const t = Array.isArray(state.tenants) && state.tenants[0]
+  process.stdout.write((t ? t.hostname : state.tenantHostname) ?? "")
+' <"${STATE_FILE}")"
+tenant_origin="$(node -e '
+  const fs = require("node:fs")
+  const state = JSON.parse(fs.readFileSync(0, "utf8"))
+  const t = Array.isArray(state.tenants) && state.tenants[0]
+  process.stdout.write((t ? t.origin : state.tenantOrigin) ?? "")
+' <"${STATE_FILE}")"
 
 proxy_origin="http://${tenant_hostname}:${PROXY_PORT}"
 
@@ -163,13 +208,27 @@ if ! curl -fsS "${proxy_origin}/env.js" | grep -q '__ENV__'; then
   exit 1
 fi
 
-echo
-echo "customer-portal live override is ready."
-echo "- k3d cluster: ${cluster_name}"
-echo "- Local portal: http://127.0.0.1:${LOCAL_PORT}"
-echo "- Override origin: ${proxy_origin}"
-echo "- API target: ${tenant_origin}"
-echo
+if [[ "${JSON_OUTPUT}" == "true" ]]; then
+  node -e '
+    const [clusterName, localPort, proxyOrigin, tenantOrigin] = process.argv.slice(1)
+    process.stdout.write(JSON.stringify({
+      ready: true,
+      workflow: "customer-portal-override",
+      clusterName,
+      localPortalUrl: `http://127.0.0.1:${localPort}`,
+      overrideOrigin: proxyOrigin,
+      apiTarget: tenantOrigin,
+    }, null, 2) + "\n")
+  ' "${cluster_name}" "${LOCAL_PORT}" "${proxy_origin}" "${tenant_origin}"
+else
+  echo
+  echo "customer-portal live override is ready."
+  echo "- k3d cluster: ${cluster_name}"
+  echo "- Local portal: http://127.0.0.1:${LOCAL_PORT}"
+  echo "- Override origin: ${proxy_origin}"
+  echo "- API target: ${tenant_origin}"
+  echo
+fi
 
 if [[ "${CHECK_ONLY}" == "true" ]]; then
   exit 0

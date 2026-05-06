@@ -48,6 +48,10 @@ cluster_exists() {
   k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${name}" >/dev/null
 }
 
+state_module() {
+  node "${ROOT}/scripts/k3d/state.mjs" "$@"
+}
+
 reset_state() {
   state_clusterName=""
   state_keycloakUrl=""
@@ -61,6 +65,8 @@ reset_state() {
 
 # Read the state file into a set of variables. Returns non-zero if the file is
 # missing or unparseable; in that case all variables are set to empty strings.
+# Supports both schema v1 (tenants[] array, keycloak sub-object) and old flat
+# schema for backwards compat while reading.
 read_state() {
   reset_state
 
@@ -80,15 +86,32 @@ read_state() {
     node -e '
       const fs = require("node:fs")
       const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+
+      // v1 schema: keycloak sub-object; tenants array
+      // v0 back-compat: flat fields at top level
+      const keycloakUrl = state.keycloak?.url ?? state.keycloakUrl ?? ""
+      const keycloakRealm = state.keycloak?.realm ?? state.keycloakRealm ?? ""
+
+      // First tenant entry (schema v1); fall back to v0 flat fields
+      const tenant = Array.isArray(state.tenants) && state.tenants.length > 0
+        ? state.tenants[0]
+        : null
+
+      const tenantId = tenant?.id ?? state.tenantId ?? ""
+      const tenantSubdomain = tenant?.subdomain ?? state.tenantSubdomain ?? ""
+      const tenantNamespace = tenant?.namespace ?? state.tenantNamespace ?? ""
+      const tenantHostname = tenant?.hostname ?? state.tenantHostname ?? ""
+      const tenantOrigin = tenant?.origin ?? state.tenantOrigin ?? ""
+
       const fields = [
         state.clusterName ?? "",
-        state.keycloakUrl ?? "",
-        state.keycloakRealm ?? "",
-        state.tenantId ?? "",
-        state.tenantSubdomain ?? "",
-        state.tenantNamespace ?? "",
-        state.tenantHostname ?? "",
-        state.tenantOrigin ?? "",
+        keycloakUrl,
+        keycloakRealm,
+        tenantId,
+        tenantSubdomain,
+        tenantNamespace,
+        tenantHostname,
+        tenantOrigin,
         "__K3D_STATE_PARSE_OK__",
       ]
 
@@ -188,16 +211,7 @@ if [[ -n "${K3D_CLUSTER_NAME:-}" ]]; then
 else
   # Try to read from state file first
   if [[ -f "${STATE_FILE}" ]] && command -v node >/dev/null 2>&1; then
-    state_cluster="$(node -e '
-      const fs = require("node:fs")
-      try {
-        const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
-        const value = state.clusterName
-        if (value !== null && value !== undefined) {
-          process.stdout.write(String(value))
-        }
-      } catch {}
-    ' "${STATE_FILE}" 2>/dev/null || true)"
+    state_cluster="$(state_module read-safe "${STATE_FILE}" clusterName 2>/dev/null || true)"
     CLUSTER_NAME="${state_cluster:-dnd-notes}"
   else
     CLUSTER_NAME="dnd-notes"
@@ -264,16 +278,28 @@ fi
 # Emit status
 # ---------------------------------------------------------------------------
 if [[ "${JSON_OUTPUT}" == "true" ]]; then
+  # Load the full state for enriched output; fall back to empty object on error
+  state_json="{}"
+  if [[ -f "${STATE_FILE}" ]]; then
+    state_json="$(cat "${STATE_FILE}")"
+  fi
+
   node -e '
     const [
       clusterName, clusterRunning,
       cpReady, kcReady, pgReady,
       tenantId, tenantSubdomain, tenantNamespace, tenantHostname, tenantOrigin,
       tenantReady, tenantUrlReachable, tenantUrlProbeSkipped,
-      stateValid, stateFile,
+      stateValid, stateFile, stateJson,
     ] = process.argv.slice(1)
 
+    // Merge live probe data into the persisted state so callers get one
+    // unified document with both stable fields and live readiness info.
+    let persisted = {}
+    try { persisted = JSON.parse(stateJson) } catch {}
+
     const status = {
+      ...persisted,
       clusterName,
       clusterRunning: clusterRunning === "true",
       stateValid: stateValid === "true",
@@ -283,18 +309,20 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
         keycloak:     { ready: kcReady },
         postgres:     { ready: pgReady },
       },
-      tenant: tenantId
-        ? {
-            id: tenantId,
-            subdomain: tenantSubdomain,
-            namespace: tenantNamespace,
-            hostname: tenantHostname,
-            origin: tenantOrigin,
-            ready: tenantReady,
-            urlReachable: tenantUrlReachable === "true",
-            urlProbeSkipped: tenantUrlProbeSkipped === "true",
-          }
-        : null,
+      tenants: tenantId
+        ? [
+            {
+              id: tenantId,
+              subdomain: tenantSubdomain,
+              namespace: tenantNamespace,
+              hostname: tenantHostname,
+              origin: tenantOrigin,
+              deployment: tenantReady,
+              urlReachable: tenantUrlReachable === "true",
+              urlProbeSkipped: tenantUrlProbeSkipped === "true",
+            },
+          ]
+        : [],
     }
 
     process.stdout.write(JSON.stringify(status, null, 2) + "\n")
@@ -313,7 +341,8 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
     "${tenant_url_reachable}" \
     "${tenant_url_probe_skipped}" \
     "${state_valid}" \
-    "${STATE_FILE}"
+    "${STATE_FILE}" \
+    "${state_json}"
 else
   echo "k3d platform status"
   echo "==================="

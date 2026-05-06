@@ -218,6 +218,10 @@ json_get() {
   ' "$path"
 }
 
+state_module() {
+  node "${ROOT}/scripts/k3d/state.mjs" "$@"
+}
+
 decode_secret_value() {
   local path="$1"
 
@@ -283,37 +287,18 @@ build_token_snippet() {
   local username="$4"
   local password="$5"
 
-  node - "${keycloak_url}" "${keycloak_realm}" "${client_id}" "${username}" "${password}" <<'NODE'
-const [, , keycloakUrl, keycloakRealm, clientId, username, password] = process.argv
-
-const shellQuote = (value) => "'" + String(value).replace(/'/g, "'\"'\"'") + "'"
-const tokenUrl = `${keycloakUrl}/realms/${keycloakRealm}/protocol/openid-connect/token`
-const tokenReader = 'process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).access_token)'
-
-process.stdout.write([
-  "curl -fsS -X POST",
-  `-H ${shellQuote("Content-Type: application/x-www-form-urlencoded")}`,
-  `--data-urlencode ${shellQuote("grant_type=password")}`,
-  `--data-urlencode ${shellQuote(`client_id=${clientId}`)}`,
-  `--data-urlencode ${shellQuote(`username=${username}`)}`,
-  `--data-urlencode ${shellQuote(`password=${password}`)}`,
-  shellQuote(tokenUrl),
-  `| node -e ${shellQuote(tokenReader)}`,
-].join(" "))
-NODE
+  state_module token-snippet \
+    "${keycloak_url}" "${keycloak_realm}" "${client_id}" "${username}" "${password}"
 }
 
-# Write the state file. tenantNamespace is stored explicitly from the API
-# response so that status/down scripts never need to re-derive it from subdomain.
+# Write the state file (schema v1). tenantNamespace is stored explicitly from
+# the API response so that status/down scripts never need to re-derive it.
 write_state() {
   local tenant_id="${1:-}"
   local tenant_subdomain="${2:-}"
   local tenant_namespace="${3:-}"
   local tenant_hostname="${4:-}"
-  local state_dir="${STATE_DIR:-$(dirname "${STATE_FILE}")}"
-
-  mkdir -p "${state_dir}"
-  chmod 700 "${state_dir}"
+  local tenant_state="${5:-}"
 
   local control_plane_token_snippet
   control_plane_token_snippet="$(build_token_snippet \
@@ -323,61 +308,68 @@ write_state() {
     "${CONTROL_PLANE_KEYCLOAK_USERNAME}" \
     "${CONTROL_PLANE_KEYCLOAK_PASSWORD}")"
 
-  local tenant_token_snippet=""
+  local tenant_token_snippet="null"
   if [[ -n "${tenant_id}" ]]; then
-    tenant_token_snippet="$(build_token_snippet \
+    local raw_snippet
+    raw_snippet="$(build_token_snippet \
       "${CONTROL_PLANE_KEYCLOAK_URL}" \
       "${CONTROL_PLANE_KEYCLOAK_REALM}" \
       "${TENANT_KEYCLOAK_CLIENT_ID}" \
       "${TENANT_KEYCLOAK_USERNAME}" \
       "${TENANT_KEYCLOAK_PASSWORD}")"
+    # JSON-encode the snippet string for embedding in the payload
+    tenant_token_snippet="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "${raw_snippet}")"
   fi
 
-  node -e '
-    const fs = require("node:fs")
-    const path = require("node:path")
+  local cp_token_snippet_json
+  cp_token_snippet_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "${control_plane_token_snippet}")"
+
+  local state_payload
+  state_payload="$(node -e '
     const [
       clusterName, httpPort, cpPort,
       keycloakUrl, keycloakRealm, cpClientId, tenantClientId,
       siteAdminEmail, siteAdminPassword,
       tenantOwnerEmail, tenantOwnerPassword,
-      tenantId, tenantSubdomain, tenantNamespace, tenantHostname, tenantPublicScheme,
-      controlPlaneTokenSnippet, tenantTokenSnippet,
+      tenantId, tenantSubdomain, tenantNamespace, tenantHostname, tenantState, tenantPublicScheme,
+      cpTokenSnippetJson, tenantTokenSnippetJson,
       stateFile,
     ] = process.argv.slice(1)
 
-    const tenantOrigin = `${tenantPublicScheme}://${tenantHostname}:${httpPort}`
+    const tenantOrigin = tenantId
+      ? `${tenantPublicScheme}://${tenantHostname}:${httpPort}`
+      : null
+
+    const ingressUrl = `${tenantPublicScheme}://127.0.0.1.nip.io:${httpPort}`
 
     const state = {
+      stateFile,
       clusterName,
+      ingressUrl,
+      controlPlaneUrl: `http://127.0.0.1:${cpPort}`,
       controlPlanePort: Number(cpPort),
-      keycloakUrl,
-      keycloakRealm,
-      controlPlaneClientId: cpClientId,
-      tenantClientId,
-      siteAdminEmail,
-      siteAdminPassword,
-      tenantId: tenantId || null,
-      tenantSubdomain: tenantSubdomain || null,
-      tenantNamespace: tenantNamespace || null,
-      tenantHostname: tenantHostname || null,
-      tenantOrigin: tenantId ? tenantOrigin : null,
-      tenantOwnerEmail,
-      tenantOwnerPassword,
+      keycloak: {
+        url: keycloakUrl,
+        realm: keycloakRealm,
+        controlPlaneClientId: cpClientId,
+        tenantClientId,
+      },
+      auth: {
+        siteAdminEmail,
+        siteAdminPassword,
+        tenantOwnerEmail,
+        tenantOwnerPassword,
+      },
+      tenants: tenantId
+        ? [{ id: tenantId, subdomain: tenantSubdomain, namespace: tenantNamespace, hostname: tenantHostname, origin: tenantOrigin, state: tenantState || "ready" }]
+        : [],
       tokenSnippets: {
-        controlPlane: controlPlaneTokenSnippet,
-        tenant: tenantId
-          ? tenantTokenSnippet
-          : null,
+        controlPlane: JSON.parse(cpTokenSnippetJson),
+        tenant: JSON.parse(tenantTokenSnippetJson),
       },
     }
 
-    const stateDir = path.dirname(stateFile)
-    fs.mkdirSync(stateDir, { recursive: true, mode: 0o700 })
-    fs.chmodSync(stateDir, 0o700)
-    fs.writeFileSync(stateFile, JSON.stringify(state, null, 2) + "\n")
-    fs.chmodSync(stateFile, 0o600)
-    process.stdout.write(stateFile)
+    process.stdout.write(JSON.stringify(state))
   ' \
     "${CLUSTER_NAME}" \
     "${K3D_HTTP_PORT}" \
@@ -394,10 +386,13 @@ write_state() {
     "${tenant_subdomain}" \
     "${tenant_namespace}" \
     "${tenant_hostname}" \
+    "${tenant_state}" \
     "${TENANT_PUBLIC_SCHEME}" \
-    "${control_plane_token_snippet}" \
+    "${cp_token_snippet_json}" \
     "${tenant_token_snippet}" \
-    "${STATE_FILE}"
+    "${STATE_FILE}")"
+
+  state_module write "${state_payload}"
 }
 
 emit_summary() {
@@ -437,6 +432,13 @@ emit_summary() {
     echo "Platform only (--no-tenant). State file: ${STATE_FILE}"
     echo "Run 'npm run k3d:status' to check platform health."
   fi
+}
+
+# ---------------------------------------------------------------------------
+# Convenience: read a scalar field from the state file (exits 0, empty on err)
+# ---------------------------------------------------------------------------
+read_state_field_safe() {
+  state_module read-safe "${STATE_FILE}" "$1" 2>/dev/null || true
 }
 
 cleanup() {
@@ -548,7 +550,7 @@ run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/custome
 # ---------------------------------------------------------------------------
 if [[ "${NO_TENANT}" == "true" ]]; then
   log "Skipping tenant provisioning (--no-tenant)."
-  write_state "" "" "" "" >/dev/null
+  write_state "" "" "" "" "" >/dev/null
   emit_summary "" "" "" ""
   exit 0
 fi
@@ -646,6 +648,7 @@ else
   tenant_namespace="$(json_get resources.namespace <"${WORK_DIR}/tenant-after-provision.json")"
   tenant_subdomain="$(json_get tenant.subdomain <"${WORK_DIR}/tenant-after-provision.json")"
   tenant_hostname="${tenant_subdomain}.${TENANT_BASE_DOMAIN}"
+  tenant_state="$(json_get tenant.currentState <"${WORK_DIR}/tenant-after-provision.json")"
 fi
 
 run_visible kubectl rollout status -n "${tenant_namespace}" deployment/dnd-notes --timeout=240s
@@ -687,6 +690,7 @@ write_state \
   "${tenant_subdomain}" \
   "${tenant_namespace}" \
   "${tenant_hostname}" \
+  "${tenant_state}" \
   >/dev/null
 
 # ---------------------------------------------------------------------------

@@ -353,3 +353,147 @@ matching CI env in `.github/workflows/k3d-smoke.yml`.
 
 The lane also vendors the ingress-nginx manifest in-repo and pins Postgres to a
 specific patch tag so local and CI smoke runs do not drift on external defaults.
+
+## Agent-friendly automation
+
+All `k3d:*` orchestration scripts accept a `--json` flag that writes
+machine-readable output to stdout. The persistent state is written to
+`.k3d-state/state.json` (schema version 1, gitignored) after every successful
+`k3d:up`. CI scripts and coding agents can query both surfaces with `jq`.
+
+### State file schema (v1)
+
+`.k3d-state/state.json` is written by `k3d:up` and read by `k3d:status`,
+`k3d:down`, `k3d:operator-portal-override`, and
+`k3d:customer-portal-override`. The schema is versioned via a top-level
+`schemaVersion` integer field; readers reject files with an unknown version.
+
+```json
+{
+  "schemaVersion": 1,
+  "clusterName": "dnd-notes",
+  "ingressUrl": "http://127.0.0.1.nip.io:8080",
+  "controlPlaneUrl": "http://127.0.0.1:3101",
+  "controlPlanePort": 3101,
+  "keycloak": {
+    "url": "http://keycloak.127.0.0.1.nip.io:8080",
+    "realm": "dnd-notes-dev",
+    "controlPlaneClientId": "dnd-notes-control-plane",
+    "tenantClientId": "dnd-notes-tenant-app"
+  },
+  "auth": {
+    "siteAdminEmail": "site-admin@example.com",
+    "siteAdminPassword": "password",
+    "tenantOwnerEmail": "owner@example.com",
+    "tenantOwnerPassword": "password"
+  },
+  "tenants": [
+    {
+      "id": "k3d-dev",
+      "subdomain": "dev",
+      "namespace": "tenant-k3d-dev",
+      "hostname": "dev.127.0.0.1.nip.io",
+      "origin": "http://dev.127.0.0.1.nip.io:8080",
+      "state": "ready"
+    }
+  ],
+  "tokenSnippets": {
+    "controlPlane": "<curl command to obtain a control-plane access token>",
+    "tenant": "<curl command to obtain a tenant access token, or null>"
+  }
+}
+```
+
+#### Field reference
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `schemaVersion` | `number` | Always `1`. Bump on breaking schema changes. |
+| `clusterName` | `string` | k3d cluster name (without the `k3d-` prefix). |
+| `ingressUrl` | `string` | Ingress base URL: scheme + host + port. |
+| `controlPlaneUrl` | `string` | Control-plane URL reachable from the host. |
+| `controlPlanePort` | `number` | Host port of the control-plane port-forward. |
+| `keycloak.url` | `string` | Browser-facing Keycloak URL. |
+| `keycloak.realm` | `string` | Keycloak realm used by the platform. |
+| `keycloak.controlPlaneClientId` | `string` | OIDC client ID for control-plane workforce tokens. |
+| `keycloak.tenantClientId` | `string` | OIDC client ID for tenant user tokens. |
+| `auth.siteAdminEmail` | `string` | Dev-only site-admin credentials. |
+| `auth.siteAdminPassword` | `string` | Dev-only site-admin credentials. |
+| `auth.tenantOwnerEmail` | `string` | Dev-only tenant-owner credentials. |
+| `auth.tenantOwnerPassword` | `string` | Dev-only tenant-owner credentials. |
+| `tenants` | `array` | Provisioned tenants. Empty when `--no-tenant` was used. |
+| `tenants[n].id` | `string` | Tenant ID as stored in the control plane. |
+| `tenants[n].subdomain` | `string` | Subdomain assigned to this tenant. |
+| `tenants[n].namespace` | `string` | Kubernetes namespace for this tenant's workloads. |
+| `tenants[n].hostname` | `string` | Full hostname (subdomain + base domain). |
+| `tenants[n].origin` | `string` | Full tenant URL (scheme + hostname + port). |
+| `tenants[n].state` | `string` | Tenant lifecycle state from the control plane (e.g. `"ready"`, `"deprovisioned"`). |
+| `tokenSnippets.controlPlane` | `string` | Ready-to-run curl command for a control-plane access token. |
+| `tokenSnippets.tenant` | `string \| null` | Ready-to-run curl command for a tenant access token, or `null`. |
+
+### Example jq queries
+
+```bash
+# Cluster name
+npm run k3d:status -- --json | jq -r '.clusterName'
+
+# Keycloak realm
+npm run k3d:status -- --json | jq -r '.keycloak.realm'
+
+# First tenant's ingress URL
+npm run k3d:status -- --json | jq -r '.tenants[0].origin'
+
+# First tenant's namespace
+npm run k3d:status -- --json | jq -r '.tenants[0].namespace'
+
+# Ingress base URL
+cat .k3d-state/state.json | jq -r '.ingressUrl'
+
+# Control-plane URL
+cat .k3d-state/state.json | jq -r '.controlPlaneUrl'
+
+# Paste-ready token command for the control plane
+cat .k3d-state/state.json | jq -r '.tokenSnippets.controlPlane'
+```
+
+### `--json` flag per script
+
+| Script | `--json` behaviour |
+| --- | --- |
+| `k3d:up` | Prints `state.json` content on stdout after successful setup. |
+| `k3d:status` | Prints the state file merged with live cluster probe data. |
+| `k3d:down` | Prints a teardown summary: `{ teardown, clusterName, clusterDeleted, stateRemoved }`. |
+| `k3d:operator-portal-override` | Prints a readiness summary (see below) then continues to stream logs. |
+| `k3d:customer-portal-override` | Prints a readiness summary (see below) then continues to stream logs. |
+
+Override script readiness summary:
+
+```json
+{
+  "ready": true,
+  "workflow": "operator-portal-override",
+  "clusterName": "dnd-notes",
+  "localPortalUrl": "http://127.0.0.1:5173",
+  "overrideOrigin": "http://operator.127.0.0.1.nip.io:38080",
+  "apiTarget": "http://control-plane.127.0.0.1.nip.io:8080"
+}
+```
+
+### State helpers module
+
+`scripts/k3d/state.mjs` is the single source of truth for the schema. It
+exports `readState`, `readStateSafe`, `writeState`, and `buildTokenSnippet`
+for programmatic use, and supports the following CLI subcommands for shell
+scripts:
+
+```bash
+node scripts/k3d/state.mjs read         <stateFile> <field>
+node scripts/k3d/state.mjs read-safe    <stateFile> <field>   # exits 0 on error
+node scripts/k3d/state.mjs read-json    <stateFile>
+node scripts/k3d/state.mjs write        <json>                # json must include stateFile
+node scripts/k3d/state.mjs token-snippet <url> <realm> <clientId> <user> <pass>
+```
+
+Tests for these helpers live in
+`apps/control-plane/test/k3d-state.test.ts` and run as part of
+`npm run test:control-plane`.
