@@ -583,7 +583,7 @@ get_exit=$?
 set -e
 
 if (( get_exit == 0 )) && [[ "${http_code}" =~ ^2 ]]; then
-  tenant_state="$(json_get tenant.state <"${WORK_DIR}/tenant-get.json")"
+  tenant_state="$(json_get tenant.currentState <"${WORK_DIR}/tenant-get.json")"
 fi
 
 if [[ "${tenant_state}" == "ready" && "${RESET_TENANT}" != "true" ]]; then
@@ -613,7 +613,7 @@ else
       deprov_state="$(curl -fsS \
         -H "Authorization: Bearer ${control_plane_bearer_token}" \
         "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${DEV_TENANT_ID}" \
-        2>/dev/null | json_get tenant.state 2>/dev/null || echo "")"
+        2>/dev/null | json_get tenant.currentState 2>/dev/null || echo "")"
       set -e
       if [[ "${deprov_state}" == "deprovisioned" || -z "${deprov_state}" ]]; then
         break
@@ -621,24 +621,6 @@ else
       sleep 2
     done
   fi
-
-  # Create the tenant record
-  log "Creating dev tenant '${DEV_TENANT_ID}'..."
-  curl -fsS \
-    -X POST \
-    -H "Authorization: Bearer ${control_plane_bearer_token}" \
-    -H 'Content-Type: application/json' \
-    -d "$(node -e '
-      const [tenantId, subdomain, ownerId, version] = process.argv.slice(1)
-      process.stdout.write(JSON.stringify({
-        id: tenantId,
-        slug: subdomain,
-        ownerId,
-        version,
-      }))
-    ' "${DEV_TENANT_ID}" "${DEV_TENANT_SUBDOMAIN}" "${DEV_TENANT_OWNER_ID}" "${TENANT_IMAGE_TAG}")" \
-    "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants" \
-    >"${WORK_DIR}/tenant-create.json"
 
   # Provision it
   log "Provisioning dev tenant '${DEV_TENANT_ID}'..."

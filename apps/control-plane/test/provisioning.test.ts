@@ -960,6 +960,55 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('allows re-provisioning a deprovisioned tenant', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantSubdomain('tenant-demo', 't-deprovisioned123456')
+      await tenantRegistry.updateTenantState(
+        'tenant-demo',
+        'deprovisioned',
+        'control-plane',
+        'Tenant was deprovisioned',
+      )
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(result.tenant.subdomain, 't-deprovisioned123456')
+      assert.equal(
+        databaseManager.ensureCalls[0]?.requireExistingRuntimeConnectionString,
+        false,
+      )
+      assert(
+        infrastructureManager.bundles.length > 0,
+        'expected infrastructure bundle to have been created',
+      )
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
   it('deprovisions tenant resources and clears the storage reference', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()

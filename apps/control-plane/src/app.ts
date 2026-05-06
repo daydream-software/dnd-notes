@@ -1465,7 +1465,12 @@ export function createApp({
         return
       }
 
-      response.json({ tenant })
+      const resources =
+        tenant.subdomain && tenantProvisioningService
+          ? tenantProvisioningService.getTenantResources(tenant)
+          : undefined
+
+      response.json({ tenant, resources })
     },
   )
 

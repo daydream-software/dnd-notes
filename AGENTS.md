@@ -4,54 +4,93 @@ This repository is a full-stack D&D note-taking application managed as an npm wo
 
 ## Project Structure & Module Organization
 
-The project is organized into a monorepo using npm workspaces:
+The project is organized into an npm monorepo:
 
-- **`apps/`**: Contains the main applications.
-  - `./apps/api`: Express + TypeScript API with Postgres persistence.
-  - `./apps/web`: React + Vite + Material UI frontend.
-  - `./apps/control-plane`: Service for tenant registry and provisioning.
-- **`packages/`**: Shared libraries used across workspaces (e.g., `./packages/portal-utils`).
-- **`platform/`**: Infrastructure and platform-specific logic, including k3d configurations and Keycloak JWT handling.
-- **`scripts/`**: Automation scripts for CI/CD, k3d management, and development tasks.
+- **`apps/api`** — Express + TypeScript backend with Postgres persistence
+- **`apps/web`** — React + Vite + Material UI frontend
+- **`apps/control-plane`** — Tenant registry and provisioning service
+- **`apps/operator-portal`** — Operator-facing React portal
+- **`apps/customer-portal`** — Customer-facing React portal
+- **`packages/portal-utils`** — Shared utilities consumed by both portals
+- **`packages/postgres-migrations`** — Shared Postgres migration framework
+- **`platform/keycloak-jwt`** — Shared Keycloak JWT module; relative imports **must** use `.js` extension
 
-Local development environment is standardized on **k3d** for Kubernetes orchestration and **Postgres** for data persistence.
+Local dev runs on **k3d** (Kubernetes in Docker) with Postgres.
 
 ## Build, Test, and Development Commands
 
-Commands should be run from the repository root:
+All commands run from the repository root.
 
-- **Dev Mode**: `npm run dev` (starts API and Web simultaneously).
-- **API Dev**: `npm run dev:api`.
-- **Web Dev**: `npm run dev:web`.
-- **Build All**: `npm run build`.
-- **Lint All**: `npm run lint`.
-- **Test All**: `npm run test`.
-- **K3d Setup**: `npm run k3d:up` (bootstraps cluster, builds images, and provisions dev tenant).
-- **K3d Health**: `npm run k3d:status`.
-- **K3d Teardown**: `npm run k3d:down`.
-- **Seed Data**: `npm run seed:data` (populates the tenant database).
+**Dev servers:**
+```
+npm run dev                    # api + web concurrently
+npm run dev:control-plane
+npm run dev:operator-portal
+npm run dev:customer-portal
+```
+
+**Build & lint:**
+```
+npm run build
+npm run lint
+```
+
+**Tests per workspace:**
+```
+npm run test:api               # Node.js native test runner
+npm run test:web               # Vitest
+npm run test:control-plane
+npm run test:operator-portal
+npm run test:customer-portal
+npm run test:keycloak-jwt
+npm run test:portal-utils
+npm run test:ci                # all workspaces with JUnit + coverage
+```
+
+**k3d cluster:**
+```
+npm run k3d:up                 # bootstrap cluster, build images, provision dev tenant
+npm run k3d:down
+npm run k3d:status
+npm run k3d:smoke
+npm run k3d:full-stack-smoke
+```
 
 ## Coding Style & Naming Conventions
 
-- **TypeScript**: Enforced strict mode (`strict: true`).
-- **Commits**: Must follow **Conventional Commits**. All commits MUST be signed (`git commit -S`). Include issue references (e.g., `feat(api): add route #123`).
-- **Branches**: Follow the squad convention: `squad/{issue-number}-{kebab-case-slug}`.
-- **Formatting**: ESLint is used across all workspaces (`npm run lint`).
+- **TypeScript strict mode** (`strict: true`) enforced in all workspaces
+- **ESLint** with `typescript-eslint` across all workspaces (`npm run lint`)
+- **`platform/keycloak-jwt`**: relative imports must end in `.js` (ESLint-enforced)
+- Use `??` over `||` for nullish checks — `prefer-nullish-coalescing` is an error
 
-## Testing Guidelines
+## Commit & Pull Request Guidelines
 
-- **API**: Uses the native Node.js test runner (`node --test`). Tests are located in `./apps/api/test/*.test.ts`.
-- **Web**: Uses **Vitest**. Tests are located alongside components.
-- **CI**: Run `npm run test:ci` for full coverage and JUnit reports.
+**Commit signing is required** — never use `--no-gpg-sign`. If a passphrase prompt is needed, stage the work and provide the user the exact `git commit -S ...` command.
+
+Conventional Commits are enforced locally via Husky + commitlint:
+- Include issue reference in every commit: `feat(api): add route #123`
+- Use closing language on the final commit: `fixes #123`
+
+**Branch naming:** `squad/{issue-number}-{kebab-case-slug}` (e.g. `squad/42-fix-login`)
+
+**PR format:**
+- `Closes #{issue-number}`
+- If the issue has a `squad:{member}` label: `Working as {member} ({role})`
+- If flagged 🟡 needs-review: add `⚠️ This task was flagged as "needs review" — please have a squad member review before merging.`
 
 ## Agent Instructions (Squad Framework)
 
-As a Coding Agent, follow these rules:
+Before starting any issue:
+1. Read `.squad/team.md` — roster, your capability profile, domain boundaries
+2. Read `.squad/routing.md` — work routing rules
+3. If the issue has a `squad:{member}` label, read `.squad/agents/{member}/charter.md` and work in their voice
 
-1. **Capability Self-Check**: Before starting, verify the task matches your profile in `./.squad/team.md`. Refuse architecture or security-critical tasks.
-2. **Planning Persistence**: 
-   - Maintain a session `plan.md` for multi-file tasks.
-   - Record progress in `./.squad/agents/copilot/history.md`.
-   - Log significant decisions in `./.squad/decisions/inbox/copilot-{slug}.md`.
-3. **Work Routing**: Respect domain boundaries defined in `./.squad/routing.md` (e.g., Data for API, Stef for UI).
-4. **Handoffs**: Always use Conventional Commits and reference issues to maintain a durable audit trail for the squad.
+**Capability check** (from `.squad/team.md` Coding Agent section):
+- 🟢 Good fit → proceed autonomously
+- 🟡 Needs review → proceed, but flag in PR description
+- 🔴 Not suitable → comment on the issue explaining why, do NOT start work
+
+**Planning persistence** (multi-phase tasks):
+1. Create/update `plan.md` with problem, approach, decisions, status, and next steps
+2. Mirror handoff context in `.squad/agents/copilot/history.md` at start, direction changes, and pauses
+3. Write impactful decisions to `.squad/decisions/inbox/copilot-{slug}.md`
