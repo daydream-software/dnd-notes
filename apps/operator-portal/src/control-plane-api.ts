@@ -24,12 +24,27 @@ function createHeaders(authToken?: string, contentType?: string) {
   return headers
 }
 
+export class ApiError extends Error {
+  public readonly statusCode: number
+  public readonly code?: string
+
+  constructor(message: string, statusCode: number, code?: string) {
+    super(message)
+    Object.setPrototypeOf(this, ApiError.prototype)
+    this.name = 'ApiError'
+    this.statusCode = statusCode
+    this.code = code
+  }
+}
+
 async function readJson<T>(response: Response) {
   if (!response.ok) {
     let errorMessage = `Request failed with status ${response.status}`
+    let errorCode: string | undefined
 
     try {
       const errorBody = (await response.json()) as ErrorResponse
+      errorCode = errorBody.code
       const details = Array.isArray(errorBody.details)
         ? errorBody.details.join(' ').trim()
         : typeof errorBody.details === 'string'
@@ -49,7 +64,7 @@ async function readJson<T>(response: Response) {
       // Fall back to generic HTTP error message.
     }
 
-    throw new Error(errorMessage)
+    throw new ApiError(errorMessage, response.status, errorCode)
   }
 
   return (await response.json()) as T

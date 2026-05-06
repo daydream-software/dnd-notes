@@ -179,33 +179,71 @@ The script honors `KEEP_K3D_SMOKE_TENANT=true` just like the fast lane, and
 `K3D_SMOKE_OUTPUT=json` when another script needs a machine-readable tenant
 summary.
 
-### 3. Live component override lane — `k3d:tenant-api-override`
+### 3. Live component override lanes
 
-The supported component-level override today is **tenant-api only**:
+Three override scripts let you run a local dev server against the live k3d stack.
+All three use the same proxy pattern: a small Node.js front proxy routes traffic
+to the correct upstream based on request path, and adds `x-dnd-notes-override-target`
+to every response so you can prove which side served each request.
 
-1. start or reuse a tenant on k3d
-2. read that tenant’s runtime Secret/ConfigMap from Kubernetes
-3. run `apps/api` locally in watch mode against the live tenant database/runtime auth config
-4. expose a local same-origin front proxy
-5. keep browser/document traffic on the k3d tenant host while routing `/api/*`
-    (plus probe paths) to the local API process
+#### `k3d:tenant-api-override`
 
-When that tenant ConfigMap carries an in-cluster `KEYCLOAK_JWKS_URL`
-(`*.svc.cluster.local`), the override launcher intentionally drops it for the
-host-side `apps/api` process so runtime auth falls back to
-`${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}/protocol/openid-connect/certs`.
-
-The proxy adds `x-dnd-notes-override-target` so the workflow can prove which side
-served each request:
+1. Start or reuse a tenant on k3d
+2. Read that tenant’s runtime Secret/ConfigMap from Kubernetes
+3. Run `apps/api` locally in watch mode against the live tenant database/runtime auth config
+4. Expose a local same-origin front proxy at `http://<tenant>.127.0.0.1.nip.io:38080`
 
 | Path | Target |
 | --- | --- |
 | `/`, `/assets/*`, browser document routes | k3d tenant host |
 | `/api/*`, `/ready`, `/readyz`, `/health`, `/healthz` | local `apps/api` |
 
-The override launcher performs the proof automatically by comparing the proxied
-root document against the live k3d tenant host and comparing proxied `/api/*`
-responses against the local API process.
+When the tenant ConfigMap carries an in-cluster `KEYCLOAK_JWKS_URL`
+(`*.svc.cluster.local`), the override launcher drops it for the host-side process
+so runtime auth falls back to the external Keycloak URL.
+
+The override launcher performs a proof automatically by comparing the proxied root
+document against the live k3d tenant host and comparing proxied `/api/*` responses
+against the local API process.
+
+#### `k3d:operator-portal-override`
+
+```bash
+npm run k3d:up                       # cluster must be running first
+npm run k3d:operator-portal-override # in a separate terminal
+```
+
+1. Reads cluster state from `.k3d-state/state.json` (written by `k3d:up`)
+2. Starts `apps/operator-portal` locally in Vite watch mode
+3. Starts a front proxy at `http://operator.127.0.0.1.nip.io:38080`
+4. Routes `/operator-api/*` to the in-cluster control plane; everything else to local Vite
+5. Injects `window.__ENV__` via `/env.js` with Keycloak URL/realm/client-id
+
+| Path | Target |
+| --- | --- |
+| `/env.js` | injected `window.__ENV__` (Keycloak config) |
+| `/operator-api/*` | in-cluster control plane |
+| `/*` | local Vite dev server (HMR enabled) |
+
+Cleanup on Ctrl-C kills both Vite and the proxy. The k3d cluster is left untouched.
+
+#### `k3d:customer-portal-override`
+
+```bash
+npm run k3d:up                        # cluster must be running first
+npm run k3d:customer-portal-override  # in a separate terminal
+```
+
+Same shape as the operator-portal override, targeting the dev tenant instead:
+
+| Path | Target |
+| --- | --- |
+| `/env.js` | injected `window.__ENV__` (Keycloak config) |
+| `/portal-api/*` | in-cluster tenant API |
+| `/*` | local Vite dev server (HMR enabled) |
+
+Proxy listens at `http://<tenant-hostname>:38081`. Keycloak SSO works end-to-end
+because the injected `window.__ENV__` points at the in-cluster Keycloak instance.
 
 ## Why the fast lane still keeps the control plane local
 
@@ -248,6 +286,12 @@ All three scripts honor a few env overrides when you need a different local shap
 | `K3D_TENANT_OVERRIDE_LISTEN_PORT` | `38080` | public port for the tenant override front proxy |
 | `K3D_TENANT_OVERRIDE_NAMESPACE` | derived | reuse an existing tenant namespace for the override lane |
 | `K3D_TENANT_OVERRIDE_SUBDOMAIN` | derived | reuse an existing tenant subdomain for the override lane |
+| `K3D_OPERATOR_PORTAL_OVERRIDE_LOCAL_PORT` | `5173` | local Vite port for operator-portal override |
+| `K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT` | `38080` | public port for the operator-portal front proxy |
+| `K3D_OPERATOR_PORTAL_OVERRIDE_CHECK_ONLY` | `false` | exit after startup checks instead of streaming logs |
+| `K3D_CUSTOMER_PORTAL_OVERRIDE_LOCAL_PORT` | `5174` | local Vite port for customer-portal override |
+| `K3D_CUSTOMER_PORTAL_OVERRIDE_LISTEN_PORT` | `38081` | public port for the customer-portal front proxy |
+| `K3D_CUSTOMER_PORTAL_OVERRIDE_CHECK_ONLY` | `false` | exit after startup checks instead of streaming logs |
 
 Additional overrides for the persistent lane (`k3d:up / down / status`):
 
@@ -268,13 +312,15 @@ The k3d workflows in this repo now cover:
 - ingress-backed tenant request validation
 - local Keycloak availability and realm seeding
 - tenant-api local override while tenant web stays on k3d
+- operator-portal and customer-portal local override against the in-cluster stack
 
 ## Supported vs unsupported override boundaries
 
 **Supported today**
 
-- `tenant-api` locally in watch mode while tenant web stays on k3d, using the
-  front-proxy workflow above
+- `tenant-api` locally in watch mode while tenant web stays on k3d (`k3d:tenant-api-override`)
+- `operator-portal` locally in Vite watch mode against the in-cluster control plane (`k3d:operator-portal-override`)
+- `customer-portal` locally in Vite watch mode against the in-cluster tenant API (`k3d:customer-portal-override`)
 
 **Not supported today**
 

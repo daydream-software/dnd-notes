@@ -110,6 +110,7 @@ export interface TenantProvisioningPort {
     triggeredBy: string
     reason?: string
   }): Promise<TenantDeprovisionResponse>
+  getTenantResources(tenant: Tenant): TenantProvisioningResources
   close(): Promise<void>
 }
 
@@ -231,6 +232,19 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.controlPlaneToken = options.controlPlaneToken
   }
 
+  getTenantResources(tenant: Tenant): TenantProvisioningResources {
+    if (!tenant.subdomain) {
+      throw new Error(`Tenant ${tenant.id} has no subdomain; resources cannot be derived.`)
+    }
+
+    return buildTenantResourceNames({
+      tenant,
+      subdomain: tenant.subdomain,
+      baseDomain: this.baseDomain,
+      imageRepository: this.imageRepository,
+    })
+  }
+
   async provisionTenant(params: {
     tenantId: string
     triggeredBy: string
@@ -249,9 +263,6 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       const isVersionRollout =
         requestedVersion !== undefined && requestedVersion !== tenant.version
 
-      if (tenant.currentState === 'deprovisioned') {
-        throw new Error(`Tenant ${tenant.id} is already deprovisioned`)
-      }
 
       if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
         throw new TenantProvisioningConflictError(
@@ -260,7 +271,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         )
       }
 
-      if (isVersionRollout && tenant.currentState !== 'ready') {
+      if (isVersionRollout && tenant.currentState !== 'ready' && tenant.currentState !== 'deprovisioned' && tenant.currentState !== 'failed') {
         throw new TenantProvisioningConflictError(
           `Tenant ${tenant.id} cannot start a rolling update from state ${tenant.currentState}. Rolling updates are only supported for ready tenants.`,
           'tenant_rollout_disallowed',
@@ -293,6 +304,11 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         hadPersistedSubdomain &&
         refreshedTenant.currentState === 'ready'
 
+      const shouldMarkProvisioning =
+        !hadPersistedSubdomain ||
+        refreshedTenant.currentState === 'deprovisioned' ||
+        refreshedTenant.currentState === 'failed'
+
       try {
         await this.tenantRegistry.updateTenantDesiredState(
           refreshedTenant.id,
@@ -305,6 +321,14 @@ export class TenantProvisioningService implements TenantProvisioningPort {
             'upgrading',
             params.triggeredBy,
             params.reason ?? 'Tenant rolling update started',
+            registryClient,
+          )
+        } else if (shouldMarkProvisioning) {
+          await this.tenantRegistry.updateTenantState(
+            refreshedTenant.id,
+            'provisioning',
+            params.triggeredBy,
+            params.reason ?? 'Tenant provisioning started',
             registryClient,
           )
         }

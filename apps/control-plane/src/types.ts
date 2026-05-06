@@ -62,6 +62,7 @@ export interface TenantListResponse {
 
 export interface TenantDetailResponse {
   tenant: Tenant
+  resources?: TenantProvisioningResources
 }
 
 export interface TenantProvisioningResources {

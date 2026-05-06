@@ -15,7 +15,7 @@ import {
   Typography,
 } from '@mui/material'
 import * as React from 'react'
-import { createTenant, provisionTenant } from './control-plane-api'
+import { ApiError, createTenant, provisionTenant } from './control-plane-api'
 import type { CreateTenantRequest } from './types'
 
 const { useEffect, useMemo, useState } = React
@@ -156,6 +156,7 @@ export default function ProvisionTenantPanel({
 
     setIsSubmitting(true)
     let tenantCreated = false
+    let tenantAlreadyExisted = false
 
     try {
       const createTenantRequest = {
@@ -168,10 +169,20 @@ export default function ProvisionTenantPanel({
         version: normalizedDraft.version,
       } satisfies CreateTenantRequest
 
-      const createdTenant = await createTenant(authToken, createTenantRequest)
-      tenantCreated = true
+      try {
+        await createTenant(authToken, createTenantRequest)
+        tenantCreated = true
+      } catch (error) {
+        // 409 means the tenant record already exists — continue to provisioning
+        // so the operator can re-provision tenants that failed or were deprovisioned.
+        if (error instanceof ApiError && error.statusCode === 409) {
+          tenantAlreadyExisted = true
+        } else {
+          throw error
+        }
+      }
 
-      const provisioningResult = await provisionTenant(authToken, createdTenant.tenant.id, {
+      const provisioningResult = await provisionTenant(authToken, normalizedDraft.id, {
         triggeredBy: actor,
         reason: normalizedDraft.reason,
         version: normalizedDraft.version,
@@ -181,7 +192,9 @@ export default function ProvisionTenantPanel({
       setDraft(createInitialDraft(suggestedVersion))
       setIsReviewOpen(false)
       onProvisioned(
-        `Provisioned ${provisioningResult.tenant.slug}. Namespace ${provisioningResult.resources.namespace}, host ${provisioningResult.resources.hostname}, and database ${provisioningResult.resources.databaseName} came from the live control-plane response.`,
+        tenantAlreadyExisted
+          ? `Re-provisioned existing tenant ${provisioningResult.tenant.slug}. Namespace ${provisioningResult.resources.namespace}, host ${provisioningResult.resources.hostname}.`
+          : `Provisioned ${provisioningResult.tenant.slug}. Namespace ${provisioningResult.resources.namespace}, host ${provisioningResult.resources.hostname}, and database ${provisioningResult.resources.databaseName} came from the live control-plane response.`,
       )
     } catch (error) {
       if (tenantCreated) {
