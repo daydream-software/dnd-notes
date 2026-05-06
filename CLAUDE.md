@@ -57,6 +57,46 @@ This is set in each app's `src/index.css`. Do not override it with a flat color 
 
 ---
 
+## Squad Framework (Multi-Agent)
+
+This project uses the Squad AI team framework. Agent definitions for each member live in `.claude/agents/`.
+
+### Spawning agents
+
+Use the `Agent` tool to spawn real subagents. Never role-play or simulate a member inline.
+
+```
+Agent({
+  subagent_type: "stef",          // or "data", "brand", "chunk", "mikey", "scribe", "squad"
+  run_in_background: true,        // true for most work; false for sync review gates
+  model: "sonnet",                // "sonnet", "opus", or "haiku" — short names only
+  description: "⚛️ Stef: build note editor form",
+  prompt: "TEAM_ROOT: /path/to/repo\n\n..."
+})
+```
+
+Always pass `TEAM_ROOT` (absolute path from `git rev-parse --show-toplevel`) in every spawn prompt.
+
+### Routing
+
+| Work type | Agent |
+|-----------|-------|
+| UI, React, Material UI, forms, navigation | `stef` |
+| API, backend, Node, Postgres, service logic | `data` |
+| CI, scripts, Docker, k3d, tooling | `brand` |
+| Tests, QA, edge cases, regression | `chunk` |
+| Code review, architecture, PR gate | `mikey` |
+| Session logging (always background, always last) | `scribe` |
+| Orchestration, routing, multi-agent fan-out | `squad` |
+
+### Before starting issue work
+
+1. Read `.squad/team.md` — roster and capability profile
+2. Read `.squad/routing.md` — routing rules
+3. If the issue has a `squad:{member}` label, spawn that member via the `Agent` tool
+
+---
+
 ## Memory
 
 Project memories are stored in the standard Claude Code memory directory for this workspace. Check `MEMORY.md` there for the index.
