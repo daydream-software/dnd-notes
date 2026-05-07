@@ -6554,9 +6554,11 @@ All k3d scripts with env-override support: `up.sh`, `down.sh`, `status.sh`
 **Decided by:** Brand
 
 #### Context
+
 Vite-based `operator-portal` and `customer-portal` needed containerization and integration into the `npm run k3d:up` workflow.
 
 #### Decisions
+
 1. **Docker Pattern**: Multi-stage Dockerfile (`docker/portal/Dockerfile`) shared by both portals using `nginx:alpine` to serve statically built Vite assets. Build argument (`PORTAL_NAME`) drives which workspace is built.
 2. **Reverse Proxying**: Nginx acts as a same-origin reverse proxy for control plane APIs. Location block rendered via template (`nginx.conf.template`) injecting `API_BASE_PATH` and `CONTROL_PLANE_URL` from container environment variables.
 3. **Runtime Config**: Dynamic `env.js` generation during nginx startup (`/docker-entrypoint.d/40-generate-env.sh`) reads `ConfigMap` values. Avoids rebuilding images for different environments. Vite configurations adapted to fallback to `window.__ENV__`.
@@ -6572,6 +6574,7 @@ Vite-based `operator-portal` and `customer-portal` needed containerization and i
 **Decided by:** Brand
 
 #### Context
+
 `.k3d-state/state.json` lacks version field and formal schema. Agents and CI scripts need stable, documented, versioned schema for `jq` queries.
 
 #### Schema Design (Top-level)
@@ -6613,6 +6616,7 @@ Vite-based `operator-portal` and `customer-portal` needed containerization and i
 ```
 
 #### Key Decisions
+
 1. `schemaVersion: 1` — integer, bumped on breaking changes. Readers reject unknown versions rather than silently misparse.
 2. `tenants` array instead of flat singular fields — supports multiple tenants while keeping backwards-compat read paths simple. Flat fields (`tenantId`, `tenantSubdomain`, etc.) removed from v1 writers; readers retain back-compat for one upgrade cycle.
 3. New top-level `ingressUrl` — ingress base URL (scheme + host + port).
@@ -6624,6 +6628,7 @@ Vite-based `operator-portal` and `customer-portal` needed containerization and i
 9. `status.sh --json` output includes same top-level fields as `state.json` augmented with live probe data.
 
 #### Migration
+
 No migration of old state files required. `k3d:up` always writes fresh state file; old pre-v1 files silently ignored by consumers checking `schemaVersion`.
 
 #### Status: Accepted
@@ -6636,14 +6641,17 @@ No migration of old state files required. `k3d:up` always writes fresh state fil
 **Date:** 2026-04-27
 
 #### Decisions
+
 1. Bash helpers exporting multiple values from `.k3d-state/state.json` must stage full parsed payload before assigning shell variables.
 2. `k3d:down --keep-cluster` namespace deletion non-blocking: use `kubectl delete namespace ... --wait=false --timeout=30s`.
 
 #### Rationale
+
 - Independent per-field parser calls can leave shell state half-populated if parser fails after first read.
 - Namespace deletion can stall indefinitely on stuck finalizers; unacceptable for teardown helper.
 
 #### Impact
+
 - `scripts/k3d/status.sh` now parses state file once, emits NUL-delimited payload plus success sentinel, only then hydrates `state_*` variables.
 - `scripts/k3d/down.sh` no longer waits forever when `--keep-cluster` hits stuck namespace.
 - `apps/control-plane/test/k3d-persistent-lane.test.ts` locks strict reset contract with partial-parser regression.
