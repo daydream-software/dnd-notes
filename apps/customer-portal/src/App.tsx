@@ -134,7 +134,6 @@ export default function App() {
 
   useEffect(() => {
     const abortController = new AbortController()
-    setIsLoadingCatalog(true)
 
     fetchPortalCatalog(abortController.signal)
       .then((response) => {
@@ -170,8 +169,11 @@ export default function App() {
 
   useEffect(() => {
     if (!sessionToken) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDashboard(null)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setHydratedSessionToken(null)
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsLoadingDashboard(false)
       return
     }
