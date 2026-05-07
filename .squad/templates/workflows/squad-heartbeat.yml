@@ -1,7 +1,5 @@
 name: Squad Heartbeat (Ralph)
-# ⚠️ SYNC: This workflow is maintained in 4 locations. Changes must be applied to all:
-#   - templates/workflows/squad-heartbeat.yml (source template)
-#   - packages/squad-cli/templates/workflows/squad-heartbeat.yml (CLI package)
+# ⚠️ SYNC: This workflow is maintained in 2 locations. Changes must be applied to all:
 #   - .squad/templates/workflows/squad-heartbeat.yml (installed template)
 #   - .github/workflows/squad-heartbeat.yml (active workflow)
 # Run 'squad upgrade' to sync installed copies from source templates.
@@ -100,72 +98,3 @@ jobs:
             }
             
             core.info(`🔄 Ralph triaged ${results.length} issue(s)`);
-
-      # Copilot auto-assign step (uses PAT if available)
-      - name: Ralph — Assign @copilot issues
-        if: success()
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
-        with:
-          github-token: ${{ secrets.COPILOT_ASSIGN_TOKEN || secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-
-            let teamFile = '.squad/team.md';
-            if (!fs.existsSync(teamFile)) {
-              teamFile = '.ai-team/team.md';
-            }
-            if (!fs.existsSync(teamFile)) return;
-
-            const content = fs.readFileSync(teamFile, 'utf8');
-
-            // Check if @copilot is on the team with auto-assign
-            const hasCopilot = content.includes('🤖 Coding Agent') || content.includes('@copilot');
-            const autoAssign = content.includes('<!-- copilot-auto-assign: true -->');
-            if (!hasCopilot || !autoAssign) return;
-
-            // Find issues labeled squad:copilot with no assignee
-            try {
-              const { data: copilotIssues } = await github.rest.issues.listForRepo({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                labels: 'squad:copilot',
-                state: 'open',
-                per_page: 5
-              });
-
-              const unassigned = copilotIssues.filter(i =>
-                !i.assignees || i.assignees.length === 0
-              );
-
-              if (unassigned.length === 0) {
-                core.info('No unassigned squad:copilot issues');
-                return;
-              }
-
-              // Get repo default branch
-              const { data: repoData } = await github.rest.repos.get({
-                owner: context.repo.owner,
-                repo: context.repo.repo
-              });
-
-              for (const issue of unassigned) {
-                try {
-                  await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/assignees', {
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    issue_number: issue.number,
-                    assignees: ['copilot-swe-agent[bot]'],
-                    agent_assignment: {
-                      target_repo: `${context.repo.owner}/${context.repo.repo}`,
-                      base_branch: repoData.default_branch,
-                      custom_instructions: `Read .squad/team.md (or .ai-team/team.md) for team context and .squad/routing.md (or .ai-team/routing.md) for routing rules.`
-                    }
-                  });
-                  core.info(`Assigned copilot-swe-agent[bot] to #${issue.number}`);
-                } catch (e) {
-                  core.warning(`Failed to assign @copilot to #${issue.number}: ${e.message}`);
-                }
-              }
-            } catch (e) {
-              core.info(`No squad:copilot label found or error: ${e.message}`);
-            }
