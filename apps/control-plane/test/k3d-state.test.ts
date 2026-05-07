@@ -1,10 +1,3 @@
-/**
- * Tests for the k3d state file read/write helpers in scripts/k3d/state.mjs.
- *
- * Uses node:test (the same runner as sibling test files in this directory).
- * Does not require a live k3d cluster — all assertions are against fixtures.
- */
-
 import assert from 'node:assert'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -373,6 +366,31 @@ describe('state.mjs CLI', () => {
     assert.strictEqual(result.status, 0, result.stderr)
     assert.match(result.stdout, /curl/)
     assert.match(result.stdout, /openid-connect\/token/)
+  })
+
+  it('read-vars emits shell assignments for a v1 state file', () => {
+    const file = tmpFile('cli-read-vars.json')
+    writeState(file, stateWithTenant)
+
+    const result = spawnSync('node', [stateMjsPath, 'read-vars', file], {
+      encoding: 'utf8',
+    })
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.match(result.stdout, /keycloak_url='http:\/\/keycloak\.127\.0\.0\.1\.nip\.io:8080'/)
+    assert.match(result.stdout, /keycloak_realm='dnd-notes-dev'/)
+    assert.match(result.stdout, /ingress_port='8080'/)
+    assert.match(result.stdout, /tenant_subdomain='dev'/)
+    assert.match(result.stdout, /tenant_hostname='dev\.127\.0\.0\.1\.nip\.io'/)
+    assert.match(result.stdout, /tenant_origin='http:\/\/dev\.127\.0\.0\.1\.nip\.io:8080'/)
+  })
+
+  it('read-vars emits empty strings on missing file', () => {
+    const result = spawnSync('node', [stateMjsPath, 'read-vars', '/nonexistent/state.json'], {
+      encoding: 'utf8',
+    })
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.match(result.stdout, /keycloak_url=''/)
+    assert.match(result.stdout, /tenant_subdomain=''/)
   })
 
   it('exits with non-zero for unknown subcommand', () => {

@@ -133,38 +133,8 @@ rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
 cluster_name="$(json_get clusterName <"${STATE_FILE}")"
-# Support v1 schema (keycloak sub-object, tenants array) and v0 flat fields
-keycloak_url="$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  const url = state.keycloak?.url ?? state.keycloakUrl ?? ""
-  process.stdout.write(url)
-' <"${STATE_FILE}")"
-keycloak_realm="$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  const realm = state.keycloak?.realm ?? state.keycloakRealm ?? ""
-  process.stdout.write(realm)
-' <"${STATE_FILE}")"
-# v1 schema: first entry in tenants[]; v0: flat tenantSubdomain/tenantHostname/tenantOrigin
-tenant_subdomain="$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  const t = Array.isArray(state.tenants) && state.tenants[0]
-  process.stdout.write((t ? t.subdomain : state.tenantSubdomain) ?? "")
-' <"${STATE_FILE}")"
-tenant_hostname="$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  const t = Array.isArray(state.tenants) && state.tenants[0]
-  process.stdout.write((t ? t.hostname : state.tenantHostname) ?? "")
-' <"${STATE_FILE}")"
-tenant_origin="$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  const t = Array.isArray(state.tenants) && state.tenants[0]
-  process.stdout.write((t ? t.origin : state.tenantOrigin) ?? "")
-' <"${STATE_FILE}")"
+# Read all state fields in one call — v1/v0 compat handled in state.mjs
+eval "$(state_module read-vars "${STATE_FILE}")"
 
 proxy_origin="http://${tenant_hostname}:${PROXY_PORT}"
 

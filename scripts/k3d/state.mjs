@@ -152,6 +152,43 @@ export function buildTokenSnippet(keycloakUrl, realm, clientId, username, passwo
   ].join(' ')
 }
 
+/**
+ * Read v1/v0-compatible shell variable assignments from the state file.
+ * Returns a newline-separated string of `key='value'` pairs ready to eval.
+ * Never throws — returns empty strings for all fields on any error.
+ *
+ * Variables emitted: keycloak_url, keycloak_realm, ingress_port,
+ * tenant_subdomain, tenant_hostname, tenant_origin.
+ *
+ * @param {string} stateFile - Absolute path to the state file.
+ * @returns {string}
+ */
+export function readCompatVars(stateFile) {
+  const sq = (v) => "'" + String(v ?? '').replace(/'/g, "'\"'\"'") + "'"
+  // Read raw JSON without schema validation so v0 state files are also handled.
+  let state = null
+  try { state = JSON.parse(readFileSync(stateFile, 'utf8')) } catch {}
+  const tenant = state && Array.isArray(state.tenants) && state.tenants[0] ? state.tenants[0] : null
+
+  const keycloakUrl = state?.keycloak?.url ?? state?.keycloakUrl ?? ''
+  const keycloakRealm = state?.keycloak?.realm ?? state?.keycloakRealm ?? ''
+
+  let ingressPort = '8080'
+  for (const url of [state?.ingressUrl, state?.tenantOrigin, state?.keycloakUrl, state?.keycloak?.url]) {
+    const m = url && url.match(/:(\d+)/)
+    if (m) { ingressPort = m[1]; break }
+  }
+
+  return [
+    `keycloak_url=${sq(keycloakUrl)}`,
+    `keycloak_realm=${sq(keycloakRealm)}`,
+    `ingress_port=${sq(ingressPort)}`,
+    `tenant_subdomain=${sq(tenant?.subdomain ?? state?.tenantSubdomain ?? '')}`,
+    `tenant_hostname=${sq(tenant?.hostname ?? state?.tenantHostname ?? '')}`,
+    `tenant_origin=${sq(tenant?.origin ?? state?.tenantOrigin ?? '')}`,
+  ].join('\n')
+}
+
 // ---------------------------------------------------------------------------
 // CLI entry point — invoked by bash scripts
 // ---------------------------------------------------------------------------
@@ -167,6 +204,9 @@ export function buildTokenSnippet(keycloakUrl, realm, clientId, username, passwo
  *
  *   node state.mjs read-json <stateFile>
  *     Print the entire state as pretty JSON.
+ *
+ *   node state.mjs read-vars <stateFile>
+ *     Print shell variable assignments for all compat fields (safe to eval).
  *
  *   node state.mjs write <json>
  *     Write the state. <json> is the full state object as a JSON string with
@@ -209,6 +249,12 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
       break
     }
 
+    case 'read-vars': {
+      const [stateFile] = args
+      process.stdout.write(readCompatVars(stateFile) + '\n')
+      break
+    }
+
     case 'write': {
       const raw = args[0]
       const payload = JSON.parse(raw)
@@ -230,7 +276,7 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
 
     default:
       process.stderr.write(
-        `Unknown subcommand: ${subcommand ?? '(none)'}\nExpected: read, read-safe, read-json, write, token-snippet\n`,
+        `Unknown subcommand: ${subcommand ?? '(none)'}\nExpected: read, read-safe, read-json, read-vars, write, token-snippet\n`,
       )
       process.exit(1)
   }

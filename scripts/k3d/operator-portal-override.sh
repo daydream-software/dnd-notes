@@ -133,41 +133,9 @@ rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
 cluster_name="$(json_get clusterName <"${STATE_FILE}")"
-# Support v1 schema (keycloak sub-object) and v0 flat fields
-keycloak_url="$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  const url = state.keycloak?.url ?? state.keycloakUrl ?? ""
-  process.stdout.write(url)
-' <"${STATE_FILE}")"
-keycloak_realm="$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  const realm = state.keycloak?.realm ?? state.keycloakRealm ?? ""
-  process.stdout.write(realm)
-' <"${STATE_FILE}")"
-# Derive the k3d ingress HTTP port from state.
-# v1: use ingressUrl. v0: try tenantOrigin then keycloakUrl. K3D_HTTP_PORT overrides all.
-k3d_http_port="${K3D_HTTP_PORT:-$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  // v1 schema: ingressUrl
-  if (state.ingressUrl) {
-    const match = state.ingressUrl.match(/:(\d+)/)
-    if (match) { process.stdout.write(match[1]); process.exit(0) }
-  }
-  // v0 back-compat: tenantOrigin or keycloakUrl
-  for (const field of ["tenantOrigin", "keycloakUrl"]) {
-    const match = (state[field] ?? "").match(/:(\d+)/)
-    if (match) { process.stdout.write(match[1]); process.exit(0) }
-  }
-  // v1 back-compat: keycloak.url
-  if (state.keycloak?.url) {
-    const match = state.keycloak.url.match(/:(\d+)/)
-    if (match) { process.stdout.write(match[1]); process.exit(0) }
-  }
-  process.stdout.write("8080")
-' <"${STATE_FILE}")}"
+# Read all state fields in one call — v1/v0 compat handled in state.mjs
+eval "$(state_module read-vars "${STATE_FILE}")"
+k3d_http_port="${K3D_HTTP_PORT:-${ingress_port}}"
 
 control_plane_hostname="control-plane.127.0.0.1.nip.io"
 control_plane_origin="http://${control_plane_hostname}:${k3d_http_port}"

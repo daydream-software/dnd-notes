@@ -298,6 +298,12 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
     let persisted = {}
     try { persisted = JSON.parse(stateJson) } catch {}
 
+    // Preserve all persisted tenant fields (including lifecycle state) and
+    // layer live probe data on top so tenants[0].state is never dropped.
+    const persistedTenant = Array.isArray(persisted.tenants) && persisted.tenants[0]
+      ? persisted.tenants[0]
+      : {}
+
     const status = {
       ...persisted,
       clusterName,
@@ -312,6 +318,7 @@ if [[ "${JSON_OUTPUT}" == "true" ]]; then
       tenants: tenantId
         ? [
             {
+              ...persistedTenant,
               id: tenantId,
               subdomain: tenantSubdomain,
               namespace: tenantNamespace,
