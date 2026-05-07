@@ -88,6 +88,7 @@ their own generated runtime role, password, and database name in the tenant pod
 Secret.
 
 The k3d overlay ConfigMap automatically sets:
+
 - `CONTROL_PLANE_AUTH_MODE=keycloak`
 - `CONTROL_PLANE_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
 - `CONTROL_PLANE_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
@@ -114,6 +115,7 @@ The hosted reference overlay is deliberately boring:
 Use it as the starting point for a managed-cluster rollout after image promotion.
 
 For Keycloak integration in hosted environments:
+
 1. Set `CONTROL_PLANE_KEYCLOAK_URL` / `TENANT_KEYCLOAK_URL` to your managed Keycloak instance (for example `https://auth.example.com`)
 2. Configure a workforce/admin client (`dnd-notes-control-plane`) plus a tenant SPA client (`dnd-notes-tenant-app`) with the hosted redirect/web origins you need.
 3. Ensure `CONTROL_PLANE_KEYCLOAK_REALM` / `TENANT_KEYCLOAK_REALM` match the intended workforce and tenant realms.

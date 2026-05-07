@@ -52,6 +52,7 @@ Practical about UX. If capturing a session note feels slow or fussy, I treat tha
 ## Design System
 
 This project uses a defined design system in `packages/theme`. Read `CLAUDE.md` for the full rules. Key points:
+
 - Font: Geist only — never Inter or others
 - Primary: `#a78bfa`, Background: `#0f172a`
 - `borderRadius: 18` globally, purple-tinted borders, `backdrop-filter: blur`

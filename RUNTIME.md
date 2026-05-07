@@ -96,6 +96,7 @@ Service hostname, so the local `apps/api` process falls back to the public
 #### Runtime Auth Flow (Keycloak mode)
 
 **Tenant apps:**
+
 1. User logs in via Keycloak login form (redirects to tenant origin with auth code)
 2. Tenant app exchanges code for ID token + access token
 3. Frontend stores tokens and sends access token in API request `Authorization: Bearer <token>`
@@ -108,6 +109,7 @@ Service hostname, so the local `apps/api` process falls back to the public
 #### Local Auth Flow (Legacy mode, `AUTH_MODE=local`)
 
 When `AUTH_MODE=local`:
+
 - Tenant app login uses traditional `/api/auth/register` and `/api/auth/login` endpoints
 - Session tokens (database-backed) are used instead of JWTs
 - Guest/share-link flows remain unchanged
@@ -120,17 +122,18 @@ When `AUTH_MODE=local`:
   When `true`, the API server also serves the built web app at `/` for same-origin deployments.  
   **Production containers should set this to `true`.**
 
-
 ## Health Endpoints
 
 The application exposes four health and probe endpoints:
 
 ### `GET /healthz` (Liveness Probe)
+
 **Purpose:** Process liveness check for Kubernetes.  
 **Response:** `200 OK` with `{ "status": "ok", "service": "dnd-notes-api" }`  
 **Failure mode:** Only fails if the Node.js process is dead or unresponsive.
 
 **Kubernetes usage:**
+
 ```yaml
 livenessProbe:
   httpGet:
@@ -143,13 +146,16 @@ livenessProbe:
 ```
 
 ### `GET /ready` (Control-plane Readiness Contract)
+
 **Purpose:** Cluster-internal readiness path used by the control plane and tenant
 Deployment manifests.  
 **Response:** Same behavior as `/readyz`.
 
 ### `GET /readyz` (Legacy Readiness Probe)
+
 **Purpose:** Ready-to-serve-traffic check for Kubernetes.  
 **Response:**  
+
 - `200 OK` with `{ "status": "ok", "service": "dnd-notes-api" }` when database is healthy  
 - `503 Service Unavailable` with `{ "error": "Database unavailable" }` when database connection fails
 - `503 Service Unavailable` with `{ "error": "Shutting down" }` during SIGTERM drain / termination
@@ -157,6 +163,7 @@ Deployment manifests.
 **Failure mode:** Returns 503 if a lightweight database connectivity check fails or the container is draining for shutdown/maintenance.
 
 **Kubernetes usage:**
+
 ```yaml
 readinessProbe:
   httpGet:
@@ -169,6 +176,7 @@ readinessProbe:
 ```
 
 ### `GET /health` (Legacy)
+
 **Purpose:** Backward compatibility for existing monitoring.  
 **Response:** Same as `/healthz`  
 **Status:** Maintained for continuity; prefer `/healthz` and `/ready` for new deployments.
@@ -176,6 +184,7 @@ readinessProbe:
 ## Persistent Storage
 
 ### Postgres
+
 - **Connection:** Via `DATABASE_URL` environment variable  
 - **Least-privilege boundary:** Newly provisioned tenants receive a dedicated
   Postgres role and randomized password from the control plane. The control
@@ -187,6 +196,7 @@ readinessProbe:
 ## Container Lifecycle
 
 ### Startup
+
 1. Resolve environment variables
 2. Initialize the Postgres connection from `DATABASE_URL`
 3. Run compatible startup upgrades (if needed). Least-privilege Postgres runtime
@@ -195,6 +205,7 @@ readinessProbe:
 5. Readiness probe begins succeeding
 
 ### Shutdown (SIGTERM)
+
 1. Stop accepting new HTTP connections
 2. Flip readiness to `503` so the pod is removed from Endpoints during drain
 3. Wait for in-flight requests to complete (default: 30s grace period)
@@ -203,9 +214,11 @@ readinessProbe:
 6. Exit with code 0 (or force-exit after the 30s grace period)
 
 ### Graceful Termination
+
 The container handles `SIGTERM` for controlled rolling updates today and future
 overlapping zero-downtime updates once the tenant PVC leaves the normal hosted
 pod shape:
+
 ```javascript
 process.on('SIGTERM', () => shutdown(0))
 ```
@@ -213,6 +226,7 @@ process.on('SIGTERM', () => shutdown(0))
 `shutdown()` now marks the app unready immediately, closes the HTTP server first, drains in-flight requests for up to 30 seconds, closes idle keep-alive sockets, and only then closes the database handle.
 
 **Kubernetes recommendation:**
+
 ```yaml
 terminationGracePeriodSeconds: 30
 ```
@@ -228,6 +242,7 @@ No other ports are required or exposed.
 The container runs as a non-root user (`appuser:appuser`, UID/GID assigned at build time).
 
 **Security posture:**
+
 - No root privileges required at runtime
 - Write access only to runtime-owned temporary paths when needed by the process
 - Read-only for application code (`/app/apps/api`, `/app/apps/web`)
@@ -235,11 +250,13 @@ The container runs as a non-root user (`appuser:appuser`, UID/GID assigned at bu
 ## Build & Deployment
 
 ### Build
+
 ```bash
 docker build -t ghcr.io/daydream-software/dnd-notes:latest .
 ```
 
 ### Run (local test)
+
 ```bash
 docker run -p 3000:3000 \
   -e DATABASE_URL=postgresql://postgres:postgres@host.docker.internal:5432/dnd-notes \
@@ -249,6 +266,7 @@ docker run -p 3000:3000 \
 ```
 
 ### Kubernetes Deployment (Phase 1 shape)
+
 See issue #43 for full manifest examples after Phase 0 validation.
 
 ## Hosted persistence contract
@@ -293,6 +311,7 @@ rolling image update.
 ## Control Plane Contract (future exclusive-maintenance follow-up)
 
 **Cluster-internal endpoints (not yet implemented):**
+
 - `GET /internal/status` - Runtime state (version, database health, uptime)
 - `POST /internal/bootstrap` - Initial tenant bootstrap and migrations
 - `POST /internal/maintenance` - Enter drain mode
@@ -303,11 +322,13 @@ These are reserved for Phase 1 control-plane orchestration and are **not** expos
 ## Postgres Notes
 
 When `DATABASE_URL` is set, the application will:
+
 1. Use `node-postgres` for async database access (issue #58)
 2. Respect Postgres connection pooling and timeout settings
 3. Drain the pool on shutdown before process exit
 
 **Connection pool defaults:**
+
 - Max connections: 20
 - Idle timeout: 30s
 - Connection timeout: 10s
@@ -318,6 +339,7 @@ When `DATABASE_URL` is set, the application will:
 Phase 0 scope: health endpoints only.
 
 **Deferred to Phase 2+:**
+
 - Structured logging (JSON output)
 - OpenTelemetry tracing
 - Prometheus `/metrics` endpoint
@@ -326,23 +348,28 @@ Phase 0 scope: health endpoints only.
 ## Security Considerations
 
 ### Secrets Management
+
 - **Phase 0:** Environment variables via Kubernetes Secrets
 - **Phase 1+:** Sealed Secrets or Vault integration
 
 ### Network Policies
+
 - **Phase 0:** No network policy enforcement
 - **Phase 1:** NetworkPolicy restricts `/internal/*` to control-plane namespace
 
 ### Database Credentials
+
 - **Postgres:** Connection string via `DATABASE_URL` (Kubernetes Secret)
 
 ### TLS
+
 - **Ingress:** Handled by ingress-nginx + cert-manager (wildcard DNS-01)
 - **Backend:** HTTP only (TLS terminated at ingress)
 
 ## Testing the Container
 
 ### Smoke test
+
 ```bash
 # Build
 docker build -t dnd-notes:test .
@@ -373,6 +400,7 @@ docker rm dnd-notes-test
 ```
 
 ### Integration test (with Postgres, Phase 1)
+
 To be defined in issue #58 after the Postgres adapter lands.
 
 ## References

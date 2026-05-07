@@ -86,9 +86,11 @@ Never reuse them outside this local environment.
 #### Testing Keycloak Runtime Auth Locally
 
 1. **Verify Keycloak is running:**
+
    ```bash
    curl -s http://keycloak.127.0.0.1.nip.io:8080/realms/dnd-notes-dev | jq .enabled
    ```
+
    Should return `true`.
 
 2. **Test tenant runtime Keycloak flow (when control-plane + tenant are running):**
@@ -115,6 +117,7 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
 ```
 
 The k3d overlay ConfigMap automatically injects:
+
 - `CONTROL_PLANE_AUTH_MODE=keycloak`
 - `CONTROL_PLANE_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
 - `CONTROL_PLANE_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
@@ -316,13 +319,13 @@ The k3d workflows in this repo now cover:
 
 ## Supported vs unsupported override boundaries
 
-**Supported today**
+### Supported today
 
 - `tenant-api` locally in watch mode while tenant web stays on k3d (`k3d:tenant-api-override`)
 - `operator-portal` locally in Vite watch mode against the in-cluster control plane (`k3d:operator-portal-override`)
 - `customer-portal` locally in Vite watch mode against the in-cluster tenant API (`k3d:customer-portal-override`)
 
-**Not supported today**
+### Not supported today
 
 - swapping `tenant-web` alone while keeping the in-cluster API as the only live backend
 - hot-swapping arbitrary in-cluster services by editing ingress/controller state directly
