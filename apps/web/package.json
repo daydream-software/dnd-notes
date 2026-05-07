@@ -18,7 +18,7 @@
     "@lexical/code": "^0.43.0",
     "@lexical/link": "^0.43.0",
     "@lexical/list": "^0.43.0",
-    "@lexical/markdown": "^0.43.0",
+    "@lexical/markdown": "^0.44.0",
     "@lexical/react": "^0.43.0",
     "@lexical/rich-text": "^0.43.0",
     "@mui/icons-material": "^9.0.0",
