@@ -1,4 +1,3 @@
-57ac82c585e80a44ae91bbad40c3e8fb21550bd0:.copilot/skills/secret-handling/SKILL.md:private-key:48
-57ac82c585e80a44ae91bbad40c3e8fb21550bd0:.squad/templates/skills/secret-handling/SKILL.md:private-key:48
-95e2a30ad7ea0099a535b5684577e367f54fc7d1:.copilot/skills/secret-handling/SKILL.md:private-key:48
-95e2a30ad7ea0099a535b5684577e367f54fc7d1:.squad/templates/skills/secret-handling/SKILL.md:private-key:48
+# Fingerprint-based allowlist (gitleaks).
+# Path-based exclusions are in .gitleaks.toml — add fingerprints here only for
+# one-off findings in committed application code.

@@ -1,2 +1,9 @@
 [extend]
 useDefault = true
+
+[allowlist]
+description = "AI agent template and skill directories contain example secret patterns, not real secrets"
+paths = [
+  '''.copilot/''',
+  '''.squad/templates/''',
+]
