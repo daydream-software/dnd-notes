@@ -13,7 +13,7 @@ COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 
 FROM base AS deps
-RUN npm ci --omit=dev --workspace apps/api --include-workspace-root
+RUN npm ci --omit=dev --ignore-scripts --workspace apps/api --include-workspace-root
 
 FROM base AS build-deps
 RUN npm ci
