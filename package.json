@@ -69,7 +69,7 @@
     "type": "git",
     "url": "git+https://github.com/daydream-software/dnd-notes.git"
   },
-  "license": "MIT",
+  "license": "FSL-1.1-MIT",
   "bugs": {
     "url": "https://github.com/daydream-software/dnd-notes/issues"
   },
