@@ -19,4 +19,4 @@ jobs:
             | tar -xz gitleaks
           sudo mv gitleaks /usr/local/bin/gitleaks
       - name: Scan for secrets
-        run: gitleaks detect --source . --log-opts="--all" --redact --exit-code 1
+        run: gitleaks detect --source . --log-opts="--all" --config .gitleaks.toml --redact --exit-code 1
