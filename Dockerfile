@@ -7,6 +7,7 @@ COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
 COPY packages/portal-utils ./packages/portal-utils
 COPY packages/postgres-migrations ./packages/postgres-migrations
+COPY packages/theme/package*.json ./packages/theme/
 COPY platform/keycloak-jwt/package*.json ./platform/keycloak-jwt/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
@@ -19,11 +20,13 @@ RUN npm ci
 
 FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./
+COPY packages/theme ./packages/theme
 COPY platform/keycloak-jwt ./platform/keycloak-jwt
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
 RUN npm run build --workspace packages/portal-utils
 RUN npm run build --workspace packages/postgres-migrations
+RUN npm run build --workspace packages/theme
 RUN npm run build --workspace platform/keycloak-jwt
 RUN npm run build --workspace apps/api
 RUN npm run build --workspace apps/web
