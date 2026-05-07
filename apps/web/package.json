@@ -21,7 +21,7 @@
     "@lexical/markdown": "^0.43.0",
     "@lexical/react": "^0.43.0",
     "@lexical/rich-text": "^0.43.0",
-    "@mui/icons-material": "^9.0.0",
+    "@mui/icons-material": "^9.0.1",
     "@mui/material": "^9.0.0",
     "keycloak-js": "^26.2.3",
     "lexical": "^0.43.0",
