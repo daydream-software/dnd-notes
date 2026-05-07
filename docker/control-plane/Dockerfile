@@ -11,7 +11,8 @@ COPY apps/web/package*.json ./apps/web/
 COPY apps/control-plane/package*.json ./apps/control-plane/
 
 FROM base AS deps
-RUN npm ci --omit=dev --workspace apps/control-plane --include-workspace-root
+RUN npm ci --workspace apps/control-plane --include-workspace-root && \
+    npm prune --omit=dev
 
 FROM base AS build-deps
 RUN npm ci

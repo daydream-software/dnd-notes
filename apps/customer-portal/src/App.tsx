@@ -120,7 +120,7 @@ export default function App() {
   )
   const [hydratedSessionToken, setHydratedSessionToken] = useState<string | null>(null)
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(true)
-  const [isLoadingDashboard, setIsLoadingDashboard] = useState(false)
+  const isLoadingDashboard = Boolean(sessionToken) && hydratedSessionToken !== sessionToken
   const [isSubmittingSignup, setIsSubmittingSignup] = useState(false)
   const [isSubmittingCreateTenant, setIsSubmittingCreateTenant] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -134,7 +134,6 @@ export default function App() {
 
   useEffect(() => {
     const abortController = new AbortController()
-    setIsLoadingCatalog(true)
 
     fetchPortalCatalog(abortController.signal)
       .then((response) => {
@@ -170,19 +169,14 @@ export default function App() {
 
   useEffect(() => {
     if (!sessionToken) {
-      setDashboard(null)
-      setHydratedSessionToken(null)
-      setIsLoadingDashboard(false)
       return
     }
 
     if (dashboard && hydratedSessionToken === sessionToken) {
-      setIsLoadingDashboard(false)
       return
     }
 
     const abortController = new AbortController()
-    setIsLoadingDashboard(true)
 
     fetchPortalDashboard(sessionToken, abortController.signal)
       .then((response) => {
@@ -203,11 +197,6 @@ export default function App() {
             ? requestError.message
             : 'Failed to restore the customer portal session.',
         )
-      })
-      .finally(() => {
-        if (!abortController.signal.aborted) {
-          setIsLoadingDashboard(false)
-        }
       })
 
     return () => {

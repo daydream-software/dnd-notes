@@ -7,20 +7,20 @@ COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
 COPY packages/portal-utils ./packages/portal-utils
 COPY packages/postgres-migrations ./packages/postgres-migrations
-COPY packages/theme/package*.json ./packages/theme/
+COPY packages/theme ./packages/theme
 COPY platform/keycloak-jwt/package*.json ./platform/keycloak-jwt/
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 
 FROM base AS deps
-RUN npm ci --omit=dev --workspace apps/api --include-workspace-root
+RUN npm ci --workspace apps/api --include-workspace-root && \
+    npm prune --omit=dev
 
 FROM base AS build-deps
 RUN npm ci
 
 FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./
-COPY packages/theme ./packages/theme
 COPY platform/keycloak-jwt ./platform/keycloak-jwt
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
