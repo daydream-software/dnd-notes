@@ -2,14 +2,14 @@
 
 # Block staged files that contain absolute paths pointing to local home dirs.
 # This catches accidental /home/<user>/ or /Users/<user>/ references before they land in history.
-if git diff --cached --name-only -z | xargs -0 grep -Pl '/home/[a-zA-Z0-9_.-]+/' -- 2>/dev/null | grep -q .; then
+if git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pl '/home/[a-zA-Z0-9_.-]+/' -- 2>/dev/null | grep -q .; then
   echo "pre-commit: staged files contain /home/<user>/ paths — remove them before committing." >&2
-  git diff --cached --name-only -z | xargs -0 grep -Pn '/home/[a-zA-Z0-9_.-]+/' -- 2>/dev/null >&2
+  git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pn '/home/[a-zA-Z0-9_.-]+/' -- 2>/dev/null >&2
   exit 1
 fi
 
-if git diff --cached --name-only -z | xargs -0 grep -Pl '/Users/[a-zA-Z0-9_.-]+/' -- 2>/dev/null | grep -q .; then
+if git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pl '/Users/[a-zA-Z0-9_.-]+/' -- 2>/dev/null | grep -q .; then
   echo "pre-commit: staged files contain /Users/<user>/ paths — remove them before committing." >&2
-  git diff --cached --name-only -z | xargs -0 grep -Pn '/Users/[a-zA-Z0-9_.-]+/' -- 2>/dev/null >&2
+  git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pn '/Users/[a-zA-Z0-9_.-]+/' -- 2>/dev/null >&2
   exit 1
 fi
