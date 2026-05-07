@@ -6575,6 +6575,7 @@ Vite-based `operator-portal` and `customer-portal` needed containerization and i
 `.k3d-state/state.json` lacks version field and formal schema. Agents and CI scripts need stable, documented, versioned schema for `jq` queries.
 
 #### Schema Design (Top-level)
+
 ```json
 {
   "schemaVersion": 1,
