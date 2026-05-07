@@ -3952,11 +3952,11 @@ All `origin/squad/…` references for the above branches deleted locally.
 - ✓ `.worktrees/43-deployment-artifacts`
 - ✓ `.worktrees/52-followup`
 - ✓ `.worktrees/58-postgres-adapter`
-- ✓ `/home/appuser/.copilot/session-state/aba00af1-b083-4cbb-9c94-a20ed4147108/files/worktrees/41-backup-restore-runbook`
-- ✓ `/home/appuser/.copilot/session-state/aba00af1-b083-4cbb-9c94-a20ed4147108/files/worktrees/44-app-shell-refactor`
-- ✓ `/home/appuser/.copilot/session-state/aba00af1-b083-4cbb-9c94-a20ed4147108/files/worktrees/46-store-refactor`
-- ✓ `/home/appuser/.copilot/session-state/e3ae480b-a733-4463-bf7c-0a50e344188d/files/worktrees/52-containerize-tenant-app`
-- ✓ `/home/appuser/.copilot/session-state/e3ae480b-a733-4463-bf7c-0a50e344188d/files/worktrees/53-control-plane-skeleton`
+- ✓ `41-backup-restore-runbook` (Copilot session worktree)
+- ✓ `44-app-shell-refactor` (Copilot session worktree)
+- ✓ `46-store-refactor` (Copilot session worktree)
+- ✓ `52-containerize-tenant-app` (Copilot session worktree)
+- ✓ `53-control-plane-skeleton` (Copilot session worktree)
 
 **Untouched (active work):**
 - ✓ `squad/55-rolling-update-choreography` — branch and worktree remain active
@@ -6545,3 +6545,139 @@ Added regression test in `apps/control-plane/test/k3d-persistent-lane.test.ts`:
 All k3d scripts with env-override support: `up.sh`, `down.sh`, `status.sh`
 
 **Pattern:** When reporting operational state, always report what the script is doing (effective config), not what's persisted on disk.
+
+---
+
+### 2026-05-04: Containerize Portals for k3d Local Dev (Brand)
+
+**Issue:** #84  
+**Decided by:** Brand
+
+#### Context
+Vite-based `operator-portal` and `customer-portal` needed containerization and integration into the `npm run k3d:up` workflow.
+
+#### Decisions
+1. **Docker Pattern**: Multi-stage Dockerfile (`docker/portal/Dockerfile`) shared by both portals using `nginx:alpine` to serve statically built Vite assets. Build argument (`PORTAL_NAME`) drives which workspace is built.
+2. **Reverse Proxying**: Nginx acts as a same-origin reverse proxy for control plane APIs. Location block rendered via template (`nginx.conf.template`) injecting `API_BASE_PATH` and `CONTROL_PLANE_URL` from container environment variables.
+3. **Runtime Config**: Dynamic `env.js` generation during nginx startup (`/docker-entrypoint.d/40-generate-env.sh`) reads `ConfigMap` values. Avoids rebuilding images for different environments. Vite configurations adapted to fallback to `window.__ENV__`.
+4. **Local Automation**: Extended `scripts/k3d/up.sh` to scaffold and rollout both portal deployments, mimicking existing control plane patterns.
+
+#### Status: Accepted
+
+---
+
+### 2026-05-06: k3d state file schema v1 (Brand)
+
+**Issue:** #86  
+**Decided by:** Brand
+
+#### Context
+`.k3d-state/state.json` lacks version field and formal schema. Agents and CI scripts need stable, documented, versioned schema for `jq` queries.
+
+#### Schema Design (Top-level)
+```json
+{
+  "schemaVersion": 1,
+  "clusterName": "dnd-notes",
+  "ingressUrl": "http://127.0.0.1.nip.io:8080",
+  "controlPlaneUrl": "http://127.0.0.1:3101",
+  "controlPlanePort": 3101,
+  "keycloak": {
+    "url": "http://keycloak.127.0.0.1.nip.io:8080",
+    "realm": "dnd-notes-dev",
+    "controlPlaneClientId": "dnd-notes-control-plane",
+    "tenantClientId": "dnd-notes-tenant-app"
+  },
+  "auth": {
+    "siteAdminEmail": "site-admin@example.com",
+    "siteAdminPassword": "password",
+    "tenantOwnerEmail": "owner@example.com",
+    "tenantOwnerPassword": "password"
+  },
+  "tenants": [
+    {
+      "id": "k3d-dev",
+      "subdomain": "dev",
+      "namespace": "tenant-k3d-dev",
+      "hostname": "dev.127.0.0.1.nip.io",
+      "origin": "http://dev.127.0.0.1.nip.io:8080",
+      "state": "ready"
+    }
+  ],
+  "tokenSnippets": {
+    "controlPlane": "<curl command>",
+    "tenant": "<curl command>"
+  }
+}
+```
+
+#### Key Decisions
+1. `schemaVersion: 1` — integer, bumped on breaking changes. Readers reject unknown versions rather than silently misparse.
+2. `tenants` array instead of flat singular fields — supports multiple tenants while keeping backwards-compat read paths simple. Flat fields (`tenantId`, `tenantSubdomain`, etc.) removed from v1 writers; readers retain back-compat for one upgrade cycle.
+3. New top-level `ingressUrl` — ingress base URL (scheme + host + port).
+4. New top-level `controlPlaneUrl` — control-plane address including local port forward.
+5. `keycloak` sub-object — groups Keycloak fields previously scattered at top level.
+6. `auth` sub-object — groups credentials previously at top level.
+7. State extraction — `state.mjs` (ES module) is single source of truth for read/write.
+8. Override scripts with `--json` print JSON readiness payload to stdout before starting tail, enabling agent-driven workflows.
+9. `status.sh --json` output includes same top-level fields as `state.json` augmented with live probe data.
+
+#### Migration
+No migration of old state files required. `k3d:up` always writes fresh state file; old pre-v1 files silently ignored by consumers checking `schemaVersion`.
+
+#### Status: Accepted
+
+---
+
+### 2026-04-27: PR #120 latest review fixes (Brand)
+
+**Decided by:** Brand  
+**Date:** 2026-04-27
+
+#### Decisions
+1. Bash helpers exporting multiple values from `.k3d-state/state.json` must stage full parsed payload before assigning shell variables.
+2. `k3d:down --keep-cluster` namespace deletion non-blocking: use `kubectl delete namespace ... --wait=false --timeout=30s`.
+
+#### Rationale
+- Independent per-field parser calls can leave shell state half-populated if parser fails after first read.
+- Namespace deletion can stall indefinitely on stuck finalizers; unacceptable for teardown helper.
+
+#### Impact
+- `scripts/k3d/status.sh` now parses state file once, emits NUL-delimited payload plus success sentinel, only then hydrates `state_*` variables.
+- `scripts/k3d/down.sh` no longer waits forever when `--keep-cluster` hits stuck namespace.
+- `apps/control-plane/test/k3d-persistent-lane.test.ts` locks strict reset contract with partial-parser regression.
+
+#### Status: Accepted
+
+---
+
+### 2026-04-27: User directive — Copilot model cost constraint
+
+**Captured by:** FFMikha (via Copilot)  
+**Date:** 2026-04-27
+
+**Directive:** Do not use `claude-opus-4.7` without asking first because of its cost.
+
+**Rationale:** User request — captured for team memory.
+
+#### Status: Accepted
+
+---
+
+### 2026-04-27: Mikey — PR #120 code review gate (Mikey)
+
+**Decision:** Reject current PR #120 code patch for two newly opened review threads; do not reply/resolve those threads yet.
+
+**Concerns:**
+1. `scripts/k3d/down.sh` still deletes namespaces in `--keep-cluster` mode with default blocking wait, so stuck namespace finalizer can hang teardown helper indefinitely.
+2. `scripts/k3d/status.sh` still reads each `state_*` field with separate `node -e` invocations, so documented `read_state()` contract ("all variables set to empty strings on failure") not strictly true if parsing fails mid-stream.
+3. Focused validation commands green, but tests prove syntax and regressions around quoting/context — they do not invalidate these two precise review concerns.
+
+**Minimum acceptable fix:**
+1. Add `--wait=false` or explicit bounded timeout to both namespace-deletion paths in `scripts/k3d/down.sh --keep-cluster`.
+2. Change `scripts/k3d/status.sh read_state()` to parse all persisted fields from one snapshot and assign only after success, or reset shell variables on every failure path before returning non-zero.
+3. Add focused regression coverage for exact contracts before asking for re-review.
+
+**Owner:** Brand should keep revision (narrow platform-shell follow-up, not architecture handoff).
+
+#### Status: Accepted
