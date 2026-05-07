@@ -381,7 +381,7 @@ test('POST /_control/maintenance enable then disable toggles the maintenance sta
 test('POST /_control/maintenance drains only writes that started before maintenance mode', async () => {
   const { app, cleanup, controlState } = await createTestApp({
     controlPlaneToken,
-    maintenanceDrainGraceMs: 150,
+    maintenanceDrainGraceMs: 500,
   })
 
   app.post('/api/test-streamed', (_request, response) => {

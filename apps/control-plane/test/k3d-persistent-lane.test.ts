@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
 
+const repoRoot = fileURLToPath(new URL('../../../', import.meta.url))
+
 const statusScriptPath = fileURLToPath(
   new URL('../../../scripts/k3d/status.sh', import.meta.url),
 )
@@ -24,9 +26,11 @@ const resetStateFnMatch = statusScript.match(/^reset_state\(\) \{\n[\s\S]*?^}/m)
 const readStateFnMatch = statusScript.match(/^read_state\(\) \{\n[\s\S]*?^}/m)
 const probeTenantUrlFnMatch = statusScript.match(/^probe_tenant_url\(\) \{\n[\s\S]*?^}/m)
 const readStateFieldFnMatch = downScript.match(/^read_state_field\(\) \{\n[\s\S]*?^}/m)
+const readTenantNamespaceFnMatch = downScript.match(/^read_tenant_namespace\(\) \{\n[\s\S]*?^}/m)
 const removeStateArtifactsFnMatch = downScript.match(/^remove_state_artifacts\(\) \{\n[\s\S]*?^}/m)
 const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n[\s\S]*?^}/m)
 const buildTokenSnippetFnMatch = upScript.match(/^build_token_snippet\(\) \{\n[\s\S]*?^}/m)
+const stateModuleFnMatch = upScript.match(/^state_module\(\) \{\n[\s\S]*?^}/m)
 const runK3dImageImportFnMatch = upScript.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
 const ensureImageImportedFnMatch = upScript.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
 const ensureImageReadyFnMatch = upScript.match(/^ensure_image_ready\(\) \{\n[\s\S]*?^}/m)
@@ -48,6 +52,10 @@ if (!readStateFieldFnMatch) {
   throw new Error('Expected read_state_field() in scripts/k3d/down.sh')
 }
 
+if (!readTenantNamespaceFnMatch) {
+  throw new Error('Expected read_tenant_namespace() in scripts/k3d/down.sh')
+}
+
 if (!removeStateArtifactsFnMatch) {
   throw new Error('Expected remove_state_artifacts() in scripts/k3d/down.sh')
 }
@@ -58,6 +66,10 @@ if (!localizePostgresUrlMatch) {
 
 if (!buildTokenSnippetFnMatch) {
   throw new Error('Expected build_token_snippet() in scripts/k3d/up.sh')
+}
+
+if (!stateModuleFnMatch) {
+  throw new Error('Expected state_module() in scripts/k3d/up.sh')
 }
 
 if (!runK3dImageImportFnMatch) {
@@ -412,11 +424,14 @@ printf '%s|%s' "$tenant_url_reachable" "$tenant_url_probe_skipped"`,
 })
 
 // ---------------------------------------------------------------------------
-// read_state_field (down.sh) — namespace preservation
+// read_tenant_namespace (down.sh) — namespace preservation
+//
+// In schema v1 the namespace lives in tenants[0].namespace; in v0 it was a
+// flat tenantNamespace field. read_tenant_namespace handles both.
 // ---------------------------------------------------------------------------
 
 describe('k3d down read_state_field — namespace preservation', () => {
-  it('reads tenantNamespace from state file without re-deriving it', () => {
+  it('reads tenantNamespace from v1 tenants[] array without re-deriving it', () => {
     const tmpDir = join(
       fileURLToPath(new URL('.', import.meta.url)),
       `.k3d-down-ns-test-${process.pid}`,
@@ -425,6 +440,37 @@ describe('k3d down read_state_field — namespace preservation', () => {
 
     mkdirSync(tmpDir, { recursive: true })
 
+    // v1 schema: namespace is in tenants[0].namespace; subdomain is different
+    // to prove no re-derivation occurs
+    const state = {
+      schemaVersion: 1,
+      tenants: [{ id: 'k3d-dev', subdomain: 'dev', namespace: 'tenant-platform-dev' }],
+    }
+    writeFileSync(stateFile, JSON.stringify(state))
+
+    const result = runBash(
+      `${readTenantNamespaceFnMatch![0]}
+STATE_FILE="${stateFile}"
+ns="$(read_tenant_namespace)"
+printf '%s' "$ns"`,
+    )
+
+    rmSync(tmpDir, { recursive: true, force: true })
+
+    assert.strictEqual(result.status, 0, result.stderr)
+    assert.strictEqual(result.stdout, 'tenant-platform-dev')
+  })
+
+  it('reads tenantNamespace from v0 flat field for back-compat', () => {
+    const tmpDir = join(
+      fileURLToPath(new URL('.', import.meta.url)),
+      `.k3d-down-ns-v0-test-${process.pid}`,
+    )
+    const stateFile = join(tmpDir, 'state.json')
+
+    mkdirSync(tmpDir, { recursive: true })
+
+    // v0 schema: flat tenantNamespace field
     const state = {
       tenantNamespace: 'tenant-platform-dev',
       tenantSubdomain: 'dev',
@@ -432,9 +478,9 @@ describe('k3d down read_state_field — namespace preservation', () => {
     writeFileSync(stateFile, JSON.stringify(state))
 
     const result = runBash(
-      `${readStateFieldFnMatch[0]}
+      `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${stateFile}"
-ns="$(read_state_field tenantNamespace)"
+ns="$(read_tenant_namespace)"
 printf '%s' "$ns"`,
     )
 
@@ -451,9 +497,9 @@ printf '%s' "$ns"`,
     )
 
     const result = runBash(
-      `${readStateFieldFnMatch[0]}
+      `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${missingStateFile}"
-ns="$(read_state_field tenantNamespace)"
+ns="$(read_tenant_namespace)"
 printf 'got:[%s]' "$ns"`,
     )
 
@@ -472,9 +518,9 @@ printf 'got:[%s]' "$ns"`,
     writeFileSync(stateFile, '{bad json}')
 
     const result = runBash(
-      `${readStateFieldFnMatch[0]}
+      `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${stateFile}"
-ns="$(read_state_field tenantNamespace)"
+ns="$(read_tenant_namespace)"
 printf 'got:[%s]' "$ns"`,
     )
 
@@ -493,13 +539,13 @@ printf 'got:[%s]' "$ns"`,
     const fakeBinDir = join(tmpDir, 'bin')
 
     mkdirSync(fakeBinDir, { recursive: true })
-    writeFileSync(stateFile, JSON.stringify({ tenantNamespace: 'tenant-platform-dev' }))
+    writeFileSync(stateFile, JSON.stringify({ tenants: [{ namespace: 'tenant-platform-dev' }] }))
 
     const result = runBash(
-      `${readStateFieldFnMatch[0]}
+      `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${stateFile}"
 PATH="${fakeBinDir}"
-ns="$(read_state_field tenantNamespace)"
+ns="$(read_tenant_namespace)"
 printf 'got:[%s]' "$ns"`,
     )
 
@@ -730,7 +776,9 @@ printf '{"access_token":"stub-token"}'
     chmodSync(join(fakeBinDir, 'curl'), 0o755)
 
     const result = runBash(
-      `${buildTokenSnippetFnMatch[0]}
+      `ROOT="${repoRoot}"
+${stateModuleFnMatch![0]}
+${buildTokenSnippetFnMatch![0]}
 snippet="$(build_token_snippet "http://keycloak.example.com:8080" "dnd-notes-dev" "client'id" "user\\"name" "pass'both\\"")"
 bash -c "$snippet"`,
       {
@@ -763,7 +811,7 @@ bash -c "$snippet"`,
     ])
   })
 
-  it('writes a valid state.json with all required fields including explicit tenantNamespace', () => {
+  it('writes a valid state.json with all required v1 fields including explicit tenantNamespace', () => {
     const tmpDir = join(
       fileURLToPath(new URL('.', import.meta.url)),
       `.k3d-write-state-test-${process.pid}`,
@@ -773,8 +821,10 @@ bash -c "$snippet"`,
     mkdirSync(tmpDir, { recursive: true })
 
     const result = runBash(
-      `${buildTokenSnippetFnMatch[0]}
-${writeStateFnMatch[0]}
+      `ROOT="${repoRoot}"
+${stateModuleFnMatch![0]}
+${buildTokenSnippetFnMatch![0]}
+${writeStateFnMatch![0]}
 STATE_FILE="${stateFile}"
 K3D_HTTP_PORT=8080
 CONTROL_PLANE_PORT=3101
@@ -789,7 +839,7 @@ TENANT_KEYCLOAK_PASSWORD="password"
 TENANT_PUBLIC_SCHEME="http"
 CLUSTER_NAME="dnd-notes"
 mkdir -p "${tmpDir}"
-write_state "k3d-dev" "dev" "tenant-platform-dev" "dev.127.0.0.1.nip.io" >/dev/null
+write_state "k3d-dev" "dev" "tenant-platform-dev" "dev.127.0.0.1.nip.io" "ready" >/dev/null
 cat "${stateFile}"`,
       {
         STATE_DIR: tmpDir,
@@ -803,22 +853,43 @@ cat "${stateFile}"`,
       assert.fail(`write_state did not produce valid JSON.\nstdout: ${result.stdout}\nstderr: ${result.stderr}`)
     }
 
-    // Stable schema contract assertions
-    assert.strictEqual(state.tenantId, 'k3d-dev', 'tenantId')
-    assert.strictEqual(state.tenantSubdomain, 'dev', 'tenantSubdomain')
-    // The core invariant: stored namespace must be the value passed in, not derived
-    assert.strictEqual(state.tenantNamespace, 'tenant-platform-dev', 'tenantNamespace must be stored verbatim')
-    assert.strictEqual(state.tenantHostname, 'dev.127.0.0.1.nip.io', 'tenantHostname')
+    // Schema v1 contract assertions
+    assert.strictEqual(state.schemaVersion, 1, 'schemaVersion must be 1')
     assert.ok(typeof state.clusterName === 'string', 'clusterName')
     assert.ok(typeof state.controlPlanePort === 'number', 'controlPlanePort')
-    assert.ok(typeof state.keycloakUrl === 'string', 'keycloakUrl')
-    assert.ok(typeof state.keycloakRealm === 'string', 'keycloakRealm')
-    assert.ok(typeof state.siteAdminEmail === 'string', 'siteAdminEmail')
-    assert.ok(typeof state.tenantOwnerEmail === 'string', 'tenantOwnerEmail')
+    assert.ok(typeof state.controlPlaneUrl === 'string', 'controlPlaneUrl')
+    assert.ok(typeof state.ingressUrl === 'string', 'ingressUrl')
+
+    // keycloak sub-object
+    const keycloak = state.keycloak as Record<string, unknown>
+    assert.ok(keycloak && typeof keycloak === 'object', 'keycloak sub-object')
+    assert.ok(typeof keycloak.url === 'string', 'keycloak.url')
+    assert.ok(typeof keycloak.realm === 'string', 'keycloak.realm')
+
+    // auth sub-object
+    const auth = state.auth as Record<string, unknown>
+    assert.ok(auth && typeof auth === 'object', 'auth sub-object')
+    assert.ok(typeof auth.siteAdminEmail === 'string', 'auth.siteAdminEmail')
+    assert.ok(typeof auth.tenantOwnerEmail === 'string', 'auth.tenantOwnerEmail')
+
+    // tenants array — the core invariant: namespace must be the value passed in, not derived
+    const tenants = state.tenants as Record<string, unknown>[]
+    assert.ok(Array.isArray(tenants) && tenants.length === 1, 'tenants array with one entry')
+    const tenant = tenants[0]
+    assert.strictEqual(tenant.id, 'k3d-dev', 'tenants[0].id')
+    assert.strictEqual(tenant.subdomain, 'dev', 'tenants[0].subdomain')
+    assert.strictEqual(tenant.namespace, 'tenant-platform-dev', 'tenants[0].namespace must be stored verbatim')
+    assert.strictEqual(tenant.hostname, 'dev.127.0.0.1.nip.io', 'tenants[0].hostname')
+    assert.ok(typeof tenant.origin === 'string', 'tenants[0].origin')
+    assert.strictEqual(tenant.state, 'ready', 'tenants[0].state')
+
+    // tokenSnippets
     assert.ok(state.tokenSnippets && typeof state.tokenSnippets === 'object', 'tokenSnippets')
     const snippets = state.tokenSnippets as Record<string, unknown>
     assert.ok(typeof snippets.controlPlane === 'string', 'tokenSnippets.controlPlane')
     assert.ok(typeof snippets.tenant === 'string', 'tokenSnippets.tenant')
+
+    // permissions
     assert.strictEqual(statSync(tmpDir).mode & 0o777, 0o700, 'state dir permissions')
     assert.strictEqual(statSync(stateFile).mode & 0o777, 0o600, 'state file permissions')
 

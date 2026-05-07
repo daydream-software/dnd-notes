@@ -11,6 +11,7 @@ STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
 STATE_DIR="$(dirname "${STATE_FILE}")"
 
 KEEP_CLUSTER=false
+JSON_OUTPUT=false
 
 usage() {
   cat <<'EOF'
@@ -23,6 +24,7 @@ Flags:
   --keep-cluster   Delete only the tenant namespace(s) and control-plane
                    deployment; keep the cluster, ingress, Postgres, and
                    Keycloak running (faster reset cycle).
+  --json           Print a machine-readable JSON teardown summary on stdout.
   --help           Show this help and exit
 
 Environment overrides:
@@ -47,8 +49,12 @@ cluster_exists() {
   k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "${name}" >/dev/null
 }
 
-# Read a field from the state file. Returns empty string on any error (missing
-# file, invalid JSON, missing key) without aborting the script.
+state_module() {
+  node "${ROOT}/scripts/k3d/state.mjs" "$@"
+}
+
+# Read a top-level scalar field from the state file.
+# Returns empty string on any error (missing file, invalid JSON, missing key).
 read_state_field() {
   local field="$1"
 
@@ -60,20 +66,36 @@ read_state_field() {
     return 0
   fi
 
+  state_module read-safe "${STATE_FILE}" "${field}" 2>/dev/null || true
+  return 0
+}
+
+# Read the first tenant's namespace from the state file (schema v1 uses
+# a tenants[] array; schema v0 used a flat tenantNamespace field).
+read_tenant_namespace() {
+  if [[ ! -f "${STATE_FILE}" ]]; then
+    return 0
+  fi
+
+  if ! command -v node >/dev/null 2>&1; then
+    return 0
+  fi
+
   node -e '
     const fs = require("node:fs")
-    const field = process.argv[1]
     try {
-      const state = JSON.parse(fs.readFileSync(process.argv[2], "utf8"))
-      const value = state[field]
-      if (value !== null && value !== undefined) {
-        process.stdout.write(String(value))
+      const state = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))
+      // v1 schema: tenants array
+      if (Array.isArray(state.tenants) && state.tenants.length > 0) {
+        const ns = state.tenants[0].namespace
+        if (ns) { process.stdout.write(ns); process.exit(0) }
       }
-    } catch {
-      // corrupt or truncated state — silently ignore
-    }
-  ' "${field}" "${STATE_FILE}" 2>/dev/null || true
-
+      // v0 back-compat: flat tenantNamespace field
+      if (state.tenantNamespace) {
+        process.stdout.write(state.tenantNamespace)
+      }
+    } catch {}
+  ' "${STATE_FILE}" 2>/dev/null || true
   return 0
 }
 
@@ -91,6 +113,7 @@ remove_state_artifacts() {
 for arg in "$@"; do
   case "${arg}" in
     --keep-cluster) KEEP_CLUSTER=true ;;
+    --json)         JSON_OUTPUT=true ;;
     --help)
       usage
       exit 0
@@ -128,7 +151,7 @@ if [[ "${KEEP_CLUSTER}" == "true" ]]; then
   target_kube_context="k3d-${CLUSTER_NAME}"
 
   # Read the persisted tenant namespace directly — never re-derive from subdomain.
-  tenant_namespace="$(read_state_field tenantNamespace)"
+  tenant_namespace="$(read_tenant_namespace)"
 
   if [[ -n "${tenant_namespace}" ]]; then
     log "Deleting tenant namespace '${tenant_namespace}'..."
@@ -155,8 +178,15 @@ if [[ "${KEEP_CLUSTER}" == "true" ]]; then
     --ignore-not-found=true
 
   remove_state_artifacts
-  log "Done. Cluster, Postgres, ingress, and Keycloak are still running."
-  log "Run 'npm run k3d:up' to re-provision."
+  if [[ "${JSON_OUTPUT}" == "true" ]]; then
+    node -e '
+      const [clusterName] = process.argv.slice(1)
+      process.stdout.write(JSON.stringify({ teardown: "soft", clusterName, clusterDeleted: false, stateRemoved: true }, null, 2) + "\n")
+    ' "${CLUSTER_NAME}"
+  else
+    log "Done. Cluster, Postgres, ingress, and Keycloak are still running."
+    log "Run 'npm run k3d:up' to re-provision."
+  fi
 else
   # -------------------------------------------------------------------------
   # Full teardown: delete the cluster
@@ -164,11 +194,24 @@ else
   if ! cluster_exists "${CLUSTER_NAME}"; then
     log "Cluster ${CLUSTER_NAME} does not exist — nothing to tear down."
     remove_state_artifacts
+    if [[ "${JSON_OUTPUT}" == "true" ]]; then
+      node -e '
+        const [clusterName] = process.argv.slice(1)
+        process.stdout.write(JSON.stringify({ teardown: "full", clusterName, clusterDeleted: false, stateRemoved: true, note: "cluster did not exist" }, null, 2) + "\n")
+      ' "${CLUSTER_NAME}"
+    fi
     exit 0
   fi
 
   log "Deleting k3d cluster '${CLUSTER_NAME}'..."
   k3d cluster delete "${CLUSTER_NAME}"
   remove_state_artifacts
-  log "Done. Run 'npm run k3d:up' to start fresh."
+  if [[ "${JSON_OUTPUT}" == "true" ]]; then
+    node -e '
+      const [clusterName] = process.argv.slice(1)
+      process.stdout.write(JSON.stringify({ teardown: "full", clusterName, clusterDeleted: true, stateRemoved: true }, null, 2) + "\n")
+    ' "${CLUSTER_NAME}"
+  else
+    log "Done. Run 'npm run k3d:up' to start fresh."
+  fi
 fi

@@ -11,6 +11,7 @@ LOCAL_PORT="${K3D_OPERATOR_PORTAL_OVERRIDE_LOCAL_PORT:-5173}"
 PROXY_PORT="${K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT:-38080}"
 CHECK_ONLY="${K3D_OPERATOR_PORTAL_OVERRIDE_CHECK_ONLY:-false}"
 WORK_DIR="${ROOT}/.k3d-smoke-work/operator-portal-override"
+JSON_OUTPUT=false
 
 portal_pid=""
 proxy_pid=""
@@ -22,6 +23,13 @@ Run the operator-portal live override workflow.
 Starts `apps/operator-portal` locally in watch mode and exposes a proxy
 at http://operator.127.0.0.1.nip.io:38080 where the portal is local but
 talks to the k3d control plane.
+
+Flags:
+  --json   Print a machine-readable JSON readiness summary on stdout once
+           the proxy is up, then continue streaming logs. With --json the
+           summary is printed before the tail so agents can consume the
+           first complete JSON line then decide whether to wait.
+  --help   Show this help and exit
 
 Environment overrides:
   K3D_STATE_FILE
@@ -97,10 +105,20 @@ cleanup() {
 
 trap cleanup EXIT
 
-if [[ "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+for arg in "$@"; do
+  case "${arg}" in
+    --json)   JSON_OUTPUT=true ;;
+    --help)
+      usage
+      exit 0
+      ;;
+    *)
+      log "Unknown argument: ${arg}"
+      usage
+      exit 1
+      ;;
+  esac
+done
 
 for tool in curl node npm; do
   require_tool "$tool"
@@ -115,19 +133,9 @@ rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
 cluster_name="$(json_get clusterName <"${STATE_FILE}")"
-keycloak_url="$(json_get keycloakUrl <"${STATE_FILE}")"
-keycloak_realm="$(json_get keycloakRealm <"${STATE_FILE}")"
-# Derive the k3d ingress HTTP port from state. Try tenantOrigin first, then
-# keycloakUrl (always present). K3D_HTTP_PORT overrides both.
-k3d_http_port="${K3D_HTTP_PORT:-$(node -e '
-  const fs = require("node:fs")
-  const state = JSON.parse(fs.readFileSync(0, "utf8"))
-  for (const field of ["tenantOrigin", "keycloakUrl"]) {
-    const match = (state[field] ?? "").match(/:(\d+)/)
-    if (match) { process.stdout.write(match[1]); process.exit(0) }
-  }
-  process.stdout.write("8080")
-' <"${STATE_FILE}")}"
+# Read all state fields in one call — v1/v0 compat handled in state.mjs
+eval "$(state_module read-vars "${STATE_FILE}")"
+k3d_http_port="${K3D_HTTP_PORT:-${ingress_port}}"
 
 control_plane_hostname="control-plane.127.0.0.1.nip.io"
 control_plane_origin="http://${control_plane_hostname}:${k3d_http_port}"
@@ -174,13 +182,27 @@ if ! curl -fsS "${proxy_origin}/env.js" | grep -q '__ENV__'; then
   exit 1
 fi
 
-echo
-echo "operator-portal live override is ready."
-echo "- k3d cluster: ${cluster_name}"
-echo "- Local portal: http://127.0.0.1:${LOCAL_PORT}"
-echo "- Override origin: ${proxy_origin}"
-echo "- API target: ${control_plane_origin}"
-echo
+if [[ "${JSON_OUTPUT}" == "true" ]]; then
+  node -e '
+    const [clusterName, localPort, proxyOrigin, controlPlaneOrigin] = process.argv.slice(1)
+    process.stdout.write(JSON.stringify({
+      ready: true,
+      workflow: "operator-portal-override",
+      clusterName,
+      localPortalUrl: `http://127.0.0.1:${localPort}`,
+      overrideOrigin: proxyOrigin,
+      apiTarget: controlPlaneOrigin,
+    }, null, 2) + "\n")
+  ' "${cluster_name}" "${LOCAL_PORT}" "${proxy_origin}" "${control_plane_origin}"
+else
+  echo
+  echo "operator-portal live override is ready."
+  echo "- k3d cluster: ${cluster_name}"
+  echo "- Local portal: http://127.0.0.1:${LOCAL_PORT}"
+  echo "- Override origin: ${proxy_origin}"
+  echo "- API target: ${control_plane_origin}"
+  echo
+fi
 
 if [[ "${CHECK_ONLY}" == "true" ]]; then
   exit 0
