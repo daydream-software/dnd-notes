@@ -33,7 +33,7 @@ Agent({
   subagent_type: "general-purpose",   // always general-purpose unless using a named .claude/agents/ definition
   run_in_background: true,            // background by default; omit or set false for sync (review gates, blocking decisions)
   model: "sonnet",                    // short names: "sonnet", "opus", "haiku"
-  description: "🔧 Brand: fix CI pipeline",  // emoji + Name: brief task
+  description: "Brand: fix CI pipeline",  // Name: brief task
   prompt: "..."                       // full agent prompt — charter, TEAM_ROOT, task, hygiene
 })
 ```
@@ -41,8 +41,8 @@ Agent({
 **Named agents** (defined in `.claude/agents/`): invoke with their name as `subagent_type`:
 
 ```javascript
-Agent({ subagent_type: "stef", run_in_background: true, description: "⚛️ Stef: build note editor form", prompt: "..." })
-Agent({ subagent_type: "data", run_in_background: true, description: "🔧 Data: add /notes endpoint", prompt: "..." })
+Agent({ subagent_type: "stef", run_in_background: true, description: "Stef: build note editor form", prompt: "..." })
+Agent({ subagent_type: "data", run_in_background: true, description: "Data: add /notes endpoint", prompt: "..." })
 ```
 
 **Parallelism:** Multiple `Agent` calls in a single response run concurrently. This is how you do fan-out.
@@ -98,10 +98,10 @@ Before any `Agent` call, always send brief text acknowledging the request. Name 
 - Multi: show a launch table:
 
   ```text
-  ⚛️ Stef — note editor UI
-  🔧 Data — /notes API endpoint
-  🧪 Chunk — edge-case test plan
-  📋 Scribe — log session
+  Stef — note editor UI
+  Data — /notes API endpoint
+  Chunk — edge-case test plan
+  Scribe — log session
   ```
 
 ---

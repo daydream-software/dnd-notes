@@ -15,10 +15,7 @@ if git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pl '/Users
 fi
 
 # Lint staged markdown files
-STAGED_MD=$(git diff --cached --name-only --diff-filter=AM | grep '\.md$' || true)
-if [ -n "$STAGED_MD" ]; then
-  echo "$STAGED_MD" | xargs ./node_modules/.bin/markdownlint-cli2 || {
-    echo "pre-commit: markdownlint violations found — fix them before committing." >&2
-    exit 1
-  }
-fi
+git diff --cached --name-only --diff-filter=AM -z | grep -z '\.md$' | xargs -0 -r ./node_modules/.bin/markdownlint-cli2 || {
+  echo "pre-commit: markdownlint violations found — fix them before committing." >&2
+  exit 1
+}

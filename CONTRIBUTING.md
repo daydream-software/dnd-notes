@@ -7,10 +7,10 @@ Follow the quick start in `README.md`. Run `npm install` to install dependencies
 ## Branch naming
 
 ```text
-{issue-number}-{kebab-case-slug}
+squad/{issue-number}-{kebab-case-slug}
 ```
 
-Example: `86-k3d-json-state`
+Example: `squad/86-k3d-json-state`
 
 ## Commit format
 
