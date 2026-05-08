@@ -19,10 +19,13 @@ TENANT_KEYCLOAK_USERNAME="${TENANT_KEYCLOAK_USERNAME:-owner@example.com}"
 TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 LOCAL_API_PORT="${K3D_TENANT_OVERRIDE_LOCAL_API_PORT:-3001}"
 PROXY_PORT="${K3D_TENANT_OVERRIDE_LISTEN_PORT:-38080}"
+POSTGRES_LOCAL_PORT="${POSTGRES_LOCAL_PORT:-55432}"
+PLATFORM_NAMESPACE="${PLATFORM_NAMESPACE:-dnd-notes-platform}"
 CHECK_ONLY="${K3D_TENANT_API_OVERRIDE_CHECK_ONLY:-false}"
 WORK_DIR="${ROOT}/.k3d-smoke-work/tenant-api-override"
 previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
 api_pid=""
+postgres_forward_pid=""
 proxy_pid=""
 
 usage() {
@@ -117,6 +120,35 @@ wait_for_http() {
   return 1
 }
 
+wait_for_tcp() {
+  local port="$1"
+  local timeout="${2:-30}"
+  local deadline=$((SECONDS + timeout))
+
+  while (( SECONDS < deadline )); do
+    if (echo > "/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Timed out waiting for TCP port ${port}"
+  return 1
+}
+
+localize_postgres_url() {
+  local raw_url="$1"
+  local local_port="$2"
+
+  node -e '
+    const [rawUrl, localPort] = process.argv.slice(1)
+    const url = new URL(rawUrl)
+    url.hostname = "127.0.0.1"
+    url.port = localPort
+    process.stdout.write(url.toString())
+  ' "${raw_url}" "${local_port}"
+}
+
 json_get() {
   local path="$1"
 
@@ -173,7 +205,7 @@ cleanup() {
   local exit_code=$?
   set +e
 
-  for pid in "${proxy_pid}" "${api_pid}"; do
+  for pid in "${proxy_pid}" "${api_pid}" "${postgres_forward_pid}"; do
     if [[ -n "${pid}" ]] && kill -0 "${pid}" >/dev/null 2>&1; then
       kill "${pid}" >/dev/null 2>&1
       wait "${pid}" 2>/dev/null
@@ -228,10 +260,23 @@ proxy_origin="http://${tenant_hostname}:${PROXY_PORT}"
 kubectl -n "${tenant_namespace}" get configmap dnd-notes-runtime -o json \
   >"${WORK_DIR}/tenant-configmap.json"
 
-database_url="$(
+raw_database_url="$(
   kubectl -n "${tenant_namespace}" get secret dnd-notes-runtime-secret -o json \
     | decode_secret_value data.DATABASE_URL
 )"
+
+# Port-forward platform-postgres so the locally-running API can reach it.
+# The forward stays alive for the lifetime of this script (cleanup() kills it).
+log "Port-forwarding platform-postgres to 127.0.0.1:${POSTGRES_LOCAL_PORT}..."
+kubectl -n "${PLATFORM_NAMESPACE}" port-forward \
+  svc/platform-postgres \
+  "${POSTGRES_LOCAL_PORT}:5432" \
+  >"${WORK_DIR}/postgres-port-forward.log" 2>&1 &
+postgres_forward_pid=$!
+
+wait_for_tcp "${POSTGRES_LOCAL_PORT}" 30
+
+database_url="$(localize_postgres_url "${raw_database_url}" "${POSTGRES_LOCAL_PORT}")"
 auth_mode="$(json_get data.AUTH_MODE <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_url="$(json_get data.KEYCLOAK_URL <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_realm="$(json_get data.KEYCLOAK_REALM <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
@@ -286,15 +331,13 @@ tenant_bearer_token="$(get_keycloak_access_token \
   "${TENANT_KEYCLOAK_PASSWORD}")"
 
 curl -fsS \
-  -H "Authorization: Bearer ${tenant_bearer_token}" \
-  "http://127.0.0.1:${LOCAL_API_PORT}/api/auth/session" \
-  >"${WORK_DIR}/local-session.json"
-curl -fsS \
   -D "${WORK_DIR}/proxy-session.headers" \
   -H "Authorization: Bearer ${tenant_bearer_token}" \
   "${proxy_origin}/api/auth/session" \
   >"${WORK_DIR}/proxy-session.json"
-cmp -s "${WORK_DIR}/local-session.json" "${WORK_DIR}/proxy-session.json"
+# /api/auth/session updates the user's last-seen timestamp on each call, so a
+# byte-equal comparison between local and proxy responses is non-deterministic.
+# We rely on the override-target header below to confirm the proxy routes here.
 normalize_headers "${WORK_DIR}/proxy-session.headers" \
   | grep -qi '^x-dnd-notes-override-target: local-api$'
 
