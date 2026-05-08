@@ -98,6 +98,32 @@ function installDomGlobals(window: InstalledWindow) {
   installGlobalProperty('atob', window.atob.bind(window))
   installGlobalProperty('btoa', window.btoa.bind(window))
 
+  // Defensive globals — exposed defensively so future MUI/RTL bumps don't break the smoke.
+  installGlobalProperty('ShadowRoot', window.ShadowRoot)
+  if (window.Window) {
+    installGlobalProperty('Window', window.Window)
+  }
+  installGlobalProperty('HTMLDivElement', window.HTMLDivElement)
+  installGlobalProperty('HTMLSpanElement', window.HTMLSpanElement)
+  installGlobalProperty('HTMLAnchorElement', window.HTMLAnchorElement)
+  installGlobalProperty('HTMLFormElement', window.HTMLFormElement)
+  installGlobalProperty('HTMLLabelElement', window.HTMLLabelElement)
+  installGlobalProperty('HTMLSelectElement', window.HTMLSelectElement)
+  installGlobalProperty('HTMLOptionElement', window.HTMLOptionElement)
+  installGlobalProperty('MutationObserver', window.MutationObserver)
+  installGlobalProperty('ResizeObserver', window.ResizeObserver)
+  installGlobalProperty('Range', window.Range)
+  installGlobalProperty('Selection', window.Selection)
+  if (window.getSelection) {
+    installGlobalProperty('getSelection', window.getSelection.bind(window))
+  }
+  installGlobalProperty('DOMParser', window.DOMParser)
+  installGlobalProperty('XMLHttpRequest', window.XMLHttpRequest)
+  installGlobalProperty('Image', window.Image)
+  installGlobalProperty('FormData', window.FormData)
+  installGlobalProperty('Blob', window.Blob)
+  installGlobalProperty('File', window.File)
+
   Object.defineProperty(globalThis, 'IS_REACT_ACT_ENVIRONMENT', {
     configurable: true,
     writable: true,
