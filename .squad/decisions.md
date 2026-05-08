@@ -6698,7 +6698,7 @@ No migration of old state files required. `k3d:up` always writes fresh state fil
 
 ## Context
 
-PR #156 added a nested-object npm override to force `@rushstack/node-core-library` to use a safe ajv version:
+PR #160 introduced a nested-object npm override while working on issue #156 to force `@rushstack/node-core-library` to use a safe ajv version:
 
 ```json
 "overrides": {

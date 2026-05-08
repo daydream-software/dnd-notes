@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, it, test } from 'node:test'
+import { format as formatLog } from 'node:util'
 import request from 'supertest'
 import { createApp, makeRateLimiter, readPositiveIntEnv } from '../src/app.js'
 import {
@@ -1702,8 +1703,8 @@ describe('Control Plane API', () => {
           return { status: 200, body: null }
         },
       }
-      console.error = ((message: unknown) => {
-        errorMessages.push(String(message))
+      console.error = ((...args: unknown[]) => {
+        errorMessages.push(formatLog(...(args as [unknown, ...unknown[]])))
       }) as typeof console.error
 
       app = createApp({
