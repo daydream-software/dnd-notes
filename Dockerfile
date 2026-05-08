@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # Multi-stage Dockerfile for dnd-notes tenant app
 # Produces a single-origin container with web + API served by Express
 
@@ -13,11 +14,12 @@ COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
 
 FROM base AS deps
-RUN npm ci --workspace apps/api --include-workspace-root && \
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --workspace apps/api --include-workspace-root && \
     npm prune --omit=dev
 
 FROM base AS build-deps
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
 
 FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./

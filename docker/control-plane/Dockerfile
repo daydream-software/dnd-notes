@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # Multi-stage Dockerfile for the internal dnd-notes control plane
 
 FROM node:22.21.1-bookworm-slim AS base
@@ -11,11 +12,12 @@ COPY apps/web/package*.json ./apps/web/
 COPY apps/control-plane/package*.json ./apps/control-plane/
 
 FROM base AS deps
-RUN npm ci --workspace apps/control-plane --include-workspace-root && \
+RUN --mount=type=cache,target=/root/.npm,sharing=locked \
+    npm ci --workspace apps/control-plane --include-workspace-root && \
     npm prune --omit=dev
 
 FROM base AS build-deps
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
 
 FROM build-deps AS build
 COPY tsconfig.json commitlint.config.cjs ./

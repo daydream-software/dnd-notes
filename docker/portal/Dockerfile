@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.4
 # Stage 1: Base with package.json files
 FROM node:22.21.1-bookworm-slim AS base
 WORKDIR /app
@@ -14,7 +15,7 @@ COPY apps/customer-portal/package*.json ./apps/customer-portal/
 
 # Stage 2: Install all dependencies for build
 FROM base AS build-deps
-RUN npm ci
+RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
 
 # Stage 3: Build application
 FROM build-deps AS build

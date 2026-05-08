@@ -28,3 +28,8 @@ scripts/*
 *.test.ts
 *.test.tsx
 test/
+.k3d-*
+coverage
+reports
+.idea
+.vscode
