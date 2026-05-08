@@ -105,6 +105,8 @@ function createTenantApiOverrideProxy(options) {
 
       await pipeline(Readable.fromWeb(response.body), reply)
     } catch (error) {
+      console.error('[tenant-api-override-proxy] upstream error:', error)
+
       if (reply.headersSent) {
         reply.destroy(error instanceof Error ? error : undefined)
         return
@@ -115,11 +117,21 @@ function createTenantApiOverrideProxy(options) {
       reply.end(
         JSON.stringify({
           error: 'Tenant API override proxy request failed.',
-          details: [error instanceof Error ? error.message : String(error)],
         }),
       )
     }
   })
+}
+
+// Allowlist: localhost, loopback IPs, or *.127.0.0.1.nip.io used by k3d ingress.
+const LOCAL_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\]|[a-z0-9-]+\.127\.0\.0\.1\.nip\.io)(:\d+)?$/
+
+function assertLocalOrigin(value, name) {
+  if (!LOCAL_ORIGIN.test(value)) {
+    throw new Error(
+      `${name} must target a local dev address (got ${JSON.stringify(value)}). This proxy only forwards to local dev servers.`,
+    )
+  }
 }
 
 async function main() {
@@ -133,6 +145,9 @@ async function main() {
       'K3D_TENANT_OVERRIDE_TENANT_ORIGIN is required (for example http://t-tenant.127.0.0.1.nip.io:8080).',
     )
   }
+
+  assertLocalOrigin(tenantOrigin, 'K3D_TENANT_OVERRIDE_TENANT_ORIGIN')
+  assertLocalOrigin(localApiOrigin, 'K3D_TENANT_OVERRIDE_LOCAL_API_ORIGIN')
 
   const server = createTenantApiOverrideProxy({
     tenantOrigin,
