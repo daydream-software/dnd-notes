@@ -1,0 +1,53 @@
+# CodeRabbit configuration — daydream-software/dnd-notes
+# Schema reference: https://docs.coderabbit.ai/reference/configuration
+
+language: en-US
+
+reviews:
+  profile: chill
+  request_changes_workflow: true
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    base_branches:
+      - main
+
+  path_filters:
+    - "!node_modules/**"
+    - "!**/node_modules/**"
+    - "!dist/**"
+    - "!**/dist/**"
+    - "!coverage/**"
+    - "!**/coverage/**"
+    - "!reports/**"
+    - "!package-lock.json"
+    - "!**/*.tsbuildinfo"
+    - "!apps/*/public/fonts/**"
+
+  path_instructions:
+    - path: "packages/theme/**"
+      instructions: |
+        This is the single source of truth for the MUI theme. Flag any new
+        createTheme calls outside this package. Forbidden values: #38bdf8 (sky),
+        #8b5cf6 as primary, #020617 as background.default, Inter or any non-Geist font.
+    - path: "apps/*/src/**/*.{ts,tsx}"
+      instructions: |
+        Flag local createTheme calls (must come from @dnd-notes/theme).
+        Flag fullWidth on form submit buttons outside Dialog action rows.
+        Flag MUI Outlined or Sharp icon variants — only Rounded is allowed.
+        Flag Title Case or ALL CAPS in UI copy (sentence case only, except the D&D NOTES brand pill).
+    - path: "platform/keycloak-jwt/**"
+      instructions: |
+        Relative imports MUST end in .js (ESLint-enforced in this package).
+    - path: "**/*.test.{ts,tsx}"
+      instructions: |
+        Tests in apps/api use node:test. Tests in apps/web and the portals use vitest.
+        Don't suggest swapping runners.
+
+chat:
+  auto_reply: true
