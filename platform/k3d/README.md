@@ -191,10 +191,12 @@ to every response so you can prove which side served each request.
 
 #### `k3d:tenant-api-override`
 
-1. Start or reuse a tenant on k3d
+1. Read the dev tenant from `.k3d-state/state.json` (written by `k3d:up`)
 2. Read that tenant’s runtime Secret/ConfigMap from Kubernetes
 3. Run `apps/api` locally in watch mode against the live tenant database/runtime auth config
 4. Expose a local same-origin front proxy at `http://<tenant>.127.0.0.1.nip.io:38080`
+
+Set `K3D_TENANT_OVERRIDE_NAMESPACE` and `K3D_TENANT_OVERRIDE_SUBDOMAIN` to point at a different tenant namespace.
 
 | Path | Target |
 | --- | --- |
