@@ -2,7 +2,7 @@ import assert from 'node:assert'
 import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, it, test } from 'node:test'
 import request from 'supertest'
-import { createApp, makeRateLimiter } from '../src/app.js'
+import { createApp, makeRateLimiter, readPositiveIntEnv } from '../src/app.js'
 import {
   TenantProvisioningConflictError,
   TenantProvisioningValidationError,
@@ -2944,4 +2944,10 @@ test('makeRateLimiter — limit=0 passes requests through instead of blocking al
     done()
   }
   middleware(req, res, next)
+})
+
+test('readPositiveIntEnv — returns fallback for float ("1.5"), confirming integer contract', () => {
+  process.env['__TEST_CP_VAR__'] = '1.5'
+  assert.equal(readPositiveIntEnv('__TEST_CP_VAR__', 99), 99)
+  delete process.env['__TEST_CP_VAR__']
 })

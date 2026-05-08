@@ -41,9 +41,10 @@ import { rateLimit, type Options as RateLimitOptions } from 'express-rate-limit'
  */
 export function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
-  if (raw === undefined || raw === '') return fallback
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+  const normalized = raw?.trim()
+  if (normalized === undefined || normalized === '') return fallback
+  const parsed = Number(normalized)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
 }
 
 const defaultWindowMs = readPositiveIntEnv('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000)

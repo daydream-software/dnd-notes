@@ -344,11 +344,13 @@ const portalLoginRateLimitPolicy: RateLimitPolicy = {
  * because express-rate-limit v8 treats limit=0 as "block every request" rather
  * than "no limit".
  */
-function readPositiveIntEnv(name: string, fallback: number): number {
+/** Exported for unit testing only. */
+export function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
-  if (raw === undefined || raw === '') return fallback
-  const parsed = Number(raw)
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+  const normalized = raw?.trim()
+  if (normalized === undefined || normalized === '') return fallback
+  const parsed = Number(normalized)
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback
 }
 
 /**
