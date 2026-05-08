@@ -126,7 +126,7 @@ wait_for_tcp() {
   local deadline=$((SECONDS + timeout))
 
   while (( SECONDS < deadline )); do
-    if (echo > "/dev/tcp/127.0.0.1/${port}") >/dev/null 2>&1; then
+    if bash -c "</dev/tcp/127.0.0.1/${port}" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1

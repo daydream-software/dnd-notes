@@ -6873,7 +6873,7 @@ simultaneously. customer-portal-override stays on 38081.
 `platform/k3d/README.md` env var table, workflow step, and readiness JSON
 example updated to reflect port 38082 and dynamic `controlPlanePort`.
 
-## What Wave 2 / Wave 3 still need to do
+## What Wave 2 / Wave 3 were planned to do next (Wave 1 context)
 
-- Wave 2: refactor smoke->REST in up.sh (replace operator-portal-smoke.ts usage)
-- Wave 3: BuildKit / image build perf
+- Wave 2: refactor smoke->REST in up.sh (replace operator-portal-smoke.ts usage) *(completed in this PR)*
+- Wave 3: BuildKit / image build perf *(completed in this PR)*

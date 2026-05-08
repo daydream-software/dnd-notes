@@ -180,7 +180,9 @@ export function readCompatVars(stateFile) {
     if (m) { ingressPort = m[1]; break }
   }
 
-  const controlPlaneUrl = state?.controlPlaneUrl ?? ''
+  const controlPlaneUrl =
+    state?.controlPlaneUrl ??
+    (state?.controlPlanePort != null ? `http://127.0.0.1:${state.controlPlanePort}` : '')
   const controlPlanePort = state?.controlPlanePort != null ? String(state.controlPlanePort) : ''
 
   return [

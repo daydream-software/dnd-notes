@@ -46,13 +46,21 @@ Environment overrides:
 EOF
 }
 
+require_value() {
+  if (( $# < 2 )); then
+    echo "Missing value for $1" >&2
+    usage
+    exit 1
+  fi
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --name)        IMAGE_NAME="$2";  shift 2 ;;
-    --dockerfile)  DOCKERFILE="$2";  shift 2 ;;
-    --repo)        IMAGE_REPO="$2";  shift 2 ;;
-    --tag)         IMAGE_TAG="$2";   shift 2 ;;
-    --build-arg)   DOCKER_BUILD_ARGS+=("--build-arg" "$2"); shift 2 ;;
+    --name)        require_value "$@"; IMAGE_NAME="$2";  shift 2 ;;
+    --dockerfile)  require_value "$@"; DOCKERFILE="$2";  shift 2 ;;
+    --repo)        require_value "$@"; IMAGE_REPO="$2";  shift 2 ;;
+    --tag)         require_value "$@"; IMAGE_TAG="$2";   shift 2 ;;
+    --build-arg)   require_value "$@"; DOCKER_BUILD_ARGS+=("--build-arg" "$2"); shift 2 ;;
     --help)        usage; exit 0 ;;
     *) echo "Unknown argument: $1" >&2; usage; exit 1 ;;
   esac
