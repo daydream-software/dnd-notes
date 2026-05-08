@@ -55,6 +55,8 @@ const readMax = readPositiveIntEnv('RATE_LIMIT_READ_MAX', 300)
 const rateLimitDefaults: Partial<RateLimitOptions> = {
   standardHeaders: 'draft-6',
   legacyHeaders: false,
+  // Trust-proxy is intentional in this deployment; suppress the runtime warning that pollutes stderr.
+  validate: { trustProxy: false },
 }
 
 export function makeRateLimiter(options: Partial<RateLimitOptions>) {

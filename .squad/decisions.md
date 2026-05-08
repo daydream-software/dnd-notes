@@ -6690,3 +6690,154 @@ No migration of old state files required. `k3d:up` always writes fresh state fil
 **Owner:** Brand should keep revision (narrow platform-shell follow-up, not architecture handoff).
 
 #### Status: Accepted
+# Decision: npm override selector form for ajv ReDoS fix
+
+**Date:** 2026-05-08
+**Author:** Brand
+**PR:** #160 (`fix/156-ajv-redos`)
+
+## Context
+
+PR #160 introduced a nested-object npm override while working on issue #156 to force `@rushstack/node-core-library` to use a safe ajv version:
+
+```json
+"overrides": {
+  "@rushstack/node-core-library": {
+    "ajv": ">=8.18.0"
+  }
+}
+```
+
+## Finding
+
+The nested-object override form does NOT work against `@rushstack/node-core-library@5.13.0`'s `"ajv": "~8.13.0"` constraint in npm 10.9.4. Even after a full clean install (`rm -rf node_modules package-lock.json && npm install`), the lockfile continued to pin `ajv@8.13.0` under the rushstack subtree and `npm audit` continued to report the ReDoS advisory.
+
+## Decision
+
+Use the flat version-selector form instead:
+
+```json
+"overrides": {
+  "ajv@~8.13.0": "^8.18.0"
+}
+```
+
+This selector matches only packages requesting `~8.13.0` (exclusively `@rushstack/node-core-library@5.13.0` in this tree). ESLint's `^6.x` ajv range does not match. The change forces hoisting — the nested `node_modules/@rushstack/node-core-library/node_modules/ajv` entry is removed from the lockfile; `node_modules/ajv@8.20.0` is shared from root.
+
+Result: `npm audit` reports 0 vulnerabilities.
+
+## Rule going forward
+
+When npm nested-object overrides target a package with a tilde-pinned dependency, prefer the `"package@range"` selector form which is more reliably enforced by npm 10.
+
+# CodeQL Alert Dismissal — Dev-Only Scripts
+
+**Decided by:** Data (Backend Dev)
+**Date:** 2026-05-08
+**Type:** Security / Process
+
+## Context
+
+Epic #150 had 6 open CodeQL alerts on `main` after its sub-issue PRs merged.
+Two (alerts #5 and #6) were flagged as SSRF on dev-only k3d proxy scripts.
+PR #161 had already added a startup-time `LOCAL_ORIGIN` allowlist that exits
+if a non-loopback target is configured — genuine mitigation that CodeQL
+cannot trace statically.
+
+## Decision
+
+Dev-only scripts (under `scripts/k3d/`) that are restricted at startup time
+to loopback targets may be dismissed as CodeQL false positives via the
+GitHub API using `dismissed_reason="false positive"`. Dismissal comment must
+state: (1) dev-only scope, (2) the PR that added the mitigation, (3) why
+static analysis cannot see the mitigation.
+
+Limit: GitHub API caps `dismissed_comment` at 280 characters.
+
+## Rationale
+
+Static analysis has no interprocedural startup-gate tracing for this pattern.
+Dismissal is appropriate when all of the following hold:
+- Script is never deployed to production
+- A startup-time guard exits the process if the target is not on an allowlist
+- The allowlist is restricted to loopback addresses only
+
+# Rate-limit policy — #152 (security alerts)
+
+**Date:** 2026-05-08
+**Author:** data
+**Context:** 27 CodeQL `js/missing-rate-limiting` alerts across `apps/api` and `apps/control-plane`
+
+## Decision
+
+Replace the custom Map-based rate-limiter buckets in `apps/api` with
+`express-rate-limit` middleware applied directly on each route handler.
+Keep the custom bucket system in `apps/control-plane` and add
+`express-rate-limit` alongside it on portal auth routes so CodeQL can
+trace a recognized pattern.
+
+## Policy table
+
+| Category               | Max requests | Window  | Routes                                           |
+|------------------------|-------------|---------|--------------------------------------------------|
+| Auth (register/login)  | 5           | 15 min  | POST /api/auth/register, POST /api/auth/login    |
+| Auth (logout)          | 30          | 15 min  | POST /api/auth/logout                            |
+| Guest join             | 10          | 10 min  | POST /api/shared/:token/join                     |
+| Membership claim       | 5           | 15 min  | POST /api/shared/:token/membership/claim         |
+| Authenticated write    | 100         | 15 min  | POST/PUT/DELETE campaigns, notes, share-links    |
+| Authenticated read     | 300         | 15 min  | GET campaigns, notes, overview, activity, etc.   |
+| Portal signup          | 5           | 15 min  | POST /portal/signup                              |
+| Portal login           | 5           | 15 min  | POST /portal/login                               |
+| Portal logout          | 30          | 15 min  | POST /portal/logout                              |
+
+## Env overrides
+
+- `RATE_LIMIT_WINDOW_MS` — window for API auth/write/read limiters
+- `RATE_LIMIT_AUTH_MAX` — max for auth-sensitive routes (default 5)
+- `RATE_LIMIT_WRITE_MAX` — max for authenticated write routes (default 100)
+- `RATE_LIMIT_READ_MAX` — max for authenticated read routes (default 300)
+- `RATE_LIMIT_PORTAL_WINDOW_MS` — window for control-plane portal routes
+- `RATE_LIMIT_PORTAL_AUTH_MAX` — max for portal auth routes (default 5)
+
+## Rationale
+
+- Auth routes tight (5/15min): brute-force credential stuffing protection
+- Write routes moderate (100/15min): normal user session generates ~10-20 writes
+- Read routes loose (300/15min): prevents scraping, still generous for normal use
+- Factory pattern (one limiter instance per `createApp()` call) keeps test isolation
+
+## Implementation note
+
+`express-rate-limit` v8, `standardHeaders: 'draft-6'`, `legacyHeaders: false`.
+This emits `RateLimit-*` headers and `Retry-After` on 429 responses, matching
+the behavior of the removed custom limiter.
+
+# Decision: rate-limit zero-disable semantics via makeRateLimiter
+
+**Decided by:** Data (Backend Dev)
+**Date:** 2026-05-08
+**Type:** Bug Fix / API Contract
+
+## Context
+
+`express-rate-limit` v8 treats `limit: 0` as "block every request", not as a no-op.
+Both `apps/api` and `apps/control-plane` documented that setting a `RATE_LIMIT_*_MAX`
+env var to `0` would disable the limiter, but the implementation passed `limit: 0`
+directly to the library — producing 429 on every request instead.
+
+## Decision
+
+All `rateLimit()` construction must route through a `makeRateLimiter()` wrapper that
+intercepts `limit === 0` and substitutes `limit: 1, skip: () => true`. This preserves
+the documented disable semantics without changing `readPositiveIntEnv()` (which still
+accepts 0 as a valid parsed value).
+
+Each app has its own copy of `makeRateLimiter()` — control-plane does not import from
+apps/api (no cross-app dependency).
+
+## Consequences
+
+- `RATE_LIMIT_*_MAX=0` now disables the limiter as documented.
+- `makeRateLimiter` is exported from both modules for unit testability.
+- Two new tests added (one per app) asserting next() is called when limit=0.
+

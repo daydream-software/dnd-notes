@@ -9,6 +9,7 @@ import {
   createAuthLoginLimiter,
   createAuthLogoutLimiter,
   createAuthRegisterLimiter,
+  createReadLimiter,
 } from '../rate-limiters.js'
 import {
   type AppRouteContext,
@@ -24,6 +25,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
   const authRegisterLimiter = createAuthRegisterLimiter()
   const authLoginLimiter = createAuthLoginLimiter()
   const authLogoutLimiter = createAuthLogoutLimiter()
+  const authSessionReadLimiter = createReadLimiter()
 
   app.get(
     '/api/auth/config',
@@ -113,6 +115,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
 
   app.get(
     '/api/auth/session',
+    authSessionReadLimiter,
     async (
       request: Request,
       response: Response<CurrentOwnerResponse | ErrorResponse>,
