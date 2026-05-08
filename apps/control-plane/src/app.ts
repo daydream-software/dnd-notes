@@ -6,6 +6,7 @@ import {
   scrypt,
   timingSafeEqual,
 } from 'node:crypto'
+import { rateLimit } from 'express-rate-limit'
 import express, {
   type Express,
   type NextFunction,
@@ -333,6 +334,9 @@ const portalLoginRateLimitPolicy: RateLimitPolicy = {
   windowMs: 1000 * 60 * 15,
   errorMessage: 'Too many portal login attempts. Please wait before trying again.',
 }
+
+const portalAuthWindowMs = Number(process.env.RATE_LIMIT_PORTAL_WINDOW_MS ?? 15 * 60 * 1000)
+const portalAuthMax = Number(process.env.RATE_LIMIT_PORTAL_AUTH_MAX ?? 5)
 
 const createTenantSchema = z.object({
   id: z.string().min(1),
@@ -694,6 +698,29 @@ export function createApp({
   app.set('trust proxy', trustProxy)
   const portalJsonParser = express.json({ limit: '16kb' })
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
+  // Per-instance express-rate-limit middleware for portal auth routes.
+  // Created inside createApp so that test instances each get isolated stores.
+  const portalSignupLimiter = rateLimit({
+    windowMs: portalAuthWindowMs,
+    limit: portalAuthMax,
+    standardHeaders: 'draft-6',
+    legacyHeaders: false,
+    message: { error: 'Too many portal signup attempts. Please wait before trying again.' },
+  })
+  const portalLoginLimiter = rateLimit({
+    windowMs: portalAuthWindowMs,
+    limit: portalAuthMax,
+    standardHeaders: 'draft-6',
+    legacyHeaders: false,
+    message: { error: 'Too many portal login attempts. Please wait before trying again.' },
+  })
+  const portalLogoutLimiter = rateLimit({
+    windowMs: portalAuthWindowMs,
+    limit: 30,
+    standardHeaders: 'draft-6',
+    legacyHeaders: false,
+    message: { error: 'Too many requests. Please wait before trying again.' },
+  })
   let nextRateLimitBucketSweepAt = 0
   const buildHealthResponse = (): HealthResponse => ({
     status: 'healthy',
@@ -1176,6 +1203,7 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/signup`,
+    portalSignupLimiter,
     createPortalRateLimitMiddleware('portal-signup', portalSignupRateLimitPolicy),
     portalJsonParser,
     async (
@@ -1270,6 +1298,7 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/login`,
+    portalLoginLimiter,
     createPortalRateLimitMiddleware('portal-login', portalLoginRateLimitPolicy),
     portalJsonParser,
     async (
@@ -1407,6 +1436,7 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/logout`,
+    portalLogoutLimiter,
     createPortalSessionMiddleware(tenantRegistry),
     portalJsonParser,
     async (

@@ -10,25 +10,35 @@ import {
   type SharedSessionResponse,
 } from '../types.js'
 import {
+  createReadLimiter,
+  createSharedClaimLimiter,
+  createSharedJoinLimiter,
+  createWriteLimiter,
+} from '../rate-limiters.js'
+import {
   type AppRouteContext,
   type ShareParams,
   type SharedNoteParams,
   applySharedLinkPolicy,
   buildOverview,
   buildSessions,
+  readSharedMembership,
   requireAuthenticatedAccount,
   requireEditorAccess,
   requireSharedMembership,
   resolveSharedLink,
-  sharedClaimRateLimitPolicy,
-  sharedJoinRateLimitPolicy,
-  readSharedMembership,
 } from '../route-support.js'
 import { validateGuestJoinInput, validateNoteCreateInput, validateNoteInput } from '../validation.js'
 
 export function registerSharedRoutes(app: Express, context: AppRouteContext) {
+  const readLimiter = createReadLimiter()
+  const writeLimiter = createWriteLimiter()
+  const sharedJoinLimiter = createSharedJoinLimiter()
+  const sharedClaimLimiter = createSharedClaimLimiter()
+
   app.get(
     '/api/shared/:shareToken/session',
+    readLimiter,
     async (
       request: Request<ShareParams>,
       response: Response<SharedSessionResponse | ErrorResponse>,
@@ -52,22 +62,11 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/shared/:shareToken/join',
+    sharedJoinLimiter,
     async (
       request: Request<ShareParams>,
       response: Response<SharedJoinResponse | ErrorResponse>,
     ) => {
-      if (
-        context.isRateLimited(
-          request,
-          response,
-          'shared-join',
-          sharedJoinRateLimitPolicy,
-          request.params.shareToken,
-        )
-      ) {
-        return
-      }
-
       const noteStore = context.getNoteStore()
       const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
@@ -103,22 +102,11 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/shared/:shareToken/membership/claim',
+    sharedClaimLimiter,
     async (
       request: Request<ShareParams>,
       response: Response<SharedMembershipClaimResponse | ErrorResponse>,
     ) => {
-      if (
-        context.isRateLimited(
-          request,
-          response,
-          'shared-claim',
-          sharedClaimRateLimitPolicy,
-          request.params.shareToken,
-        )
-      ) {
-        return
-      }
-
       const noteStore = context.getNoteStore()
       const shared = await resolveSharedLink(noteStore, request.params.shareToken, response)
 
@@ -184,6 +172,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.get(
     '/api/shared/:shareToken/overview',
+    readLimiter,
     async (
       request: Request<ShareParams>,
       response: Response<NotesOverview | ErrorResponse>,
@@ -214,6 +203,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.get(
     '/api/shared/:shareToken/notes',
+    readLimiter,
     async (
       request: Request<ShareParams>,
       response: Response<NotesResponse | ErrorResponse>,
@@ -244,6 +234,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.get(
     '/api/shared/:shareToken/sessions',
+    readLimiter,
     async (
       request: Request<ShareParams>,
       response: Response<SessionsResponse | ErrorResponse>,
@@ -274,6 +265,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/shared/:shareToken/notes',
+    writeLimiter,
     async (
       request: Request<ShareParams>,
       response: Response<NoteResponse | ErrorResponse>,
@@ -328,6 +320,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.put(
     '/api/shared/:shareToken/notes/:noteId',
+    writeLimiter,
     async (
       request: Request<SharedNoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
@@ -395,6 +388,7 @@ export function registerSharedRoutes(app: Express, context: AppRouteContext) {
 
   app.delete(
     '/api/shared/:shareToken/notes/:noteId',
+    writeLimiter,
     async (
       request: Request<SharedNoteParams>,
       response: Response<undefined | ErrorResponse>,
