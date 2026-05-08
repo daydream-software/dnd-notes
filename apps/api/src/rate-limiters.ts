@@ -33,7 +33,11 @@ import { rateLimit, type Options as RateLimitOptions } from 'express-rate-limit'
  *   - the value is not a finite number (e.g. "abc", "NaN"), OR
  *   - the value is negative.
  *
- * Explicitly allows 0 — operators may intentionally disable a limit.
+ * Explicitly allows 0 — operators may intentionally disable a limit by setting
+ * the variable to "0". For this to have the intended effect, callers must route
+ * through makeRateLimiter (or apply the equivalent skip workaround themselves),
+ * because express-rate-limit v8 treats limit=0 as "block every request" rather
+ * than "no limit".
  */
 export function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
@@ -52,7 +56,12 @@ const rateLimitDefaults: Partial<RateLimitOptions> = {
   legacyHeaders: false,
 }
 
-function makeRateLimiter(options: Partial<RateLimitOptions>) {
+export function makeRateLimiter(options: Partial<RateLimitOptions>) {
+  // express-rate-limit v8 treats limit=0 as "block everything".
+  // Preserve the documented "0 disables limiting" semantics.
+  if (options.limit === 0) {
+    return rateLimit({ ...rateLimitDefaults, ...options, limit: 1, skip: () => true })
+  }
   return rateLimit({ ...rateLimitDefaults, ...options })
 }
 

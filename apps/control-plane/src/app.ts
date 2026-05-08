@@ -338,13 +338,31 @@ const portalLoginRateLimitPolicy: RateLimitPolicy = {
 /**
  * Parse a non-negative integer from an environment variable.
  * Returns `fallback` when the variable is absent, empty, non-finite, or negative.
- * Explicitly allows 0 — operators may intentionally disable a limit.
+ * Explicitly allows 0 — operators may intentionally disable a limit by setting
+ * the variable to "0". For this to have the intended effect, callers must route
+ * through makeRateLimiter (or apply the equivalent skip workaround themselves),
+ * because express-rate-limit v8 treats limit=0 as "block every request" rather
+ * than "no limit".
  */
 function readPositiveIntEnv(name: string, fallback: number): number {
   const raw = process.env[name]
   if (raw === undefined || raw === '') return fallback
   const parsed = Number(raw)
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+/**
+ * Thin wrapper around rateLimit() that preserves the documented "0 disables
+ * limiting" semantics. express-rate-limit v8 treats limit=0 as "block every
+ * request", so we swap it for limit=1 with skip=() => true instead.
+ *
+ * Exported for unit testing only.
+ */
+export function makeRateLimiter(options: Parameters<typeof rateLimit>[0]) {
+  if (options.limit === 0) {
+    return rateLimit({ ...options, limit: 1, skip: () => true })
+  }
+  return rateLimit(options)
 }
 
 const portalAuthWindowMs = readPositiveIntEnv('RATE_LIMIT_PORTAL_WINDOW_MS', 15 * 60 * 1000)
@@ -712,21 +730,21 @@ export function createApp({
   const rateLimitBuckets = new Map<string, RateLimitBucket>()
   // Per-instance express-rate-limit middleware for portal auth routes.
   // Created inside createApp so that test instances each get isolated stores.
-  const portalSignupLimiter = rateLimit({
+  const portalSignupLimiter = makeRateLimiter({
     windowMs: portalAuthWindowMs,
     limit: portalAuthMax,
     standardHeaders: 'draft-6',
     legacyHeaders: false,
     message: { error: 'Too many portal signup attempts. Please wait before trying again.' },
   })
-  const portalLoginLimiter = rateLimit({
+  const portalLoginLimiter = makeRateLimiter({
     windowMs: portalAuthWindowMs,
     limit: portalAuthMax,
     standardHeaders: 'draft-6',
     legacyHeaders: false,
     message: { error: 'Too many portal login attempts. Please wait before trying again.' },
   })
-  const portalLogoutLimiter = rateLimit({
+  const portalLogoutLimiter = makeRateLimiter({
     windowMs: portalAuthWindowMs,
     limit: 30,
     standardHeaders: 'draft-6',

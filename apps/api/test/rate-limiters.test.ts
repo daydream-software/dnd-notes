@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { readPositiveIntEnv } from '../src/rate-limiters.js'
+import { makeRateLimiter, readPositiveIntEnv } from '../src/rate-limiters.js'
 
 const FALLBACK = 42
 
@@ -37,4 +37,22 @@ test('readPositiveIntEnv — returns 0 when variable is "0" (zero is valid)', ()
   process.env['__TEST_VAR__'] = '0'
   assert.equal(readPositiveIntEnv('__TEST_VAR__', FALLBACK), 0)
   delete process.env['__TEST_VAR__']
+})
+
+test('makeRateLimiter — limit=0 passes requests through instead of blocking all', (_, done) => {
+  const middleware = makeRateLimiter({ windowMs: 60_000, limit: 0 })
+  const req = { ip: '127.0.0.1', headers: {}, method: 'GET', path: '/' } as unknown as Parameters<typeof middleware>[0]
+  const res = {
+    setHeader: () => {},
+    getHeader: () => undefined,
+    status: function () { return this },
+    json: function () { return this },
+  } as unknown as Parameters<typeof middleware>[1]
+  let nextCalled = false
+  const next: Parameters<typeof middleware>[2] = () => {
+    nextCalled = true
+    assert.ok(nextCalled, 'next() must be called — limit=0 should disable, not block')
+    done()
+  }
+  middleware(req, res, next)
 })

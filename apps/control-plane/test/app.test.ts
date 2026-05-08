@@ -1,8 +1,8 @@
 import assert from 'node:assert'
 import { createRequire } from 'node:module'
-import { afterEach, beforeEach, describe, it } from 'node:test'
+import { afterEach, beforeEach, describe, it, test } from 'node:test'
 import request from 'supertest'
-import { createApp } from '../src/app.js'
+import { createApp, makeRateLimiter } from '../src/app.js'
 import {
   TenantProvisioningConflictError,
   TenantProvisioningValidationError,
@@ -2923,4 +2923,25 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.error, 'Tenant not found')
     })
   })
+})
+
+test('makeRateLimiter — limit=0 passes requests through instead of blocking all', (_, done) => {
+  const middleware = makeRateLimiter({
+    windowMs: 60_000,
+    limit: 0,
+    standardHeaders: 'draft-6',
+    legacyHeaders: false,
+  })
+  const req = { ip: '127.0.0.1', headers: {}, method: 'GET', path: '/' } as unknown as Parameters<typeof middleware>[0]
+  const res = {
+    setHeader: () => {},
+    getHeader: () => undefined,
+    status: function () { return this },
+    json: function () { return this },
+  } as unknown as Parameters<typeof middleware>[1]
+  const next: Parameters<typeof middleware>[2] = () => {
+    assert.ok(true, 'next() must be called — limit=0 should disable, not block')
+    done()
+  }
+  middleware(req, res, next)
 })
