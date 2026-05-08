@@ -795,25 +795,34 @@ export function createApp({
   ) => {
     await tenantRegistry.appendAuditLogEntry(params).catch(() => undefined)
   }
+  const backupArtifactFormatSchema = z.enum(['custom'])
+
   const persistCompletedBackupArtifact = async (params: {
     id: string
     tenantId: string
     triggeredBy: string
     reason: string
     artifact: {
-      format: string
+      format: 'custom'
       location: string
       sizeBytes: number
       sha256: string
       capturedAt: string
     }
   }) => {
+    // Validate the format field against the known allowlist before persisting.
+    // This ensures a tainted value can never reach the database as a format string.
+    const formatResult = backupArtifactFormatSchema.safeParse(params.artifact.format)
+    if (!formatResult.success) {
+      throw new Error(`Unsupported backup artifact format: "${params.artifact.format}"`)
+    }
+
     await tenantRegistry.createBackupRun({
       id: params.id,
       tenantId: params.tenantId,
       triggeredBy: params.triggeredBy,
       reason: params.reason,
-      format: params.artifact.format,
+      format: formatResult.data,
     })
 
     return await tenantRegistry.markBackupRunCompleted(params.id, {
