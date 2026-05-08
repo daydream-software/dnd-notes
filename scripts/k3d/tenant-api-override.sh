@@ -6,6 +6,7 @@ if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
+STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 K3D_HTTP_PORT="${K3D_HTTP_PORT:-8080}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
@@ -28,24 +29,33 @@ usage() {
   cat <<'EOF'
 Run the supported tenant-api live override workflow for issue #79.
 
-By default the script provisions or reuses a tenant, starts `apps/api` locally in
-watch mode against that tenant's runtime config, and exposes a same-origin front
-proxy where tenant web stays on k3d while `/api/*` is routed to the local API.
+The script reads the dev tenant from .k3d-state/state.json (written by
+k3d:up), starts `apps/api` locally in watch mode against that tenant's
+runtime config, and exposes a same-origin front proxy where tenant web stays
+on k3d while `/api/*` is routed to the local API.
+
+To target a specific tenant namespace/subdomain instead of the one written by
+k3d:up, set K3D_TENANT_OVERRIDE_NAMESPACE and K3D_TENANT_OVERRIDE_SUBDOMAIN.
 
 Environment overrides:
+  K3D_STATE_FILE                    path to state.json (default: .k3d-state/state.json)
   K3D_CLUSTER_NAME
   K3D_HTTP_PORT
   TENANT_BASE_DOMAIN
   K3D_TENANT_OVERRIDE_LOCAL_API_PORT
   K3D_TENANT_OVERRIDE_LISTEN_PORT
-  K3D_TENANT_OVERRIDE_NAMESPACE
-  K3D_TENANT_OVERRIDE_SUBDOMAIN
+  K3D_TENANT_OVERRIDE_NAMESPACE     override tenant namespace (skips state.json lookup)
+  K3D_TENANT_OVERRIDE_SUBDOMAIN     override tenant subdomain (skips state.json lookup)
   K3D_TENANT_API_OVERRIDE_CHECK_ONLY=true
 EOF
 }
 
 log() {
   echo "$*" >&2
+}
+
+state_module() {
+  node "${ROOT}/scripts/k3d/state.mjs" "$@"
 }
 
 normalize_headers() {
@@ -203,13 +213,12 @@ tenant_namespace="${K3D_TENANT_OVERRIDE_NAMESPACE:-}"
 tenant_subdomain="${K3D_TENANT_OVERRIDE_SUBDOMAIN:-}"
 
 if [[ -z "${tenant_namespace}" || -z "${tenant_subdomain}" ]]; then
-  KEEP_K3D_SMOKE_TENANT=true \
-  K3D_SMOKE_OUTPUT=json \
-  "${ROOT}/scripts/k3d/full-stack-smoke.sh" \
-    >"${WORK_DIR}/full-stack-smoke.json"
-
-  tenant_namespace="$(json_get tenantNamespace <"${WORK_DIR}/full-stack-smoke.json")"
-  tenant_subdomain="$(json_get tenantSubdomain <"${WORK_DIR}/full-stack-smoke.json")"
+  if [[ ! -f "${STATE_FILE}" ]]; then
+    log "State file ${STATE_FILE} not found. Run npm run k3d:up first."
+    exit 1
+  fi
+  # Read tenant fields from state.json written by k3d:up.
+  eval "$(state_module read-vars "${STATE_FILE}")"
 fi
 
 tenant_hostname="${tenant_subdomain}.${TENANT_BASE_DOMAIN}"
