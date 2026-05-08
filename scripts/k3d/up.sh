@@ -514,10 +514,35 @@ cp_image_ref="${CONTROL_PLANE_IMAGE_REPOSITORY}:${CONTROL_PLANE_IMAGE_TAG}"
 op_image_ref="${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-operator-portal}:${OPERATOR_PORTAL_IMAGE_TAG:-k3d}"
 cust_image_ref="${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}:${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}"
 
-ensure_image_ready "Tenant" "${tenant_image_ref}" "${ROOT}/scripts/k3d/build-tenant-image.sh"
-ensure_image_ready "Control-plane" "${cp_image_ref}" "${ROOT}/scripts/k3d/build-control-plane-image.sh"
-ensure_image_ready "Operator-portal" "${op_image_ref}" "${ROOT}/scripts/k3d/build-operator-portal-image.sh"
-ensure_image_ready "Customer-portal" "${cust_image_ref}" "${ROOT}/scripts/k3d/build-customer-portal-image.sh"
+log "Building 4 images in parallel..."
+ensure_image_ready "Tenant" "${tenant_image_ref}" "${ROOT}/scripts/k3d/build-tenant-image.sh" \
+  >"${WORK_DIR}/build-tenant.log" 2>&1 &
+pid_tenant=$!
+ensure_image_ready "Control-plane" "${cp_image_ref}" "${ROOT}/scripts/k3d/build-control-plane-image.sh" \
+  >"${WORK_DIR}/build-control-plane.log" 2>&1 &
+pid_cp=$!
+ensure_image_ready "Operator-portal" "${op_image_ref}" "${ROOT}/scripts/k3d/build-operator-portal-image.sh" \
+  >"${WORK_DIR}/build-operator-portal.log" 2>&1 &
+pid_op=$!
+ensure_image_ready "Customer-portal" "${cust_image_ref}" "${ROOT}/scripts/k3d/build-customer-portal-image.sh" \
+  >"${WORK_DIR}/build-customer-portal.log" 2>&1 &
+pid_cust=$!
+
+_build_fail=0
+for _pid_var in pid_tenant pid_cp pid_op pid_cust; do
+  if ! wait "${!_pid_var}"; then
+    log "Build failed: ${_pid_var} — see ${WORK_DIR}/build-*.log for details"
+    _build_fail=1
+  fi
+done
+
+# Stream all build logs to stderr so the operator sees the full output.
+for _log in "${WORK_DIR}"/build-*.log; do
+  [[ -s "${_log}" ]] && { log "--- ${_log} ---"; cat "${_log}" >&2; }
+done
+
+[ "${_build_fail}" -eq 0 ] || exit 1
+log "All 4 images built and imported."
 
 # ---------------------------------------------------------------------------
 # Step 3: Deploy control plane and portals
