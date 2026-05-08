@@ -218,7 +218,7 @@ npm run k3d:operator-portal-override # in a separate terminal
 
 1. Reads cluster state from `.k3d-state/state.json` (written by `k3d:up`)
 2. Starts `apps/operator-portal` locally in Vite watch mode
-3. Starts a front proxy at `http://operator.127.0.0.1.nip.io:38080`
+3. Starts a front proxy at `http://operator.127.0.0.1.nip.io:38082`
 4. Routes `/operator-api/*` to the in-cluster control plane; everything else to local Vite
 5. Injects `window.__ENV__` via `/env.js` with Keycloak URL/realm/client-id
 
@@ -290,7 +290,7 @@ All three scripts honor a few env overrides when you need a different local shap
 | `K3D_TENANT_OVERRIDE_NAMESPACE` | derived | reuse an existing tenant namespace for the override lane |
 | `K3D_TENANT_OVERRIDE_SUBDOMAIN` | derived | reuse an existing tenant subdomain for the override lane |
 | `K3D_OPERATOR_PORTAL_OVERRIDE_LOCAL_PORT` | `5173` | local Vite port for operator-portal override |
-| `K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT` | `38080` | public port for the operator-portal front proxy |
+| `K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT` | `38082` | public port for the operator-portal front proxy |
 | `K3D_OPERATOR_PORTAL_OVERRIDE_CHECK_ONLY` | `false` | exit after startup checks instead of streaming logs |
 | `K3D_CUSTOMER_PORTAL_OVERRIDE_LOCAL_PORT` | `5174` | local Vite port for customer-portal override |
 | `K3D_CUSTOMER_PORTAL_OVERRIDE_LISTEN_PORT` | `38081` | public port for the customer-portal front proxy |
@@ -477,8 +477,8 @@ Override script readiness summary:
   "workflow": "operator-portal-override",
   "clusterName": "dnd-notes",
   "localPortalUrl": "http://127.0.0.1:5173",
-  "overrideOrigin": "http://operator.127.0.0.1.nip.io:38080",
-  "apiTarget": "http://control-plane.127.0.0.1.nip.io:8080"
+  "overrideOrigin": "http://operator.127.0.0.1.nip.io:38082",
+  "apiTarget": "http://127.0.0.1:<controlPlanePort>"
 }
 ```
 
