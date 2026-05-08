@@ -6,7 +6,7 @@ import {
   scrypt,
   timingSafeEqual,
 } from 'node:crypto'
-import { rateLimit } from 'express-rate-limit'
+import { rateLimit, type Options as RateLimitOptions } from 'express-rate-limit'
 import express, {
   type Express,
   type NextFunction,
@@ -358,7 +358,7 @@ function readPositiveIntEnv(name: string, fallback: number): number {
  *
  * Exported for unit testing only.
  */
-export function makeRateLimiter(options: Parameters<typeof rateLimit>[0]) {
+export function makeRateLimiter(options: Partial<RateLimitOptions>) {
   if (options.limit === 0) {
     return rateLimit({ ...options, limit: 1, skip: () => true })
   }
