@@ -151,9 +151,11 @@ ensure_image_imported_into_cluster() {
 }
 
 ensure_image_ready() {
+  # Args: <image_name> <image_ref> <build_script> [extra args...]
+  # Extra args are forwarded to the build script verbatim.
   local image_name="$1"
   local image_ref="$2"
-  local build_script="$3"
+  shift 2
 
   if [[ "${NO_REBUILD}" == "true" ]]; then
     if image_exists_locally "${image_ref}"; then
@@ -161,10 +163,10 @@ ensure_image_ready() {
       ensure_image_imported_into_cluster "${image_ref}"
     else
       log "${image_name} image ${image_ref} not found locally despite --no-rebuild; building..."
-      run_visible "${build_script}"
+      run_visible "$@"
     fi
   else
-    run_visible "${build_script}"
+    run_visible "$@"
   fi
 }
 
@@ -515,16 +517,38 @@ op_image_ref="${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-
 cust_image_ref="${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}:${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}"
 
 log "Building 4 images in parallel..."
-ensure_image_ready "Tenant" "${tenant_image_ref}" "${ROOT}/scripts/k3d/build-tenant-image.sh" \
+ensure_image_ready "Tenant" "${tenant_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Tenant \
+    --dockerfile Dockerfile \
+    --repo "${TENANT_IMAGE_REPOSITORY}" \
+    --tag "${TENANT_IMAGE_TAG}" \
   >"${WORK_DIR}/build-tenant.log" 2>&1 &
 pid_tenant=$!
-ensure_image_ready "Control-plane" "${cp_image_ref}" "${ROOT}/scripts/k3d/build-control-plane-image.sh" \
+ensure_image_ready "Control-plane" "${cp_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Control-plane \
+    --dockerfile docker/control-plane/Dockerfile \
+    --repo "${CONTROL_PLANE_IMAGE_REPOSITORY}" \
+    --tag "${CONTROL_PLANE_IMAGE_TAG}" \
   >"${WORK_DIR}/build-control-plane.log" 2>&1 &
 pid_cp=$!
-ensure_image_ready "Operator-portal" "${op_image_ref}" "${ROOT}/scripts/k3d/build-operator-portal-image.sh" \
+ensure_image_ready "Operator-portal" "${op_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Operator-portal \
+    --dockerfile docker/portal/Dockerfile \
+    --repo "${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-operator-portal}" \
+    --tag "${OPERATOR_PORTAL_IMAGE_TAG:-k3d}" \
+    --build-arg PORTAL_NAME=operator-portal \
   >"${WORK_DIR}/build-operator-portal.log" 2>&1 &
 pid_op=$!
-ensure_image_ready "Customer-portal" "${cust_image_ref}" "${ROOT}/scripts/k3d/build-customer-portal-image.sh" \
+ensure_image_ready "Customer-portal" "${cust_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Customer-portal \
+    --dockerfile docker/portal/Dockerfile \
+    --repo "${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}" \
+    --tag "${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}" \
+    --build-arg PORTAL_NAME=customer-portal \
   >"${WORK_DIR}/build-customer-portal.log" 2>&1 &
 pid_cust=$!
 
