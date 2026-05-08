@@ -16,10 +16,7 @@ import {
 import { registerOwnerCampaignRoutes } from './routes/owner-campaign-routes.js'
 import { registerOwnerNoteRoutes } from './routes/owner-note-routes.js'
 import { registerSharedRoutes } from './routes/shared-routes.js'
-import {
-  normalizePublicWebUrl,
-  type RateLimitPolicy,
-} from './route-support.js'
+import { normalizePublicWebUrl } from './route-support.js'
 import { createControlState, type ControlState } from './control-state.js'
 import { tenantApiSchemaVersion } from './migrations.js'
 import type { ErrorResponse, HealthResponse } from './types.js'
@@ -27,10 +24,6 @@ import type { ErrorResponse, HealthResponse } from './types.js'
 export const noteStoreSchemaVersion = tenantApiSchemaVersion
 const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
 const defaultMaintenanceDrainGraceMs = 5_000
-interface RateLimitBucket {
-  count: number
-  resetAt: number
-}
 
 interface CreateAppOptions {
   noteStore: NoteStore
@@ -46,10 +39,6 @@ interface CreateAppOptions {
   tenantId?: string | null
   maintenanceDrainGraceMs?: number
   controlState?: ControlState
-}
-
-function readRateLimitClientId(request: Request) {
-  return request.ip ?? request.socket.remoteAddress ?? 'unknown'
 }
 
 export function createApp({
@@ -69,57 +58,12 @@ export function createApp({
 }: CreateAppOptions): Express {
   const app = express()
   const noteStore = initialNoteStore
-  const rateLimitBuckets = new Map<string, RateLimitBucket>()
   const publicWebUrl = normalizePublicWebUrl(configuredPublicWebUrl)
-
-  function isRateLimited(
-    request: Request,
-    response: Response<ErrorResponse>,
-    policyKey: string,
-    policy: RateLimitPolicy,
-    scopeKey?: string,
-  ) {
-    const now = Date.now()
-
-    for (const [key, bucket] of rateLimitBuckets) {
-      if (bucket.resetAt <= now) {
-        rateLimitBuckets.delete(key)
-      }
-    }
-
-    const bucketKey = [
-      policyKey,
-      readRateLimitClientId(request),
-      scopeKey ?? '',
-    ].join(':')
-    const existingBucket = rateLimitBuckets.get(bucketKey)
-
-    if (!existingBucket || existingBucket.resetAt <= now) {
-      rateLimitBuckets.set(bucketKey, {
-        count: 1,
-        resetAt: now + policy.windowMs,
-      })
-      return false
-    }
-
-    if (existingBucket.count >= policy.maxRequests) {
-      response.set(
-        'Retry-After',
-        Math.max(1, Math.ceil((existingBucket.resetAt - now) / 1000)).toString(),
-      )
-      response.status(429).json({ error: policy.errorMessage })
-      return true
-    }
-
-    existingBucket.count += 1
-    return false
-  }
 
   const routeContext = {
     getNoteStore: () => noteStore,
     publicWebUrl,
     runtimeAuth,
-    isRateLimited,
   }
 
   // CORS configuration - explicit origin allowlist for security

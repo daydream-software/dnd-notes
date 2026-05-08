@@ -1,15 +1,16 @@
 import type { Express, Request, Response } from 'express'
-import {
-  type CampaignMembershipsResponse,
-  type CampaignResponse,
-  type CampaignShareLinkCreateResponse,
-  type CampaignShareLinkRevealResponse,
-  type CampaignShareLinksResponse,
-  type CampaignsResponse,
-  type ErrorResponse,
-  type MembershipConsolidationResponse,
-  type SessionsResponse,
+import type {
+  CampaignMembershipsResponse,
+  CampaignResponse,
+  CampaignShareLinkCreateResponse,
+  CampaignShareLinkRevealResponse,
+  CampaignShareLinksResponse,
+  CampaignsResponse,
+  ErrorResponse,
+  MembershipConsolidationResponse,
+  SessionsResponse,
 } from '../types.js'
+import { createReadLimiter, createWriteLimiter } from '../rate-limiters.js'
 import {
   type AppRouteContext,
   type CampaignParams,
@@ -27,8 +28,12 @@ import {
 } from '../validation.js'
 
 export function registerOwnerCampaignRoutes(app: Express, context: AppRouteContext) {
+  const readLimiter = createReadLimiter()
+  const writeLimiter = createWriteLimiter()
+
   app.get(
     '/api/campaigns',
+    readLimiter,
     async (
       request: Request,
       response: Response<CampaignsResponse | ErrorResponse>,
@@ -46,6 +51,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.post(
     '/api/campaigns',
+    writeLimiter,
     async (
       request: Request,
       response: Response<CampaignResponse | ErrorResponse>,
@@ -74,6 +80,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId',
+    readLimiter,
     async (
       request: Request<CampaignParams>,
       response: Response<CampaignResponse | ErrorResponse>,
@@ -102,6 +109,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/sessions',
+    readLimiter,
     async (
       request: Request<CampaignParams>,
       response: Response<SessionsResponse | ErrorResponse>,
@@ -130,6 +138,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.put(
     '/api/campaigns/:campaignId',
+    writeLimiter,
     async (
       request: Request<CampaignParams>,
       response: Response<CampaignResponse | ErrorResponse>,
@@ -179,6 +188,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/memberships',
+    readLimiter,
     async (
       request: Request<CampaignParams>,
       response: Response<CampaignMembershipsResponse | ErrorResponse>,
@@ -209,6 +219,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.post(
     '/api/campaigns/:campaignId/memberships/consolidations',
+    writeLimiter,
     async (
       request: Request<CampaignParams>,
       response: Response<MembershipConsolidationResponse | ErrorResponse>,
@@ -330,6 +341,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/share-links',
+    readLimiter,
     async (
       request: Request<CampaignParams>,
       response: Response<CampaignShareLinksResponse | ErrorResponse>,
@@ -360,6 +372,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.post(
     '/api/campaigns/:campaignId/share-links',
+    writeLimiter,
     async (
       request: Request<CampaignParams>,
       response: Response<CampaignShareLinkCreateResponse | ErrorResponse>,
@@ -413,6 +426,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.get(
     '/api/campaigns/:campaignId/share-links/:shareLinkId',
+    readLimiter,
     async (
       request: Request<ShareLinkParams>,
       response: Response<CampaignShareLinkRevealResponse | ErrorResponse>,
@@ -465,6 +479,7 @@ export function registerOwnerCampaignRoutes(app: Express, context: AppRouteConte
 
   app.delete(
     '/api/campaigns/:campaignId/share-links/:shareLinkId',
+    writeLimiter,
     async (
       request: Request<ShareLinkParams>,
       response: Response<undefined | ErrorResponse>,

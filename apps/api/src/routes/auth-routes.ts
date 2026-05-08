@@ -6,10 +6,13 @@ import type {
   ErrorResponse,
 } from '../types.js'
 import {
+  createAuthLoginLimiter,
+  createAuthLogoutLimiter,
+  createAuthRegisterLimiter,
+} from '../rate-limiters.js'
+import {
   type AppRouteContext,
-  loginRateLimitPolicy,
   parseAuthorizationToken,
-  registerRateLimitPolicy,
   requireAuthenticatedAccount,
 } from '../route-support.js'
 import {
@@ -18,6 +21,10 @@ import {
 } from '../validation.js'
 
 export function registerAuthRoutes(app: Express, context: AppRouteContext) {
+  const authRegisterLimiter = createAuthRegisterLimiter()
+  const authLoginLimiter = createAuthLoginLimiter()
+  const authLogoutLimiter = createAuthLogoutLimiter()
+
   app.get(
     '/api/auth/config',
     (_request: Request, response: Response<AuthConfigResponse>) => {
@@ -27,14 +34,11 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/auth/register',
+    authRegisterLimiter,
     async (
       request: Request,
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
-      if (context.isRateLimited(request, response, 'auth-register', registerRateLimitPolicy)) {
-        return
-      }
-
       if (context.runtimeAuth.mode === 'keycloak') {
         response.status(404).json({
           error: 'Local auth routes are disabled when Keycloak auth is enabled.',
@@ -69,14 +73,11 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/auth/login',
+    authLoginLimiter,
     async (
       request: Request,
       response: Response<AuthSessionResponse | ErrorResponse>,
     ) => {
-      if (context.isRateLimited(request, response, 'auth-login', loginRateLimitPolicy)) {
-        return
-      }
-
       if (context.runtimeAuth.mode === 'keycloak') {
         response.status(404).json({
           error: 'Local auth routes are disabled when Keycloak auth is enabled.',
@@ -133,6 +134,7 @@ export function registerAuthRoutes(app: Express, context: AppRouteContext) {
 
   app.post(
     '/api/auth/logout',
+    authLogoutLimiter,
     async (
       request: Request,
       response: Response<undefined | ErrorResponse>,

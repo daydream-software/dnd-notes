@@ -46,47 +46,10 @@ export interface SharedNoteParams extends ShareParams {
 export const defaultActivityLimit = 20
 export const maxActivityLimit = 100
 
-export interface RateLimitPolicy {
-  maxRequests: number
-  windowMs: number
-  errorMessage: string
-}
-
 export interface AppRouteContext {
   getNoteStore: () => NoteStore
   publicWebUrl: string | null
   runtimeAuth: TenantRuntimeAuth
-  isRateLimited: (
-    request: Request,
-    response: Response<ErrorResponse>,
-    policyKey: string,
-    policy: RateLimitPolicy,
-    scopeKey?: string,
-  ) => boolean
-}
-
-export const registerRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many registration attempts. Please wait before trying again.',
-}
-
-export const loginRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many login attempts. Please wait before trying again.',
-}
-
-export const sharedJoinRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 10,
-  windowMs: 1000 * 60 * 10,
-  errorMessage: 'Too many guest join attempts. Please wait before trying again.',
-}
-
-export const sharedClaimRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many membership claim attempts. Please wait before trying again.',
 }
 
 export function normalizePublicWebUrl(publicWebUrl?: string) {

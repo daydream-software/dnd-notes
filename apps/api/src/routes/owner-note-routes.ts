@@ -1,12 +1,13 @@
 import type { Express, Request, Response } from 'express'
-import {
-  type ErrorResponse,
-  type NoteActivityResponse,
-  type NoteResponse,
-  type NotesOverview,
-  type NotesResponse,
-  type SessionsResponse,
+import type {
+  ErrorResponse,
+  NoteActivityResponse,
+  NoteResponse,
+  NotesOverview,
+  NotesResponse,
+  SessionsResponse,
 } from '../types.js'
+import { createReadLimiter, createWriteLimiter } from '../rate-limiters.js'
 import {
   type AppRouteContext,
   type NoteParams,
@@ -23,8 +24,12 @@ import {
 import { validateNoteCreateInput, validateNoteInput } from '../validation.js'
 
 export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) {
+  const readLimiter = createReadLimiter()
+  const writeLimiter = createWriteLimiter()
+
   app.get(
     '/api/overview',
+    readLimiter,
     async (
       request: Request,
       response: Response<NotesOverview | ErrorResponse>,
@@ -59,6 +64,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes',
+    readLimiter,
     async (
       request: Request,
       response: Response<NotesResponse | ErrorResponse>,
@@ -87,6 +93,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/activity',
+    readLimiter,
     async (
       request: Request,
       response: Response<NoteActivityResponse | ErrorResponse>,
@@ -137,6 +144,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/sessions',
+    readLimiter,
     async (request: Request, response: Response<SessionsResponse | ErrorResponse>) => {
       const noteStore = context.getNoteStore()
       const owner = await requireAuthenticatedAccount(noteStore, request, response, context.runtimeAuth)
@@ -162,6 +170,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.post(
     '/api/notes',
+    writeLimiter,
     async (
       request: Request,
       response: Response<NoteResponse | ErrorResponse>,
@@ -221,6 +230,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/sessions/:sessionId',
+    readLimiter,
     async (
       request: Request<SessionParams>,
       response: Response<NotesResponse | ErrorResponse>,
@@ -251,6 +261,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/:noteId',
+    readLimiter,
     async (
       request: Request<NoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
@@ -282,6 +293,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.get(
     '/api/notes/:noteId/backlinks',
+    readLimiter,
     async (
       request: Request<NoteParams>,
       response: Response<NotesResponse | ErrorResponse>,
@@ -314,6 +326,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.put(
     '/api/notes/:noteId',
+    writeLimiter,
     async (
       request: Request<NoteParams>,
       response: Response<NoteResponse | ErrorResponse>,
@@ -382,6 +395,7 @@ export function registerOwnerNoteRoutes(app: Express, context: AppRouteContext) 
 
   app.delete(
     '/api/notes/:noteId',
+    writeLimiter,
     async (
       request: Request<NoteParams>,
       response: Response<undefined | ErrorResponse>,
