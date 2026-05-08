@@ -62,13 +62,6 @@ jobs:
         if: ${{ always() && hashFiles('reports/coverage/summary.md') != '' }}
         run: cat reports/coverage/summary.md >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload coverage artifacts
-        if: ${{ always() && hashFiles('reports/coverage/**/*') != '' }}
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: coverage-reports
-          path: reports/coverage
-
       - name: Build
         run: npm run build
 
