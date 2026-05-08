@@ -623,22 +623,36 @@ else
     done
   fi
 
-  # Provision it
-  log "Provisioning dev tenant '${DEV_TENANT_ID}'..."
-  OPERATOR_PORTAL_ACCESS_TOKEN="${control_plane_bearer_token}" \
-  OPERATOR_PORTAL_REFRESH_TOKEN="${control_plane_bearer_token}" \
-  OPERATOR_PORTAL_CONTROL_PLANE_BASE_URL="http://127.0.0.1:${CONTROL_PLANE_PORT}" \
-  OPERATOR_PORTAL_TENANT_ID="${DEV_TENANT_ID}" \
-  OPERATOR_PORTAL_TENANT_SLUG="${DEV_TENANT_SUBDOMAIN}" \
-  OPERATOR_PORTAL_OWNER_ID="${DEV_TENANT_OWNER_ID}" \
-  OPERATOR_PORTAL_INITIAL_ADMIN_EMAIL="${TENANT_KEYCLOAK_USERNAME}" \
-  OPERATOR_PORTAL_TENANT_VERSION="${TENANT_IMAGE_TAG}" \
-  OPERATOR_PORTAL_REASON='k3d:up dev tenant provision' \
-  OPERATOR_PORTAL_PROVISION_TIMEOUT_MS='300000' \
-  node --import tsx "${ROOT}/scripts/k3d/operator-portal-smoke.ts" \
-    >"${WORK_DIR}/operator-portal-provision.json"
+  # Create the tenant record if it does not exist yet (idempotent — 409 means already present).
+  log "Creating dev tenant record '${DEV_TENANT_ID}' (idempotent)..."
+  create_http_code="$(curl -sS \
+    -o /dev/null \
+    -w '%{http_code}' \
+    -X POST \
+    -H "Authorization: Bearer ${control_plane_bearer_token}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"id\":\"${DEV_TENANT_ID}\",\"slug\":\"${DEV_TENANT_SUBDOMAIN}\",\"ownerId\":\"${DEV_TENANT_OWNER_ID}\",\"initialAdminEmail\":\"${TENANT_KEYCLOAK_USERNAME}\",\"version\":\"${TENANT_IMAGE_TAG}\"}" \
+    "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants")"
+  if [[ "${create_http_code}" != "201" && "${create_http_code}" != "409" ]]; then
+    log "Unexpected HTTP ${create_http_code} from POST /internal/tenants — aborting."
+    exit 1
+  fi
 
-  # Read back the actual namespace assigned by the provisioner (never derive from subdomain).
+  # Provision the tenant via REST. The endpoint is synchronous — it blocks until
+  # provisioning completes (or times out). operator-portal-smoke.ts is NOT invoked
+  # here; it is still used by full-stack-smoke.sh for E2E portal UI validation.
+  log "Provisioning dev tenant '${DEV_TENANT_ID}'..."
+  curl -fsS \
+    --max-time 300 \
+    -X POST \
+    -H "Authorization: Bearer ${control_plane_bearer_token}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"triggeredBy\":\"k3d-up\",\"reason\":\"k3d:up dev tenant provision\",\"version\":\"${TENANT_IMAGE_TAG}\"}" \
+    "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${DEV_TENANT_ID}/provision" \
+    >"${WORK_DIR}/tenant-provision.json"
+
+  # Read back the actual namespace and final state assigned by the provisioner
+  # (never derive namespace from subdomain).
   curl -fsS \
     -H "Authorization: Bearer ${control_plane_bearer_token}" \
     "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${DEV_TENANT_ID}" \
