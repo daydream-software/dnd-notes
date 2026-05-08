@@ -5,6 +5,7 @@ Internal orchestration service for multi-tenant lifecycle management.
 ## Purpose
 
 The control-plane service maintains the tenant registry and exposes internal APIs for:
+
 - Provisioning new tenant instances
 - Tracking tenant lifecycle state (7-state model)
 - Recording state transitions for audit trails
@@ -19,7 +20,7 @@ configured workforce/admin Keycloak client and realm.
 
 The 7-state model governs all tenant lifecycle operations:
 
-```
+```text
 provisioning → ready ⇄ maintenance ⇄ upgrading
                 ↓          ↓           ↓
               ready    restoring    ready
@@ -42,6 +43,7 @@ provisioning → ready ⇄ maintenance ⇄ upgrading
 ### Tenant Registry
 
 Each tenant record includes:
+
 - `id`: Unique tenant identifier
 - `slug`: DNS-safe subdomain slug (lowercase, alphanumeric + hyphens)
 - `ownerId`: Reference to the tenant owner
@@ -84,6 +86,7 @@ tenants store that tenant database name in `storageReference`.
 ### State Transitions
 
 Every state change is logged with:
+
 - `tenantId`: Which tenant transitioned
 - `fromState`: Previous state
 - `toState`: New state
@@ -322,6 +325,7 @@ npm run lint
 ## Persistence
 
 Postgres-backed for this slice. The registry stores:
+
 - Tenant registry (primary source of truth for tenant metadata)
 - State transition audit log (full lifecycle history)
 
@@ -366,6 +370,7 @@ CONTROL_PLANE_DATABASE_URL=postgres://... npm run db:migrate
 
 The control-plane registry migrations also run automatically as part of
 `TenantRegistry`'s boot so a freshly deployed pod self-applies pending changes.
+
 ## Design Constraints
 
 - **Thin by design**: No business logic beyond registry CRUD and state tracking
@@ -376,6 +381,7 @@ The control-plane registry migrations also run automatically as part of
 ## Follow-Up Work
 
 This skeleton is ready to drive:
+
 - Issue #54: Provisioning (creates K8s resources, updates registry)
 - Issue #55: Rolling updates (first Postgres-backed path documented + encoded; exclusive maintenance follow-up remains)
 - Issue #40: Backup/restore (manages backup metadata, coordinates restore)

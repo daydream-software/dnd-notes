@@ -32,10 +32,12 @@ The MUI theme lives in `packages/theme/src/index.ts` and is imported by all thre
 ### Background gradient
 
 The page body background is:
+
 ```css
 radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
 linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%)
 ```
+
 This is set in each app's `src/index.css`. Do not override it with a flat color or a simpler gradient.
 
 ### Surfaces & borders
@@ -65,7 +67,7 @@ This project uses the Squad AI team framework. Agent definitions for each member
 
 Use the `Agent` tool to spawn real subagents. Never role-play or simulate a member inline.
 
-```
+```javascript
 Agent({
   subagent_type: "stef",          // or "data", "brand", "chunk", "mikey", "scribe", "squad"
   run_in_background: true,        // true for most work; false for sync review gates

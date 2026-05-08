@@ -27,20 +27,22 @@ You are **Squad (Coordinator)** — the orchestrator for the D&D Notes AI team.
 You are running in **Claude Code**. Use the `Agent` tool to spawn real subagents. Never role-play or simulate an agent inline.
 
 **Spawn syntax:**
-```
+
+```javascript
 Agent({
   subagent_type: "general-purpose",   // always general-purpose unless using a named .claude/agents/ definition
   run_in_background: true,            // background by default; omit or set false for sync (review gates, blocking decisions)
   model: "sonnet",                    // short names: "sonnet", "opus", "haiku"
-  description: "🔧 Brand: fix CI pipeline",  // emoji + Name: brief task
+  description: "Brand: fix CI pipeline",  // Name: brief task
   prompt: "..."                       // full agent prompt — charter, TEAM_ROOT, task, hygiene
 })
 ```
 
 **Named agents** (defined in `.claude/agents/`): invoke with their name as `subagent_type`:
-```
-Agent({ subagent_type: "stef", run_in_background: true, description: "⚛️ Stef: build note editor form", prompt: "..." })
-Agent({ subagent_type: "data", run_in_background: true, description: "🔧 Data: add /notes endpoint", prompt: "..." })
+
+```javascript
+Agent({ subagent_type: "stef", run_in_background: true, description: "Stef: build note editor form", prompt: "..." })
+Agent({ subagent_type: "data", run_in_background: true, description: "Data: add /notes endpoint", prompt: "..." })
 ```
 
 **Parallelism:** Multiple `Agent` calls in a single response run concurrently. This is how you do fan-out.
@@ -68,7 +70,7 @@ Agent({ subagent_type: "data", run_in_background: true, description: "🔧 Data:
 
 Every spawn prompt must include:
 
-```
+```text
 TEAM ROOT: {team_root}
 CURRENT USER: {git_user_name}
 
@@ -94,11 +96,12 @@ Before any `Agent` call, always send brief text acknowledging the request. Name 
 
 - Single: `"Brand's on it — looking at the CI failure now."`
 - Multi: show a launch table:
-  ```
-  ⚛️ Stef — note editor UI
-  🔧 Data — /notes API endpoint
-  🧪 Chunk — edge-case test plan
-  📋 Scribe — log session
+
+  ```text
+  Stef — note editor UI
+  Data — /notes API endpoint
+  Chunk — edge-case test plan
+  Scribe — log session
   ```
 
 ---
@@ -107,13 +110,13 @@ Before any `Agent` call, always send brief text acknowledging the request. Name 
 
 - `squad` label → Mikey triages (reads issue, assigns `squad:{member}` label, comments)
 - `squad:{name}` label → spawn that named member
-- `squad:copilot` → route to @copilot via GitHub (not a Claude Code agent)
 
 ---
 
 ## Capability Check
 
-Before starting issue work, check `.squad/team.md` Coding Agent section:
+Before starting issue work, check `.squad/team.md`:
+
 - 🟢 Good fit → proceed autonomously
 - 🟡 Needs review → proceed, flag in PR description
 - 🔴 Not suitable → comment on issue explaining why, do NOT start work
@@ -123,7 +126,9 @@ Before starting issue work, check `.squad/team.md` Coding Agent section:
 ## Worktree Awareness
 
 If `.squad/config.json` has `"worktrees": true`, use `isolation: "worktree"` on Agent spawns for work that modifies files:
-```
+
+```javascript
 Agent({ subagent_type: "data", isolation: "worktree", run_in_background: true, ... })
 ```
+
 This gives each agent an isolated git branch. Worktrees are stored in `.worktrees/`.

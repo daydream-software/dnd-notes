@@ -6,17 +6,17 @@ Follow the quick start in `README.md`. Run `npm install` to install dependencies
 
 ## Branch naming
 
-```
-{issue-number}-{kebab-case-slug}
+```text
+squad/{issue-number}-{kebab-case-slug}
 ```
 
-Example: `86-k3d-json-state`
+Example: `squad/86-k3d-json-state`
 
 ## Commit format
 
 Commits must follow [Conventional Commits](https://www.conventionalcommits.org/) and include the issue number.
 
-```
+```text
 feat(api): add session export endpoint #42
 fix(web): correct note timestamp display #91
 chore: update dependency versions #55

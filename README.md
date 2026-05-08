@@ -21,8 +21,8 @@ npm run seed:data
 npm run dev
 ```
 
-- Web: http://localhost:5173
-- API: http://localhost:3001
+- Web: <http://localhost:5173>
+- API: <http://localhost:3001>
 
 `seed:data` loads sample campaigns and notes into a local Postgres database. Copy `apps/api/.env.example` to `apps/api/.env` and set `DATABASE_URL` before running.
 

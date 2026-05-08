@@ -1,0 +1,34 @@
+// markdownlint-cli2 configuration
+// Specifying globs here lets the ignore list apply when running `markdownlint-cli2` with no args.
+// The pre-commit hook passes staged files explicitly and doesn't use this config for file selection.
+{
+  "config": {
+    "default": true,
+    "MD013": false, // line-length — long table cells are legitimate
+    "MD033": false, // inline-html — used in some docs
+    "MD041": false, // first-line-heading — agent instruction files start with prose
+    "MD060": false  // table-column-style — too strict for squad tables
+  },
+  "globs": ["**/*.md"],
+  "ignores": [
+    "**/node_modules/**",
+    "CHANGELOG.md",
+    ".worktrees/**",
+    ".copilot/**",
+    ".github/agents/**",
+    ".squad/decisions.md",
+    ".squad/decisions-archive.md",
+    ".squad/decisions/**",
+    ".squad/log/**",
+    ".squad/agents/**",
+    ".squad/orchestration-log/**",
+    ".squad/sessions/**",
+    ".squad/skills/**",
+    ".squad/templates/**",
+    ".squad/docs/**",
+    ".squad/ceremonies.md",
+    ".squad/qa-brief-*.md",
+    ".squad/phase2-recommendation.md",
+    "docs/archive/**"
+  ]
+}

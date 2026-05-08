@@ -1,4 +1,5 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
+set -o pipefail
 
 # Block staged files that contain absolute paths pointing to local home dirs.
 # This catches accidental /home/<user>/ or /Users/<user>/ references before they land in history.
@@ -12,4 +13,16 @@ if git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pl '/Users
   echo "pre-commit: staged files contain /Users/<user>/ paths — remove them before committing." >&2
   git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pn '/Users/[a-zA-Z0-9_.-]+/' -- 2>/dev/null >&2
   exit 1
+fi
+
+# Lint staged markdown files
+staged_md=()
+while IFS= read -r -d '' file; do
+  staged_md+=("$file")
+done < <(git diff --cached --name-only --diff-filter=AM -z -- '*.md')
+if (( ${#staged_md[@]} > 0 )); then
+  ./node_modules/.bin/markdownlint-cli2 "${staged_md[@]}" || {
+    echo "pre-commit: markdownlint violations found — fix them before committing." >&2
+    exit 1
+  }
 fi

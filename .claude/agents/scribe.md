@@ -29,11 +29,12 @@ After every substantial work session:
 
 2. **Merge the decision inbox:** Read all files in `.squad/decisions/inbox/`, APPEND each to `.squad/decisions.md`, delete each inbox file after merging.
 
-3. **Deduplicate decisions.md:** Parse into decision blocks (`### ` prefix). Remove exact duplicates. Consolidate overlapping blocks into a single merged block with `### {today}: {topic} (consolidated)`.
+3. **Deduplicate decisions.md:** Parse into decision blocks (`###` prefix). Remove exact duplicates. Consolidate overlapping blocks into a single merged block with `### {today}: {topic} (consolidated)`.
 
 4. **Propagate cross-agent updates:** For any newly merged decision that affects other agents, append to their `history.md`:
-   ```
-   📌 Team update ({timestamp}): {summary} — decided by {Name}
+
+   ```text
+   Team update ({timestamp}): {summary} — decided by {Name}
    ```
 
 5. **Commit `.squad/` changes:**
