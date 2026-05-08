@@ -6841,3 +6841,39 @@ apps/api (no cross-app dependency).
 - `makeRateLimiter` is exported from both modules for unit testability.
 - Two new tests added (one per app) asserting next() is called when limit=0.
 
+# k3d Wave 1 decisions — 2026-05-08
+
+**Branch:** fix/k3d-portal-override-state-module
+
+## ShadowRoot / DOM globals (operator-portal-smoke.ts)
+
+ShadowRoot is now installed in `installDomGlobals` along with a defensive
+set of DOM constructors (HTMLDivElement, HTMLSpanElement, HTMLAnchorElement,
+HTMLFormElement, HTMLLabelElement, HTMLSelectElement, HTMLOptionElement,
+MutationObserver, ResizeObserver, Range, Selection, getSelection, DOMParser,
+XMLHttpRequest, Image, FormData, Blob, File, and Window).
+Window and getSelection are installed conditionally — skipped if JSDOM does
+not expose them.
+
+## controlPlaneUrl sourced from state.json
+
+`readCompatVars` in `scripts/k3d/state.mjs` now emits `control_plane_url`
+and `control_plane_port`. `scripts/k3d/operator-portal-override.sh` reads
+`control_plane_origin` from `control_plane_url` instead of the hardcoded
+`control-plane.127.0.0.1.nip.io` hostname (which has no matching ingress).
+
+## operator-portal-override default port moved to 38082
+
+`K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT` default changed from 38080 to
+38082 to avoid collision with tenant-api-override (38080) when both run
+simultaneously. customer-portal-override stays on 38081.
+
+## README updated
+
+`platform/k3d/README.md` env var table, workflow step, and readiness JSON
+example updated to reflect port 38082 and dynamic `controlPlanePort`.
+
+## What Wave 2 / Wave 3 still need to do
+
+- Wave 2: refactor smoke->REST in up.sh (replace operator-portal-smoke.ts usage)
+- Wave 3: BuildKit / image build perf
