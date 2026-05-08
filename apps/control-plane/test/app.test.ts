@@ -2939,8 +2939,8 @@ test('makeRateLimiter — limit=0 passes requests through instead of blocking al
     status: function () { return this },
     json: function () { return this },
   } as unknown as Parameters<typeof middleware>[1]
-  const next: Parameters<typeof middleware>[2] = () => {
-    assert.ok(true, 'next() must be called — limit=0 should disable, not block')
+  const next: Parameters<typeof middleware>[2] = (err?: unknown) => {
+    assert.strictEqual(err, undefined, 'next(err) should not be called')
     done()
   }
   middleware(req, res, next)
