@@ -25,10 +25,27 @@
 
 import { rateLimit, type Options as RateLimitOptions } from 'express-rate-limit'
 
-const defaultWindowMs = Number(process.env.RATE_LIMIT_WINDOW_MS ?? 15 * 60 * 1000)
-const authMax = Number(process.env.RATE_LIMIT_AUTH_MAX ?? 5)
-const writeMax = Number(process.env.RATE_LIMIT_WRITE_MAX ?? 100)
-const readMax = Number(process.env.RATE_LIMIT_READ_MAX ?? 300)
+/**
+ * Parse a non-negative integer from an environment variable.
+ *
+ * Returns `fallback` when:
+ *   - the variable is absent or empty, OR
+ *   - the value is not a finite number (e.g. "abc", "NaN"), OR
+ *   - the value is negative.
+ *
+ * Explicitly allows 0 — operators may intentionally disable a limit.
+ */
+export function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+const defaultWindowMs = readPositiveIntEnv('RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000)
+const authMax = readPositiveIntEnv('RATE_LIMIT_AUTH_MAX', 5)
+const writeMax = readPositiveIntEnv('RATE_LIMIT_WRITE_MAX', 100)
+const readMax = readPositiveIntEnv('RATE_LIMIT_READ_MAX', 300)
 
 const rateLimitDefaults: Partial<RateLimitOptions> = {
   standardHeaders: 'draft-6',

@@ -335,8 +335,20 @@ const portalLoginRateLimitPolicy: RateLimitPolicy = {
   errorMessage: 'Too many portal login attempts. Please wait before trying again.',
 }
 
-const portalAuthWindowMs = Number(process.env.RATE_LIMIT_PORTAL_WINDOW_MS ?? 15 * 60 * 1000)
-const portalAuthMax = Number(process.env.RATE_LIMIT_PORTAL_AUTH_MAX ?? 5)
+/**
+ * Parse a non-negative integer from an environment variable.
+ * Returns `fallback` when the variable is absent, empty, non-finite, or negative.
+ * Explicitly allows 0 — operators may intentionally disable a limit.
+ */
+function readPositiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') return fallback
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback
+}
+
+const portalAuthWindowMs = readPositiveIntEnv('RATE_LIMIT_PORTAL_WINDOW_MS', 15 * 60 * 1000)
+const portalAuthMax = readPositiveIntEnv('RATE_LIMIT_PORTAL_AUTH_MAX', 5)
 
 const createTenantSchema = z.object({
   id: z.string().min(1),
