@@ -45,7 +45,6 @@ if command -v kubectl >/dev/null 2>&1; then
 fi
 control_plane_port_forward_pid=""
 postgres_forward_pid=""
-tenant_namespace=""
 
 usage() {
   cat <<'EOF'
@@ -609,8 +608,8 @@ else
       "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${DEV_TENANT_ID}/deprovision" \
       >/dev/null 2>&1 || true
     # Wait for deprovision to complete
-    local_deadline=$((SECONDS + 60))
-    while (( SECONDS < local_deadline )); do
+    deprov_deadline=$((SECONDS + 60))
+    while (( SECONDS < deprov_deadline )); do
       set +e
       deprov_state="$(curl -fsS \
         -H "Authorization: Bearer ${control_plane_bearer_token}" \
