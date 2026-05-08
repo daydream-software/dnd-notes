@@ -78,6 +78,11 @@
   "engines": {
     "node": ">=22.21.1 <23"
   },
+  "overrides": {
+    "@rushstack/node-core-library": {
+      "ajv": ">=8.18.0"
+    }
+  },
   "devDependencies": {
     "@commitlint/cli": "^20.5.0",
     "@commitlint/config-conventional": "^20.5.0",
