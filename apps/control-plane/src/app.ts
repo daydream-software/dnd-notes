@@ -369,6 +369,8 @@ export function makeRateLimiter(options: Partial<RateLimitOptions>) {
 
 const portalAuthWindowMs = readPositiveIntEnv('RATE_LIMIT_PORTAL_WINDOW_MS', 15 * 60 * 1000)
 const portalAuthMax = readPositiveIntEnv('RATE_LIMIT_PORTAL_AUTH_MAX', 5)
+const internalAdminWindowMs = readPositiveIntEnv('RATE_LIMIT_INTERNAL_WINDOW_MS', 15 * 60 * 1000)
+const internalAdminMax = readPositiveIntEnv('RATE_LIMIT_INTERNAL_MAX', 100)
 
 const createTenantSchema = z.object({
   id: z.string().min(1),
@@ -567,11 +569,11 @@ function getErrorMessage(error: unknown) {
 
 function logUnexpectedError(message: string, error: unknown) {
   if (error instanceof Error) {
-    console.error(message, error)
+    console.error('%s', message, error)
     return
   }
 
-  console.error(`${message}: ${getErrorMessage(error)}`)
+  console.error('%s: %s', message, getErrorMessage(error))
 }
 
 function readRateLimitClientId(request: Request) {
@@ -752,6 +754,13 @@ export function createApp({
     standardHeaders: 'draft-6',
     legacyHeaders: false,
     message: { error: 'Too many requests. Please wait before trying again.' },
+  })
+  const internalAdminLimiter = makeRateLimiter({
+    windowMs: internalAdminWindowMs,
+    limit: internalAdminMax,
+    standardHeaders: 'draft-6',
+    legacyHeaders: false,
+    message: { error: 'Too many internal admin requests. Please wait before trying again.' },
   })
   let nextRateLimitBucketSweepAt = 0
   const buildHealthResponse = (): HealthResponse => ({
@@ -1221,7 +1230,7 @@ export function createApp({
     response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin')
     next()
   })
-  app.use(internalRoutePrefix, createAdminAuthMiddleware(adminToken, adminAuth))
+  app.use(internalRoutePrefix, internalAdminLimiter, createAdminAuthMiddleware(adminToken, adminAuth))
   app.use(internalRoutePrefix, express.json())
 
   app.get('/health', (_request: Request, response: Response<HealthResponse>) => {

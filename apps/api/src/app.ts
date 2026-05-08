@@ -20,6 +20,7 @@ import { normalizePublicWebUrl } from './route-support.js'
 import { createControlState, type ControlState } from './control-state.js'
 import { tenantApiSchemaVersion } from './migrations.js'
 import type { ErrorResponse, HealthResponse } from './types.js'
+import { createReadLimiter } from './rate-limiters.js'
 
 export const noteStoreSchemaVersion = tenantApiSchemaVersion
 const writeMethods = new Set(['POST', 'PUT', 'PATCH', 'DELETE'])
@@ -59,6 +60,7 @@ export function createApp({
   const app = express()
   const noteStore = initialNoteStore
   const publicWebUrl = normalizePublicWebUrl(configuredPublicWebUrl)
+  const spaFallbackReadLimiter = createReadLimiter()
 
   const routeContext = {
     getNoteStore: () => noteStore,
@@ -238,7 +240,7 @@ export function createApp({
     app.use(express.static(resolvedWebDistPath))
 
     // SPA fallback - serve index.html for browser navigation requests only
-    app.use((request: Request, response: Response, next) => {
+    app.use(spaFallbackReadLimiter, (request: Request, response: Response, next) => {
       const isDocumentRequest = request.method === 'GET' || request.method === 'HEAD'
       const path = request.path
       const acceptsHtml = Boolean(request.accepts('html'))
