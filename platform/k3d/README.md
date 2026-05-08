@@ -6,7 +6,7 @@ This lane intentionally uses **k3d for daily iteration** and keeps the control p
 
 ## Prerequisites
 
-- Docker
+- Docker with BuildKit support (Docker 23+ or `docker buildx` v0.10+)
 - `k3d`
 - `kubectl`
 - Node `22.21.1`
@@ -44,6 +44,55 @@ The same smoke lane now runs in GitHub Actions via
 `.github/workflows/k3d-smoke.yml`. That workflow installs `k3d` and `kubectl`,
 executes `npm run k3d:smoke`, uploads cluster diagnostics, and tears the test
 cluster down at the end of the job.
+
+## Image build strategy
+
+All four runtime images (tenant, control-plane, operator-portal, customer-portal)
+are built by a single script: `scripts/k3d/build-image.sh`.
+
+```bash
+scripts/k3d/build-image.sh \
+  --name <label> \
+  --dockerfile <path-relative-to-repo-root> \
+  --repo <image-repository> \
+  --tag <tag> \
+  [--build-arg KEY=VALUE ...]
+```
+
+`k3d:up` fans out all four builds in parallel (background subshells), captures
+per-image logs in `.k3d-up-work/build-<name>.log`, waits for all four PIDs,
+then streams the combined log to stderr.  Any single build failure aborts the
+whole step.  Pass `--no-rebuild` to skip builds when the Docker tags already
+exist locally.
+
+All three Dockerfiles (`Dockerfile`, `docker/control-plane/Dockerfile`,
+`docker/portal/Dockerfile`) use `# syntax=docker/dockerfile:1.4` and
+`--mount=type=cache,target=/root/.npm,sharing=locked` on every `npm ci` step.
+The `DOCKER_BUILDKIT=1` environment variable is set by the build script.  On a
+warm local cache, repeated `npm ci` steps resolve in seconds instead of
+re-downloading the full dependency tree.
+
+Note: when `CI=true`, the build script prunes host-side images and the BuildKit
+cache after each import to reclaim runner disk space.  The npm cache mount
+benefit is therefore local-dev only in CI.
+
+The two npm script aliases delegate to `build-image.sh`:
+
+```bash
+npm run k3d:build-image               # tenant image
+npm run k3d:build-control-plane-image # control-plane image
+```
+
+For portal images, pass the appropriate `--build-arg PORTAL_NAME=` flag:
+
+```bash
+bash scripts/k3d/build-image.sh \
+  --name Operator-portal \
+  --dockerfile docker/portal/Dockerfile \
+  --repo ghcr.io/daydream-software/dnd-notes-operator-portal \
+  --tag k3d \
+  --build-arg PORTAL_NAME=operator-portal
+```
 
 ## What `k3d:bootstrap` provisions
 
