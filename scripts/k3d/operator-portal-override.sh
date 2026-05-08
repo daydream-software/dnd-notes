@@ -141,8 +141,7 @@ cluster_name="$(json_get clusterName <"${STATE_FILE}")"
 eval "$(state_module read-vars "${STATE_FILE}")"
 k3d_http_port="${K3D_HTTP_PORT:-${ingress_port}}"
 
-control_plane_hostname="control-plane.127.0.0.1.nip.io"
-control_plane_origin="http://${control_plane_hostname}:${k3d_http_port}"
+control_plane_origin="${control_plane_url}"
 proxy_hostname="operator.127.0.0.1.nip.io"
 proxy_origin="http://${proxy_hostname}:${PROXY_PORT}"
 

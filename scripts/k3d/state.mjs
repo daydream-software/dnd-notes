@@ -158,7 +158,8 @@ export function buildTokenSnippet(keycloakUrl, realm, clientId, username, passwo
  * Never throws — returns empty strings for all fields on any error.
  *
  * Variables emitted: keycloak_url, keycloak_realm, ingress_port,
- * tenant_subdomain, tenant_hostname, tenant_origin.
+ * tenant_subdomain, tenant_hostname, tenant_origin,
+ * control_plane_url, control_plane_port.
  *
  * @param {string} stateFile - Absolute path to the state file.
  * @returns {string}
@@ -179,6 +180,9 @@ export function readCompatVars(stateFile) {
     if (m) { ingressPort = m[1]; break }
   }
 
+  const controlPlaneUrl = state?.controlPlaneUrl ?? ''
+  const controlPlanePort = state?.controlPlanePort != null ? String(state.controlPlanePort) : ''
+
   return [
     `keycloak_url=${sq(keycloakUrl)}`,
     `keycloak_realm=${sq(keycloakRealm)}`,
@@ -186,6 +190,8 @@ export function readCompatVars(stateFile) {
     `tenant_subdomain=${sq(tenant?.subdomain ?? state?.tenantSubdomain ?? '')}`,
     `tenant_hostname=${sq(tenant?.hostname ?? state?.tenantHostname ?? '')}`,
     `tenant_origin=${sq(tenant?.origin ?? state?.tenantOrigin ?? '')}`,
+    `control_plane_url=${sq(controlPlaneUrl)}`,
+    `control_plane_port=${sq(controlPlanePort)}`,
   ].join('\n')
 }
 
