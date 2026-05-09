@@ -134,6 +134,8 @@ interface TenantProvisioningServiceOptions {
   tenantPort?: number
   readyTimeoutMs?: number
   controlPlaneToken?: string
+  /** cert-manager ClusterIssuer name for TLS on tenant ingresses (e.g. 'dev-ca' in k3d, 'letsencrypt-prod' in hosted). When undefined, no TLS annotation or spec.tls block is added (back-compat with setups without cert-manager). */
+  tlsClusterIssuer?: string
 }
 
 interface BuildTenantInfrastructureBundleOptions {
@@ -148,6 +150,8 @@ interface BuildTenantInfrastructureBundleOptions {
   publicScheme: 'http' | 'https'
   tenantPort: number
   controlPlaneToken?: string
+  /** cert-manager ClusterIssuer name for TLS on the tenant ingress. When undefined, no TLS configuration is applied. */
+  tlsClusterIssuer?: string
 }
 
 export class TenantProvisioningValidationError extends Error {
@@ -216,6 +220,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly tenantPort: number
   private readonly readyTimeoutMs: number
   private readonly controlPlaneToken?: string
+  private readonly tlsClusterIssuer?: string
 
   constructor(options: TenantProvisioningServiceOptions) {
     this.tenantRegistry = options.tenantRegistry
@@ -230,6 +235,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.tenantPort = options.tenantPort ?? defaultTenantPort
     this.readyTimeoutMs = options.readyTimeoutMs ?? defaultTenantReadyTimeoutMs
     this.controlPlaneToken = options.controlPlaneToken
+    this.tlsClusterIssuer = options.tlsClusterIssuer
   }
 
   getTenantResources(tenant: Tenant): TenantProvisioningResources {
@@ -379,6 +385,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           publicScheme: this.publicScheme,
           tenantPort: this.tenantPort,
           controlPlaneToken: this.controlPlaneToken,
+          tlsClusterIssuer: this.tlsClusterIssuer,
         })
         const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
           refreshedTenant.id,
@@ -896,6 +903,7 @@ export function createLiveTenantProvisioningService(params: {
   tenantPort?: number
   readyTimeoutMs?: number
   controlPlaneToken?: string
+  tlsClusterIssuer?: string
 }): TenantProvisioningService {
   return new TenantProvisioningService({
     tenantRegistry: params.tenantRegistry,
@@ -913,6 +921,7 @@ export function createLiveTenantProvisioningService(params: {
     tenantPort: params.tenantPort,
     readyTimeoutMs: params.readyTimeoutMs,
     controlPlaneToken: params.controlPlaneToken,
+    tlsClusterIssuer: params.tlsClusterIssuer,
   })
 }
 
@@ -1040,9 +1049,22 @@ export function buildTenantInfrastructureBundle(
         name: resources.serviceName,
         namespace: resources.namespace,
         labels: namespaceLabels,
+        ...(options.tlsClusterIssuer
+          ? { annotations: { 'cert-manager.io/cluster-issuer': options.tlsClusterIssuer } }
+          : {}),
       },
       spec: {
         ingressClassName: options.ingressClassName ?? 'nginx',
+        ...(options.tlsClusterIssuer
+          ? {
+              tls: [
+                {
+                  hosts: [resources.hostname],
+                  secretName: `${resources.serviceName}-tls`,
+                },
+              ],
+            }
+          : {}),
         rules: [
           {
             host: resources.hostname,

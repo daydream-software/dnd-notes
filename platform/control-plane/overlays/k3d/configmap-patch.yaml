@@ -18,3 +18,4 @@ data:
   TENANT_KEYCLOAK_REALM: dnd-notes-dev
   TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app
   TENANT_INGRESS_CLASS_NAME: nginx
+  TENANT_TLS_CLUSTER_ISSUER: dev-ca
