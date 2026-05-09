@@ -874,6 +874,69 @@ export class TenantRegistry {
     return this.mapRowToPortalAccount(row)
   }
 
+  /**
+   * Provisions a portal_accounts row for a user that authenticated via
+   * Keycloak but has no existing local account. Idempotent: if a concurrent
+   * request already created the row (23505 on email or keycloak_sub), re-reads
+   * by keycloakSub and returns the winner. If the re-read still returns nothing,
+   * propagates the original error so the caller sees a 500 (not a silent swallow).
+   *
+   * Display-name derivation order: claims.name -> given_name + family_name ->
+   * email local-part (everything before the first @).
+   */
+  async createPortalAccountFromKeycloak(params: {
+    id: string
+    keycloakSub: string
+    email: string
+    displayName: string
+  }): Promise<PortalAccount> {
+    const { id, keycloakSub, email, displayName } = params
+
+    try {
+      const result = await this.run<PortalAccountRow>(
+        `INSERT INTO portal_accounts (
+           id,
+           email,
+           display_name,
+           billing_email,
+           billing_provider,
+           password_hash,
+           auth_provider,
+           keycloak_sub
+         )
+         VALUES ($1, $2, $3, NULL, NULL, NULL, 'keycloak', $4)
+         RETURNING ${portalAccountSelectColumns}`,
+        [id, email, displayName, keycloakSub],
+      )
+      const row = result.rows[0]
+
+      if (!row) {
+        throw new Error('Failed to retrieve created portal account')
+      }
+
+      return this.mapRowToPortalAccount(row)
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error
+      }
+
+      // Race: another concurrent first-login already created the row. Re-read
+      // by keycloakSub — the winner will have written both email and sub
+      // atomically, so this is the safe discriminator.
+      const existing = await this.getPortalAccountByKeycloakSub(keycloakSub)
+
+      if (existing) {
+        return existing
+      }
+
+      // The conflict was on email but the keycloak_sub index returned nothing.
+      // This means the email belongs to a pre-existing local account without a
+      // sub. The middleware should route to the email-link path instead.
+      // Re-throw so the caller sees it as a 500 rather than silent corruption.
+      throw error
+    }
+  }
+
   async deletePortalAccount(accountId: string): Promise<void> {
     const result = await this.run(
       `DELETE FROM portal_accounts

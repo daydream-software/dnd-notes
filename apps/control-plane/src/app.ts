@@ -594,6 +594,27 @@ function normalizePortalEmail(email: string) {
   return email.trim().toLowerCase()
 }
 
+/**
+ * Derives a display name from Keycloak token claims for a new auto-created
+ * portal account. Precedence: `name` claim -> `given_name` + `family_name` ->
+ * email local-part (everything before the first @).
+ */
+function derivePortalDisplayName(claims: PortalTokenClaims, normalizedEmail: string): string {
+  if (claims.name?.trim()) {
+    return claims.name.trim()
+  }
+
+  const given = claims.given_name?.trim() ?? ''
+  const family = claims.family_name?.trim() ?? ''
+  const composed = [given, family].filter(Boolean).join(' ')
+
+  if (composed) {
+    return composed
+  }
+
+  return normalizedEmail.split('@')[0] ?? normalizedEmail
+}
+
 function createPortalSessionToken() {
   return randomBytes(32).toString('hex')
 }
@@ -1094,9 +1115,8 @@ export function createApp({
       let portalAccount = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
 
       if (!portalAccount) {
-        // First-login path: fall back to email match.
-        // Require claims.email — preferred_username is not an email claim and
-        // must not be used for account resolution.
+        // All first-login paths require claims.email — preferred_username is not
+        // an email claim and must not be used for account resolution.
         if (!rawEmail) {
           request.resume()
           response.status(401).json({ error: 'Unauthorized' })
@@ -1106,26 +1126,35 @@ export function createApp({
         const email = normalizePortalEmail(rawEmail)
         const emailAccount = await tenantRegistry.getPortalAccountByEmail(email)
 
-        if (!emailAccount) {
-          request.resume()
-          response.status(401).json({ error: 'Unauthorized' })
-          return
+        if (emailAccount) {
+          // Email-match path: local account exists (migrated from local-auth era).
+          // Persist the sub link. Returns null if the account is already bound to
+          // a different sub (concurrent token swap / Keycloak account recreation).
+          const linked = await tenantRegistry.linkPortalAccountKeycloakSub(
+            emailAccount.id,
+            keycloakSub,
+          )
+
+          if (!linked) {
+            request.resume()
+            response.status(401).json({ error: 'Unauthorized' })
+            return
+          }
+
+          portalAccount = linked
+        } else {
+          // Auto-create path: no local account exists. Any user authenticated by
+          // the customer realm is provisioned a portal account on first login
+          // (revises spike #148 §0 — Option A). The Keycloak realm's own
+          // registration / MFA / email-verification policies are the gate.
+          const displayName = derivePortalDisplayName(claims, email)
+          portalAccount = await tenantRegistry.createPortalAccountFromKeycloak({
+            id: randomUUID(),
+            keycloakSub,
+            email,
+            displayName,
+          })
         }
-
-        // Persist the sub link. Returns null if the account is already bound to
-        // a different sub (concurrent token swap / Keycloak account recreation).
-        const linked = await tenantRegistry.linkPortalAccountKeycloakSub(
-          emailAccount.id,
-          keycloakSub,
-        )
-
-        if (!linked) {
-          request.resume()
-          response.status(401).json({ error: 'Unauthorized' })
-          return
-        }
-
-        portalAccount = linked
       }
 
       const portalRequest = request as PortalAuthenticatedRequest
