@@ -45,6 +45,34 @@ Keycloak wildcard matching limitation: `*` glob only at END of URL, not in hostn
 
 ---
 
+### 2026-05-09: k3d Ingress Port Constraint (80/443 only) + CI CAROOT Wiring
+**Decided by:** Brand (CI/Scripts)  
+**Date:** 2026-05-09  
+**Type:** Infrastructure & CI  
+**PR:** #169 (CodeRabbit review response)
+
+## Context
+
+CodeRabbit flagged two gaps on PR #169: (1) CI workflow never installed mkcert or exported `CAROOT`, causing `bootstrap.sh:validate_caroot` to fail in `k3d:smoke`. (2) Port override env vars (`HTTP_PORT`, `HTTPS_PORT`) could be set to non-standard values, reintroducing origin-mismatch bugs if a port appeared in the Origin header.
+
+A third structural risk: `cluster_exists()` short-circuits cluster creation, so a stale cluster with 8080/8443 host-port mappings from before this PR would silently bypass any env-var-level port validation.
+
+## Decisions
+
+**CAROOT in CI:** Install mkcert in the GitHub Actions workflow (mirrors dev setup). `CAROOT` is set to `$RUNNER_TEMP/mkcert-ca` and persisted via `$GITHUB_ENV`. `TRUST_STORES=""` skips system trust-store install (no `libnss3-tools` needed; smoke lane uses `curl -k`). Rejected openssl fallback and optional-CAROOT approaches to keep CI and dev paths identical.
+
+**Port enforcement:** `validate_ingress_ports` added to `bootstrap.sh`, runs before `validate_caroot`. Rejects `HTTP_PORT` != 80 or `HTTPS_PORT` != 443 at bootstrap entry. Non-80/443 ports are disallowed outright — this maintains the "portless origins" invariant and makes origin-mismatch impossible. Can be re-opened later if a legitimate need arises.
+
+**Existing cluster guard:** `validate_ingress_ports` also runs `docker inspect k3d-${CLUSTER_NAME}-serverlb` and checks live host-port mappings. If a stale cluster maps non-80/443 ports, bootstrap exits with a message directing the user to `npm run k3d:down` first.
+
+## Outcomes
+
+- CI `k3d:smoke` unblocked
+- Origin-mismatch bug class structurally closed (not just documented)
+- 5 CodeRabbit threads on PR #169 addressed
+
+---
+
 ### 2026-04-19: Code Review Response Patterns
 **Decided by:** Data (Backend Dev)  
 **Date:** 2026-04-19  
