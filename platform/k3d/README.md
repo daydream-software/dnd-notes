@@ -6,7 +6,7 @@ This lane intentionally uses **k3d for daily iteration** and keeps the control p
 
 ## Prerequisites
 
-- Docker
+- Docker with BuildKit support (Docker 23+ or `docker buildx` v0.10+)
 - `k3d`
 - `kubectl`
 - Node `22.21.1`
@@ -44,6 +44,55 @@ The same smoke lane now runs in GitHub Actions via
 `.github/workflows/k3d-smoke.yml`. That workflow installs `k3d` and `kubectl`,
 executes `npm run k3d:smoke`, uploads cluster diagnostics, and tears the test
 cluster down at the end of the job.
+
+## Image build strategy
+
+All four runtime images (tenant, control-plane, operator-portal, customer-portal)
+are built by a single script: `scripts/k3d/build-image.sh`.
+
+```bash
+scripts/k3d/build-image.sh \
+  --name <label> \
+  --dockerfile <path-relative-to-repo-root> \
+  --repo <image-repository> \
+  --tag <tag> \
+  [--build-arg KEY=VALUE ...]
+```
+
+`k3d:up` fans out all four builds in parallel (background subshells), captures
+per-image logs in `.k3d-up-work/build-<name>.log`, waits for all four PIDs,
+then streams the combined log to stderr.  Any single build failure aborts the
+whole step.  Pass `--no-rebuild` to skip builds when the Docker tags already
+exist locally.
+
+All three Dockerfiles (`Dockerfile`, `docker/control-plane/Dockerfile`,
+`docker/portal/Dockerfile`) use `# syntax=docker/dockerfile:1.4` and
+`--mount=type=cache,target=/root/.npm,sharing=locked` on every `npm ci` step.
+The `DOCKER_BUILDKIT=1` environment variable is set by the build script.  On a
+warm local cache, repeated `npm ci` steps resolve in seconds instead of
+re-downloading the full dependency tree.
+
+Note: when `CI=true`, the build script prunes host-side images and the BuildKit
+cache after each import to reclaim runner disk space.  The npm cache mount
+benefit is therefore local-dev only in CI.
+
+The two npm script aliases delegate to `build-image.sh`:
+
+```bash
+npm run k3d:build-image               # tenant image
+npm run k3d:build-control-plane-image # control-plane image
+```
+
+For portal images, pass the appropriate `--build-arg PORTAL_NAME=` flag:
+
+```bash
+bash scripts/k3d/build-image.sh \
+  --name Operator-portal \
+  --dockerfile docker/portal/Dockerfile \
+  --repo ghcr.io/daydream-software/dnd-notes-operator-portal \
+  --tag k3d \
+  --build-arg PORTAL_NAME=operator-portal
+```
 
 ## What `k3d:bootstrap` provisions
 
@@ -191,10 +240,12 @@ to every response so you can prove which side served each request.
 
 #### `k3d:tenant-api-override`
 
-1. Start or reuse a tenant on k3d
+1. Read the dev tenant from `.k3d-state/state.json` (written by `k3d:up`)
 2. Read that tenant’s runtime Secret/ConfigMap from Kubernetes
 3. Run `apps/api` locally in watch mode against the live tenant database/runtime auth config
 4. Expose a local same-origin front proxy at `http://<tenant>.127.0.0.1.nip.io:38080`
+
+Set `K3D_TENANT_OVERRIDE_NAMESPACE` and `K3D_TENANT_OVERRIDE_SUBDOMAIN` to point at a different tenant namespace.
 
 | Path | Target |
 | --- | --- |
@@ -218,7 +269,7 @@ npm run k3d:operator-portal-override # in a separate terminal
 
 1. Reads cluster state from `.k3d-state/state.json` (written by `k3d:up`)
 2. Starts `apps/operator-portal` locally in Vite watch mode
-3. Starts a front proxy at `http://operator.127.0.0.1.nip.io:38080`
+3. Starts a front proxy at `http://operator.127.0.0.1.nip.io:38082`
 4. Routes `/operator-api/*` to the in-cluster control plane; everything else to local Vite
 5. Injects `window.__ENV__` via `/env.js` with Keycloak URL/realm/client-id
 
@@ -290,7 +341,7 @@ All three scripts honor a few env overrides when you need a different local shap
 | `K3D_TENANT_OVERRIDE_NAMESPACE` | derived | reuse an existing tenant namespace for the override lane |
 | `K3D_TENANT_OVERRIDE_SUBDOMAIN` | derived | reuse an existing tenant subdomain for the override lane |
 | `K3D_OPERATOR_PORTAL_OVERRIDE_LOCAL_PORT` | `5173` | local Vite port for operator-portal override |
-| `K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT` | `38080` | public port for the operator-portal front proxy |
+| `K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT` | `38082` | public port for the operator-portal front proxy |
 | `K3D_OPERATOR_PORTAL_OVERRIDE_CHECK_ONLY` | `false` | exit after startup checks instead of streaming logs |
 | `K3D_CUSTOMER_PORTAL_OVERRIDE_LOCAL_PORT` | `5174` | local Vite port for customer-portal override |
 | `K3D_CUSTOMER_PORTAL_OVERRIDE_LISTEN_PORT` | `38081` | public port for the customer-portal front proxy |
@@ -477,8 +528,8 @@ Override script readiness summary:
   "workflow": "operator-portal-override",
   "clusterName": "dnd-notes",
   "localPortalUrl": "http://127.0.0.1:5173",
-  "overrideOrigin": "http://operator.127.0.0.1.nip.io:38080",
-  "apiTarget": "http://control-plane.127.0.0.1.nip.io:8080"
+  "overrideOrigin": "http://operator.127.0.0.1.nip.io:38082",
+  "apiTarget": "http://127.0.0.1:<controlPlanePort>"
 }
 ```
 

@@ -289,8 +289,16 @@ rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
 run_visible "${ROOT}/scripts/k3d/bootstrap.sh"
-run_visible "${ROOT}/scripts/k3d/build-tenant-image.sh"
-run_visible "${ROOT}/scripts/k3d/build-control-plane-image.sh"
+run_visible bash "${ROOT}/scripts/k3d/build-image.sh" \
+  --name Tenant \
+  --dockerfile Dockerfile \
+  --repo "${TENANT_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes}" \
+  --tag "${TENANT_IMAGE_TAG}"
+run_visible bash "${ROOT}/scripts/k3d/build-image.sh" \
+  --name Control-plane \
+  --dockerfile docker/control-plane/Dockerfile \
+  --repo "${CONTROL_PLANE_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-control-plane}" \
+  --tag "${TENANT_IMAGE_TAG}"
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 

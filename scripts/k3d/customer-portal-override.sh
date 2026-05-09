@@ -83,6 +83,10 @@ json_get() {
   ' "$path"
 }
 
+state_module() {
+  node "${ROOT}/scripts/k3d/state.mjs" "$@"
+}
+
 cleanup() {
   local exit_code=$?
   set +e

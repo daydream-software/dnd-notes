@@ -113,7 +113,11 @@ function createOwnedPostgresPool(connectionString: string): PostgresPoolLike {
     statement_timeout: parseIntegerSetting(process.env.NOTES_DB_STATEMENT_TIMEOUT_MS, 30_000),
   }
 
-  return new Pool(config)
+  const pool = new Pool(config)
+  pool.on('error', (error) => {
+    console.warn('Postgres pool idle client error (pool will reconnect):', error.message)
+  })
+  return pool
 }
 
 export function createNoteStorePostgresPool(connectionString: string): PostgresPoolLike {

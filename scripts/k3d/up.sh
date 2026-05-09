@@ -45,7 +45,6 @@ if command -v kubectl >/dev/null 2>&1; then
 fi
 control_plane_port_forward_pid=""
 postgres_forward_pid=""
-tenant_namespace=""
 
 usage() {
   cat <<'EOF'
@@ -152,9 +151,11 @@ ensure_image_imported_into_cluster() {
 }
 
 ensure_image_ready() {
+  # Args: <image_name> <image_ref> <build_script> [extra args...]
+  # Extra args are forwarded to the build script verbatim.
   local image_name="$1"
   local image_ref="$2"
-  local build_script="$3"
+  shift 2
 
   if [[ "${NO_REBUILD}" == "true" ]]; then
     if image_exists_locally "${image_ref}"; then
@@ -162,10 +163,10 @@ ensure_image_ready() {
       ensure_image_imported_into_cluster "${image_ref}"
     else
       log "${image_name} image ${image_ref} not found locally despite --no-rebuild; building..."
-      run_visible "${build_script}"
+      run_visible "$@"
     fi
   else
-    run_visible "${build_script}"
+    run_visible "$@"
   fi
 }
 
@@ -515,10 +516,57 @@ cp_image_ref="${CONTROL_PLANE_IMAGE_REPOSITORY}:${CONTROL_PLANE_IMAGE_TAG}"
 op_image_ref="${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-operator-portal}:${OPERATOR_PORTAL_IMAGE_TAG:-k3d}"
 cust_image_ref="${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}:${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}"
 
-ensure_image_ready "Tenant" "${tenant_image_ref}" "${ROOT}/scripts/k3d/build-tenant-image.sh"
-ensure_image_ready "Control-plane" "${cp_image_ref}" "${ROOT}/scripts/k3d/build-control-plane-image.sh"
-ensure_image_ready "Operator-portal" "${op_image_ref}" "${ROOT}/scripts/k3d/build-operator-portal-image.sh"
-ensure_image_ready "Customer-portal" "${cust_image_ref}" "${ROOT}/scripts/k3d/build-customer-portal-image.sh"
+log "Building 4 images in parallel..."
+ensure_image_ready "Tenant" "${tenant_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Tenant \
+    --dockerfile Dockerfile \
+    --repo "${TENANT_IMAGE_REPOSITORY}" \
+    --tag "${TENANT_IMAGE_TAG}" \
+  >"${WORK_DIR}/build-tenant.log" 2>&1 &
+pid_tenant=$!
+ensure_image_ready "Control-plane" "${cp_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Control-plane \
+    --dockerfile docker/control-plane/Dockerfile \
+    --repo "${CONTROL_PLANE_IMAGE_REPOSITORY}" \
+    --tag "${CONTROL_PLANE_IMAGE_TAG}" \
+  >"${WORK_DIR}/build-control-plane.log" 2>&1 &
+pid_cp=$!
+ensure_image_ready "Operator-portal" "${op_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Operator-portal \
+    --dockerfile docker/portal/Dockerfile \
+    --repo "${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-operator-portal}" \
+    --tag "${OPERATOR_PORTAL_IMAGE_TAG:-k3d}" \
+    --build-arg PORTAL_NAME=operator-portal \
+  >"${WORK_DIR}/build-operator-portal.log" 2>&1 &
+pid_op=$!
+ensure_image_ready "Customer-portal" "${cust_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Customer-portal \
+    --dockerfile docker/portal/Dockerfile \
+    --repo "${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}" \
+    --tag "${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}" \
+    --build-arg PORTAL_NAME=customer-portal \
+  >"${WORK_DIR}/build-customer-portal.log" 2>&1 &
+pid_cust=$!
+
+_build_fail=0
+for _pid_var in pid_tenant pid_cp pid_op pid_cust; do
+  if ! wait "${!_pid_var}"; then
+    log "Build failed: ${_pid_var} — see ${WORK_DIR}/build-*.log for details"
+    _build_fail=1
+  fi
+done
+
+# Stream all build logs to stderr so the operator sees the full output.
+for _log in "${WORK_DIR}"/build-*.log; do
+  [[ -s "${_log}" ]] && { log "--- ${_log} ---"; cat "${_log}" >&2; }
+done
+
+[ "${_build_fail}" -eq 0 ] || exit 1
+log "All 4 images built and imported."
 
 # ---------------------------------------------------------------------------
 # Step 3: Deploy control plane and portals
@@ -609,8 +657,8 @@ else
       "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${DEV_TENANT_ID}/deprovision" \
       >/dev/null 2>&1 || true
     # Wait for deprovision to complete
-    local_deadline=$((SECONDS + 60))
-    while (( SECONDS < local_deadline )); do
+    deprov_deadline=$((SECONDS + 60))
+    while (( SECONDS < deprov_deadline )); do
       set +e
       deprov_state="$(curl -fsS \
         -H "Authorization: Bearer ${control_plane_bearer_token}" \
@@ -624,22 +672,36 @@ else
     done
   fi
 
-  # Provision it
-  log "Provisioning dev tenant '${DEV_TENANT_ID}'..."
-  OPERATOR_PORTAL_ACCESS_TOKEN="${control_plane_bearer_token}" \
-  OPERATOR_PORTAL_REFRESH_TOKEN="${control_plane_bearer_token}" \
-  OPERATOR_PORTAL_CONTROL_PLANE_BASE_URL="http://127.0.0.1:${CONTROL_PLANE_PORT}" \
-  OPERATOR_PORTAL_TENANT_ID="${DEV_TENANT_ID}" \
-  OPERATOR_PORTAL_TENANT_SLUG="${DEV_TENANT_SUBDOMAIN}" \
-  OPERATOR_PORTAL_OWNER_ID="${DEV_TENANT_OWNER_ID}" \
-  OPERATOR_PORTAL_INITIAL_ADMIN_EMAIL="${TENANT_KEYCLOAK_USERNAME}" \
-  OPERATOR_PORTAL_TENANT_VERSION="${TENANT_IMAGE_TAG}" \
-  OPERATOR_PORTAL_REASON='k3d:up dev tenant provision' \
-  OPERATOR_PORTAL_PROVISION_TIMEOUT_MS='300000' \
-  node --import tsx "${ROOT}/scripts/k3d/operator-portal-smoke.ts" \
-    >"${WORK_DIR}/operator-portal-provision.json"
+  # Create the tenant record if it does not exist yet (idempotent — 409 means already present).
+  log "Creating dev tenant record '${DEV_TENANT_ID}' (idempotent)..."
+  create_http_code="$(curl -sS \
+    -o /dev/null \
+    -w '%{http_code}' \
+    -X POST \
+    -H "Authorization: Bearer ${control_plane_bearer_token}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"id\":\"${DEV_TENANT_ID}\",\"slug\":\"${DEV_TENANT_SUBDOMAIN}\",\"ownerId\":\"${DEV_TENANT_OWNER_ID}\",\"initialAdminEmail\":\"${TENANT_KEYCLOAK_USERNAME}\",\"version\":\"${TENANT_IMAGE_TAG}\"}" \
+    "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants")"
+  if [[ "${create_http_code}" != "201" && "${create_http_code}" != "409" ]]; then
+    log "Unexpected HTTP ${create_http_code} from POST /internal/tenants — aborting."
+    exit 1
+  fi
 
-  # Read back the actual namespace assigned by the provisioner (never derive from subdomain).
+  # Provision the tenant via REST. The endpoint is synchronous — it blocks until
+  # provisioning completes (or times out). operator-portal-smoke.ts is NOT invoked
+  # here; it is still used by full-stack-smoke.sh for E2E portal UI validation.
+  log "Provisioning dev tenant '${DEV_TENANT_ID}'..."
+  curl -fsS \
+    --max-time 300 \
+    -X POST \
+    -H "Authorization: Bearer ${control_plane_bearer_token}" \
+    -H 'Content-Type: application/json' \
+    -d "{\"triggeredBy\":\"k3d-up\",\"reason\":\"k3d:up dev tenant provision\",\"version\":\"${TENANT_IMAGE_TAG}\"}" \
+    "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${DEV_TENANT_ID}/provision" \
+    >"${WORK_DIR}/tenant-provision.json"
+
+  # Read back the actual namespace and final state assigned by the provisioner
+  # (never derive namespace from subdomain).
   curl -fsS \
     -H "Authorization: Bearer ${control_plane_bearer_token}" \
     "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants/${DEV_TENANT_ID}" \

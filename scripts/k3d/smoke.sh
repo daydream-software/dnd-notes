@@ -304,7 +304,11 @@ rm -rf "${WORK_DIR}"
 mkdir -p "${WORK_DIR}"
 
 "${ROOT}/scripts/k3d/bootstrap.sh"
-"${ROOT}/scripts/k3d/build-tenant-image.sh"
+bash "${ROOT}/scripts/k3d/build-image.sh" \
+  --name Tenant \
+  --dockerfile Dockerfile \
+  --repo "${TENANT_IMAGE_REPOSITORY}" \
+  --tag "${TENANT_IMAGE_TAG}"
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 

@@ -8,7 +8,7 @@ fi
 ROOT="$(git rev-parse --show-toplevel)"
 STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
 LOCAL_PORT="${K3D_OPERATOR_PORTAL_OVERRIDE_LOCAL_PORT:-5173}"
-PROXY_PORT="${K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT:-38080}"
+PROXY_PORT="${K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT:-38082}"
 CHECK_ONLY="${K3D_OPERATOR_PORTAL_OVERRIDE_CHECK_ONLY:-false}"
 WORK_DIR="${ROOT}/.k3d-smoke-work/operator-portal-override"
 JSON_OUTPUT=false
@@ -21,7 +21,7 @@ usage() {
 Run the operator-portal live override workflow.
 
 Starts `apps/operator-portal` locally in watch mode and exposes a proxy
-at http://operator.127.0.0.1.nip.io:38080 where the portal is local but
+at http://operator.127.0.0.1.nip.io:38082 where the portal is local but
 talks to the k3d control plane.
 
 Flags:
@@ -83,6 +83,10 @@ json_get() {
   ' "$path"
 }
 
+state_module() {
+  node "${ROOT}/scripts/k3d/state.mjs" "$@"
+}
+
 cleanup() {
   local exit_code=$?
   set +e
@@ -137,8 +141,7 @@ cluster_name="$(json_get clusterName <"${STATE_FILE}")"
 eval "$(state_module read-vars "${STATE_FILE}")"
 k3d_http_port="${K3D_HTTP_PORT:-${ingress_port}}"
 
-control_plane_hostname="control-plane.127.0.0.1.nip.io"
-control_plane_origin="http://${control_plane_hostname}:${k3d_http_port}"
+control_plane_origin="${control_plane_url}"
 proxy_hostname="operator.127.0.0.1.nip.io"
 proxy_origin="http://${proxy_hostname}:${PROXY_PORT}"
 
