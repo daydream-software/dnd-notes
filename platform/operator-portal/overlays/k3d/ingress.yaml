@@ -5,8 +5,14 @@ metadata:
   namespace: dnd-notes-platform
   labels:
     app.kubernetes.io/name: operator-portal
+  annotations:
+    cert-manager.io/cluster-issuer: dev-ca
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - operator.127.0.0.1.nip.io
+      secretName: operator-portal-tls
   rules:
     - host: operator.127.0.0.1.nip.io
       http:

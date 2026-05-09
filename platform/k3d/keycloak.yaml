@@ -79,12 +79,12 @@ data:
           "implicitFlowEnabled": false,
           "directAccessGrantsEnabled": true,
           "redirectUris": [
-            "http://*.127.0.0.1.nip.io/*",
+            "https://*.127.0.0.1.nip.io/*",
             "http://localhost:5173/*",
             "http://localhost:3000/*"
           ],
           "webOrigins": [
-            "http://*.127.0.0.1.nip.io",
+            "https://*.127.0.0.1.nip.io",
             "http://localhost:5173",
             "http://localhost:3000"
           ]
@@ -98,12 +98,12 @@ data:
           "implicitFlowEnabled": false,
           "directAccessGrantsEnabled": true,
           "redirectUris": [
-            "http://operator.127.0.0.1.nip.io/*",
+            "https://operator.127.0.0.1.nip.io/*",
             "http://localhost:5173/*",
             "http://localhost:5174/*"
           ],
           "webOrigins": [
-            "http://operator.127.0.0.1.nip.io",
+            "https://operator.127.0.0.1.nip.io",
             "http://localhost:5173",
             "http://localhost:5174"
           ]
@@ -172,7 +172,9 @@ spec:
                 name: platform-keycloak-bootstrap-env
           env:
             - name: KC_HOSTNAME
-              value: http://keycloak.127.0.0.1.nip.io
+              value: https://keycloak.127.0.0.1.nip.io
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
           ports:
             - name: http
               containerPort: 8080
@@ -223,8 +225,14 @@ metadata:
   labels:
     app.kubernetes.io/name: platform-keycloak
     app.kubernetes.io/part-of: dnd-notes
+  annotations:
+    cert-manager.io/cluster-issuer: dev-ca
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - keycloak.127.0.0.1.nip.io
+      secretName: platform-keycloak-tls
   rules:
     - host: keycloak.127.0.0.1.nip.io
       http:
