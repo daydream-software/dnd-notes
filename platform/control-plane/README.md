@@ -98,7 +98,7 @@ The k3d overlay ConfigMap automatically sets:
 - `TENANT_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
 - `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
-- `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
+- Per-tenant client: derived automatically as `dnd-notes-tenant-{tenantId}` at provisioning time
 - `TENANT_INGRESS_CLASS_NAME=nginx`
 
 ## Hosted reference overlay

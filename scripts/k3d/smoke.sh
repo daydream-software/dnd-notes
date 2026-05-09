@@ -30,7 +30,6 @@ CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES="${CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES:-
 TENANT_KEYCLOAK_URL="${TENANT_KEYCLOAK_URL:-${CONTROL_PLANE_KEYCLOAK_URL}}"
 TENANT_KEYCLOAK_REALM="${TENANT_KEYCLOAK_REALM:-${CONTROL_PLANE_KEYCLOAK_REALM}}"
 TENANT_KEYCLOAK_JWKS_URL="${TENANT_KEYCLOAK_JWKS_URL:-http://platform-keycloak.${PLATFORM_NAMESPACE}.svc.cluster.local:8080/realms/${TENANT_KEYCLOAK_REALM}/protocol/openid-connect/certs}"
-TENANT_KEYCLOAK_CLIENT_ID="${TENANT_KEYCLOAK_CLIENT_ID:-dnd-notes-tenant-app}"
 TENANT_KEYCLOAK_USERNAME="${TENANT_KEYCLOAK_USERNAME:-owner@example.com}"
 TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 KEEP_TENANT="${KEEP_K3D_SMOKE_TENANT:-false}"
@@ -78,7 +77,6 @@ Environment overrides:
   TENANT_KEYCLOAK_URL
   TENANT_KEYCLOAK_REALM
   TENANT_KEYCLOAK_JWKS_URL
-  TENANT_KEYCLOAK_CLIENT_ID
   TENANT_KEYCLOAK_USERNAME
   TENANT_KEYCLOAK_PASSWORD
   KEEP_K3D_SMOKE_TENANT=true   Keep the provisioned tenant for debugging
@@ -368,7 +366,6 @@ env \
   TENANT_KEYCLOAK_URL="${TENANT_KEYCLOAK_URL}" \
   TENANT_KEYCLOAK_REALM="${TENANT_KEYCLOAK_REALM}" \
   TENANT_KEYCLOAK_JWKS_URL="${TENANT_KEYCLOAK_JWKS_URL}" \
-  TENANT_KEYCLOAK_CLIENT_ID="${TENANT_KEYCLOAK_CLIENT_ID}" \
   TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN}" \
   TENANT_IMAGE_REPOSITORY="${TENANT_IMAGE_REPOSITORY}" \
   TENANT_DATABASE_ADMIN_URL="postgresql://postgres:postgres@127.0.0.1:${POSTGRES_LOCAL_PORT}/postgres" \
@@ -391,6 +388,8 @@ control_plane_bearer_token="$(get_keycloak_access_token \
 
 tenant_id="smoke-$(date +%s)"
 tenant_slug="${tenant_id}"
+# Per-tenant Keycloak client ID is derived from the tenant ID at provision time.
+tenant_keycloak_client_id="dnd-notes-tenant-${tenant_id}"
 
 request_json_to_file \
   "${WORK_DIR}/tenant-create.json" \
@@ -423,7 +422,7 @@ wait_for_http "http://127.0.0.1:${TENANT_LOCAL_PORT}/ready" 60
 tenant_bearer_token="$(get_keycloak_access_token \
   "${TENANT_KEYCLOAK_URL}" \
   "${TENANT_KEYCLOAK_REALM}" \
-  "${TENANT_KEYCLOAK_CLIENT_ID}" \
+  "${tenant_keycloak_client_id}" \
   "${TENANT_KEYCLOAK_USERNAME}" \
   "${TENANT_KEYCLOAK_PASSWORD}")"
 
@@ -447,4 +446,4 @@ echo "- Tenant namespace: ${tenant_namespace}"
 echo "- Tenant subdomain: ${tenant_subdomain}"
 echo "- Tenant readiness: http://127.0.0.1:${TENANT_LOCAL_PORT}/ready"
 echo "- Control-plane Keycloak auth: ${CONTROL_PLANE_KEYCLOAK_REALM}/${CONTROL_PLANE_KEYCLOAK_CLIENT_ID}"
-echo "- Tenant Keycloak auth: ${TENANT_KEYCLOAK_REALM}/${TENANT_KEYCLOAK_CLIENT_ID} (${tenant_owner_email}, ${tenant_campaign_count} campaigns)"
+echo "- Tenant Keycloak auth: ${TENANT_KEYCLOAK_REALM}/${tenant_keycloak_client_id} (${tenant_owner_email}, ${tenant_campaign_count} campaigns)"

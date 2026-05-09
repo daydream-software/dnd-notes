@@ -46,7 +46,7 @@ The control-plane also decides how new tenant pods boot:
 - `TENANT_KEYCLOAK_URL`
 - optional `TENANT_KEYCLOAK_JWKS_URL`
 - `TENANT_KEYCLOAK_REALM`
-- `TENANT_KEYCLOAK_CLIENT_ID`
+- The per-tenant Keycloak client ID is derived automatically as `dnd-notes-tenant-{tenantId}` — it is not a configurable env var.
 
 ## Local k3d contract
 
@@ -68,7 +68,7 @@ The k3d control-plane overlay enables both runtime paths with:
 - `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
 - `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
-- `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
+- Per-tenant client: derived automatically as `dnd-notes-tenant-{tenantId}` at provisioning time
 
 The split matters in k3d: browsers and the local control-plane use the public
 issuer URL (`http://keycloak.127.0.0.1.nip.io:8080`), but tenant pods cannot

@@ -28,7 +28,6 @@ CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-dev}"
 CONTROL_PLANE_KEYCLOAK_CLIENT_ID="${CONTROL_PLANE_KEYCLOAK_CLIENT_ID:-dnd-notes-control-plane}"
 CONTROL_PLANE_KEYCLOAK_USERNAME="${CONTROL_PLANE_KEYCLOAK_USERNAME:-site-admin@example.com}"
 CONTROL_PLANE_KEYCLOAK_PASSWORD="${CONTROL_PLANE_KEYCLOAK_PASSWORD:-password}"
-TENANT_KEYCLOAK_CLIENT_ID="${TENANT_KEYCLOAK_CLIENT_ID:-dnd-notes-tenant-app}"
 TENANT_KEYCLOAK_USERNAME="${TENANT_KEYCLOAK_USERNAME:-owner@example.com}"
 TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 DEV_TENANT_ID="${K3D_DEV_TENANT_ID:-k3d-dev}"
@@ -87,7 +86,6 @@ Environment overrides:
   CONTROL_PLANE_KEYCLOAK_CLIENT_ID
   CONTROL_PLANE_KEYCLOAK_USERNAME
   CONTROL_PLANE_KEYCLOAK_PASSWORD
-  TENANT_KEYCLOAK_CLIENT_ID
   TENANT_KEYCLOAK_USERNAME
   TENANT_KEYCLOAK_PASSWORD
   K3D_DEV_TENANT_ID
@@ -334,13 +332,19 @@ write_state() {
     "${CONTROL_PLANE_KEYCLOAK_USERNAME}" \
     "${CONTROL_PLANE_KEYCLOAK_PASSWORD}")"
 
+  # Per-tenant Keycloak client IDs are derived from the tenant ID; there is no
+  # shared static client. When tenant_id is empty (no dev tenant), client ID
+  # is also empty and the token snippet is omitted.
+  local tenant_client_id=""
+  [[ -n "${tenant_id}" ]] && tenant_client_id="dnd-notes-tenant-${tenant_id}"
+
   local tenant_token_snippet="null"
   if [[ -n "${tenant_id}" ]]; then
     local raw_snippet
     raw_snippet="$(build_token_snippet \
       "${CONTROL_PLANE_KEYCLOAK_URL}" \
       "${CONTROL_PLANE_KEYCLOAK_REALM}" \
-      "${TENANT_KEYCLOAK_CLIENT_ID}" \
+      "${tenant_client_id}" \
       "${TENANT_KEYCLOAK_USERNAME}" \
       "${TENANT_KEYCLOAK_PASSWORD}")"
     # JSON-encode the snippet string for embedding in the payload
@@ -407,7 +411,7 @@ write_state() {
     "${CONTROL_PLANE_KEYCLOAK_URL}" \
     "${CONTROL_PLANE_KEYCLOAK_REALM}" \
     "${CONTROL_PLANE_KEYCLOAK_CLIENT_ID}" \
-    "${TENANT_KEYCLOAK_CLIENT_ID}" \
+    "${tenant_client_id}" \
     "${CONTROL_PLANE_KEYCLOAK_USERNAME}" \
     "${CONTROL_PLANE_KEYCLOAK_PASSWORD}" \
     "${TENANT_KEYCLOAK_USERNAME}" \

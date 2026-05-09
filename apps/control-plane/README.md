@@ -291,7 +291,6 @@ Environment variables:
 - `TENANT_AUTH_MODE` — `local` (default) or `keycloak` for provisioned tenant pods
 - `TENANT_KEYCLOAK_URL` — Keycloak base URL injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
 - `TENANT_KEYCLOAK_REALM` — tenant realm injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
-- `TENANT_KEYCLOAK_CLIENT_ID` — tenant web client ID injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
 - `TENANT_BASE_DOMAIN` — base domain for generated tenant hosts
 - `TENANT_INGRESS_CLASS_NAME` — ingress class used for generated tenant Ingress resources (`nginx` by default)
 - `TENANT_IMAGE_REPOSITORY` — tenant image repository used in generated Deployments
