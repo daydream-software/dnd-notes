@@ -197,8 +197,14 @@ export default function App({
     }
   }, [])
 
-  // --- Keycloak bootstrap (runs on mount to handle redirect-back) ---
+  // --- Keycloak bootstrap (gated on resolved auth mode from catalog) ---
   useEffect(() => {
+    // Wait until catalog has resolved so we don't bootstrap Keycloak in local
+    // mode portals where Keycloak may not be reachable at all.
+    if (isLoadingCatalog || catalog?.authMode !== 'keycloak') {
+      return
+    }
+
     let cancelled = false
     const keycloakClient = keycloakClientFactory(portalKeycloakConfig)
     keycloakClientRef.current = keycloakClient
@@ -234,7 +240,7 @@ export default function App({
     return () => {
       cancelled = true
     }
-  }, [keycloakClientFactory])
+  }, [catalog?.authMode, isLoadingCatalog, keycloakClientFactory])
 
   // --- Keycloak dashboard hydration ---
   useEffect(() => {
@@ -348,11 +354,19 @@ export default function App({
       return
     }
 
-    await keycloakClientRef.current.login(buildPortalRedirectUri())
+    try {
+      await keycloakClientRef.current.login(buildPortalRedirectUri())
+    } catch (loginError) {
+      setError(
+        loginError instanceof Error
+          ? loginError.message
+          : 'Could not start the Keycloak sign-in flow.',
+      )
+    }
   }, [])
 
   const handleKeycloakLogout = useCallback(async () => {
-    const redirectUri = window.location.origin
+    const redirectUri = buildPortalRedirectUri()
 
     setKeycloakToken(null)
     setDashboard(null)

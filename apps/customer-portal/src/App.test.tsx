@@ -592,7 +592,7 @@ describe('customer portal — keycloak mode', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
 
     expect(stub.logout).toHaveBeenCalledOnce()
-    expect(stub.logout).toHaveBeenCalledWith(window.location.origin)
+    expect(stub.logout).toHaveBeenCalledWith(`${window.location.origin}/`)
     expect(
       await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
     ).toBeTruthy()
