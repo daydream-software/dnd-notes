@@ -216,10 +216,15 @@ install_cert_manager() {
     if kubectl -n cert-manager get endpoints cert-manager-webhook \
         -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -qE '[0-9]'; then
       echo "cert-manager-webhook endpoint is ready."
-      break
+      return 0
     fi
     sleep 3
   done
+
+  echo "ERROR: cert-manager-webhook endpoint did not become ready within 60s." >&2
+  echo "  ClusterIssuer apply will fail; aborting before downstream errors." >&2
+  kubectl -n cert-manager get endpoints cert-manager-webhook -o yaml >&2 || true
+  exit 1
 }
 
 apply_cert_manager_ca() {
