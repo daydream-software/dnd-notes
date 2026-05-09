@@ -6952,3 +6952,69 @@ example updated to reflect port 38082 and dynamic `controlPlanePort`.
 
 - Wave 2: refactor smoke->REST in up.sh (replace operator-portal-smoke.ts usage) *(completed in this PR)*
 - Wave 3: BuildKit / image build perf *(completed in this PR)*
+
+---
+
+### 2026-05-09: Keycloak portal auth flow design (spike #148)
+**Decided by:** Data (Backend Dev)  
+**Date:** 2026-05-09  
+**Type:** Architecture & Portal Auth  
+**Issue:** #148 (part of epic #139), sibling #170
+
+## Context
+
+During diagnosis of portal login failures (fix/portal-keycloak-url-https), three distinct bugs emerged:
+
+1. Operator portal: HTTP :8080 fallback (pre-#169, configmap regression) — **Fixed in this session.**
+2. Customer portal: Register/login buttons unresponsive → root cause is reuse of `dnd-notes-tenant-app` client, which carries wildcard redirect URIs Keycloak does NOT honour in the hostname portion.
+3. Tenant web app: `invalid_redirect_uri` — same wildcard limitation, tracked in #170.
+
+The customer & tenant failures require a durable realm-sync mechanism plus dedicated Keycloak clients with explicit hostnames.
+
+## Decision
+
+### Client topology
+- Three static portal clients in the shared `dnd-notes-dev` realm:
+  - `dnd-notes-control-plane` (confidential, service account) — used by control-plane for admin-REST calls
+  - `dnd-notes-customer-portal` (public, PKCE) — new, hostname `portal.127.0.0.1.nip.io`
+  - `dnd-notes-operator-portal` (public, PKCE) — already exists
+- Per-tenant clients remain dynamic, handled by #170 (each tenant gets its own explicit-hostname client).
+
+### Realm sync strategy
+- `--import-realm` seeds on first boot only and does NOT re-import into an existing realm.
+- **Durable path:** Idempotent admin-REST upsert (`ensureClient`) called from control-plane at startup.
+- Rejected alternatives:
+  - `KC_IMPORT_REALM_OVERWRITE` — nukes user data
+  - Standalone Kubernetes Job — ordering complexity
+  - `up.sh` one-shot — no drift protection
+
+### Auth flow
+- Shared realm for both portals (SSO wins over blast-radius isolation at current scale)
+- Public client + PKCE, no BFF proxy for initial slice
+- Token storage: `sessionStorage` (parity with operator-portal)
+- Logout: front-channel only
+- Refresh: `updateToken` before each API call, no silent-refresh iframe
+
+### Migration
+- Existing dev clusters: automatic on first control-plane startup after new code ships (startup upsert handles it)
+- New clusters: realm re-import from updated `realm.json` on full teardown + recreate
+
+## Outcomes
+
+- Spike #148 design complete; awaiting implementation PRs
+- #170 dependency chain clarified (extends shared `keycloak-admin-client.ts` wrapper once #148 lands)
+- Keycloak wildcard-limitation roadmap established
+
+## Follow-ups
+
+- #148 implementation (create admin-REST client wrapper + realm-sync logic)
+- #170 implementation (per-tenant client provisioning)
+- #174 UI pass (unblocked once customer-portal login fixed)
+
+## Files affected (full punch list in issue comment)
+- `platform/k3d/keycloak.yaml`
+- `apps/control-plane/src/keycloak-admin-client.ts` (new)
+- `apps/customer-portal/src/keycloak-client.ts` (new)
+- `platform/customer-portal/base/configmap.yaml`, `platform/control-plane/overlays/k3d/*-patch.yaml`
+- `scripts/k3d/bootstrap.sh` (comment fix)
+

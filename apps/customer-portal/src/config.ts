@@ -15,7 +15,7 @@ export const portalApiBasePath = normalizeBasePath(
 )
 
 export const portalKeycloakConfig = {
-  url: runtimeEnv.KEYCLOAK_URL ?? (import.meta.env.VITE_PORTAL_KEYCLOAK_URL as string | undefined) ?? 'http://keycloak.127.0.0.1.nip.io:8080',
+  url: runtimeEnv.KEYCLOAK_URL ?? (import.meta.env.VITE_PORTAL_KEYCLOAK_URL as string | undefined) ?? 'https://keycloak.127.0.0.1.nip.io',
   realm: runtimeEnv.KEYCLOAK_REALM ?? (import.meta.env.VITE_PORTAL_KEYCLOAK_REALM as string | undefined) ?? 'dnd-notes-dev',
   clientId: runtimeEnv.KEYCLOAK_CLIENT_ID ?? (import.meta.env.VITE_PORTAL_KEYCLOAK_CLIENT_ID as string | undefined) ?? 'dnd-notes-tenant-app',
 }
