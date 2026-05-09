@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { createJsonResponse, readMockJsonBody, readMockRequest } from './test-helpers'
+import type { CustomerKeycloakClient } from './keycloak-client'
 import type {
   PortalCatalogResponse,
   PortalCreateTenantRequest,
@@ -42,6 +43,11 @@ const catalog: PortalCatalogResponse = {
     teamInvites: 'coming-soon',
     usageAnalytics: 'coming-soon',
   },
+}
+
+const keycloakCatalog: PortalCatalogResponse = {
+  ...catalog,
+  authMode: 'keycloak',
 }
 
 const baseDashboard: PortalDashboardResponse = {
@@ -100,6 +106,19 @@ const baseDashboard: PortalDashboardResponse = {
   ],
 }
 
+/** Build a minimal keycloak client stub (not authenticated by default). */
+function makeKeycloakStub(
+  overrides: Partial<CustomerKeycloakClient> = {},
+): CustomerKeycloakClient {
+  return {
+    init: vi.fn().mockResolvedValue(null),
+    login: vi.fn().mockResolvedValue(undefined),
+    logout: vi.fn().mockResolvedValue(undefined),
+    freshToken: vi.fn().mockResolvedValue('kc-access-token'),
+    ...overrides,
+  }
+}
+
 describe('customer portal', () => {
   beforeEach(() => {
     sessionStorage.clear()
@@ -121,7 +140,8 @@ describe('customer portal', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    render(<App />)
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
 
     expect(
       await screen.findByText(
@@ -168,7 +188,8 @@ describe('customer portal', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    render(<App />)
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
     await screen.findByLabelText('Work email')
@@ -229,7 +250,8 @@ describe('customer portal', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    render(<App />)
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
     await screen.findByLabelText('Work email')
@@ -275,7 +297,8 @@ describe('customer portal', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    render(<App />)
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
     await screen.findByLabelText('Portal email')
@@ -370,7 +393,8 @@ describe('customer portal', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    render(<App />)
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
     expect(await screen.findByText('Customer dashboard')).toBeTruthy()
@@ -425,7 +449,8 @@ describe('customer portal', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    render(<App />)
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
     expect(await screen.findByText('Customer dashboard')).toBeTruthy()
@@ -436,5 +461,132 @@ describe('customer portal', () => {
     await waitFor(() => {
       expect(sessionStorage.getItem(storedTokenKey)).toBeNull()
     })
+  })
+})
+
+describe('customer portal — keycloak mode', () => {
+  beforeEach(() => {
+    sessionStorage.clear()
+  })
+
+  afterEach(() => {
+    cleanup()
+    vi.restoreAllMocks()
+  })
+
+  it('shows the Keycloak entry card when catalog reports keycloak mode and session is unauthenticated', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(keycloakCatalog)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub({ init: vi.fn().mockResolvedValue(null) })
+    render(<App keycloakClientFactory={() => stub} />)
+
+    expect(
+      await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
+    ).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Create portal account' })).toBeNull()
+  })
+
+  it('calls keycloak.login when the sign-in button is clicked', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(keycloakCatalog)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub({ init: vi.fn().mockResolvedValue(null) })
+    render(<App keycloakClientFactory={() => stub} />)
+
+    const user = userEvent.setup()
+    await user.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }))
+
+    expect(stub.login).toHaveBeenCalledOnce()
+  })
+
+  it('renders the dashboard after a successful Keycloak session is restored', async () => {
+    const kcDashboard: PortalDashboardResponse = {
+      ...baseDashboard,
+      account: { ...baseDashboard.account, authProvider: 'keycloak', keycloakSub: 'sub-123' },
+      catalog: keycloakCatalog,
+    }
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(keycloakCatalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse(kcDashboard)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub({
+      init: vi.fn().mockResolvedValue({
+        accessToken: 'kc-access-token',
+        refreshToken: 'kc-refresh-token',
+      }),
+      freshToken: vi.fn().mockResolvedValue('kc-access-token'),
+    })
+    render(<App keycloakClientFactory={() => stub} />)
+
+    expect(await screen.findByText('Customer dashboard')).toBeTruthy()
+    expect(screen.getByText('Misty Harbor')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Sign in with Keycloak' })).toBeNull()
+  })
+
+  it('calls keycloak.logout when the sign-out button is clicked', async () => {
+    const kcDashboard: PortalDashboardResponse = {
+      ...baseDashboard,
+      account: { ...baseDashboard.account, authProvider: 'keycloak', keycloakSub: 'sub-123' },
+      catalog: keycloakCatalog,
+    }
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(keycloakCatalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse(kcDashboard)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub({
+      init: vi.fn().mockResolvedValue({
+        accessToken: 'kc-access-token',
+        refreshToken: 'kc-refresh-token',
+      }),
+      freshToken: vi.fn().mockResolvedValue('kc-access-token'),
+    })
+    render(<App keycloakClientFactory={() => stub} />)
+
+    const user = userEvent.setup()
+    await screen.findByText('Customer dashboard')
+
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(stub.logout).toHaveBeenCalledOnce()
+    expect(
+      await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
+    ).toBeTruthy()
   })
 })
