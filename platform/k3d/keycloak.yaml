@@ -80,11 +80,13 @@ data:
           "directAccessGrantsEnabled": true,
           "redirectUris": [
             "https://*.127.0.0.1.nip.io/*",
+            "http://*.127.0.0.1.nip.io/*",
             "http://localhost:5173/*",
             "http://localhost:3000/*"
           ],
           "webOrigins": [
             "https://*.127.0.0.1.nip.io",
+            "http://*.127.0.0.1.nip.io",
             "http://localhost:5173",
             "http://localhost:3000"
           ]
@@ -99,11 +101,13 @@ data:
           "directAccessGrantsEnabled": true,
           "redirectUris": [
             "https://operator.127.0.0.1.nip.io/*",
+            "http://operator.127.0.0.1.nip.io/*",
             "http://localhost:5173/*",
             "http://localhost:5174/*"
           ],
           "webOrigins": [
             "https://operator.127.0.0.1.nip.io",
+            "http://operator.127.0.0.1.nip.io",
             "http://localhost:5173",
             "http://localhost:5174"
           ]

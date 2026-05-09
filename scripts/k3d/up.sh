@@ -360,9 +360,9 @@ write_state() {
       stateFile,
     ] = process.argv.slice(1)
 
-    const isHttps = tenantPublicScheme === 'https'
+    const isHttps = tenantPublicScheme === "https"
     const defaultPort = isHttps ? 443 : 80
-    const portSuffix = Number(httpPort) !== defaultPort ? `:${httpPort}` : ''
+    const portSuffix = Number(httpPort) !== defaultPort ? `:${httpPort}` : ""
 
     const tenantOrigin = tenantId
       ? `${tenantPublicScheme}://${tenantHostname}${portSuffix}`
