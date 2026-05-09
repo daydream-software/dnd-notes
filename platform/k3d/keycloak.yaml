@@ -80,24 +80,14 @@ data:
       "clients": [
         {
           "clientId": "dnd-notes-tenant-app",
-          "enabled": true,
+          "enabled": false,
           "publicClient": true,
-          "standardFlowEnabled": true,
+          "standardFlowEnabled": false,
           "bearerOnly": false,
           "implicitFlowEnabled": false,
-          "directAccessGrantsEnabled": true,
-          "redirectUris": [
-            "https://*.127.0.0.1.nip.io/*",
-            "http://*.127.0.0.1.nip.io/*",
-            "http://localhost:5173/*",
-            "http://localhost:3000/*"
-          ],
-          "webOrigins": [
-            "https://*.127.0.0.1.nip.io",
-            "http://*.127.0.0.1.nip.io",
-            "http://localhost:5173",
-            "http://localhost:3000"
-          ]
+          "directAccessGrantsEnabled": false,
+          "redirectUris": [],
+          "webOrigins": []
         },
         {
           "clientId": "dnd-notes-control-plane",

@@ -212,6 +212,24 @@ class FakeInfrastructureManager {
   }
 }
 
+class FakeKeycloakAdminClient {
+  ensureCalls: Array<Record<string, unknown>> = []
+  deleteCalls: string[] = []
+  shouldThrowOnDelete = false
+
+  async ensureClient(spec: Record<string, unknown>): Promise<void> {
+    this.ensureCalls.push(spec)
+  }
+
+  async deleteClient(clientId: string): Promise<void> {
+    if (this.shouldThrowOnDelete) {
+      throw new Error('synthetic Keycloak delete failure')
+    }
+
+    this.deleteCalls.push(clientId)
+  }
+}
+
 function createTenantRecord(overrides: Partial<Tenant> = {}): Tenant {
   return {
     id: 'tenant-demo',
@@ -410,7 +428,6 @@ describe('TenantProvisioningService', () => {
           keycloakUrl: 'https://auth.example.com',
           keycloakJwksUrl: 'http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-prod/protocol/openid-connect/certs',
           keycloakRealm: 'dnd-notes-prod',
-          keycloakClientId: 'dnd-notes-tenant-app',
         },
         baseDomain: 'dnd-notes.test',
         imageRepository: 'ghcr.io/daydream-software/dnd-notes',
@@ -443,9 +460,11 @@ describe('TenantProvisioningService', () => {
         infrastructureManager.bundles[0].keycloakJwksUrl,
         'http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-prod/protocol/openid-connect/certs',
       )
+      // The per-tenant Keycloak client ID is always derived from the tenant ID,
+      // not from a configurable field.
       assert.equal(
         infrastructureManager.bundles[0].keycloakClientId,
-        'dnd-notes-tenant-app',
+        'dnd-notes-tenant-tenant-demo',
       )
     } finally {
       await provisioningService.close()
@@ -1331,6 +1350,229 @@ describe('TenantProvisioningService', () => {
       ),
       'postgresql://postgres:postgres@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/tenant_demo_t_opaque123456?sslmode=disable',
     )
+  })
+
+  it('creates a per-tenant Keycloak client on provision with correct clientId and redirectUris', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(keycloakAdminClient.ensureCalls.length, 1)
+      const ensureCall = keycloakAdminClient.ensureCalls[0]
+      assert.equal(ensureCall.clientId, 'dnd-notes-tenant-tenant-demo')
+      assert.equal(ensureCall.publicClient, true)
+      assert.equal(ensureCall.standardFlowEnabled, true)
+      assert.equal(ensureCall.directAccessGrantsEnabled, false)
+      const hostname = result.resources.hostname
+      assert.deepEqual(ensureCall.redirectUris, [`https://${hostname}/*`, `http://${hostname}/*`])
+      assert.deepEqual(ensureCall.webOrigins, [`https://${hostname}`, `http://${hostname}`])
+      assert.deepEqual((ensureCall.attributes as Record<string, string>)?.['pkce.code.challenge.method'], 'S256')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('is idempotent when provisioning the same tenant twice (ensureClient called each time)', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      // First provision
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+      const firstCall = keycloakAdminClient.ensureCalls[0]
+
+      // Second provision (re-provision of existing ready tenant — new version)
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+        version: '1.1.0',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(keycloakAdminClient.ensureCalls.length, 2)
+      const secondCall = keycloakAdminClient.ensureCalls[1]
+      // Both calls target the same derived clientId — re-provision is idempotent
+      // at the call-site level; the wrapper handles the actual no-op.
+      assert.equal(firstCall.clientId, secondCall.clientId)
+      assert.deepEqual(firstCall.redirectUris, secondCall.redirectUris)
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('deletes the per-tenant Keycloak client on deprovision', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(keycloakAdminClient.deleteCalls.length, 0)
+
+      const result = await provisioningService.deprovisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'deprovisioned')
+      assert.equal(keycloakAdminClient.deleteCalls.length, 1)
+      assert.equal(keycloakAdminClient.deleteCalls[0], 'dnd-notes-tenant-tenant-demo')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('does not block deprovision when Keycloak client deletion fails', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+    keycloakAdminClient.shouldThrowOnDelete = true
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      // Deprovision must succeed even though the KC client deletion throws
+      const result = await provisioningService.deprovisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'deprovisioned')
+      assert.equal(result.deprovisioned, true)
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('skips per-tenant Keycloak steps when no keycloakAdminClient is configured', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+
+    // No keycloakAdminClient passed — auth-disabled path
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+
+      const depResult = await provisioningService.deprovisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(depResult.tenant.currentState, 'deprovisioned')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
   })
 })
 

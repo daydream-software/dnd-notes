@@ -19,6 +19,7 @@ import {
   applyLeastPrivilegeTenantGrants,
   initializeTenantNoteStoreDatabase,
 } from './tenant-database-bootstrap.js'
+import type { KeycloakAdminClient } from './keycloak-admin-client.js'
 import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
 import type {
   Tenant,
@@ -126,6 +127,8 @@ interface TenantProvisioningServiceOptions {
   infrastructureManager: TenantInfrastructureManager
   databaseManager: TenantDatabaseManager
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
+  /** Optional Keycloak admin client. When provided, a per-tenant Keycloak client is created on provision and deleted on deprovision. When absent, the step is silently skipped. */
+  keycloakAdminClient?: KeycloakAdminClient
   baseDomain: string
   ingressClassName?: string
   imageRepository: string
@@ -179,7 +182,6 @@ export class TenantProvisioningConflictError extends Error {
 
 interface TenantRuntimeAuthConfig {
   mode: 'local' | 'keycloak'
-  keycloakClientId?: string
   keycloakJwksUrl?: string
   keycloakRealm?: string
   keycloakUrl?: string
@@ -212,6 +214,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly infrastructureManager: TenantInfrastructureManager
   private readonly databaseManager: TenantDatabaseManager
   private readonly tenantRuntimeAuth: TenantRuntimeAuthConfig
+  private readonly keycloakAdminClient?: KeycloakAdminClient
   private readonly baseDomain: string
   private readonly ingressClassName: string
   private readonly imageRepository: string
@@ -227,6 +230,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.infrastructureManager = options.infrastructureManager
     this.databaseManager = options.databaseManager
     this.tenantRuntimeAuth = options.tenantRuntimeAuth ?? { mode: 'local' }
+    this.keycloakAdminClient = options.keycloakAdminClient
     this.baseDomain = options.baseDomain
     this.ingressClassName = options.ingressClassName ?? 'nginx'
     this.imageRepository = options.imageRepository
@@ -424,6 +428,34 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           registryClient,
         )
 
+        // Ensure a per-tenant Keycloak client exists before the SPA pod boots.
+        // The KC step runs before applyTenantResources so the client is in place
+        // when the pod first initialises. Failure here is intentionally fatal for
+        // provisioning — the tenant SPA cannot authenticate without it.
+        if (this.keycloakAdminClient) {
+          const hostname = bundle.resources.hostname
+          const tenantClientId = `dnd-notes-tenant-${refreshedTenant.id}`
+          await this.keycloakAdminClient.ensureClient({
+            clientId: tenantClientId,
+            enabled: true,
+            publicClient: true,
+            standardFlowEnabled: true,
+            implicitFlowEnabled: false,
+            directAccessGrantsEnabled: false,
+            redirectUris: [
+              `https://${hostname}/*`,
+              `http://${hostname}/*`,
+            ],
+            webOrigins: [
+              `https://${hostname}`,
+              `http://${hostname}`,
+            ],
+            attributes: {
+              'pkce.code.challenge.method': 'S256',
+            },
+          })
+        }
+
         await this.infrastructureManager.applyTenantResources(bundle)
         await this.infrastructureManager.waitForTenantReady(
           bundle.resources,
@@ -505,6 +537,20 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           null,
           registryClient,
         )
+      }
+
+      // Delete the per-tenant Keycloak client. A failure here is a warning, not
+      // a blocker — an orphaned KC client is recoverable manually, and we must
+      // not block the full deprovision because of it.
+      if (this.keycloakAdminClient) {
+        try {
+          await this.keycloakAdminClient.deleteClient(`dnd-notes-tenant-${tenant.id}`)
+        } catch (error) {
+          console.warn(
+            `Keycloak client deletion failed for tenant "${tenant.id}" — continuing deprovision:`,
+            error,
+          )
+        }
       }
 
       await this.tenantRegistry.updateTenantDesiredState(
@@ -898,6 +944,7 @@ export function createLiveTenantProvisioningService(params: {
   databaseAdminUrl: string
   databaseRuntimeUrl?: string
   tenantRuntimeAuth?: TenantRuntimeAuthConfig
+  keycloakAdminClient?: KeycloakAdminClient
   imagePullSecretName?: string
   publicScheme?: 'http' | 'https'
   tenantPort?: number
@@ -913,6 +960,7 @@ export function createLiveTenantProvisioningService(params: {
       params.databaseRuntimeUrl,
     ),
     tenantRuntimeAuth: params.tenantRuntimeAuth,
+    keycloakAdminClient: params.keycloakAdminClient,
     baseDomain: params.baseDomain,
     ingressClassName: params.ingressClassName,
     imageRepository: params.imageRepository,
@@ -959,19 +1007,21 @@ export function buildTenantInfrastructureBundle(
   if (options.tenantRuntimeAuth?.mode === 'keycloak') {
     if (
       !options.tenantRuntimeAuth.keycloakUrl ||
-      !options.tenantRuntimeAuth.keycloakRealm ||
-      !options.tenantRuntimeAuth.keycloakClientId
+      !options.tenantRuntimeAuth.keycloakRealm
     ) {
       throw new TenantProvisioningValidationError(
-        'Keycloak tenant runtime auth requires KEYCLOAK_URL, KEYCLOAK_REALM, and KEYCLOAK_TENANT_CLIENT_ID.',
+        'Keycloak tenant runtime auth requires KEYCLOAK_URL and KEYCLOAK_REALM.',
       )
     }
 
+    // The per-tenant Keycloak client ID is always derived from the tenant ID.
+    // It is not configurable at the auth-config level — the canonical name is
+    // `dnd-notes-tenant-{tenantId}` and is created by ensureClient during
+    // provisioning.
     configMapData.AUTH_MODE = 'keycloak'
     configMapData.KEYCLOAK_URL = options.tenantRuntimeAuth.keycloakUrl
     configMapData.KEYCLOAK_REALM = options.tenantRuntimeAuth.keycloakRealm
-    configMapData.KEYCLOAK_TENANT_CLIENT_ID =
-      options.tenantRuntimeAuth.keycloakClientId
+    configMapData.KEYCLOAK_TENANT_CLIENT_ID = `dnd-notes-tenant-${options.tenant.id}`
     if (options.tenantRuntimeAuth.keycloakJwksUrl) {
       configMapData.KEYCLOAK_JWKS_URL = options.tenantRuntimeAuth.keycloakJwksUrl
     }
