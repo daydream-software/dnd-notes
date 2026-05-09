@@ -1576,7 +1576,7 @@ export function createApp({
     // Logout is a local-auth-only operation. In Keycloak mode, the SPA handles
     // logout directly with Keycloak (front-channel). Returns 501 in Keycloak
     // mode via ensurePortalLocalAuthEnabled before session middleware runs.
-    (_request, response, next) => {
+    (_request: Request, response: Response, next: NextFunction) => {
       if (!ensurePortalLocalAuthEnabled(response)) return
       next()
     },
