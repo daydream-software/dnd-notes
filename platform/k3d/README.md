@@ -134,12 +134,12 @@ Keycloak gets that full external HTTPS URL baked into its deployment via `KC_HOS
 
 ### Keycloak Runtime Auth Setup
 
-The bootstrap now seeds two public Keycloak clients for runtime authentication:
+The bootstrap seeds one static Keycloak client for control-plane auth. Per-tenant Keycloak clients are created automatically by the control plane at provisioning time:
 
 | Client | ID | Purpose |
 | --- | --- | --- |
-| Tenant app | `dnd-notes-tenant-app` | Tenant app OIDC/JWT flows |
 | Control-plane workforce/admin | `dnd-notes-control-plane` | Control-plane admin API |
+| Tenant app (per-tenant) | `dnd-notes-tenant-{tenantId}` | Tenant app OIDC/JWT flows — provisioned automatically, not seeded |
 
 Seeded user accounts in the `dnd-notes-dev` realm:
 
@@ -164,7 +164,7 @@ Never reuse them outside this local environment.
    Should return `true`.
 
 2. **Test tenant runtime Keycloak flow (when control-plane + tenant are running):**
-    - Obtain a tenant access token for `dnd-notes-tenant-app` from the seeded Keycloak realm
+    - Obtain a tenant access token using the per-tenant client `dnd-notes-tenant-{tenantId}` (created during provisioning)
     - Call the tenant API with `Authorization: Bearer <token>`
     - The backend validates the JWT and looks up or links the owner account by `keycloak_sub`
     - Guest/share-link routes still use `X-Guest-Token` and do not require Keycloak
@@ -492,7 +492,7 @@ machine-readable output to stdout. The persistent state is written to
     "url": "https://keycloak.127.0.0.1.nip.io",
     "realm": "dnd-notes-dev",
     "controlPlaneClientId": "dnd-notes-control-plane",
-    "tenantClientId": "dnd-notes-tenant-app"
+    "tenantClientId": "dnd-notes-tenant-k3d-dev"
   },
   "auth": {
     "siteAdminEmail": "site-admin@example.com",
@@ -529,7 +529,7 @@ machine-readable output to stdout. The persistent state is written to
 | `keycloak.url` | `string` | Browser-facing Keycloak URL. |
 | `keycloak.realm` | `string` | Keycloak realm used by the platform. |
 | `keycloak.controlPlaneClientId` | `string` | OIDC client ID for control-plane workforce tokens. |
-| `keycloak.tenantClientId` | `string` | OIDC client ID for tenant user tokens. |
+| `keycloak.tenantClientId` | `string` | OIDC client ID for tenant user tokens. Derived as `dnd-notes-tenant-{tenantId}` at provisioning time. |
 | `auth.siteAdminEmail` | `string` | Dev-only site-admin credentials. |
 | `auth.siteAdminPassword` | `string` | Dev-only site-admin credentials. |
 | `auth.tenantOwnerEmail` | `string` | Dev-only tenant-owner credentials. |

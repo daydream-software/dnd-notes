@@ -312,6 +312,11 @@ keycloak_client_id="$(json_get data.KEYCLOAK_TENANT_CLIENT_ID <"${WORK_DIR}/tena
 keycloak_jwks_url="$(json_get data.KEYCLOAK_JWKS_URL <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_jwks_url_for_local_api="$(normalize_local_keycloak_jwks_url "${keycloak_jwks_url}")"
 
+if [[ "${auth_mode}" == "keycloak" && -z "${keycloak_client_id}" ]]; then
+  log "Missing KEYCLOAK_TENANT_CLIENT_ID in ConfigMap dnd-notes-runtime for namespace ${tenant_namespace}. Re-provision the tenant or update its runtime ConfigMap."
+  exit 1
+fi
+
 env \
   PORT="${LOCAL_API_PORT}" \
   DATABASE_URL="${database_url}" \
