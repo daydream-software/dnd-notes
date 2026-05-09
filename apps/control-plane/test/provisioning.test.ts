@@ -1386,7 +1386,7 @@ describe('TenantProvisioningService', () => {
       assert.equal(ensureCall.clientId, 'dnd-notes-tenant-tenant-demo')
       assert.equal(ensureCall.publicClient, true)
       assert.equal(ensureCall.standardFlowEnabled, true)
-      assert.equal(ensureCall.directAccessGrantsEnabled, false)
+      assert.equal(ensureCall.directAccessGrantsEnabled, true)
       const hostname = result.resources.hostname
       assert.deepEqual(ensureCall.redirectUris, [`https://${hostname}/*`, `http://${hostname}/*`])
       assert.deepEqual(ensureCall.webOrigins, [`https://${hostname}`, `http://${hostname}`])
