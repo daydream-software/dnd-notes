@@ -243,7 +243,7 @@ Issue `#79` adds a second lane for the full current platform shape.
    skipping straight to a raw manifest path)
 4. waits for the tenant rollout to finish
 5. verifies `GET /ready`, `GET /api/auth/session`, and `GET /api/campaigns`
-   through the tenant ingress host (`http://<subdomain>.127.0.0.1.nip.io`)
+   through the tenant ingress host (`https://<subdomain>.127.0.0.1.nip.io`)
 
 This lane is the supported answer for:
 
@@ -348,8 +348,8 @@ All three scripts honor a few env overrides when you need a different local shap
 | `K3D_IMAGE_IMPORT_MODE` | `direct` | primary k3d image import mode for local image loads |
 | `K3D_IMAGE_IMPORT_FALLBACK_MODE` | `tools` | retry mode used if the primary import stalls or fails |
 | `K3D_IMAGE_IMPORT_TIMEOUT_SECONDS` | `180` | per-import timeout (when `timeout` is available) before the fallback mode is tried |
-| `K3D_HTTP_PORT` | `80` | host HTTP port for ingress |
-| `K3D_HTTPS_PORT` | `443` | host HTTPS port for ingress |
+| `K3D_HTTP_PORT` | `80` | host HTTP port for ingress (must be `80`; non-standard values are rejected by `bootstrap.sh` so origins stay portless) |
+| `K3D_HTTPS_PORT` | `443` | host HTTPS port for ingress (must be `443`; same reason) |
 | `CAROOT` | (required) | path to the mkcert CA directory containing `rootCA.pem` and `rootCA-key.pem`; on WSL use `/mnt/c/Users/<user>/AppData/Local/mkcert` |
 | `TENANT_IMAGE_REPOSITORY` | `ghcr.io/daydream-software/dnd-notes` | tenant image repository |
 | `TENANT_IMAGE_TAG` | `k3d` | tenant image tag used by the smoke lane |

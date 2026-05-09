@@ -89,6 +89,24 @@ jobs:
           chmod +x k3d
           sudo mv k3d /usr/local/bin/k3d
 
+      - name: Install mkcert and generate dev CA
+        env:
+          MKCERT_VERSION: v1.4.4
+        run: |
+          curl -fsSLo mkcert "https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64"
+          chmod +x mkcert
+          sudo mv mkcert /usr/local/bin/mkcert
+
+          CAROOT_DIR="${RUNNER_TEMP}/mkcert-ca"
+          mkdir -p "${CAROOT_DIR}"
+          # TRUST_STORES="" generates the CA in CAROOT but skips installing it
+          # into system/NSS/Java trust stores (which would require libnss3-tools).
+          # The smoke lane only validates HTTPS endpoints with `curl -k`, so the
+          # CA never needs to be trusted by anything in CI — bootstrap.sh just
+          # needs the rootCA.pem / rootCA-key.pem files for cert-manager.
+          CAROOT="${CAROOT_DIR}" TRUST_STORES="" mkcert -install
+          echo "CAROOT=${CAROOT_DIR}" >> "${GITHUB_ENV}"
+
       - name: Show tool versions
         run: |
           docker version

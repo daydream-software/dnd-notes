@@ -27,8 +27,11 @@ Environment overrides:
                             timeout for each k3s image pull attempt in seconds (default: 180)
   K3D_K3S_PULL_RETRY_DELAY_SECONDS
                             delay between failed k3s image pull attempts in seconds (default: 5)
-  K3D_HTTP_PORT             Host port mapped to ingress HTTP (default: 80)
-  K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 443)
+  K3D_HTTP_PORT             Host port mapped to ingress HTTP. Must be 80;
+                            non-standard values are rejected (portless origins
+                            are required for Keycloak + ALLOWED_ORIGINS).
+  K3D_HTTPS_PORT            Host port mapped to ingress HTTPS. Must be 443
+                            for the same reason.
   INGRESS_NGINX_MANIFEST_PATH
                               Local ingress-nginx manifest path
   CAROOT                    Path to the mkcert CA root directory containing rootCA.pem and
@@ -50,6 +53,40 @@ require_tool() {
 
 cluster_exists() {
   k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "$CLUSTER_NAME" >/dev/null
+}
+
+# Reject non-standard ingress ports. Portless origins are load-bearing for
+# Keycloak redirectUris/webOrigins and the API's ALLOWED_ORIGINS exact-match.
+# Anything other than 80/443 silently re-introduces the CORS/redirect bug this
+# stack was built to avoid.
+validate_ingress_ports() {
+  if [[ "${HTTP_PORT}" != "80" || "${HTTPS_PORT}" != "443" ]]; then
+    echo "ERROR: K3D_HTTP_PORT must be 80 and K3D_HTTPS_PORT must be 443." >&2
+    echo "  Current values: HTTP=${HTTP_PORT}, HTTPS=${HTTPS_PORT}" >&2
+    echo "  Portless origins are required for Keycloak redirect URIs and the" >&2
+    echo "  API ALLOWED_ORIGINS exact-match. Free up host ports 80/443 first." >&2
+    exit 1
+  fi
+
+  local serverlb="k3d-${CLUSTER_NAME}-serverlb"
+  if ! docker inspect "${serverlb}" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local actual_http actual_https
+  actual_http="$(docker inspect "${serverlb}" \
+    --format '{{ with (index .NetworkSettings.Ports "80/tcp") }}{{ (index . 0).HostPort }}{{ end }}' 2>/dev/null || true)"
+  actual_https="$(docker inspect "${serverlb}" \
+    --format '{{ with (index .NetworkSettings.Ports "443/tcp") }}{{ (index . 0).HostPort }}{{ end }}' 2>/dev/null || true)"
+
+  if [[ "${actual_http}" != "80" || "${actual_https}" != "443" ]]; then
+    echo "ERROR: existing k3d cluster '${CLUSTER_NAME}' maps non-standard ingress ports:" >&2
+    echo "  HTTP:  host ${actual_http:-?} → container 80" >&2
+    echo "  HTTPS: host ${actual_https:-?} → container 443" >&2
+    echo "  Portless origins are required. Run 'npm run k3d:down' to delete this" >&2
+    echo "  cluster, then re-run bootstrap to recreate it on standard ports." >&2
+    exit 1
+  fi
 }
 
 wait_for_rollout() {
@@ -216,6 +253,7 @@ for tool in docker k3d kubectl; do
   require_tool "$tool"
 done
 
+validate_ingress_ports
 validate_caroot
 
 previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
