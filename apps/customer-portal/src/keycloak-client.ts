@@ -87,25 +87,30 @@ export function createCustomerKeycloakClient(
     async init() {
       const storedTokens = readStoredKeycloakTokens()
 
-      const authenticated = await client.init({
-        checkLoginIframe: false,
-        pkceMethod: 'S256',
-        onLoad: 'check-sso',
-        silentCheckSsoFallback: false,
-        token: storedTokens?.accessToken,
-        refreshToken: storedTokens?.refreshToken,
-        idToken: storedTokens?.idToken,
-      })
+      try {
+        const authenticated = await client.init({
+          checkLoginIframe: false,
+          pkceMethod: 'S256',
+          onLoad: 'check-sso',
+          silentCheckSsoFallback: false,
+          token: storedTokens?.accessToken,
+          refreshToken: storedTokens?.refreshToken,
+          idToken: storedTokens?.idToken,
+        })
 
-      const tokens = authenticated ? readTokens(client) : null
+        const tokens = authenticated ? readTokens(client) : null
 
-      if (tokens) {
-        persistKeycloakTokens(tokens)
-      } else {
+        if (tokens) {
+          persistKeycloakTokens(tokens)
+        } else {
+          clearStoredKeycloakTokens()
+        }
+
+        return tokens
+      } catch (error) {
         clearStoredKeycloakTokens()
+        throw error
       }
-
-      return tokens
     },
     async login(redirectUri) {
       await client.login({ redirectUri })
@@ -115,7 +120,12 @@ export function createCustomerKeycloakClient(
       await client.logout({ redirectUri })
     },
     async freshToken(minValidity = 30) {
-      await client.updateToken(minValidity)
+      try {
+        await client.updateToken(minValidity)
+      } catch (error) {
+        clearStoredKeycloakTokens()
+        throw error
+      }
       const tokens = readTokens(client)
 
       if (!tokens) {
