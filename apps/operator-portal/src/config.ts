@@ -38,7 +38,7 @@ export function resolveOperatorPortalConfig(viteEnv: OperatorPortalViteEnv = {})
     operatorKeycloakConfig: {
       url: normalizeUrl(
         runtimeEnv.KEYCLOAK_URL ?? viteEnv.VITE_OPERATOR_KEYCLOAK_URL,
-        'http://keycloak.127.0.0.1.nip.io:8080',
+        'https://keycloak.127.0.0.1.nip.io',
       ),
       realm: normalizeString(
         runtimeEnv.KEYCLOAK_REALM ?? viteEnv.VITE_OPERATOR_KEYCLOAK_REALM,

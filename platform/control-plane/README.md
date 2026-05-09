@@ -54,7 +54,7 @@ CONTROL_PLANE_TOKEN="$(curl -fsS \
   --data-urlencode 'client_id=dnd-notes-control-plane' \
   --data-urlencode 'username=site-admin@example.com' \
   --data-urlencode 'password=password' \
-  http://keycloak.127.0.0.1.nip.io:8080/realms/dnd-notes-dev/protocol/openid-connect/token \
+  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes-dev/protocol/openid-connect/token \
   | jq -r '.access_token')"
 
 curl -H "Authorization: Bearer ${CONTROL_PLANE_TOKEN}" \
@@ -90,12 +90,12 @@ Secret.
 The k3d overlay ConfigMap automatically sets:
 
 - `CONTROL_PLANE_AUTH_MODE=keycloak`
-- `CONTROL_PLANE_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `CONTROL_PLANE_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
 - `CONTROL_PLANE_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-dev`
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
 - `TENANT_AUTH_MODE=keycloak`
-- `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `TENANT_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
 - `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
 - `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`

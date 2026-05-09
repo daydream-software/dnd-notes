@@ -7,7 +7,7 @@ describe('resolveOperatorPortalConfig', () => {
     expect(resolveOperatorPortalConfig()).toEqual({
       operatorApiBasePath: '/operator-api',
       operatorKeycloakConfig: {
-        url: 'http://keycloak.127.0.0.1.nip.io:8080',
+        url: 'https://keycloak.127.0.0.1.nip.io',
         realm: 'dnd-notes-dev',
         clientId: 'dnd-notes-control-plane',
       },
@@ -41,7 +41,7 @@ describe('resolveOperatorPortalConfig', () => {
     ).toEqual({
       operatorApiBasePath: '/operator-api',
       operatorKeycloakConfig: {
-        url: 'http://keycloak.127.0.0.1.nip.io:8080',
+        url: 'https://keycloak.127.0.0.1.nip.io',
         realm: 'dnd-notes-dev',
         clientId: 'dnd-notes-control-plane',
       },
@@ -56,7 +56,7 @@ describe('resolveOperatorPortalConfig', () => {
     ).toEqual({
       operatorApiBasePath: '/operator-api',
       operatorKeycloakConfig: {
-        url: 'http://keycloak.127.0.0.1.nip.io:8080',
+        url: 'https://keycloak.127.0.0.1.nip.io',
         realm: 'dnd-notes-dev',
         clientId: 'dnd-notes-control-plane',
       },
