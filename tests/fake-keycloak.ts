@@ -7,10 +7,13 @@ interface FakeKeycloakTokenOptions {
   clientId: string
   email?: string
   expiresInSeconds?: number
+  familyName?: string
+  givenName?: string
   issuer?: string
   notBeforeOffsetSeconds?: number
   roles?: string[]
   subject?: string
+  /** Full name claim (`name`). Pass an empty string to omit the claim entirely. */
   userName?: string
 }
 
@@ -85,6 +88,8 @@ export async function startFakeKeycloakServer(realm = 'dnd-notes-test') {
       clientId,
       email = 'owner@example.com',
       expiresInSeconds = 300,
+      familyName,
+      givenName,
       issuer: tokenIssuer = issuer,
       notBeforeOffsetSeconds = 0,
       roles = [],
@@ -106,7 +111,11 @@ export async function startFakeKeycloakServer(realm = 'dnd-notes-test') {
         exp: now + expiresInSeconds,
         iat: now,
         nbf: now + notBeforeOffsetSeconds,
-        name: userName,
+        // Omit `name` claim entirely when userName is an empty string so callers
+        // can test the given_name/family_name fallback branch.
+        ...(userName ? { name: userName } : {}),
+        ...(givenName !== undefined ? { given_name: givenName } : {}),
+        ...(familyName !== undefined ? { family_name: familyName } : {}),
         preferred_username: email,
         resource_access:
           roles.length > 0

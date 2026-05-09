@@ -301,7 +301,7 @@ describe('Portal Keycloak auth', () => {
     assert.ok(response.body.error)
   })
 
-  it('returns 401 when bearer token references an unknown portal account', async () => {
+  it('auto-creates a portal account for a brand-new Keycloak user with no local account', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
     const portalKeycloakAuth = createPortalKeycloakAuth({
       mode: 'keycloak',
@@ -315,17 +315,25 @@ describe('Portal Keycloak auth', () => {
       portalAuthMode: 'keycloak',
       portalKeycloakAuth,
     })
+    const keycloakSub = 'kc-sub-brand-new'
     const token = keycloak.issueToken({
       clientId: portalClientId,
       email: 'no-account@example.com',
+      subject: keycloakSub,
     })
 
+    // Auto-create: no local account exists, but Keycloak token is valid.
     const response = await request(app)
       .get('/portal/me')
       .set('Authorization', `Bearer ${token}`)
-      .expect(401)
+      .expect(200)
 
-    assert.ok(response.body.error)
+    assert.ok(response.body.account)
+
+    // The new account must be retrievable by keycloakSub.
+    const created = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(created)
+    assert.equal(created.email, 'no-account@example.com')
   })
 })
 
@@ -457,21 +465,38 @@ describe('Portal Keycloak auth — auto-link by email', () => {
     assert.equal(linked.keycloakSub, keycloakSub)
   })
 
-  it('returns 401 when the email has no local account', async () => {
+  it('auto-creates a portal account when no local account matches the email', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
 
+    const keycloakSub = 'kc-sub-new-user'
     const app = buildPortalApp()
     const token = keycloak.issueToken({
       clientId: portalClientId,
       email: 'ghost@example.com',
+      subject: keycloakSub,
     })
 
+    // First login: account is auto-created.
     const response = await request(app)
       .get('/portal/me')
       .set('Authorization', `Bearer ${token}`)
-      .expect(401)
+      .expect(200)
 
-    assert.ok(response.body.error)
+    assert.ok(response.body.account)
+
+    // The created account must be retrievable by keycloakSub (fast path).
+    const created = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(created, 'auto-created account not found by keycloakSub')
+    assert.equal(created.email, 'ghost@example.com')
+    assert.equal(created.keycloakSub, keycloakSub)
+
+    // Subsequent login resolves via sub fast path.
+    const response2 = await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    assert.equal(response2.body.account.id, response.body.account.id)
   })
 
   it('returns 401 when the email account is already bound to a different Keycloak sub', async () => {
@@ -504,5 +529,193 @@ describe('Portal Keycloak auth — auto-link by email', () => {
     const original = await tenantRegistry.getPortalAccountByKeycloakSub('kc-sub-original')
     assert.ok(original)
     assert.equal(original.keycloakSub, 'kc-sub-original')
+  })
+})
+
+describe('Portal Keycloak auth — auto-create on first login', () => {
+  const keycloakRealm = 'dnd-notes-dev'
+  const portalClientId = 'dnd-notes-customer-portal'
+  const { startFakeKeycloakServer } = fakeKeycloakModule
+  let tenantRegistry: TenantRegistry
+  let keycloak: Awaited<ReturnType<typeof startFakeKeycloakServer>> | undefined
+  let cleanupTenantRegistry: (() => Promise<void>) | undefined
+
+  beforeEach(() => {
+    const registry = createTestTenantRegistry()
+    tenantRegistry = registry.tenantRegistry
+    cleanupTenantRegistry = registry.cleanup
+  })
+
+  afterEach(async () => {
+    await keycloak?.close()
+    keycloak = undefined
+    await cleanupTenantRegistry?.()
+    cleanupTenantRegistry = undefined
+  })
+
+  function buildPortalApp() {
+    const portalKeycloakAuth = createPortalKeycloakAuth({
+      mode: 'keycloak',
+      keycloakUrl: keycloak!.baseUrl,
+      keycloakRealm,
+      clientId: portalClientId,
+    })
+    return createApp({
+      tenantRegistry,
+      adminToken: 'any-token',
+      portalAuthMode: 'keycloak',
+      portalKeycloakAuth,
+    })
+  }
+
+  it('concurrent first-logins for the same Keycloak user produce exactly one account', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    const keycloakSub = 'kc-sub-concurrent-create'
+    const app = buildPortalApp()
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'concurrent-new@example.com',
+      subject: keycloakSub,
+    })
+
+    // Fire two requests simultaneously. pg-mem serializes them, but we exercise
+    // the unique-constraint idempotency path in createPortalAccountFromKeycloak.
+    const [r1, r2] = await Promise.all([
+      request(app).get('/portal/me').set('Authorization', `Bearer ${token}`),
+      request(app).get('/portal/me').set('Authorization', `Bearer ${token}`),
+    ])
+
+    assert.equal(r1.status, 200, `first concurrent auto-create status: ${r1.status}`)
+    assert.equal(r2.status, 200, `second concurrent auto-create status: ${r2.status}`)
+
+    // Both responses must reference the same account.
+    assert.equal(
+      r1.body.account.id,
+      r2.body.account.id,
+      'concurrent creates produced two accounts',
+    )
+
+    // Exactly one row for this keycloakSub.
+    const created = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(created, 'no account found for keycloakSub after concurrent auto-create')
+    assert.equal(created.keycloakSub, keycloakSub)
+    assert.equal(created.email, 'concurrent-new@example.com')
+  })
+
+  it('auto-created account cannot reach operator-portal endpoints', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    // Issue a customer-realm token for a brand-new user (no operator roles).
+    const keycloakSub = 'kc-sub-customer-only'
+    const adminAuth = createControlPlaneAdminAuth({
+      mode: 'keycloak',
+      keycloakUrl: keycloak.baseUrl,
+      keycloakRealm,
+      clientId: portalClientId,
+      requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
+    })
+    const portalKeycloakAuth = createPortalKeycloakAuth({
+      mode: 'keycloak',
+      keycloakUrl: keycloak.baseUrl,
+      keycloakRealm,
+      clientId: portalClientId,
+    })
+    const app = createApp({
+      tenantRegistry,
+      adminAuth,
+      portalAuthMode: 'keycloak',
+      portalKeycloakAuth,
+    })
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'customer-only@example.com',
+      subject: keycloakSub,
+      // No control-plane-admin / control-plane-workforce roles.
+    })
+
+    // Portal endpoint: auto-creates the account and returns 200.
+    await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    // Operator endpoint: must still reject — the operator gate is role-based,
+    // not portal_accounts-based. Auto-create must not weaken this invariant.
+    const operatorResponse = await request(app)
+      .get('/internal/tenants')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(403)
+
+    assert.equal(operatorResponse.body.error, 'Forbidden')
+  })
+
+  it('derives display name from name claim', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    const keycloakSub = 'kc-sub-display-name'
+    const app = buildPortalApp()
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'named@example.com',
+      subject: keycloakSub,
+      userName: 'Alice Wonderland',
+    })
+
+    await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    const created = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(created)
+    assert.equal(created.displayName, 'Alice Wonderland')
+  })
+
+  it('derives display name from given_name + family_name when name claim is absent', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    const keycloakSub = 'kc-sub-given-family'
+    const app = buildPortalApp()
+    // userName: '' omits the name claim; givenName + familyName are set.
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'given-family@example.com',
+      subject: keycloakSub,
+      userName: '',
+      givenName: 'Bob',
+      familyName: 'Builder',
+    })
+
+    await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    const created = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(created)
+    assert.equal(created.displayName, 'Bob Builder')
+  })
+
+  it('falls back to email local-part when no name claims are present', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    const keycloakSub = 'kc-sub-email-localpart'
+    const app = buildPortalApp()
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'localpart@example.com',
+      subject: keycloakSub,
+      userName: '',
+    })
+
+    await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    const created = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(created)
+    assert.equal(created.displayName, 'localpart')
   })
 })

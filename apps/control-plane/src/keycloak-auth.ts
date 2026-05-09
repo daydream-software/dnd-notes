@@ -40,6 +40,9 @@ export interface PortalTokenClaims {
   sub: string
   email?: string
   preferred_username?: string
+  name?: string
+  given_name?: string
+  family_name?: string
 }
 
 interface CreateControlPlaneAdminAuthOptions {
@@ -134,6 +137,9 @@ export function createControlPlaneAdminAuth(
 interface PortalJwtClaims extends JwtClaims {
   email?: string
   preferred_username?: string
+  name?: string
+  given_name?: string
+  family_name?: string
 }
 
 interface CreatePortalKeycloakAuthOptions {
@@ -208,6 +214,9 @@ export function createPortalKeycloakAuth(
         sub: claims.sub,
         email: claims.email,
         preferred_username: claims.preferred_username,
+        name: claims.name,
+        given_name: claims.given_name,
+        family_name: claims.family_name,
       }
     },
   }
