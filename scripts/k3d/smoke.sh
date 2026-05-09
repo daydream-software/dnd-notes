@@ -130,14 +130,16 @@ wait_for_http() {
   return 1
 }
 
-# Build curl TLS args: prefer --cacert with the mkcert CA when CAROOT is set;
-# fall back to -k when it isn't. Used for HTTPS endpoints whose certificate is
-# signed by the mkcert CA (not trusted by the WSL curl binary by default).
-mkcert_curl_tls_args() {
+# curl wrapper that prefers --cacert with the mkcert CA when CAROOT is set,
+# falling back to -k when it isn't. Used for HTTPS endpoints whose certificate
+# is signed by the mkcert CA (not trusted by the WSL curl binary by default).
+# Implemented as a wrapper rather than as an args-emitter so it stays
+# compatible with Bash 3.2 (mapfile is 4.0+, see the BASH_VERSINFO check above).
+curl_with_mkcert_tls() {
   if [[ -n "${CAROOT:-}" && -r "${CAROOT}/rootCA.pem" ]]; then
-    printf '%s\n' "--cacert" "${CAROOT}/rootCA.pem"
+    curl --cacert "${CAROOT}/rootCA.pem" "$@"
   else
-    printf '%s\n' "-k"
+    curl -k "$@"
   fi
 }
 
@@ -145,11 +147,9 @@ wait_for_http_insecure() {
   local url="$1"
   local timeout="${2:-60}"
   local deadline=$((SECONDS + timeout))
-  local tls_args=()
-  mapfile -t tls_args < <(mkcert_curl_tls_args)
 
   while (( SECONDS < deadline )); do
-    if curl -fsS "${tls_args[@]}" "$url" >/dev/null 2>&1; then
+    if curl_with_mkcert_tls -fsS "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -245,10 +245,8 @@ get_keycloak_access_token() {
   local client_id="$3"
   local username="$4"
   local password="$5"
-  local tls_args=()
-  mapfile -t tls_args < <(mkcert_curl_tls_args)
 
-  curl -fsS "${tls_args[@]}" \
+  curl_with_mkcert_tls -fsS \
     -X POST \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode "grant_type=password" \
