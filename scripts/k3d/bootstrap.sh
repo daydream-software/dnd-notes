@@ -29,6 +29,13 @@ Environment overrides:
   K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 443)
   INGRESS_NGINX_MANIFEST_PATH
                               Local ingress-nginx manifest path
+  CAROOT                    Path to the mkcert CA root directory containing rootCA.pem and
+                            rootCA-key.pem. Required for TLS certificate issuance.
+                            On WSL with mkcert installed on the Windows host, set this to the
+                            Windows AppData path via the WSL mount, for example:
+                              export CAROOT="/mnt/c/Users/<YourUser>/AppData/Local/mkcert"
+                            Then run 'mkcert -install' on the Windows host if you have not
+                            already done so to add the CA to your browser trust store.
 EOF
 }
 
@@ -120,14 +127,82 @@ restore_previous_context() {
 }
 
 apply_keycloak_manifest() {
-  local keycloak_external_url="http://keycloak.127.0.0.1.nip.io:${HTTP_PORT}"
-
   kubectl apply -f "${ROOT}/platform/k3d/keycloak.yaml"
-  kubectl set env \
-    -n "${PLATFORM_NAMESPACE}" \
-    deployment/platform-keycloak \
-    KC_HOSTNAME="${keycloak_external_url}" \
-    >/dev/null
+  # Restart to pick up any realm configmap changes (import only runs on startup).
+  kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/platform-keycloak >/dev/null 2>&1 || true
+}
+
+validate_caroot() {
+  if [[ -z "${CAROOT:-}" ]]; then
+    echo "ERROR: CAROOT environment variable is not set." >&2
+    echo "  CAROOT must point to the directory containing mkcert's rootCA.pem and rootCA-key.pem." >&2
+    echo "  On WSL with mkcert installed on the Windows host, run:" >&2
+    echo "    export CAROOT=\"/mnt/c/Users/<YourUser>/AppData/Local/mkcert\"" >&2
+    echo "  Then ensure 'mkcert -install' has been run on the Windows host." >&2
+    echo "  Run 'bootstrap.sh --help' for details." >&2
+    exit 1
+  fi
+  if [[ ! -r "${CAROOT}/rootCA.pem" ]]; then
+    echo "ERROR: ${CAROOT}/rootCA.pem not found or not readable." >&2
+    echo "  Run 'mkcert -install' on the host where your browsers trust certificates." >&2
+    exit 1
+  fi
+  if [[ ! -r "${CAROOT}/rootCA-key.pem" ]]; then
+    echo "ERROR: ${CAROOT}/rootCA-key.pem not found or not readable." >&2
+    echo "  Run 'mkcert -install' on the host where your browsers trust certificates." >&2
+    exit 1
+  fi
+}
+
+install_cert_manager() {
+  local cert_manager_version="v1.16.3"
+  local cert_manager_url="https://github.com/cert-manager/cert-manager/releases/download/${cert_manager_version}/cert-manager.yaml"
+
+  echo "Installing cert-manager ${cert_manager_version}..."
+  kubectl apply -f "${cert_manager_url}"
+
+  echo "Waiting for cert-manager deployments to become available..."
+  kubectl -n cert-manager wait \
+    --for=condition=Available \
+    --timeout=120s \
+    deploy/cert-manager \
+    deploy/cert-manager-cainjector \
+    deploy/cert-manager-webhook
+
+  # Wait for the webhook endpoint to be ready — the validating webhook rejects
+  # ClusterIssuer resources until this is up.
+  echo "Waiting for cert-manager-webhook endpoint..."
+  local deadline=$((SECONDS + 60))
+  while (( SECONDS < deadline )); do
+    if kubectl -n cert-manager get endpoints cert-manager-webhook \
+        -o jsonpath='{.subsets[*].addresses[*].ip}' 2>/dev/null | grep -qE '[0-9]'; then
+      echo "cert-manager-webhook endpoint is ready."
+      break
+    fi
+    sleep 3
+  done
+}
+
+apply_cert_manager_ca() {
+  echo "Creating mkcert-ca secret from CAROOT=${CAROOT}..."
+  kubectl -n cert-manager create secret tls mkcert-ca \
+    --cert="${CAROOT}/rootCA.pem" \
+    --key="${CAROOT}/rootCA-key.pem" \
+    --dry-run=client -o yaml \
+    | kubectl apply -f -
+
+  echo "Applying ClusterIssuer dev-ca..."
+  # Retry a few times in case the cert-manager webhook is still initialising.
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if kubectl apply -f "${ROOT}/platform/k3d/cluster-issuer.yaml"; then
+      return 0
+    fi
+    echo "ClusterIssuer apply attempt ${attempt} failed — retrying in 10s..."
+    sleep 10
+  done
+  echo "ERROR: Failed to apply ClusterIssuer after 5 attempts." >&2
+  return 1
 }
 
 if [[ "${1:-}" == "--help" ]]; then
@@ -138,6 +213,8 @@ fi
 for tool in docker k3d kubectl; do
   require_tool "$tool"
 done
+
+validate_caroot
 
 previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
 trap restore_previous_context EXIT
@@ -165,6 +242,9 @@ kubectl apply -f "${ROOT}/platform/k3d/namespace.yaml"
 kubectl apply -f "${INGRESS_NGINX_MANIFEST_PATH}"
 wait_for_rollout ingress-nginx ingress-nginx-controller 240s
 
+install_cert_manager
+apply_cert_manager_ca
+
 kubectl apply -f "${ROOT}/platform/k3d/postgres.yaml"
 apply_keycloak_manifest
 
@@ -186,5 +266,5 @@ echo "k3d platform bootstrap complete."
 echo "- Cluster context: k3d-${CLUSTER_NAME}"
 echo "- k3s image: ${K3S_IMAGE}"
 echo "- Platform namespace: ${PLATFORM_NAMESPACE}"
-echo "- Keycloak ingress: http://keycloak.127.0.0.1.nip.io:${HTTP_PORT}"
+echo "- Keycloak ingress: https://keycloak.127.0.0.1.nip.io"
 echo "- Postgres service: platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432"
