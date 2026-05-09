@@ -27,6 +27,8 @@
     "k3d:bootstrap": "bash ./scripts/k3d/bootstrap.sh",
     "k3d:build-image": "bash ./scripts/k3d/build-image.sh --name Tenant --dockerfile Dockerfile --repo ghcr.io/daydream-software/dnd-notes --tag k3d",
     "k3d:build-control-plane-image": "bash ./scripts/k3d/build-image.sh --name Control-plane --dockerfile docker/control-plane/Dockerfile --repo ghcr.io/daydream-software/dnd-notes-control-plane --tag k3d",
+    "k3d:build-operator-portal-image": "bash ./scripts/k3d/build-image.sh --name Operator-portal --dockerfile docker/portal/Dockerfile --repo ghcr.io/daydream-software/dnd-notes-operator-portal --tag k3d --build-arg PORTAL_NAME=operator-portal",
+    "k3d:build-customer-portal-image": "bash ./scripts/k3d/build-image.sh --name Customer-portal --dockerfile docker/portal/Dockerfile --repo ghcr.io/daydream-software/dnd-notes-customer-portal --tag k3d --build-arg PORTAL_NAME=customer-portal",
     "k3d:smoke": "bash ./scripts/k3d/smoke.sh",
     "k3d:full-stack-smoke": "bash ./scripts/k3d/full-stack-smoke.sh",
     "k3d:tenant-api-override": "bash ./scripts/k3d/tenant-api-override.sh",
