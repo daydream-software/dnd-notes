@@ -30,6 +30,7 @@ import {
   signupPortalAccount,
 } from './control-plane-api'
 import {
+  clearStoredKeycloakTokens,
   createCustomerKeycloakClient,
   type CustomerKeycloakClient,
   type CustomerKeycloakConfig,
@@ -261,6 +262,7 @@ export default function App({
         }
       } catch (hydrationError) {
         if (!cancelled) {
+          clearStoredKeycloakTokens()
           setKeycloakToken(null)
           setDashboard(null)
           setError(

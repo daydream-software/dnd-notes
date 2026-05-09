@@ -597,4 +597,44 @@ describe('customer portal — keycloak mode', () => {
       await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
     ).toBeTruthy()
   })
+
+  it('clears persisted keycloak tokens from sessionStorage when dashboard fetch returns 401', async () => {
+    const kcTokensKey = 'dnd-notes:customer-portal:keycloak-tokens'
+
+    sessionStorage.setItem(
+      kcTokensKey,
+      JSON.stringify({ accessToken: 'kc-access-token', refreshToken: 'kc-refresh-token' }),
+    )
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(keycloakCatalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse({ error: 'Unauthorized' }, 401)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub({
+      init: vi.fn().mockResolvedValue({
+        accessToken: 'kc-access-token',
+        refreshToken: 'kc-refresh-token',
+      }),
+      freshToken: vi.fn().mockResolvedValue('kc-access-token'),
+    })
+    render(<App keycloakClientFactory={() => stub} />)
+
+    // UI should fall back to the entry card (keycloakToken state is null)
+    expect(
+      await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
+    ).toBeTruthy()
+
+    // sessionStorage must also be cleared — prevents the reload loop
+    expect(sessionStorage.getItem(kcTokensKey)).toBeNull()
+  })
 })
