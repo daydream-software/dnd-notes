@@ -6,10 +6,15 @@
  * (this PR) and per-tenant client lifecycle (#170).
  *
  * All methods are idempotent:
- *   - ensureClient: GET by clientId → POST if missing, PUT if present.
+ *   - ensureClient: GET by clientId → POST if missing; diff spec against
+ *     existing and PUT only when at least one spec key differs; no-op if
+ *     already in sync. This avoids spurious 409s from Keycloak when the
+ *     realm-imported client already matches the desired spec.
  *   - deleteClient: GET by clientId → DELETE internal id; no-op if not found.
  *   - getClient: GET by clientId → returns spec or null.
  */
+
+import { isDeepStrictEqual } from 'node:util'
 
 export interface KeycloakClientSpec {
   clientId: string
@@ -52,6 +57,26 @@ function normalizeBaseUrl(url: string): string {
   let end = url.length
   while (end > 0 && url[end - 1] === '/') end--
   return url.slice(0, end)
+}
+
+/**
+ * Returns true when every key present in `spec` already has an equal value in
+ * `existing`. Keys carried by Keycloak but absent from `spec` are ignored —
+ * we only care whether the fields we manage are already correct.
+ *
+ * Uses Node's `isDeepStrictEqual` so array values (redirectUris, webOrigins)
+ * are compared element-by-element, not by stringified form.
+ */
+function specMatchesExisting(
+  spec: KeycloakClientSpec,
+  existing: KeycloakClientSpec & { id: string },
+): boolean {
+  for (const key of Object.keys(spec)) {
+    if (!isDeepStrictEqual(spec[key], existing[key])) {
+      return false
+    }
+  }
+  return true
 }
 
 export class KeycloakAdminClient {
@@ -181,14 +206,21 @@ export class KeycloakAdminClient {
 
   /**
    * Idempotent create-or-update. If a client with spec.clientId already exists
-   * it is replaced via PUT (full replace). If it does not exist it is created
-   * via POST.
+   * the spec is diffed against the live representation: if every key in spec
+   * already matches the existing value the PUT is skipped entirely (no-op).
+   * Only when at least one spec key differs is a full-replace PUT issued.
+   * If the client does not exist it is created via POST.
    */
   async ensureClient(spec: KeycloakClientSpec): Promise<void> {
     const existing = await this.getClient(spec.clientId)
 
     if (existing) {
-      // Full replace — Keycloak admin REST uses PUT, not PATCH.
+      if (specMatchesExisting(spec, existing)) {
+        // All managed fields are already in sync — skip the PUT.
+        return
+      }
+
+      // At least one field differs — full replace via PUT.
       const response = await this.adminFetch(`/clients/${existing.id}`, {
         method: 'PUT',
         body: JSON.stringify({ ...existing, ...spec }),

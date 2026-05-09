@@ -278,6 +278,56 @@ describe('KeycloakAdminClient', () => {
       assert.equal(clientEntries.length, 1)
     })
 
+    it('skips PUT when spec already matches the existing client', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      const spec: KeycloakClientSpec = {
+        clientId: 'synced-client',
+        enabled: true,
+        publicClient: true,
+        redirectUris: ['https://example.com/*'],
+        webOrigins: ['https://example.com'],
+      }
+      // Pre-seed with an existing client that already matches the spec.
+      // Include extra fields Keycloak would carry that are not in the spec.
+      state.clients['synced-client'] = {
+        ...spec,
+        id: 'id-synced-client',
+        protocol: 'openid-connect',
+        defaultClientScopes: ['web-origins', 'profile'],
+      }
+      const client = makeClient(server.baseUrl)
+
+      await client.ensureClient(spec)
+
+      // No PUT should have been issued — the spec was already in sync.
+      const putReq = state.adminRequests.find((r) => r.method === 'PUT')
+      assert.equal(putReq, undefined, 'expected no PUT when spec matches existing client')
+    })
+
+    it('still PUTs when at least one spec field differs from the existing client', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      const existingSpec: KeycloakClientSpec = {
+        clientId: 'drifted-client',
+        enabled: true,
+        publicClient: true,
+        redirectUris: ['https://old.example.com/*'],
+      }
+      state.clients['drifted-client'] = { ...existingSpec, id: 'id-drifted-client' }
+      const client = makeClient(server.baseUrl)
+
+      // Call with a different redirectUris — must trigger a PUT.
+      await client.ensureClient({
+        ...existingSpec,
+        redirectUris: ['https://new.example.com/*'],
+      })
+
+      const putReq = state.adminRequests.find((r) => r.method === 'PUT')
+      assert.ok(putReq, 'expected a PUT when a spec field differs from existing')
+      assert.deepEqual(state.clients['drifted-client']!.redirectUris, [
+        'https://new.example.com/*',
+      ])
+    })
+
     it('throws KeycloakAdminError when Keycloak returns an error status', async () => {
       server = await startFakeKeycloakAdminServer(state)
       state.adminResponse = { status: 500, body: { error: 'server error' } }
