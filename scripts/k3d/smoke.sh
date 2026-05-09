@@ -130,15 +130,26 @@ wait_for_http() {
   return 1
 }
 
-# Like wait_for_http but passes -k to curl for HTTPS endpoints whose certificate
-# is signed by the mkcert CA (not trusted by WSL curl automatically).
+# Build curl TLS args: prefer --cacert with the mkcert CA when CAROOT is set;
+# fall back to -k when it isn't. Used for HTTPS endpoints whose certificate is
+# signed by the mkcert CA (not trusted by the WSL curl binary by default).
+mkcert_curl_tls_args() {
+  if [[ -n "${CAROOT:-}" && -r "${CAROOT}/rootCA.pem" ]]; then
+    printf '%s\n' "--cacert" "${CAROOT}/rootCA.pem"
+  else
+    printf '%s\n' "-k"
+  fi
+}
+
 wait_for_http_insecure() {
   local url="$1"
   local timeout="${2:-60}"
   local deadline=$((SECONDS + timeout))
+  local tls_args=()
+  mapfile -t tls_args < <(mkcert_curl_tls_args)
 
   while (( SECONDS < deadline )); do
-    if curl -fsSk "$url" >/dev/null 2>&1; then
+    if curl -fsS "${tls_args[@]}" "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -234,9 +245,10 @@ get_keycloak_access_token() {
   local client_id="$3"
   local username="$4"
   local password="$5"
+  local tls_args=()
+  mapfile -t tls_args < <(mkcert_curl_tls_args)
 
-  # -k: Keycloak is served over HTTPS via mkcert CA; not trusted by WSL curl.
-  curl -fsSk \
+  curl -fsS "${tls_args[@]}" \
     -X POST \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode "grant_type=password" \

@@ -55,6 +55,18 @@ cluster_exists() {
   k3d cluster list --no-headers 2>/dev/null | awk '{print $1}' | grep -Fx "$CLUSTER_NAME" >/dev/null
 }
 
+check_port_free() {
+  local port="$1"
+  local label="$2"
+  if bash -c "</dev/tcp/127.0.0.1/${port}" >/dev/null 2>&1; then
+    echo "ERROR: ${label} port ${port} is already in use on 127.0.0.1." >&2
+    echo "  Standard ingress ports are required (the PR enforces 80/443 for" >&2
+    echo "  portless origins). Free port ${port} on the host (stop the" >&2
+    echo "  conflicting service) and re-run bootstrap." >&2
+    exit 1
+  fi
+}
+
 # Reject non-standard ingress ports. Portless origins are load-bearing for
 # Keycloak redirectUris/webOrigins and the API's ALLOWED_ORIGINS exact-match.
 # Anything other than 80/443 silently re-introduces the CORS/redirect bug this
@@ -265,6 +277,8 @@ previous_kube_context="$(kubectl config current-context 2>/dev/null || true)"
 trap restore_previous_context EXIT
 
 if ! cluster_exists; then
+  check_port_free "${HTTP_PORT}" "HTTP"
+  check_port_free "${HTTPS_PORT}" "HTTPS"
   pull_k3s_image
   echo "Creating k3d cluster ${CLUSTER_NAME}..."
   k3d cluster create "$CLUSTER_NAME" \
