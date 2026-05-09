@@ -2,6 +2,49 @@
 
 ## Active Decisions
 
+### 2026-05-08: K3d HTTPS via cert-manager & mkcert CA
+**Decided by:** Brand (CI/Scripts)  
+**Date:** 2026-05-08  
+**Type:** Infrastructure & Architecture  
+**PR:** #169
+
+## Context
+
+Login flow from tenant portal to Keycloak failed due to missing Web Crypto API (`crypto.subtle`), which requires a secure context (HTTPS or `localhost` exact). Tenant URLs like `https://t-XXX.127.0.0.1.nip.io` were served over HTTP, making the browser deny PKCE in keycloak-js.
+
+## Decision
+
+Implement HTTPS everywhere in k3d dev environment via:
+
+- **cert-manager 1.16.3** with mkcert-backed ClusterIssuer (`dev-ca`)
+- **CAROOT contract:** Bootstrap requires `CAROOT` env var (mkcert CA directory path, user-machine-specific, never committed)
+- **TLS on all ingresses:** Static (keycloak, portals) + dynamic tenant ingress
+- **Tenant TLS opt-in:** `TENANT_TLS_CLUSTER_ISSUER` env var (undefined = no TLS for prod compat)
+- **Auto-load .env:** `scripts/k3d/_load-dotenv.sh` sourced by all entry scripts (`.env.example` committed as template)
+- **Node + Bash trust model:** Proxies use `NODE_EXTRA_CA_CERTS=${CAROOT}/rootCA.pem`; scripts use `curl -k` for internal checks (mkcert CA not in WSL curl trust store)
+
+## Outcomes
+
+- End-to-end login flow works with valid HTTPS certs
+- Browser trusts dev CA certs (mkcert installed on dev machine)
+- Keycloak PKCE succeeds (secure context achieved)
+- Token exchange completes
+- Cluster RAM investigation opened (#173 — ~10GB observed)
+
+## Known Limitations
+
+Keycloak wildcard matching limitation: `*` glob only at END of URL, not in hostname. Workaround: manual per-tenant kcadm patches (temporary, issue #170 tracks per-tenant client fix).
+
+## Follow-ups
+
+- #170: Per-tenant Keycloak client (architectural fix)
+- #171: Keycloak login branding per portal
+- #172: Account Console + portal account-settings redirects
+- #173: Cluster RAM usage investigation
+- #174: UI pass (deferred)
+
+---
+
 ### 2026-04-19: Code Review Response Patterns
 **Decided by:** Data (Backend Dev)  
 **Date:** 2026-04-19  
