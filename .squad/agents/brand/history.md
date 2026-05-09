@@ -34,6 +34,8 @@ Brand is the Platform Dev responsible for infrastructure, Kubernetes orchestrati
 
 📌 Team update (2026-05-09): PR #169 CI smoke unblocked + CodeRabbit review addressed — Brand wired CAROOT in CI workflow (mkcert install step, `$RUNNER_TEMP/mkcert-ca`, `TRUST_STORES=""`), added `validate_ingress_ports` to bootstrap.sh rejecting non-80/443 at both env-var and live Docker port-mapping level. 5 CodeRabbit threads resolved. Commit: 4ddecf6. Decisions logged: k3d port constraint + CI CAROOT wiring. Session log: `.squad/sessions/2026-05-09-pr169-ci-smoke-coderabbit-fixes.md`. — Scribe
 
+📌 Team update (2026-05-09): PR #169 follow-up — NODE_EXTRA_CA_CERTS gap in smoke.sh — After 4ddecf6, CI smoke passed validate_caroot but got HTTP 401 on POST /internal/tenants (Node process trusting mkcert CA). One-line fix in smoke.sh control-plane env block (commit 4262aa8, same pattern as *-override.sh scripts). CI smoke green: run 25601345615, pass at 6m26s. — Scribe
+
 ## Learnings
 
 - **PR #120 k3d Review Fixes (2026-04-27):** In `scripts/k3d/status.sh`, parse `.k3d-state/state.json` once in Node and emit a NUL-delimited payload plus a success sentinel before assigning any `state_*` shell vars; that keeps the documented “all empty on failure” contract true even when the parser dies mid-stream. In `scripts/k3d/down.sh`, namespace teardown for `--keep-cluster` should use `kubectl delete namespace ... --wait=false --timeout=30s` so stuck finalizers do not hang the helper forever. Regression anchor: `apps/control-plane/test/k3d-persistent-lane.test.ts`. User preference: do not use `claude-opus-4.7` without asking first.

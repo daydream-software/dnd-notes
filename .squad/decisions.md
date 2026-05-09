@@ -71,6 +71,10 @@ A third structural risk: `cluster_exists()` short-circuits cluster creation, so 
 - Origin-mismatch bug class structurally closed (not just documented)
 - 5 CodeRabbit threads on PR #169 addressed
 
+## Follow-up (2026-05-09): NODE_EXTRA_CA_CERTS in smoke.sh
+
+After the first push (commit 4ddecf6), CI smoke got past `validate_caroot` but failed at 5m55s with `HTTP 401 {"error":"Unauthorized"}` on `POST /internal/tenants`. Root cause: `smoke.sh` spawns the control-plane as a local Node.js process that talks to Keycloak over HTTPS via the mkcert CA; Node does not trust that CA by default, so JWKS fetch / OIDC discovery silently failed and every bearer token was rejected. The `*-override.sh` scripts already set `NODE_EXTRA_CA_CERTS="${CAROOT:+${CAROOT}/rootCA.pem}"` for their Node processes — `smoke.sh`'s control-plane env block was the missing case. Fix: one-line addition of the same variable to `smoke.sh` (commit 4262aa8). CI smoke green on second push (run 25601345615, pass at 6m26s).
+
 ---
 
 ### 2026-04-19: Code Review Response Patterns
