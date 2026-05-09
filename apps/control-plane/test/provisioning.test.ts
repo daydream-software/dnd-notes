@@ -1390,7 +1390,10 @@ describe('TenantProvisioningService', () => {
       const hostname = result.resources.hostname
       assert.deepEqual(ensureCall.redirectUris, [`https://${hostname}/*`, `http://${hostname}/*`])
       assert.deepEqual(ensureCall.webOrigins, [`https://${hostname}`, `http://${hostname}`])
-      assert.deepEqual((ensureCall.attributes as Record<string, string>)?.['pkce.code.challenge.method'], 'S256')
+      // pkce.code.challenge.method is intentionally absent: Keycloak enforces the
+      // attribute on ALL token requests including direct-grant, which breaks the
+      // smoke test's password-flow token fetch. Re-enable once smoke uses PKCE (#183).
+      assert.equal((ensureCall.attributes as Record<string, string> | undefined)?.['pkce.code.challenge.method'], undefined)
     } finally {
       await provisioningService.close()
       await cleanup()

@@ -443,10 +443,12 @@ export class TenantProvisioningService implements TenantProvisioningPort {
             implicitFlowEnabled: false,
             // Direct-access grants (password flow) are enabled so that k3d smoke
             // tests can fetch a tenant token without a browser redirect. The SPA
-            // itself always uses the PKCE auth-code flow (enforced by the
-            // pkce.code.challenge.method attribute below). This mirrors the trust
-            // model of the tombstoned dnd-notes-tenant-app client.
-            // TODO: disable once the smoke uses PKCE (#170 hardening follow-up).
+            // itself negotiates PKCE via keycloak-js at runtime (auth-code flow).
+            // The pkce.code.challenge.method attribute is intentionally omitted:
+            // Keycloak enforces the attribute on ALL token requests for the client,
+            // including direct-grant, causing a 401 when no code_challenge is
+            // present. Server-side PKCE enforcement is tracked in #183 — it will
+            // be re-enabled once the smoke switches to the auth-code + PKCE flow.
             directAccessGrantsEnabled: true,
             redirectUris: [
               `https://${hostname}/*`,
@@ -456,9 +458,6 @@ export class TenantProvisioningService implements TenantProvisioningPort {
               `https://${hostname}`,
               `http://${hostname}`,
             ],
-            attributes: {
-              'pkce.code.challenge.method': 'S256',
-            },
           })
         }
 
