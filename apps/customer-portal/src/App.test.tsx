@@ -512,6 +512,7 @@ describe('customer portal — keycloak mode', () => {
     await user.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }))
 
     expect(stub.login).toHaveBeenCalledOnce()
+    expect(stub.login).toHaveBeenCalledWith(window.location.origin)
   })
 
   it('renders the dashboard after a successful Keycloak session is restored', async () => {
@@ -521,6 +522,8 @@ describe('customer portal — keycloak mode', () => {
       catalog: keycloakCatalog,
     }
 
+    let dashboardAuthHeader: string | null = null
+
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
 
@@ -529,6 +532,8 @@ describe('customer portal — keycloak mode', () => {
       }
 
       if (path === '/portal-api/portal/me' && method === 'GET') {
+        const headers = init?.headers instanceof Headers ? init.headers : new Headers(init?.headers as HeadersInit)
+        dashboardAuthHeader = headers.get('Authorization')
         return createJsonResponse(kcDashboard)
       }
 
@@ -547,6 +552,8 @@ describe('customer portal — keycloak mode', () => {
     expect(await screen.findByText('Customer dashboard')).toBeTruthy()
     expect(screen.getByText('Misty Harbor')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Sign in with Keycloak' })).toBeNull()
+    expect(stub.freshToken).toHaveBeenCalledOnce()
+    expect(dashboardAuthHeader).toBe('Bearer kc-access-token')
   })
 
   it('calls keycloak.logout when the sign-out button is clicked', async () => {
@@ -585,6 +592,7 @@ describe('customer portal — keycloak mode', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
 
     expect(stub.logout).toHaveBeenCalledOnce()
+    expect(stub.logout).toHaveBeenCalledWith(window.location.origin)
     expect(
       await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
     ).toBeTruthy()

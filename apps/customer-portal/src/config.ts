@@ -21,9 +21,8 @@ export const portalKeycloakConfig: CustomerKeycloakConfig = {
   clientId: runtimeEnv.KEYCLOAK_CLIENT_ID ?? (import.meta.env.VITE_PORTAL_KEYCLOAK_CLIENT_ID as string | undefined) ?? 'dnd-notes-customer-portal',
 }
 
+// Returns origin only — no pathname or search — so stale query params from a
+// previous failed flow (e.g. ?error=access_denied) are never forwarded to Keycloak.
 export function buildPortalRedirectUri() {
-  return new URL(
-    `${window.location.pathname}${window.location.search}`,
-    window.location.origin,
-  ).toString()
+  return window.location.origin
 }

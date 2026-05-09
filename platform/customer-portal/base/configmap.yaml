@@ -8,4 +8,4 @@ data:
   CONTROL_PLANE_URL: "http://dnd-notes-control-plane.dnd-notes-platform.svc.cluster.local:3001"
   KEYCLOAK_URL: "https://keycloak.127.0.0.1.nip.io"
   KEYCLOAK_REALM: "dnd-notes-dev"
-  KEYCLOAK_CLIENT_ID: "dnd-notes-tenant-app"
+  KEYCLOAK_CLIENT_ID: "dnd-notes-customer-portal"
