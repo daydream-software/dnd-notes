@@ -21,8 +21,10 @@ export const portalKeycloakConfig: CustomerKeycloakConfig = {
   clientId: runtimeEnv.KEYCLOAK_CLIENT_ID ?? (import.meta.env.VITE_PORTAL_KEYCLOAK_CLIENT_ID as string | undefined) ?? 'dnd-notes-customer-portal',
 }
 
-// Returns origin only — no pathname or search — so stale query params from a
-// previous failed flow (e.g. ?error=access_denied) are never forwarded to Keycloak.
+// Returns origin + trailing slash — no pathname or query — so stale params
+// from a prior failed flow (e.g. ?error=access_denied) are never forwarded to
+// Keycloak. The trailing slash ensures the URI matches the realm wildcard
+// pattern (https://portal.example.com/*) which requires at least one slash.
 export function buildPortalRedirectUri() {
-  return window.location.origin
+  return `${window.location.origin}/`
 }

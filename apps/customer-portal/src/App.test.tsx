@@ -512,7 +512,7 @@ describe('customer portal — keycloak mode', () => {
     await user.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }))
 
     expect(stub.login).toHaveBeenCalledOnce()
-    expect(stub.login).toHaveBeenCalledWith(window.location.origin)
+    expect(stub.login).toHaveBeenCalledWith(`${window.location.origin}/`)
   })
 
   it('renders the dashboard after a successful Keycloak session is restored', async () => {
