@@ -18,3 +18,10 @@ data:
   TENANT_KEYCLOAK_REALM: dnd-notes
   TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app
   TENANT_INGRESS_CLASS_NAME: nginx
+  KEYCLOAK_ADMIN_BASE_URL: https://auth.example.com
+  KEYCLOAK_ADMIN_REALM: dnd-notes
+  CUSTOMER_PORTAL_AUTH_MODE: keycloak
+  CUSTOMER_PORTAL_KEYCLOAK_URL: https://auth.example.com
+  CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes/protocol/openid-connect/certs
+  CUSTOMER_PORTAL_KEYCLOAK_REALM: dnd-notes
+  CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID: dnd-notes-customer-portal

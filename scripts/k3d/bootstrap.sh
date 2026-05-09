@@ -179,9 +179,13 @@ restore_previous_context() {
 
 apply_keycloak_manifest() {
   kubectl apply -f "${ROOT}/platform/k3d/keycloak.yaml"
-  # Restart to pick up any realm configmap changes (import only runs on startup).
+  # Restart Keycloak so it picks up the updated realm configmap on a fresh
+  # cluster. Note: --import-realm only imports on the very first startup when the
+  # realm does not yet exist. On an existing cluster the realm is NOT re-imported
+  # on restart — changes that landed after the initial import are applied instead
+  # via the control-plane's KeycloakAdminClient startup upsert.
   # We surface failures here — silently swallowing them would let bootstrap
-  # report success while the realm remains stale.
+  # report success while Keycloak remains unhealthy.
   kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/platform-keycloak >/dev/null
 }
 
@@ -328,6 +332,30 @@ if [[ "$(
 fi
 
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
+
+# ---------------------------------------------------------------------------
+# Seed dnd-notes-keycloak-admin using the bootstrap-admin credentials.
+#
+# This Job runs once per cluster using the KC_BOOTSTRAP_ADMIN_USERNAME /
+# KC_BOOTSTRAP_ADMIN_PASSWORD bootstrap credentials from the
+# platform-keycloak-bootstrap-env Secret to create the dnd-notes-keycloak-admin
+# service-account client and bind its realm-management roles.
+#
+# On a fresh cluster --import-realm already created the client, so the Job is
+# a no-op. On an existing cluster where the realm was imported before this
+# client was added, the Job creates it.
+#
+# The Job is deleted and re-created on every bootstrap run so it can re-verify
+# idempotency after a keycloak restart / realm change.
+# ---------------------------------------------------------------------------
+echo "Running keycloak-admin-bootstrap Job..."
+kubectl delete job -n "${PLATFORM_NAMESPACE}" keycloak-admin-bootstrap --ignore-not-found >/dev/null
+kubectl apply -f "${ROOT}/platform/k3d/keycloak-admin-bootstrap-job.yaml" >/dev/null
+if ! kubectl wait --for=condition=complete --timeout=300s \
+  -n "${PLATFORM_NAMESPACE}" job/keycloak-admin-bootstrap; then
+  kubectl logs -n "${PLATFORM_NAMESPACE}" job/keycloak-admin-bootstrap || true
+  exit 1
+fi
 
 echo
 echo "k3d platform bootstrap complete."

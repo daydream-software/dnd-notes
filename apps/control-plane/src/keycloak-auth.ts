@@ -31,6 +31,17 @@ export interface ControlPlaneAdminAuth {
   authorizeBearerToken(token: string): Promise<void>
 }
 
+export interface PortalKeycloakAuth {
+  mode: 'local' | 'keycloak'
+  verifyBearerToken(token: string): Promise<PortalTokenClaims>
+}
+
+export interface PortalTokenClaims {
+  sub: string
+  email?: string
+  preferred_username?: string
+}
+
 interface CreateControlPlaneAdminAuthOptions {
   clientId?: string
   issuer?: string
@@ -115,6 +126,88 @@ export function createControlPlaneAdminAuth(
 
       if (!requiredRoles.some((role) => effectiveRoles.has(role))) {
         throw new ControlPlaneAuthError(403, 'Forbidden')
+      }
+    },
+  }
+}
+
+interface PortalJwtClaims extends JwtClaims {
+  email?: string
+  preferred_username?: string
+}
+
+interface CreatePortalKeycloakAuthOptions {
+  clientId?: string
+  issuer?: string
+  jwksUrl?: string
+  keycloakRealm?: string
+  keycloakUrl?: string
+  mode?: string
+}
+
+export function createPortalKeycloakAuth(
+  options: CreatePortalKeycloakAuthOptions = {},
+): PortalKeycloakAuth {
+  const mode = options.mode === 'keycloak' ? 'keycloak' : 'local'
+
+  if (mode === 'local') {
+    return {
+      mode,
+      async verifyBearerToken() {
+        throw new ControlPlaneAuthError(401, 'Portal Keycloak auth is not enabled.')
+      },
+    }
+  }
+
+  if (!options.clientId) {
+    throw new Error(
+      'CUSTOMER_PORTAL_AUTH_MODE=keycloak requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
+    )
+  }
+
+  const issuer =
+    options.issuer ??
+    (options.keycloakUrl && options.keycloakRealm
+      ? `${normalizeBaseUrl(options.keycloakUrl)}/realms/${options.keycloakRealm}`
+      : undefined)
+
+  if (!issuer) {
+    throw new Error(
+      'CUSTOMER_PORTAL_AUTH_MODE=keycloak requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
+    )
+  }
+
+  const { clientId } = options
+  const jwksUrl = options.jwksUrl ?? `${issuer}/protocol/openid-connect/certs`
+
+  return {
+    mode,
+    async verifyBearerToken(token) {
+      let claims: PortalJwtClaims
+
+      try {
+        const result = await verifyToken<PortalJwtClaims>(token, {
+          issuer,
+          audience: clientId,
+          jwksUrl,
+          notBeforeSkewSec: 30,
+        })
+        claims = result.claims
+      } catch (error) {
+        if (error instanceof KeycloakJwtVerificationError) {
+          throw new ControlPlaneAuthError(401, 'Unauthorized')
+        }
+        throw error
+      }
+
+      if (!claims.sub) {
+        throw new ControlPlaneAuthError(401, 'Unauthorized')
+      }
+
+      return {
+        sub: claims.sub,
+        email: claims.email,
+        preferred_username: claims.preferred_username,
       }
     },
   }
