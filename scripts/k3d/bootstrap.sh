@@ -180,7 +180,9 @@ restore_previous_context() {
 apply_keycloak_manifest() {
   kubectl apply -f "${ROOT}/platform/k3d/keycloak.yaml"
   # Restart to pick up any realm configmap changes (import only runs on startup).
-  kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/platform-keycloak >/dev/null 2>&1 || true
+  # We surface failures here — silently swallowing them would let bootstrap
+  # report success while the realm remains stale.
+  kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/platform-keycloak >/dev/null
 }
 
 validate_caroot() {
@@ -252,12 +254,19 @@ apply_cert_manager_ca() {
   local attempt
   for attempt in 1 2 3 4 5; do
     if kubectl apply -f "${ROOT}/platform/k3d/cluster-issuer.yaml"; then
-      return 0
+      # A successful apply only confirms acceptance. Wait for the issuer to
+      # actually become Ready — otherwise downstream Certificates will sit
+      # pending and the HTTPS endpoints will be flaky.
+      if kubectl wait --for=condition=Ready --timeout=60s clusterissuer/dev-ca; then
+        return 0
+      fi
+      echo "ClusterIssuer dev-ca did not become Ready within 60s — retrying apply..." >&2
+      kubectl describe clusterissuer dev-ca >&2 || true
     fi
     echo "ClusterIssuer apply attempt ${attempt} failed — retrying in 10s..."
     sleep 10
   done
-  echo "ERROR: Failed to apply ClusterIssuer after 5 attempts." >&2
+  echo "ERROR: Failed to apply or ready ClusterIssuer after 5 attempts." >&2
   return 1
 }
 
