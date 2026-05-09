@@ -3798,7 +3798,7 @@ function App() {
                                           variant="body2"
                                           sx={{
                                             mt: 0.75,
-                                            fontFamily: 'monospace',
+                                            fontFamily: "'Geist Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace",
                                             wordBreak: 'break-all',
                                             filter: revealedShareLink.isVisible
                                               ? 'none'

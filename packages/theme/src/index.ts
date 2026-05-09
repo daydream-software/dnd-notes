@@ -13,6 +13,7 @@ export const theme = createTheme({
       default: '#0f172a',
       paper: 'rgba(15, 23, 42, 0.9)',
     },
+    divider: 'rgba(167, 139, 250, 0.2)',
   },
   shape: {
     borderRadius: 18,
