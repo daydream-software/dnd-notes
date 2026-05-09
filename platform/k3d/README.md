@@ -28,7 +28,7 @@ builds when the Docker tags already exist, `--reset-tenant` to deprovision and
 re-create the `dev` tenant from scratch, and `--json` for a machine-readable
 summary on stdout.
 
-The tenant is reachable at `http://dev.127.0.0.1.nip.io:8080/` after a
+The tenant is reachable at `http://dev.127.0.0.1.nip.io/` after a
 successful `k3d:up`.  State (URLs, credentials, token snippets) is persisted
 to `.k3d-state/state.json` (gitignored).
 
@@ -96,7 +96,7 @@ bash scripts/k3d/build-image.sh \
 
 ## What `k3d:bootstrap` provisions
 
-- a k3d cluster pinned to `rancher/k3s:v1.35.3-k3s1` with Traefik disabled and host ports `8080`/`8443` mapped to the load balancer
+- a k3d cluster pinned to `rancher/k3s:v1.35.3-k3s1` with Traefik disabled and host ports `80`/`443` mapped to the load balancer
 - a vendored `ingress-nginx` controller manifest pinned to controller `v1.12.1`
 - a platform Postgres instance in `dnd-notes-platform` pinned to `postgres:17.9-bookworm`
 - a seeded Keycloak instance in `dnd-notes-platform`
@@ -104,7 +104,7 @@ bash scripts/k3d/build-image.sh \
 Keycloak is exposed at:
 
 ```text
-http://keycloak.127.0.0.1.nip.io:8080
+http://keycloak.127.0.0.1.nip.io
 ```
 
 Keycloak now gets that full external URL injected during bootstrap so its own
@@ -137,7 +137,7 @@ Never reuse them outside this local environment.
 1. **Verify Keycloak is running:**
 
    ```bash
-   curl -s http://keycloak.127.0.0.1.nip.io:8080/realms/dnd-notes-dev | jq .enabled
+   curl -s http://keycloak.127.0.0.1.nip.io/realms/dnd-notes-dev | jq .enabled
    ```
 
    Should return `true`.
@@ -168,12 +168,12 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
 The k3d overlay ConfigMap automatically injects:
 
 - `CONTROL_PLANE_AUTH_MODE=keycloak`
-- `CONTROL_PLANE_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `CONTROL_PLANE_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io`
 - `CONTROL_PLANE_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-dev`
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
 - `TENANT_AUTH_MODE=keycloak`
-- `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io:8080`
+- `TENANT_KEYCLOAK_URL=http://keycloak.127.0.0.1.nip.io`
 - `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
 - `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
@@ -220,7 +220,7 @@ Issue `#79` adds a second lane for the full current platform shape.
    skipping straight to a raw manifest path)
 4. waits for the tenant rollout to finish
 5. verifies `GET /ready`, `GET /api/auth/session`, and `GET /api/campaigns`
-   through the tenant ingress host (`http://<subdomain>.127.0.0.1.nip.io:8080`)
+   through the tenant ingress host (`http://<subdomain>.127.0.0.1.nip.io`)
 
 This lane is the supported answer for:
 
@@ -326,8 +326,8 @@ All three scripts honor a few env overrides when you need a different local shap
 | `K3D_IMAGE_IMPORT_MODE` | `direct` | primary k3d image import mode for local image loads |
 | `K3D_IMAGE_IMPORT_FALLBACK_MODE` | `tools` | retry mode used if the primary import stalls or fails |
 | `K3D_IMAGE_IMPORT_TIMEOUT_SECONDS` | `180` | per-import timeout (when `timeout` is available) before the fallback mode is tried |
-| `K3D_HTTP_PORT` | `8080` | host HTTP port for ingress |
-| `K3D_HTTPS_PORT` | `8443` | host HTTPS port for ingress |
+| `K3D_HTTP_PORT` | `80` | host HTTP port for ingress |
+| `K3D_HTTPS_PORT` | `443` | host HTTPS port for ingress |
 | `TENANT_IMAGE_REPOSITORY` | `ghcr.io/daydream-software/dnd-notes` | tenant image repository |
 | `TENANT_IMAGE_TAG` | `k3d` | tenant image tag used by the smoke lane |
 | `CONTROL_PLANE_PORT` | `3101` | local smoke control-plane port |
@@ -426,11 +426,11 @@ machine-readable output to stdout. The persistent state is written to
 {
   "schemaVersion": 1,
   "clusterName": "dnd-notes",
-  "ingressUrl": "http://127.0.0.1.nip.io:8080",
+  "ingressUrl": "http://127.0.0.1.nip.io",
   "controlPlaneUrl": "http://127.0.0.1:3101",
   "controlPlanePort": 3101,
   "keycloak": {
-    "url": "http://keycloak.127.0.0.1.nip.io:8080",
+    "url": "http://keycloak.127.0.0.1.nip.io",
     "realm": "dnd-notes-dev",
     "controlPlaneClientId": "dnd-notes-control-plane",
     "tenantClientId": "dnd-notes-tenant-app"
@@ -447,7 +447,7 @@ machine-readable output to stdout. The persistent state is written to
       "subdomain": "dev",
       "namespace": "tenant-k3d-dev",
       "hostname": "dev.127.0.0.1.nip.io",
-      "origin": "http://dev.127.0.0.1.nip.io:8080",
+      "origin": "http://dev.127.0.0.1.nip.io",
       "state": "ready"
     }
   ],

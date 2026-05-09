@@ -4,8 +4,8 @@ set -euo pipefail
 ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 K3S_IMAGE="${K3D_K3S_IMAGE:-rancher/k3s:v1.35.3-k3s1}"
-HTTP_PORT="${K3D_HTTP_PORT:-8080}"
-HTTPS_PORT="${K3D_HTTPS_PORT:-8443}"
+HTTP_PORT="${K3D_HTTP_PORT:-80}"
+HTTPS_PORT="${K3D_HTTPS_PORT:-443}"
 K3S_PULL_RETRIES="${K3D_K3S_PULL_RETRIES:-3}"
 K3S_PULL_TIMEOUT_SECONDS="${K3D_K3S_PULL_TIMEOUT_SECONDS:-180}"
 K3S_PULL_RETRY_DELAY_SECONDS="${K3D_K3S_PULL_RETRY_DELAY_SECONDS:-5}"
@@ -25,8 +25,8 @@ Environment overrides:
                             timeout for each k3s image pull attempt in seconds (default: 180)
   K3D_K3S_PULL_RETRY_DELAY_SECONDS
                             delay between failed k3s image pull attempts in seconds (default: 5)
-  K3D_HTTP_PORT             Host port mapped to ingress HTTP (default: 8080)
-  K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 8443)
+  K3D_HTTP_PORT             Host port mapped to ingress HTTP (default: 80)
+  K3D_HTTPS_PORT            Host port mapped to ingress HTTPS (default: 443)
   INGRESS_NGINX_MANIFEST_PATH
                               Local ingress-nginx manifest path
 EOF

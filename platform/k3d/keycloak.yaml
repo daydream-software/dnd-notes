@@ -80,13 +80,11 @@ data:
           "directAccessGrantsEnabled": true,
           "redirectUris": [
             "http://*.127.0.0.1.nip.io/*",
-            "http://*.127.0.0.1.nip.io:8080/*",
             "http://localhost:5173/*",
             "http://localhost:3000/*"
           ],
           "webOrigins": [
             "http://*.127.0.0.1.nip.io",
-            "http://*.127.0.0.1.nip.io:8080",
             "http://localhost:5173",
             "http://localhost:3000"
           ]
@@ -100,12 +98,12 @@ data:
           "implicitFlowEnabled": false,
           "directAccessGrantsEnabled": true,
           "redirectUris": [
-            "http://operator.127.0.0.1.nip.io:8080/*",
+            "http://operator.127.0.0.1.nip.io/*",
             "http://localhost:5173/*",
             "http://localhost:5174/*"
           ],
           "webOrigins": [
-            "http://operator.127.0.0.1.nip.io:8080",
+            "http://operator.127.0.0.1.nip.io",
             "http://localhost:5173",
             "http://localhost:5174"
           ]
@@ -174,7 +172,7 @@ spec:
                 name: platform-keycloak-bootstrap-env
           env:
             - name: KC_HOSTNAME
-              value: http://keycloak.127.0.0.1.nip.io:8080
+              value: http://keycloak.127.0.0.1.nip.io
           ports:
             - name: http
               containerPort: 8080
