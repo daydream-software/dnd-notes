@@ -346,6 +346,7 @@ wait_for_http_insecure "${CONTROL_PLANE_KEYCLOAK_URL}/realms/${CONTROL_PLANE_KEY
 
 env \
   PORT="${CONTROL_PLANE_PORT}" \
+  NODE_EXTRA_CA_CERTS="${CAROOT:+${CAROOT}/rootCA.pem}" \
   CONTROL_PLANE_DATABASE_URL="postgresql://postgres:postgres@127.0.0.1:${POSTGRES_LOCAL_PORT}/control_plane" \
   CONTROL_PLANE_AUTH_MODE=keycloak \
   CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL}" \
