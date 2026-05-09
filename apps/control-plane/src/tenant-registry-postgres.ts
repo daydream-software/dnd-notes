@@ -908,6 +908,61 @@ export class TenantRegistry {
     return row.rows[0] ? this.mapRowToPortalAccount(row.rows[0]) : null
   }
 
+  async getPortalAccountByKeycloakSub(keycloakSub: string): Promise<PortalAccount | null> {
+    const row = await this.run<PortalAccountRow>(
+      `SELECT ${portalAccountSelectColumns}
+       FROM portal_accounts
+       WHERE keycloak_sub = $1`,
+      [keycloakSub],
+    )
+
+    return row.rows[0] ? this.mapRowToPortalAccount(row.rows[0]) : null
+  }
+
+  /**
+   * Conditionally binds a Keycloak `sub` to an account that has no existing
+   * binding. Uses a conditional UPDATE (`WHERE keycloak_sub IS NULL`) so
+   * concurrent first-login requests for the same account converge atomically.
+   *
+   * Returns the account state after the attempt:
+   * - If the link was written (or already matches), returns the updated account.
+   * - If the account is already bound to a *different* sub, returns null so the
+   *   caller can issue a 401.
+   */
+  async linkPortalAccountKeycloakSub(
+    accountId: string,
+    keycloakSub: string,
+  ): Promise<PortalAccount | null> {
+    const updateResult = await this.run<PortalAccountRow>(
+      `UPDATE portal_accounts
+       SET keycloak_sub = $1, updated_at = CURRENT_TIMESTAMP
+       WHERE id = $2 AND COALESCE(keycloak_sub, '') = ''
+       RETURNING ${portalAccountSelectColumns}`,
+      [keycloakSub, accountId],
+    )
+
+    if (updateResult.rows[0]) {
+      return this.mapRowToPortalAccount(updateResult.rows[0])
+    }
+
+    // The conditional UPDATE matched zero rows. Either the account already has
+    // a keycloak_sub set (race or pre-existing binding) or the accountId is
+    // invalid. Re-read to disambiguate.
+    const current = await this.getPortalAccount(accountId)
+
+    if (!current) {
+      return null
+    }
+
+    // Idempotent: the account was already linked to the same sub.
+    if (current.keycloakSub === keycloakSub) {
+      return current
+    }
+
+    // Bound to a different identity — do not overwrite.
+    return null
+  }
+
   async getPortalAccountAuthByEmail(email: string): Promise<{
     account: PortalAccount
     passwordHash: string | null

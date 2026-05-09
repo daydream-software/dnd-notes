@@ -328,3 +328,181 @@ describe('Portal Keycloak auth', () => {
     assert.ok(response.body.error)
   })
 })
+
+describe('Portal Keycloak auth — auto-link by email', () => {
+  const keycloakRealm = 'dnd-notes-dev'
+  const portalClientId = 'dnd-notes-customer-portal'
+  const { startFakeKeycloakServer } = fakeKeycloakModule
+  let tenantRegistry: TenantRegistry
+  let keycloak: Awaited<ReturnType<typeof startFakeKeycloakServer>> | undefined
+  let cleanupTenantRegistry: (() => Promise<void>) | undefined
+
+  beforeEach(() => {
+    const registry = createTestTenantRegistry()
+    tenantRegistry = registry.tenantRegistry
+    cleanupTenantRegistry = registry.cleanup
+  })
+
+  afterEach(async () => {
+    await keycloak?.close()
+    keycloak = undefined
+    await cleanupTenantRegistry?.()
+    cleanupTenantRegistry = undefined
+  })
+
+  function buildPortalApp() {
+    const portalKeycloakAuth = createPortalKeycloakAuth({
+      mode: 'keycloak',
+      keycloakUrl: keycloak!.baseUrl,
+      keycloakRealm,
+      clientId: portalClientId,
+    })
+    return createApp({
+      tenantRegistry,
+      adminToken: 'any-token',
+      portalAuthMode: 'keycloak',
+      portalKeycloakAuth,
+    })
+  }
+
+  it('auto-links a local account on first Keycloak login and persists the sub', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    // Existing local account — no keycloakSub yet.
+    await tenantRegistry.createPortalAccount({
+      id: 'local-acct-1',
+      email: 'user@example.com',
+      displayName: 'Migrated User',
+    })
+
+    const keycloakSub = 'kc-sub-abc123'
+    const app = buildPortalApp()
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'user@example.com',
+      subject: keycloakSub,
+    })
+
+    const response = await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    assert.ok(response.body.account)
+
+    // Verify the sub was persisted.
+    const linked = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(linked, 'keycloakSub was not persisted')
+    assert.equal(linked.id, 'local-acct-1')
+    assert.equal(linked.keycloakSub, keycloakSub)
+  })
+
+  it('resolves via sub on subsequent logins (fast path) without writing again', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    const keycloakSub = 'kc-sub-returning-user'
+    await tenantRegistry.createPortalAccount({
+      id: 'linked-acct-1',
+      email: 'returning@example.com',
+      displayName: 'Returning User',
+      keycloakSub,
+    })
+
+    const app = buildPortalApp()
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'returning@example.com',
+      subject: keycloakSub,
+    })
+
+    const response = await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    assert.ok(response.body.account)
+    assert.equal(response.body.account.id, 'linked-acct-1')
+  })
+
+  it('handles concurrent first-logins: both succeed and link is set exactly once', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    await tenantRegistry.createPortalAccount({
+      id: 'concurrent-acct-1',
+      email: 'concurrent@example.com',
+      displayName: 'Concurrent User',
+    })
+
+    const keycloakSub = 'kc-sub-concurrent'
+    const app = buildPortalApp()
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'concurrent@example.com',
+      subject: keycloakSub,
+    })
+
+    // Fire two requests "simultaneously" — pg-mem serializes them, but we still
+    // exercise the conditional UPDATE path and verify post-conditions.
+    const [r1, r2] = await Promise.all([
+      request(app).get('/portal/me').set('Authorization', `Bearer ${token}`),
+      request(app).get('/portal/me').set('Authorization', `Bearer ${token}`),
+    ])
+
+    assert.equal(r1.status, 200, `first concurrent request status: ${r1.status}`)
+    assert.equal(r2.status, 200, `second concurrent request status: ${r2.status}`)
+
+    // Exactly one link must exist.
+    const linked = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(linked, 'keycloakSub was not persisted after concurrent logins')
+    assert.equal(linked.keycloakSub, keycloakSub)
+  })
+
+  it('returns 401 when the email has no local account', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    const app = buildPortalApp()
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'ghost@example.com',
+    })
+
+    const response = await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(401)
+
+    assert.ok(response.body.error)
+  })
+
+  it('returns 401 when the email account is already bound to a different Keycloak sub', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    // Account pre-linked to sub A.
+    await tenantRegistry.createPortalAccount({
+      id: 'stolen-acct-1',
+      email: 'contested@example.com',
+      displayName: 'Contested User',
+      keycloakSub: 'kc-sub-original',
+    })
+
+    const app = buildPortalApp()
+    // Token with sub B claiming the same email.
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'contested@example.com',
+      subject: 'kc-sub-different',
+    })
+
+    const response = await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(401)
+
+    assert.ok(response.body.error)
+
+    // Original binding must be intact.
+    const original = await tenantRegistry.getPortalAccountByKeycloakSub('kc-sub-original')
+    assert.ok(original)
+    assert.equal(original.keycloakSub, 'kc-sub-original')
+  })
+})

@@ -1088,19 +1088,41 @@ export function createApp({
       }
 
       const email = claims.email ?? claims.preferred_username
+      const keycloakSub = claims.sub
 
-      if (!email) {
-        request.resume()
-        response.status(401).json({ error: 'Unauthorized' })
-        return
-      }
-
-      const portalAccount = await tenantRegistry.getPortalAccountByEmail(email)
+      // Fast path: account already linked to this Keycloak sub.
+      let portalAccount = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
 
       if (!portalAccount) {
-        request.resume()
-        response.status(401).json({ error: 'Unauthorized' })
-        return
+        // First-login path: fall back to email match.
+        if (!email) {
+          request.resume()
+          response.status(401).json({ error: 'Unauthorized' })
+          return
+        }
+
+        const emailAccount = await tenantRegistry.getPortalAccountByEmail(email)
+
+        if (!emailAccount) {
+          request.resume()
+          response.status(401).json({ error: 'Unauthorized' })
+          return
+        }
+
+        // Persist the sub link. Returns null if the account is already bound to
+        // a different sub (concurrent token swap / Keycloak account recreation).
+        const linked = await tenantRegistry.linkPortalAccountKeycloakSub(
+          emailAccount.id,
+          keycloakSub,
+        )
+
+        if (!linked) {
+          request.resume()
+          response.status(401).json({ error: 'Unauthorized' })
+          return
+        }
+
+        portalAccount = linked
       }
 
       const portalRequest = request as PortalAuthenticatedRequest
