@@ -51,7 +51,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
-      DOCKER_BUILDKIT: '0'
+      DOCKER_BUILDKIT: '1'
       KUBECTL_VERSION: v1.35.4
 
     steps:
