@@ -179,9 +179,13 @@ restore_previous_context() {
 
 apply_keycloak_manifest() {
   kubectl apply -f "${ROOT}/platform/k3d/keycloak.yaml"
-  # Restart to pick up any realm configmap changes (import only runs on startup).
+  # Restart Keycloak so it picks up the updated realm configmap on a fresh
+  # cluster. Note: --import-realm only imports on the very first startup when the
+  # realm does not yet exist. On an existing cluster the realm is NOT re-imported
+  # on restart — changes that landed after the initial import are applied instead
+  # via the control-plane's KeycloakAdminClient startup upsert.
   # We surface failures here — silently swallowing them would let bootstrap
-  # report success while the realm remains stale.
+  # report success while Keycloak remains unhealthy.
   kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/platform-keycloak >/dev/null
 }
 

@@ -1,7 +1,8 @@
 import dotenv from 'dotenv'
 import type { Server } from 'node:http'
 import { createApp } from './app.js'
-import { createControlPlaneAdminAuth } from './keycloak-auth.js'
+import { createControlPlaneAdminAuth, createPortalKeycloakAuth } from './keycloak-auth.js'
+import { KeycloakAdminClient } from './keycloak-admin-client.js'
 import {
   createLiveTenantProvisioningService,
   defaultTenantReadyTimeoutMs,
@@ -52,6 +53,19 @@ const CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES =
     .filter((role) => role.length > 0) ?? []
 const CUSTOMER_PORTAL_AUTH_MODE =
   process.env.CUSTOMER_PORTAL_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
+const CUSTOMER_PORTAL_KEYCLOAK_URL = process.env.CUSTOMER_PORTAL_KEYCLOAK_URL
+const rawCustomerPortalKeycloakJwksUrl =
+  process.env.CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL?.trim()
+const CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL =
+  rawCustomerPortalKeycloakJwksUrl === undefined || rawCustomerPortalKeycloakJwksUrl === ''
+    ? undefined
+    : rawCustomerPortalKeycloakJwksUrl
+const CUSTOMER_PORTAL_KEYCLOAK_REALM = process.env.CUSTOMER_PORTAL_KEYCLOAK_REALM
+const CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID = process.env.CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID
+const KEYCLOAK_ADMIN_BASE_URL = process.env.KEYCLOAK_ADMIN_BASE_URL
+const KEYCLOAK_ADMIN_REALM = process.env.KEYCLOAK_ADMIN_REALM
+const KEYCLOAK_ADMIN_CLIENT_ID = process.env.KEYCLOAK_ADMIN_CLIENT_ID
+const KEYCLOAK_ADMIN_CLIENT_SECRET = process.env.KEYCLOAK_ADMIN_CLIENT_SECRET
 const rawCustomerPortalDefaultTenantVersion =
   process.env.CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION?.trim()
 const CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION =
@@ -135,6 +149,40 @@ const adminAuth = createControlPlaneAdminAuth({
   clientId: CONTROL_PLANE_KEYCLOAK_CLIENT_ID,
   requiredRoles: CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES,
 })
+
+if (
+  CUSTOMER_PORTAL_AUTH_MODE === 'keycloak' &&
+  (!CUSTOMER_PORTAL_KEYCLOAK_URL ||
+    !CUSTOMER_PORTAL_KEYCLOAK_REALM ||
+    !CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID)
+) {
+  throw new Error(
+    'CUSTOMER_PORTAL_AUTH_MODE=keycloak requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
+  )
+}
+
+const portalKeycloakAuth = createPortalKeycloakAuth({
+  mode: CUSTOMER_PORTAL_AUTH_MODE,
+  keycloakUrl: CUSTOMER_PORTAL_KEYCLOAK_URL,
+  jwksUrl: CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL,
+  keycloakRealm: CUSTOMER_PORTAL_KEYCLOAK_REALM,
+  clientId: CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID,
+})
+
+// Instantiate the Keycloak admin client when credentials are provided.
+// This is used at startup to ensure static portal clients exist in the realm.
+const keycloakAdminClient =
+  KEYCLOAK_ADMIN_BASE_URL &&
+  KEYCLOAK_ADMIN_REALM &&
+  KEYCLOAK_ADMIN_CLIENT_ID &&
+  KEYCLOAK_ADMIN_CLIENT_SECRET
+    ? new KeycloakAdminClient({
+        baseUrl: KEYCLOAK_ADMIN_BASE_URL,
+        realm: KEYCLOAK_ADMIN_REALM,
+        clientId: KEYCLOAK_ADMIN_CLIENT_ID,
+        clientSecret: KEYCLOAK_ADMIN_CLIENT_SECRET,
+      })
+    : null
 
 function parsePortSetting(
   name: string,
@@ -266,6 +314,7 @@ const app = createApp({
   tenantProvisioningService,
   trustProxy: CONTROL_PLANE_TRUST_PROXY,
   portalAuthMode: CUSTOMER_PORTAL_AUTH_MODE,
+  portalKeycloakAuth,
   portalDefaultTenantVersion: CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION,
   tenantBaseDomain: TENANT_BASE_DOMAIN,
   tenantPublicScheme: TENANT_PUBLIC_SCHEME,
@@ -297,6 +346,65 @@ try {
 } catch (error) {
   console.error('Control-plane migrations failed; refusing to start:', error)
   process.exit(1)
+}
+
+// Ensure static portal Keycloak clients exist in the realm. This is a soft
+// failure: if Keycloak is temporarily unreachable the control-plane still
+// starts so that local-auth fallback and non-Keycloak routes remain available.
+// The upsert will succeed on the next control-plane restart.
+if (keycloakAdminClient) {
+  const staticPortalClients = [
+    {
+      clientId: 'dnd-notes-control-plane',
+      enabled: true,
+      publicClient: true,
+      standardFlowEnabled: true,
+      implicitFlowEnabled: false,
+      directAccessGrantsEnabled: true,
+      redirectUris: [
+        'https://operator.127.0.0.1.nip.io/*',
+        'http://operator.127.0.0.1.nip.io/*',
+        'http://localhost:5173/*',
+        'http://localhost:5174/*',
+      ],
+      webOrigins: [
+        'https://operator.127.0.0.1.nip.io',
+        'http://operator.127.0.0.1.nip.io',
+        'http://localhost:5173',
+        'http://localhost:5174',
+      ],
+    },
+    {
+      clientId: 'dnd-notes-customer-portal',
+      enabled: true,
+      publicClient: true,
+      standardFlowEnabled: true,
+      implicitFlowEnabled: false,
+      directAccessGrantsEnabled: false,
+      redirectUris: [
+        'https://portal.127.0.0.1.nip.io/*',
+        'http://portal.127.0.0.1.nip.io/*',
+        'http://localhost:5175/*',
+      ],
+      webOrigins: [
+        'https://portal.127.0.0.1.nip.io',
+        'http://portal.127.0.0.1.nip.io',
+        'http://localhost:5175',
+      ],
+    },
+  ]
+
+  for (const clientSpec of staticPortalClients) {
+    try {
+      await keycloakAdminClient.ensureClient(clientSpec)
+      console.log(`Keycloak client "${clientSpec.clientId}" is in sync.`)
+    } catch (error) {
+      console.error(
+        `Keycloak startup upsert failed for "${clientSpec.clientId}" — continuing without it:`,
+        error,
+      )
+    }
+  }
 }
 
 serverRef.current = app.listen(PORT, () => {

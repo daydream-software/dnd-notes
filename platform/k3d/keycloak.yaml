@@ -67,6 +67,14 @@ data:
           "clientRoles": {
             "dnd-notes-control-plane": ["control-plane-admin", "control-plane-workforce"]
           }
+        },
+        {
+          "username": "service-account-dnd-notes-keycloak-admin",
+          "enabled": true,
+          "serviceAccountClientId": "dnd-notes-keycloak-admin",
+          "clientRoles": {
+            "realm-management": ["manage-clients", "view-clients", "view-realm"]
+          }
         }
       ],
       "clients": [
@@ -111,6 +119,36 @@ data:
             "http://localhost:5173",
             "http://localhost:5174"
           ]
+        },
+        {
+          "clientId": "dnd-notes-customer-portal",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "redirectUris": [
+            "https://portal.127.0.0.1.nip.io/*",
+            "http://portal.127.0.0.1.nip.io/*",
+            "http://localhost:5175/*"
+          ],
+          "webOrigins": [
+            "https://portal.127.0.0.1.nip.io",
+            "http://portal.127.0.0.1.nip.io",
+            "http://localhost:5175"
+          ]
+        },
+        {
+          "clientId": "dnd-notes-keycloak-admin",
+          "enabled": true,
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "dev-admin-client-secret"
         }
       ],
       "roles": {

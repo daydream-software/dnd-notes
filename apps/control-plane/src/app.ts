@@ -18,6 +18,8 @@ import {
   ControlPlaneAuthError,
   createControlPlaneAdminAuth,
   type ControlPlaneAdminAuth,
+  type PortalKeycloakAuth,
+  type PortalTokenClaims,
 } from './keycloak-auth.js'
 import {
   TenantProvisioningConflictError,
@@ -284,6 +286,7 @@ interface CreateAppOptions {
   tenantBackupDispatcher?: TenantBackupDispatcher
   trustProxy?: boolean | number
   portalAuthMode?: 'local' | 'keycloak'
+  portalKeycloakAuth?: PortalKeycloakAuth
   portalDefaultTenantVersion?: string
   tenantBaseDomain?: string
   tenantPublicScheme?: 'http' | 'https'
@@ -730,6 +733,7 @@ export function createApp({
   tenantBackupDispatcher = new ThrowingTenantBackupDispatcher(),
   trustProxy = false,
   portalAuthMode = 'local',
+  portalKeycloakAuth,
   portalDefaultTenantVersion = appVersion,
   tenantBaseDomain,
   tenantPublicScheme = 'https',
@@ -1047,9 +1051,62 @@ export function createApp({
 
     response.status(501).json({
       error:
-        'Portal Keycloak auth is not implemented yet. Use local portal auth for this slice.',
+        'This endpoint is only available in local portal auth mode. Use Keycloak authentication instead.',
     })
     return false
+  }
+
+  const createPortalKeycloakSessionMiddleware = (): express.RequestHandler => {
+    return async (request, response: Response<ErrorResponse>, next) => {
+      if (!portalKeycloakAuth || portalKeycloakAuth.mode !== 'keycloak') {
+        response.status(501).json({ error: 'Portal Keycloak auth is not configured.' })
+        return
+      }
+
+      const authorizationHeader = request.header('authorization')
+
+      if (!authorizationHeader?.startsWith('Bearer ')) {
+        request.resume()
+        response.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      const rawToken = authorizationHeader.slice('Bearer '.length).trim()
+      let claims: PortalTokenClaims
+
+      try {
+        claims = await portalKeycloakAuth.verifyBearerToken(rawToken)
+      } catch (error) {
+        request.resume()
+
+        if (error instanceof ControlPlaneAuthError) {
+          response.status(error.statusCode).json({ error: error.message })
+          return
+        }
+
+        throw error
+      }
+
+      const email = claims.email ?? claims.preferred_username
+
+      if (!email) {
+        request.resume()
+        response.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      const portalAccount = await tenantRegistry.getPortalAccountByEmail(email)
+
+      if (!portalAccount) {
+        request.resume()
+        response.status(401).json({ error: 'Unauthorized' })
+        return
+      }
+
+      const portalRequest = request as PortalAuthenticatedRequest
+      portalRequest.portalAccount = portalAccount
+      next()
+    }
   }
   const createPortalRateLimitMiddleware = (
     policyKey: string,
@@ -1397,9 +1454,14 @@ export function createApp({
     },
   )
 
+  const portalAuthMiddleware =
+    portalAuthMode === 'keycloak'
+      ? createPortalKeycloakSessionMiddleware()
+      : createPortalSessionMiddleware(tenantRegistry)
+
   app.get(
     `${portalRoutePrefix}/me`,
-    createPortalSessionMiddleware(tenantRegistry),
+    portalAuthMiddleware,
     async (
       request: Request,
       response: Response<PortalDashboardResponse | ErrorResponse>,
@@ -1418,7 +1480,7 @@ export function createApp({
 
   app.post(
     `${portalRoutePrefix}/me/tenants`,
-    createPortalSessionMiddleware(tenantRegistry),
+    portalAuthMiddleware,
     portalJsonParser,
     async (
       request: Request,
@@ -1486,6 +1548,10 @@ export function createApp({
   app.post(
     `${portalRoutePrefix}/logout`,
     portalLogoutLimiter,
+    // Logout is a local-auth-only operation. In Keycloak mode, the SPA handles
+    // logout directly with Keycloak (front-channel). This endpoint is a no-op
+    // for Keycloak mode and returns 501 via createPortalSessionMiddleware when
+    // no local session is present.
     createPortalSessionMiddleware(tenantRegistry),
     portalJsonParser,
     async (
