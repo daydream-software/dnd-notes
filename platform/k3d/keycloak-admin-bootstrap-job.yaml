@@ -60,7 +60,7 @@ spec:
             - -eu
             - -c
             - |
-              apk add --no-cache curl jq >/dev/null 2>&1
+              apk add --no-cache curl jq >/dev/null
 
               echo "[bootstrap] Waiting for realm ${KC_REALM} to be available..."
               deadline=$(( $(date +%s) + 60 ))

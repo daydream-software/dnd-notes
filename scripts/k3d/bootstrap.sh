@@ -351,8 +351,11 @@ wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
 echo "Running keycloak-admin-bootstrap Job..."
 kubectl delete job -n "${PLATFORM_NAMESPACE}" keycloak-admin-bootstrap --ignore-not-found >/dev/null
 kubectl apply -f "${ROOT}/platform/k3d/keycloak-admin-bootstrap-job.yaml" >/dev/null
-kubectl wait --for=condition=complete --timeout=120s \
-  -n "${PLATFORM_NAMESPACE}" job/keycloak-admin-bootstrap
+if ! kubectl wait --for=condition=complete --timeout=300s \
+  -n "${PLATFORM_NAMESPACE}" job/keycloak-admin-bootstrap; then
+  kubectl logs -n "${PLATFORM_NAMESPACE}" job/keycloak-admin-bootstrap || true
+  exit 1
+fi
 
 echo
 echo "k3d platform bootstrap complete."
