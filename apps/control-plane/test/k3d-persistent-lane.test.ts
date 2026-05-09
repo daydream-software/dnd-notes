@@ -127,7 +127,7 @@ describe('k3d status read_state — namespace preservation', () => {
       keycloakUrl: 'http://keycloak.127.0.0.1.nip.io:8080',
       keycloakRealm: 'dnd-notes-dev',
       controlPlaneClientId: 'dnd-notes-control-plane',
-      tenantClientId: 'dnd-notes-tenant-app',
+      tenantClientId: 'dnd-notes-tenant-k3d-dev',
       siteAdminEmail: 'site-admin@example.com',
       siteAdminPassword: 'password',
       tenantOwnerEmail: 'owner@example.com',
@@ -833,7 +833,6 @@ CONTROL_PLANE_KEYCLOAK_REALM="dnd-notes-dev"
 CONTROL_PLANE_KEYCLOAK_CLIENT_ID="dnd-notes-control-plane"
 CONTROL_PLANE_KEYCLOAK_USERNAME="site-admin@example.com"
 CONTROL_PLANE_KEYCLOAK_PASSWORD="password"
-TENANT_KEYCLOAK_CLIENT_ID="dnd-notes-tenant-app"
 TENANT_KEYCLOAK_USERNAME="owner@example.com"
 TENANT_KEYCLOAK_PASSWORD="password"
 TENANT_PUBLIC_SCHEME="http"

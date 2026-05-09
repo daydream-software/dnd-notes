@@ -20,7 +20,6 @@ data:
   TENANT_KEYCLOAK_URL: https://auth.example.com
   TENANT_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes/protocol/openid-connect/certs
   TENANT_KEYCLOAK_REALM: dnd-notes
-  TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app
   TENANT_BASE_DOMAIN: replace-me.example.com
   TENANT_INGRESS_CLASS_NAME: nginx
   TENANT_IMAGE_REPOSITORY: ghcr.io/daydream-software/dnd-notes

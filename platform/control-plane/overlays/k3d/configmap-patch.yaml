@@ -16,7 +16,6 @@ data:
   TENANT_KEYCLOAK_URL: https://keycloak.127.0.0.1.nip.io
   TENANT_KEYCLOAK_JWKS_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs
   TENANT_KEYCLOAK_REALM: dnd-notes-dev
-  TENANT_KEYCLOAK_CLIENT_ID: dnd-notes-tenant-app
   TENANT_INGRESS_CLASS_NAME: nginx
   TENANT_TLS_CLUSTER_ISSUER: dev-ca
   KEYCLOAK_ADMIN_BASE_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080

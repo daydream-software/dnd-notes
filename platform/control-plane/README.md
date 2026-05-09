@@ -98,7 +98,7 @@ The k3d overlay ConfigMap automatically sets:
 - `TENANT_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
 - `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
-- `TENANT_KEYCLOAK_CLIENT_ID=dnd-notes-tenant-app`
+- Per-tenant client: derived automatically as `dnd-notes-tenant-{tenantId}` at provisioning time
 - `TENANT_INGRESS_CLASS_NAME=nginx`
 
 ## Hosted reference overlay
@@ -117,7 +117,7 @@ Use it as the starting point for a managed-cluster rollout after image promotion
 For Keycloak integration in hosted environments:
 
 1. Set `CONTROL_PLANE_KEYCLOAK_URL` / `TENANT_KEYCLOAK_URL` to your managed Keycloak instance (for example `https://auth.example.com`)
-2. Configure a workforce/admin client (`dnd-notes-control-plane`) plus a tenant SPA client (`dnd-notes-tenant-app`) with the hosted redirect/web origins you need.
+2. Configure a workforce/admin client (`dnd-notes-control-plane`). Per-tenant Keycloak clients (`dnd-notes-tenant-{tenantId}`) are created automatically at provisioning time — no shared tenant SPA client is required.
 3. Ensure `CONTROL_PLANE_KEYCLOAK_REALM` / `TENANT_KEYCLOAK_REALM` match the intended workforce and tenant realms.
 4. Set `CONTROL_PLANE_KEYCLOAK_JWKS_URL` and/or `TENANT_KEYCLOAK_JWKS_URL` only when in-cluster services cannot reach the public issuer host directly; otherwise leave them aligned with the default realm certs endpoints.
 5. Override `TENANT_INGRESS_CLASS_NAME` if your cluster uses a controller other than `nginx` for tenant hosts.

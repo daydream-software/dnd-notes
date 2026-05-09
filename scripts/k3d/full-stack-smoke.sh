@@ -20,7 +20,6 @@ CONTROL_PLANE_KEYCLOAK_USERNAME="${CONTROL_PLANE_KEYCLOAK_USERNAME:-site-admin@e
 CONTROL_PLANE_KEYCLOAK_PASSWORD="${CONTROL_PLANE_KEYCLOAK_PASSWORD:-password}"
 TENANT_KEYCLOAK_URL="${TENANT_KEYCLOAK_URL:-${CONTROL_PLANE_KEYCLOAK_URL}}"
 TENANT_KEYCLOAK_REALM="${TENANT_KEYCLOAK_REALM:-${CONTROL_PLANE_KEYCLOAK_REALM}}"
-TENANT_KEYCLOAK_CLIENT_ID="${TENANT_KEYCLOAK_CLIENT_ID:-dnd-notes-tenant-app}"
 TENANT_KEYCLOAK_USERNAME="${TENANT_KEYCLOAK_USERNAME:-owner@example.com}"
 TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
@@ -61,7 +60,6 @@ Environment overrides:
   CONTROL_PLANE_KEYCLOAK_PASSWORD
   TENANT_KEYCLOAK_URL
   TENANT_KEYCLOAK_REALM
-  TENANT_KEYCLOAK_CLIENT_ID
   TENANT_KEYCLOAK_USERNAME
   TENANT_KEYCLOAK_PASSWORD
   TENANT_BASE_DOMAIN
@@ -369,6 +367,8 @@ control_plane_bearer_token="$(json_get access_token <<<"${control_plane_token_re
 
 tenant_id="smoke-$(date +%s%N)-${RANDOM}"
 tenant_slug="${tenant_id}"
+# Per-tenant Keycloak client ID is derived from the tenant ID at provision time.
+tenant_keycloak_client_id="dnd-notes-tenant-${tenant_id}"
 
 OPERATOR_PORTAL_ACCESS_TOKEN="${control_plane_bearer_token}" \
 OPERATOR_PORTAL_REFRESH_TOKEN="${control_plane_bearer_token}" \
@@ -405,7 +405,7 @@ wait_for_http_insecure "${tenant_origin}/ready" 120
 tenant_token_response="$(get_keycloak_token_response \
   "${TENANT_KEYCLOAK_URL}" \
   "${TENANT_KEYCLOAK_REALM}" \
-  "${TENANT_KEYCLOAK_CLIENT_ID}" \
+  "${tenant_keycloak_client_id}" \
   "${TENANT_KEYCLOAK_USERNAME}" \
   "${TENANT_KEYCLOAK_PASSWORD}")"
 tenant_bearer_token="$(json_get access_token <<<"${tenant_token_response}")"

@@ -82,7 +82,6 @@ const TENANT_KEYCLOAK_JWKS_URL =
     ? undefined
     : rawTenantKeycloakJwksUrl
 const TENANT_KEYCLOAK_REALM = process.env.TENANT_KEYCLOAK_REALM
-const TENANT_KEYCLOAK_CLIENT_ID = process.env.TENANT_KEYCLOAK_CLIENT_ID
 const TENANT_BASE_DOMAIN = process.env.TENANT_BASE_DOMAIN
 const rawTenantIngressClassName = process.env.TENANT_INGRESS_CLASS_NAME?.trim()
 const TENANT_INGRESS_CLASS_NAME =
@@ -263,10 +262,10 @@ if (ENABLE_TENANT_PROVISIONING) {
 
   if (
     TENANT_AUTH_MODE === 'keycloak' &&
-    (!TENANT_KEYCLOAK_URL || !TENANT_KEYCLOAK_REALM || !TENANT_KEYCLOAK_CLIENT_ID)
+    (!TENANT_KEYCLOAK_URL || !TENANT_KEYCLOAK_REALM)
   ) {
     throw new Error(
-      'Provisioning with TENANT_AUTH_MODE=keycloak requires TENANT_KEYCLOAK_URL, TENANT_KEYCLOAK_REALM, and TENANT_KEYCLOAK_CLIENT_ID.',
+      'Provisioning with TENANT_AUTH_MODE=keycloak requires TENANT_KEYCLOAK_URL and TENANT_KEYCLOAK_REALM. The per-tenant client ID is derived automatically from the tenant ID.',
     )
   }
 
@@ -295,9 +294,12 @@ if (ENABLE_TENANT_PROVISIONING) {
             keycloakUrl: TENANT_KEYCLOAK_URL,
             keycloakJwksUrl: TENANT_KEYCLOAK_JWKS_URL,
             keycloakRealm: TENANT_KEYCLOAK_REALM,
-            keycloakClientId: TENANT_KEYCLOAK_CLIENT_ID,
           }
         : { mode: 'local' },
+    // Pass the admin client (may be null when KEYCLOAK_ADMIN_* is not configured)
+    // so the provisioner can create per-tenant Keycloak clients. When absent the
+    // step is silently skipped — useful for local-auth environments.
+    keycloakAdminClient: keycloakAdminClient ?? undefined,
     imagePullSecretName: TENANT_IMAGE_PULL_SECRET,
     publicScheme: TENANT_PUBLIC_SCHEME,
     tenantPort: tenantAppPort,
