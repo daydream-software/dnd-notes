@@ -137,7 +137,10 @@ data:
             "https://portal.127.0.0.1.nip.io",
             "http://portal.127.0.0.1.nip.io",
             "http://localhost:5175"
-          ]
+          ],
+          "attributes": {
+            "pkce.code.challenge.method": "S256"
+          }
         },
         {
           "clientId": "dnd-notes-keycloak-admin",

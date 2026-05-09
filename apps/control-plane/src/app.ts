@@ -1087,7 +1087,7 @@ export function createApp({
         throw error
       }
 
-      const email = claims.email ?? claims.preferred_username
+      const rawEmail = claims.email
       const keycloakSub = claims.sub
 
       // Fast path: account already linked to this Keycloak sub.
@@ -1095,12 +1095,15 @@ export function createApp({
 
       if (!portalAccount) {
         // First-login path: fall back to email match.
-        if (!email) {
+        // Require claims.email — preferred_username is not an email claim and
+        // must not be used for account resolution.
+        if (!rawEmail) {
           request.resume()
           response.status(401).json({ error: 'Unauthorized' })
           return
         }
 
+        const email = normalizePortalEmail(rawEmail)
         const emailAccount = await tenantRegistry.getPortalAccountByEmail(email)
 
         if (!emailAccount) {
@@ -1571,9 +1574,12 @@ export function createApp({
     `${portalRoutePrefix}/logout`,
     portalLogoutLimiter,
     // Logout is a local-auth-only operation. In Keycloak mode, the SPA handles
-    // logout directly with Keycloak (front-channel). This endpoint is a no-op
-    // for Keycloak mode and returns 501 via createPortalSessionMiddleware when
-    // no local session is present.
+    // logout directly with Keycloak (front-channel). Returns 501 in Keycloak
+    // mode via ensurePortalLocalAuthEnabled before session middleware runs.
+    (_request, response, next) => {
+      if (!ensurePortalLocalAuthEnabled(response)) return
+      next()
+    },
     createPortalSessionMiddleware(tenantRegistry),
     portalJsonParser,
     async (
