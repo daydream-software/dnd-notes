@@ -576,7 +576,7 @@ export default function App({
     >
       <AppBar position="static" color="transparent" elevation={0}>
         <Toolbar sx={{ justifyContent: 'space-between', gap: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700 }}>
+          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: '0.08em' }}>
             D&amp;D NOTES
           </Typography>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
