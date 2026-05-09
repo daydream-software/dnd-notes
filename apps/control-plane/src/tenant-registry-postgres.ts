@@ -921,8 +921,14 @@ export class TenantRegistry {
 
   /**
    * Conditionally binds a Keycloak `sub` to an account that has no existing
-   * binding. Uses a conditional UPDATE (`WHERE keycloak_sub IS NULL`) so
-   * concurrent first-login requests for the same account converge atomically.
+   * binding. Uses a conditional UPDATE (`WHERE COALESCE(keycloak_sub, '') = ''`)
+   * so concurrent first-login requests for the same account converge atomically.
+   *
+   * Note: the condition uses COALESCE rather than `keycloak_sub IS NULL` because
+   * pg-mem (the in-memory Postgres used in tests) does not evaluate `IS NULL` in
+   * UPDATE WHERE clauses correctly. `COALESCE(col, '') = ''` is semantically
+   * equivalent in real Postgres for this column: no code path writes an empty
+   * string sub, so NULL and empty string are indistinguishable in practice.
    *
    * Returns the account state after the attempt:
    * - If the link was written (or already matches), returns the updated account.
