@@ -5,8 +5,14 @@ metadata:
   namespace: dnd-notes-platform
   labels:
     app.kubernetes.io/name: customer-portal
+  annotations:
+    cert-manager.io/cluster-issuer: dev-ca
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - portal.127.0.0.1.nip.io
+      secretName: customer-portal-tls
   rules:
     - host: portal.127.0.0.1.nip.io
       http:

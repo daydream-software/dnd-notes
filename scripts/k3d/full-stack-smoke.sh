@@ -6,11 +6,14 @@ if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/k3d/_load-dotenv.sh
+source "${ROOT}/scripts/k3d/_load-dotenv.sh"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
-K3D_HTTP_PORT="${K3D_HTTP_PORT:-8080}"
+K3D_HTTP_PORT="${K3D_HTTP_PORT:-80}"
+K3D_HTTPS_PORT="${K3D_HTTPS_PORT:-443}"
 CONTROL_PLANE_PORT="${CONTROL_PLANE_PORT:-3101}"
-CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-http://keycloak.127.0.0.1.nip.io:${K3D_HTTP_PORT}}"
+CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-https://keycloak.127.0.0.1.nip.io}"
 CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-dev}"
 CONTROL_PLANE_KEYCLOAK_CLIENT_ID="${CONTROL_PLANE_KEYCLOAK_CLIENT_ID:-dnd-notes-control-plane}"
 CONTROL_PLANE_KEYCLOAK_USERNAME="${CONTROL_PLANE_KEYCLOAK_USERNAME:-site-admin@example.com}"
@@ -21,7 +24,7 @@ TENANT_KEYCLOAK_CLIENT_ID="${TENANT_KEYCLOAK_CLIENT_ID:-dnd-notes-tenant-app}"
 TENANT_KEYCLOAK_USERNAME="${TENANT_KEYCLOAK_USERNAME:-owner@example.com}"
 TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
-TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-http}"
+TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-https}"
 TENANT_IMAGE_TAG="${TENANT_IMAGE_TAG:-k3d}"
 KEEP_TENANT="${KEEP_K3D_SMOKE_TENANT:-false}"
 OUTPUT_MODE="${K3D_SMOKE_OUTPUT:-text}"
@@ -48,6 +51,7 @@ What it does:
 Environment overrides:
   K3D_CLUSTER_NAME
   K3D_HTTP_PORT
+  K3D_HTTPS_PORT
   CONTROL_PLANE_PORT
   TENANT_IMAGE_TAG
   CONTROL_PLANE_KEYCLOAK_URL
@@ -115,6 +119,24 @@ wait_for_http() {
   return 1
 }
 
+# Like wait_for_http but passes -k to curl for HTTPS endpoints whose certificate
+# is signed by the mkcert CA (not trusted by WSL curl automatically).
+wait_for_http_insecure() {
+  local url="$1"
+  local timeout="${2:-60}"
+  local deadline=$((SECONDS + timeout))
+
+  while (( SECONDS < deadline )); do
+    if curl -fsSk "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Timed out waiting for ${url}"
+  return 1
+}
+
 json_get() {
   local path="$1"
 
@@ -162,7 +184,8 @@ get_keycloak_token_response() {
   local username="$4"
   local password="$5"
 
-  curl -fsS \
+  # -k: Keycloak is served over HTTPS via mkcert CA; not trusted by WSL curl.
+  curl -fsSk \
     -X POST \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode "grant_type=password" \
@@ -183,7 +206,15 @@ run_visible() {
 emit_summary() {
   local session_path="$1"
   local campaigns_path="$2"
-  local tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}:${K3D_HTTP_PORT}"
+  local ingress_port
+  ingress_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "${K3D_HTTPS_PORT}" || echo "${K3D_HTTP_PORT}")"
+  local default_port
+  default_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "443" || echo "80")"
+  local port_suffix=""
+  if [[ "${ingress_port}" != "${default_port}" ]]; then
+    port_suffix=":${ingress_port}"
+  fi
+  local tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}${port_suffix}"
   local tenant_owner_email
   local tenant_campaign_count
 
@@ -326,7 +357,7 @@ control_plane_port_forward_pid=$!
 
 wait_for_tcp "${CONTROL_PLANE_PORT}" 30
 wait_for_http "http://127.0.0.1:${CONTROL_PLANE_PORT}/health" 60
-wait_for_http "${CONTROL_PLANE_KEYCLOAK_URL}/realms/${CONTROL_PLANE_KEYCLOAK_REALM}" 60
+wait_for_http_insecure "${CONTROL_PLANE_KEYCLOAK_URL}/realms/${CONTROL_PLANE_KEYCLOAK_REALM}" 60
 
 control_plane_token_response="$(get_keycloak_token_response \
   "${CONTROL_PLANE_KEYCLOAK_URL}" \
@@ -360,8 +391,16 @@ tenant_subdomain="$(json_find_tenant_field "${tenant_id}" 'tenant.subdomain' <"$
 tenant_namespace="tenant-${tenant_subdomain}"
 tenant_hostname="${tenant_subdomain}.${TENANT_BASE_DOMAIN}"
 
+_ingress_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "${K3D_HTTPS_PORT}" || echo "${K3D_HTTP_PORT}")"
+_default_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "443" || echo "80")"
+_port_suffix=""
+if [[ "${_ingress_port}" != "${_default_port}" ]]; then
+  _port_suffix=":${_ingress_port}"
+fi
+tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}${_port_suffix}"
+
 run_visible kubectl rollout status -n "${tenant_namespace}" deployment/dnd-notes --timeout=240s
-wait_for_http "${TENANT_PUBLIC_SCHEME}://${tenant_hostname}:${K3D_HTTP_PORT}/ready" 120
+wait_for_http_insecure "${tenant_origin}/ready" 120
 
 tenant_token_response="$(get_keycloak_token_response \
   "${TENANT_KEYCLOAK_URL}" \
@@ -371,14 +410,14 @@ tenant_token_response="$(get_keycloak_token_response \
   "${TENANT_KEYCLOAK_PASSWORD}")"
 tenant_bearer_token="$(json_get access_token <<<"${tenant_token_response}")"
 
-curl -fsS \
+curl -fsSk \
   -H "Authorization: Bearer ${tenant_bearer_token}" \
-  "${TENANT_PUBLIC_SCHEME}://${tenant_hostname}:${K3D_HTTP_PORT}/api/auth/session" \
+  "${tenant_origin}/api/auth/session" \
   >"${WORK_DIR}/tenant-session.json"
 
-curl -fsS \
+curl -fsSk \
   -H "Authorization: Bearer ${tenant_bearer_token}" \
-  "${TENANT_PUBLIC_SCHEME}://${tenant_hostname}:${K3D_HTTP_PORT}/api/campaigns" \
+  "${tenant_origin}/api/campaigns" \
   >"${WORK_DIR}/tenant-campaigns.json"
 
 emit_summary "${WORK_DIR}/tenant-session.json" "${WORK_DIR}/tenant-campaigns.json"

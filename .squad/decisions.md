@@ -2,6 +2,81 @@
 
 ## Active Decisions
 
+### 2026-05-08: K3d HTTPS via cert-manager & mkcert CA
+**Decided by:** Brand (CI/Scripts)  
+**Date:** 2026-05-08  
+**Type:** Infrastructure & Architecture  
+**PR:** #169
+
+## Context
+
+Login flow from tenant portal to Keycloak failed due to missing Web Crypto API (`crypto.subtle`), which requires a secure context (HTTPS or `localhost` exact). Tenant URLs like `https://t-XXX.127.0.0.1.nip.io` were served over HTTP, making the browser deny PKCE in keycloak-js.
+
+## Decision
+
+Implement HTTPS everywhere in k3d dev environment via:
+
+- **cert-manager 1.16.3** with mkcert-backed ClusterIssuer (`dev-ca`)
+- **CAROOT contract:** Bootstrap requires `CAROOT` env var (mkcert CA directory path, user-machine-specific, never committed)
+- **TLS on all ingresses:** Static (keycloak, portals) + dynamic tenant ingress
+- **Tenant TLS opt-in:** `TENANT_TLS_CLUSTER_ISSUER` env var (undefined = no TLS for prod compat)
+- **Auto-load .env:** `scripts/k3d/_load-dotenv.sh` sourced by all entry scripts (`.env.example` committed as template)
+- **Node + Bash trust model:** Proxies use `NODE_EXTRA_CA_CERTS=${CAROOT}/rootCA.pem`; scripts use `curl -k` for internal checks (mkcert CA not in WSL curl trust store)
+
+## Outcomes
+
+- End-to-end login flow works with valid HTTPS certs
+- Browser trusts dev CA certs (mkcert installed on dev machine)
+- Keycloak PKCE succeeds (secure context achieved)
+- Token exchange completes
+- Cluster RAM investigation opened (#173 — ~10GB observed)
+
+## Known Limitations
+
+Keycloak wildcard matching limitation: `*` glob only at END of URL, not in hostname. Workaround: manual per-tenant kcadm patches (temporary, issue #170 tracks per-tenant client fix).
+
+## Follow-ups
+
+- #170: Per-tenant Keycloak client (architectural fix)
+- #171: Keycloak login branding per portal
+- #172: Account Console + portal account-settings redirects
+- #173: Cluster RAM usage investigation
+- #174: UI pass (deferred)
+
+---
+
+### 2026-05-09: k3d Ingress Port Constraint (80/443 only) + CI CAROOT Wiring
+**Decided by:** Brand (CI/Scripts)  
+**Date:** 2026-05-09  
+**Type:** Infrastructure & CI  
+**PR:** #169 (CodeRabbit review response)
+
+## Context
+
+CodeRabbit flagged two gaps on PR #169: (1) CI workflow never installed mkcert or exported `CAROOT`, causing `bootstrap.sh:validate_caroot` to fail in `k3d:smoke`. (2) Port override env vars (`HTTP_PORT`, `HTTPS_PORT`) could be set to non-standard values, reintroducing origin-mismatch bugs if a port appeared in the Origin header.
+
+A third structural risk: `cluster_exists()` short-circuits cluster creation, so a stale cluster with 8080/8443 host-port mappings from before this PR would silently bypass any env-var-level port validation.
+
+## Decisions
+
+**CAROOT in CI:** Install mkcert in the GitHub Actions workflow (mirrors dev setup). `CAROOT` is set to `$RUNNER_TEMP/mkcert-ca` and persisted via `$GITHUB_ENV`. `TRUST_STORES=""` skips system trust-store install (no `libnss3-tools` needed; smoke lane uses `curl -k`). Rejected openssl fallback and optional-CAROOT approaches to keep CI and dev paths identical.
+
+**Port enforcement:** `validate_ingress_ports` added to `bootstrap.sh`, runs before `validate_caroot`. Rejects `HTTP_PORT` != 80 or `HTTPS_PORT` != 443 at bootstrap entry. Non-80/443 ports are disallowed outright — this maintains the "portless origins" invariant and makes origin-mismatch impossible. Can be re-opened later if a legitimate need arises.
+
+**Existing cluster guard:** `validate_ingress_ports` also runs `docker inspect k3d-${CLUSTER_NAME}-serverlb` and checks live host-port mappings. If a stale cluster maps non-80/443 ports, bootstrap exits with a message directing the user to `npm run k3d:down` first.
+
+## Outcomes
+
+- CI `k3d:smoke` unblocked
+- Origin-mismatch bug class structurally closed (not just documented)
+- 5 CodeRabbit threads on PR #169 addressed
+
+## Follow-up (2026-05-09): NODE_EXTRA_CA_CERTS in smoke.sh
+
+After the first push (commit 4ddecf6), CI smoke got past `validate_caroot` but failed at 5m55s with `HTTP 401 {"error":"Unauthorized"}` on `POST /internal/tenants`. Root cause: `smoke.sh` spawns the control-plane as a local Node.js process that talks to Keycloak over HTTPS via the mkcert CA; Node does not trust that CA by default, so JWKS fetch / OIDC discovery silently failed and every bearer token was rejected. The `*-override.sh` scripts already set `NODE_EXTRA_CA_CERTS="${CAROOT:+${CAROOT}/rootCA.pem}"` for their Node processes — `smoke.sh`'s control-plane env block was the missing case. Fix: one-line addition of the same variable to `smoke.sh` (commit 4262aa8). CI smoke green on second push (run 25601345615, pass at 6m26s).
+
+---
+
 ### 2026-04-19: Code Review Response Patterns
 **Decided by:** Data (Backend Dev)  
 **Date:** 2026-04-19  

@@ -142,7 +142,7 @@ async function main() {
 
   if (!tenantOrigin) {
     throw new Error(
-      'K3D_TENANT_OVERRIDE_TENANT_ORIGIN is required (for example http://t-tenant.127.0.0.1.nip.io:8080).',
+      'K3D_TENANT_OVERRIDE_TENANT_ORIGIN is required (for example https://t-tenant.127.0.0.1.nip.io).',
     )
   }
 

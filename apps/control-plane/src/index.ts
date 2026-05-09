@@ -81,6 +81,11 @@ const TENANT_DATABASE_RUNTIME_URL = process.env.TENANT_DATABASE_RUNTIME_URL
 const TENANT_IMAGE_PULL_SECRET = process.env.TENANT_IMAGE_PULL_SECRET
 const TENANT_PUBLIC_SCHEME =
   process.env.TENANT_PUBLIC_SCHEME === 'http' ? 'http' : 'https'
+const rawTenantTlsClusterIssuer = process.env.TENANT_TLS_CLUSTER_ISSUER?.trim()
+const TENANT_TLS_CLUSTER_ISSUER =
+  rawTenantTlsClusterIssuer && rawTenantTlsClusterIssuer.length > 0
+    ? rawTenantTlsClusterIssuer
+    : undefined
 const rawControlPlaneTrustProxy = process.env.CONTROL_PLANE_TRUST_PROXY
 
 function parseTrustProxySetting(rawValue: string | undefined): boolean | number {
@@ -250,6 +255,7 @@ if (ENABLE_TENANT_PROVISIONING) {
     tenantPort: tenantAppPort,
     readyTimeoutMs: tenantReadyTimeoutMs,
     controlPlaneToken: TENANT_CONTROL_PLANE_TOKEN,
+    tlsClusterIssuer: TENANT_TLS_CLUSTER_ISSUER,
   })
 }
 

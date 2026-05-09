@@ -6,6 +6,8 @@ if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/k3d/_load-dotenv.sh
+source "${ROOT}/scripts/k3d/_load-dotenv.sh"
 STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
 LOCAL_PORT="${K3D_OPERATOR_PORTAL_OVERRIDE_LOCAL_PORT:-5173}"
 PROXY_PORT="${K3D_OPERATOR_PORTAL_OVERRIDE_LISTEN_PORT:-38082}"
@@ -173,6 +175,7 @@ env \
   K3D_PORTAL_OVERRIDE_LOCAL_VITE_ORIGIN="http://127.0.0.1:${LOCAL_PORT}" \
   K3D_PORTAL_OVERRIDE_API_PATH="/operator-api" \
   K3D_PORTAL_OVERRIDE_ENV_JS="${env_js}" \
+  NODE_EXTRA_CA_CERTS="${CAROOT:+${CAROOT}/rootCA.pem}" \
   node "${ROOT}/scripts/k3d/portal-override-proxy.js" \
   >"${WORK_DIR}/portal-override-proxy.log" 2>&1 &
 proxy_pid=$!
