@@ -6,6 +6,8 @@ if (( BASH_VERSINFO[0] > 4 || ( BASH_VERSINFO[0] == 4 && BASH_VERSINFO[1] >= 4 )
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/k3d/_load-dotenv.sh
+source "${ROOT}/scripts/k3d/_load-dotenv.sh"
 STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 K3D_HTTP_PORT="${K3D_HTTP_PORT:-80}"

@@ -2,6 +2,8 @@
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
+# shellcheck source=scripts/k3d/_load-dotenv.sh
+source "${ROOT}/scripts/k3d/_load-dotenv.sh"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 K3S_IMAGE="${K3D_K3S_IMAGE:-rancher/k3s:v1.35.3-k3s1}"
 HTTP_PORT="${K3D_HTTP_PORT:-80}"
