@@ -10,11 +10,11 @@
  * {
  *   "schemaVersion": 1,
  *   "clusterName": "dnd-notes",
- *   "ingressUrl": "http://127.0.0.1.nip.io",
+ *   "ingressUrl": "https://127.0.0.1.nip.io",
  *   "controlPlaneUrl": "http://127.0.0.1:3101",
  *   "controlPlanePort": 3101,
  *   "keycloak": {
- *     "url": "http://keycloak.127.0.0.1.nip.io",
+ *     "url": "https://keycloak.127.0.0.1.nip.io",
  *     "realm": "dnd-notes-dev",
  *     "controlPlaneClientId": "dnd-notes-control-plane",
  *     "tenantClientId": "dnd-notes-tenant-app"
@@ -31,7 +31,7 @@
  *       "subdomain": "dev",
  *       "namespace": "tenant-k3d-dev",
  *       "hostname": "dev.127.0.0.1.nip.io",
- *       "origin": "http://dev.127.0.0.1.nip.io",
+ *       "origin": "https://dev.127.0.0.1.nip.io",
  *       "state": "ready"
  *     }
  *   ],
@@ -174,7 +174,19 @@ export function readCompatVars(stateFile) {
   const keycloakUrl = state?.keycloak?.url ?? state?.keycloakUrl ?? ''
   const keycloakRealm = state?.keycloak?.realm ?? state?.keycloakRealm ?? ''
 
-  let ingressPort = '80'
+  // Derive ingressPort from stored URLs. For HTTPS URLs without an explicit port
+  // the regex won't match (443 is implicit), so default to 443 when the ingress
+  // URL uses https, otherwise 80.
+  const ingressScheme = (() => {
+    for (const url of [state?.ingressUrl, state?.tenantOrigin]) {
+      if (url && typeof url === 'string') {
+        if (url.startsWith('https://')) return 'https'
+        if (url.startsWith('http://')) return 'http'
+      }
+    }
+    return 'https'
+  })()
+  let ingressPort = ingressScheme === 'https' ? '443' : '80'
   for (const url of [state?.ingressUrl, state?.tenantOrigin, state?.keycloakUrl, state?.keycloak?.url]) {
     const m = url && url.match(/:(\d+)/)
     if (m) { ingressPort = m[1]; break }

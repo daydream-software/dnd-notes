@@ -9,6 +9,7 @@ ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 K3D_HTTP_PORT="${K3D_HTTP_PORT:-80}"
+K3D_HTTPS_PORT="${K3D_HTTPS_PORT:-443}"
 CONTROL_PLANE_PORT="${CONTROL_PLANE_PORT:-3101}"
 POSTGRES_LOCAL_PORT="${POSTGRES_LOCAL_PORT:-55432}"
 TENANT_IMAGE_TAG="${TENANT_IMAGE_TAG:-k3d}"
@@ -19,8 +20,8 @@ IMAGE_IMPORT_MODE="${K3D_IMAGE_IMPORT_MODE:-direct}"
 IMAGE_IMPORT_FALLBACK_MODE="${K3D_IMAGE_IMPORT_FALLBACK_MODE:-tools}"
 IMAGE_IMPORT_TIMEOUT_SECONDS="${K3D_IMAGE_IMPORT_TIMEOUT_SECONDS:-180}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
-TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-http}"
-CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-http://keycloak.127.0.0.1.nip.io:${K3D_HTTP_PORT}}"
+TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-https}"
+CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-https://keycloak.127.0.0.1.nip.io}"
 CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-dev}"
 CONTROL_PLANE_KEYCLOAK_CLIENT_ID="${CONTROL_PLANE_KEYCLOAK_CLIENT_ID:-dnd-notes-control-plane}"
 CONTROL_PLANE_KEYCLOAK_USERNAME="${CONTROL_PLANE_KEYCLOAK_USERNAME:-site-admin@example.com}"
@@ -69,6 +70,7 @@ Flags:
 Environment overrides:
   K3D_CLUSTER_NAME
   K3D_HTTP_PORT
+  K3D_HTTPS_PORT
   CONTROL_PLANE_PORT
   POSTGRES_LOCAL_PORT
   TENANT_IMAGE_TAG
@@ -202,6 +204,25 @@ wait_for_http() {
   return 1
 }
 
+# Like wait_for_http but passes -k (insecure) to curl. Used for HTTPS endpoints
+# whose certificate is signed by the mkcert CA, which the WSL curl binary does
+# not trust automatically even when the Windows browser trust store does.
+wait_for_http_insecure() {
+  local url="$1"
+  local timeout="${2:-60}"
+  local deadline=$((SECONDS + timeout))
+
+  while (( SECONDS < deadline )); do
+    if curl -fsSk "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Timed out waiting for ${url}"
+  return 1
+}
+
 json_get() {
   local path="$1"
 
@@ -247,7 +268,9 @@ get_keycloak_access_token() {
   local username="$4"
   local password="$5"
 
-  curl -fsS \
+  # -k: Keycloak URL is now HTTPS via mkcert CA; the CA is trusted by the browser
+  # (Windows trust store) but not necessarily by the WSL curl binary.
+  curl -fsSk \
     -X POST \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode "grant_type=password" \
@@ -337,11 +360,15 @@ write_state() {
       stateFile,
     ] = process.argv.slice(1)
 
+    const isHttps = tenantPublicScheme === 'https'
+    const defaultPort = isHttps ? 443 : 80
+    const portSuffix = Number(httpPort) !== defaultPort ? `:${httpPort}` : ''
+
     const tenantOrigin = tenantId
-      ? `${tenantPublicScheme}://${tenantHostname}:${httpPort}`
+      ? `${tenantPublicScheme}://${tenantHostname}${portSuffix}`
       : null
 
-    const ingressUrl = `${tenantPublicScheme}://127.0.0.1.nip.io:${httpPort}`
+    const ingressUrl = `${tenantPublicScheme}://127.0.0.1.nip.io${portSuffix}`
 
     const state = {
       stateFile,
@@ -373,7 +400,7 @@ write_state() {
     process.stdout.write(JSON.stringify(state))
   ' \
     "${CLUSTER_NAME}" \
-    "${K3D_HTTP_PORT}" \
+    "$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "${K3D_HTTPS_PORT}" || echo "${K3D_HTTP_PORT}")" \
     "${CONTROL_PLANE_PORT}" \
     "${CONTROL_PLANE_KEYCLOAK_URL}" \
     "${CONTROL_PLANE_KEYCLOAK_REALM}" \
@@ -407,7 +434,15 @@ emit_summary() {
     return
   fi
 
-  local tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}:${K3D_HTTP_PORT}"
+  local ingress_port
+  ingress_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "${K3D_HTTPS_PORT}" || echo "${K3D_HTTP_PORT}")"
+  local default_port
+  default_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "443" || echo "80")"
+  local port_suffix=""
+  if [[ "${ingress_port}" != "${default_port}" ]]; then
+    port_suffix=":${ingress_port}"
+  fi
+  local tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}${port_suffix}"
 
   echo
   echo "k3d platform is up."
@@ -612,7 +647,7 @@ control_plane_port_forward_pid=$!
 
 wait_for_tcp "${CONTROL_PLANE_PORT}" 30
 wait_for_http "http://127.0.0.1:${CONTROL_PLANE_PORT}/health" 60
-wait_for_http "${CONTROL_PLANE_KEYCLOAK_URL}/realms/${CONTROL_PLANE_KEYCLOAK_REALM}" 60
+wait_for_http_insecure "${CONTROL_PLANE_KEYCLOAK_URL}/realms/${CONTROL_PLANE_KEYCLOAK_REALM}" 60
 
 control_plane_bearer_token="$(get_keycloak_access_token \
   "${CONTROL_PLANE_KEYCLOAK_URL}" \
@@ -715,8 +750,17 @@ fi
 
 run_visible kubectl rollout status -n "${tenant_namespace}" deployment/dnd-notes --timeout=240s
 
-tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}:${K3D_HTTP_PORT}"
-wait_for_http "${tenant_origin}/ready" 120
+_ingress_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "${K3D_HTTPS_PORT}" || echo "${K3D_HTTP_PORT}")"
+_default_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "443" || echo "80")"
+_port_suffix=""
+if [[ "${_ingress_port}" != "${_default_port}" ]]; then
+  _port_suffix=":${_ingress_port}"
+fi
+tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}${_port_suffix}"
+# curl -k: the mkcert CA is trusted in the browser (Windows/WSL trust store) but
+# not necessarily in the WSL curl binary; -k skips TLS verification for internal
+# health checks only.
+wait_for_http_insecure "${tenant_origin}/ready" 120
 
 # ---------------------------------------------------------------------------
 # Step 5: Seed tenant with standard sample data (idempotent)

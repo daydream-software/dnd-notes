@@ -10,15 +10,16 @@ ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
 K3D_HTTP_PORT="${K3D_HTTP_PORT:-80}"
+K3D_HTTPS_PORT="${K3D_HTTPS_PORT:-443}"
 CONTROL_PLANE_PORT="${CONTROL_PLANE_PORT:-3101}"
 POSTGRES_LOCAL_PORT="${POSTGRES_LOCAL_PORT:-55432}"
 TENANT_LOCAL_PORT="${TENANT_LOCAL_PORT:-38080}"
 TENANT_IMAGE_REPOSITORY="${TENANT_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes}"
 TENANT_IMAGE_TAG="${TENANT_IMAGE_TAG:-k3d}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
-TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-http}"
+TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-https}"
 TENANT_DATABASE_RUNTIME_URL="${TENANT_DATABASE_RUNTIME_URL:-postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres}"
-CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-http://keycloak.127.0.0.1.nip.io:${K3D_HTTP_PORT}}"
+CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-https://keycloak.127.0.0.1.nip.io}"
 CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-dev}"
 CONTROL_PLANE_KEYCLOAK_CLIENT_ID="${CONTROL_PLANE_KEYCLOAK_CLIENT_ID:-dnd-notes-control-plane}"
 CONTROL_PLANE_KEYCLOAK_USERNAME="${CONTROL_PLANE_KEYCLOAK_USERNAME:-site-admin@example.com}"
@@ -58,6 +59,7 @@ What it does:
 Environment overrides:
   K3D_CLUSTER_NAME
   K3D_HTTP_PORT
+  K3D_HTTPS_PORT
   CONTROL_PLANE_PORT
   POSTGRES_LOCAL_PORT
   TENANT_LOCAL_PORT
@@ -117,6 +119,24 @@ wait_for_http() {
 
   while (( SECONDS < deadline )); do
     if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  echo "Timed out waiting for ${url}" >&2
+  return 1
+}
+
+# Like wait_for_http but passes -k to curl for HTTPS endpoints whose certificate
+# is signed by the mkcert CA (not trusted by WSL curl automatically).
+wait_for_http_insecure() {
+  local url="$1"
+  local timeout="${2:-60}"
+  local deadline=$((SECONDS + timeout))
+
+  while (( SECONDS < deadline )); do
+    if curl -fsSk "$url" >/dev/null 2>&1; then
       return 0
     fi
     sleep 1
@@ -213,7 +233,8 @@ get_keycloak_access_token() {
   local username="$4"
   local password="$5"
 
-  curl -fsS \
+  # -k: Keycloak is served over HTTPS via mkcert CA; not trusted by WSL curl.
+  curl -fsSk \
     -X POST \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode "grant_type=password" \
@@ -319,7 +340,7 @@ kubectl -n "${PLATFORM_NAMESPACE}" port-forward \
 postgres_forward_pid=$!
 
 wait_for_tcp "${POSTGRES_LOCAL_PORT}" 30
-wait_for_http "${CONTROL_PLANE_KEYCLOAK_URL}/realms/${CONTROL_PLANE_KEYCLOAK_REALM}" 60
+wait_for_http_insecure "${CONTROL_PLANE_KEYCLOAK_URL}/realms/${CONTROL_PLANE_KEYCLOAK_REALM}" 60
 
 env \
   PORT="${CONTROL_PLANE_PORT}" \
@@ -340,6 +361,7 @@ env \
   TENANT_DATABASE_ADMIN_URL="postgresql://postgres:postgres@127.0.0.1:${POSTGRES_LOCAL_PORT}/postgres" \
   TENANT_DATABASE_RUNTIME_URL="${TENANT_DATABASE_RUNTIME_URL}" \
   TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME}" \
+  TENANT_TLS_CLUSTER_ISSUER="${TENANT_TLS_CLUSTER_ISSUER:-dev-ca}" \
   TENANT_APP_PORT=3000 \
   TENANT_READY_TIMEOUT_MS="$(resolve_tenant_ready_timeout_ms)" \
   node --import tsx "${ROOT}/apps/control-plane/src/index.ts" \

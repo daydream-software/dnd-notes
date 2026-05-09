@@ -184,7 +184,7 @@ async function main() {
 
   if (!k3dApiOrigin) {
     throw new Error(
-      'K3D_PORTAL_OVERRIDE_K3D_API_ORIGIN is required (for example http://control-plane.127.0.0.1.nip.io).',
+      'K3D_PORTAL_OVERRIDE_K3D_API_ORIGIN is required (for example https://control-plane.127.0.0.1.nip.io).',
     )
   }
 

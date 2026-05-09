@@ -9,8 +9,10 @@ ROOT="$(git rev-parse --show-toplevel)"
 STATE_FILE="${K3D_STATE_FILE:-${ROOT}/.k3d-state/state.json}"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 K3D_HTTP_PORT="${K3D_HTTP_PORT:-80}"
+K3D_HTTPS_PORT="${K3D_HTTPS_PORT:-443}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
-CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-http://keycloak.127.0.0.1.nip.io:${K3D_HTTP_PORT}}"
+TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-https}"
+CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-https://keycloak.127.0.0.1.nip.io}"
 CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-dev}"
 TENANT_KEYCLOAK_URL="${TENANT_KEYCLOAK_URL:-${CONTROL_PLANE_KEYCLOAK_URL}}"
 TENANT_KEYCLOAK_REALM="${TENANT_KEYCLOAK_REALM:-${CONTROL_PLANE_KEYCLOAK_REALM}}"
@@ -120,6 +122,24 @@ wait_for_http() {
   return 1
 }
 
+# Like wait_for_http but passes -k to curl for HTTPS endpoints whose certificate
+# is signed by the mkcert CA (not trusted by WSL curl automatically).
+wait_for_http_insecure() {
+  local url="$1"
+  local timeout="${2:-60}"
+  local deadline=$((SECONDS + timeout))
+
+  while (( SECONDS < deadline )); do
+    if curl -fsSk "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+
+  log "Timed out waiting for ${url}"
+  return 1
+}
+
 wait_for_tcp() {
   local port="$1"
   local timeout="${2:-30}"
@@ -190,7 +210,8 @@ get_keycloak_access_token() {
   local username="$4"
   local password="$5"
 
-  curl -fsS \
+  # -k: Keycloak is served over HTTPS via mkcert CA; not trusted by WSL curl.
+  curl -fsSk \
     -X POST \
     -H 'Content-Type: application/x-www-form-urlencoded' \
     --data-urlencode "grant_type=password" \
@@ -254,7 +275,13 @@ if [[ -z "${tenant_namespace}" || -z "${tenant_subdomain}" ]]; then
 fi
 
 tenant_hostname="${tenant_subdomain}.${TENANT_BASE_DOMAIN}"
-tenant_origin="http://${tenant_hostname}:${K3D_HTTP_PORT}"
+_ingress_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "${K3D_HTTPS_PORT}" || echo "${K3D_HTTP_PORT}")"
+_default_port="$([ "${TENANT_PUBLIC_SCHEME}" = "https" ] && echo "443" || echo "80")"
+_port_suffix=""
+if [[ "${_ingress_port}" != "${_default_port}" ]]; then
+  _port_suffix=":${_ingress_port}"
+fi
+tenant_origin="${TENANT_PUBLIC_SCHEME}://${tenant_hostname}${_port_suffix}"
 proxy_origin="http://${tenant_hostname}:${PROXY_PORT}"
 
 kubectl -n "${tenant_namespace}" get configmap dnd-notes-runtime -o json \
@@ -304,6 +331,7 @@ env \
   K3D_TENANT_OVERRIDE_LISTEN_PORT="${PROXY_PORT}" \
   K3D_TENANT_OVERRIDE_TENANT_ORIGIN="${tenant_origin}" \
   K3D_TENANT_OVERRIDE_LOCAL_API_ORIGIN="http://127.0.0.1:${LOCAL_API_PORT}" \
+  NODE_EXTRA_CA_CERTS="${CAROOT:+${CAROOT}/rootCA.pem}" \
   node "${ROOT}/scripts/k3d/tenant-api-override-proxy.js" \
   >"${WORK_DIR}/tenant-api-override-proxy.log" 2>&1 &
 proxy_pid=$!
@@ -311,7 +339,7 @@ proxy_pid=$!
 wait_for_http "${proxy_origin}/" 60
 wait_for_http "${proxy_origin}/api/auth/config" 60
 
-curl -fsS "${tenant_origin}/" >"${WORK_DIR}/upstream-root.html"
+curl -fsSk "${tenant_origin}/" >"${WORK_DIR}/upstream-root.html"
 curl -fsS -D "${WORK_DIR}/proxy-root.headers" "${proxy_origin}/" >"${WORK_DIR}/proxy-root.html"
 cmp -s "${WORK_DIR}/upstream-root.html" "${WORK_DIR}/proxy-root.html"
 normalize_headers "${WORK_DIR}/proxy-root.headers" \

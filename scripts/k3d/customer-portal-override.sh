@@ -170,6 +170,7 @@ env \
   K3D_PORTAL_OVERRIDE_LOCAL_VITE_ORIGIN="http://127.0.0.1:${LOCAL_PORT}" \
   K3D_PORTAL_OVERRIDE_API_PATH="/portal-api" \
   K3D_PORTAL_OVERRIDE_ENV_JS="${env_js}" \
+  NODE_EXTRA_CA_CERTS="${CAROOT:+${CAROOT}/rootCA.pem}" \
   node "${ROOT}/scripts/k3d/portal-override-proxy.js" \
   >"${WORK_DIR}/portal-override-proxy.log" 2>&1 &
 proxy_pid=$!
