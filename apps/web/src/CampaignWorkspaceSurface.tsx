@@ -1,4 +1,4 @@
-import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
+import { DndNotesMark } from './DndNotesMark'
 import {
   Box,
   Container,
@@ -88,7 +88,7 @@ function CampaignWorkspaceSurface({
               maxWidth: '100%',
             }}
           >
-            <StickyNote2RoundedIcon fontSize="small" />
+            <DndNotesMark fontSize="small" />
             <Typography
               variant="caption"
               sx={{

@@ -9,6 +9,7 @@ import PlaylistAddCheckCircleRoundedIcon from '@mui/icons-material/PlaylistAddCh
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
 import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
+import { DndNotesMark } from './DndNotesMark'
 import {
   Alert,
   Autocomplete,
@@ -3203,7 +3204,7 @@ function App() {
                 maxWidth: '100%',
               }}
             >
-              <StickyNote2RoundedIcon fontSize="small" />
+              <DndNotesMark fontSize="small" />
               <Typography
                 variant="caption"
                 sx={{
@@ -4794,7 +4795,7 @@ function App() {
                 maxWidth: 'calc(100vw - 24px)',
               }}
             >
-              <StickyNote2RoundedIcon fontSize="small" />
+              <DndNotesMark fontSize="small" />
               <Typography
                 variant="caption"
                 sx={{
