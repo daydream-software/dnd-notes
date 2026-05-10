@@ -145,9 +145,7 @@ describe('customer portal', () => {
     render(<App keycloakClientFactory={() => stub} />)
 
     expect(
-      await screen.findByText(
-        'Spin up a dedicated D&D note space without waiting on manual ops.',
-      ),
+      await screen.findByRole('heading', { name: 'Your D&D Notes workspaces' }),
     ).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Adventurer' })).toBeTruthy()
     expect(screen.getByRole('heading', { name: 'Guild' })).toBeTruthy()

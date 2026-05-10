@@ -706,22 +706,20 @@ export default function App({
         </Toolbar>
       </AppBar>
 
-      <Container maxWidth="lg" sx={{ py: 6 }}>
-        <Stack spacing={4}>
+      <Container maxWidth="xl" sx={{ py: 6 }}>
+        <Stack spacing={2.5}>
           <Paper sx={{ p: { xs: 3, md: 5 }, backdropFilter: 'blur(16px)' }}>
             <Stack spacing={2}>
-              <Typography variant="overline" color="primary.main">
-                Public landing + self-serve signup
-              </Typography>
               <Typography
                 variant="h2"
                 sx={{ fontSize: { xs: '2.4rem', md: '3.5rem' }, fontWeight: 800 }}
               >
-                Spin up a dedicated D&amp;D note space without waiting on manual ops.
+                Your D&amp;D Notes workspaces
               </Typography>
               <Typography variant="h6" color="text.secondary" sx={{ maxWidth: 780 }}>
-                Discover the product, claim a tenant slug, capture billing intent, and
-                manage your owned instances from a single customer-facing portal.
+                {!isAuthenticated
+                  ? 'Sign in to manage your tenants, or create your first one.'
+                  : 'Manage your tenant instances from this customer portal.'}
               </Typography>
               <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
                 <Chip label={instanceHeadline} color="secondary" />
@@ -750,38 +748,6 @@ export default function App({
               after the control-plane provisioning lane is configured.
             </Alert>
           ) : null}
-
-          <Box
-            sx={{
-              display: 'grid',
-              gap: 3,
-              gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' },
-            }}
-          >
-            {(planOptions.length > 0 ? planOptions : []).map((plan) => (
-              <Card key={plan.id} variant="outlined">
-                <CardContent>
-                  <Stack spacing={1.5}>
-                    <Stack
-                      direction="row"
-                      sx={{ justifyContent: 'space-between', alignItems: 'center' }}
-                    >
-                      <Typography variant="h5">{plan.name}</Typography>
-                      <Chip label={plan.priceLabel} size="small" color="primary" />
-                    </Stack>
-                    <Typography color="text.secondary">{plan.description}</Typography>
-                    <Stack spacing={1}>
-                      {plan.features.map((feature) => (
-                        <Typography key={feature} variant="body2">
-                          - {feature}
-                        </Typography>
-                      ))}
-                    </Stack>
-                  </Stack>
-                </CardContent>
-              </Card>
-            ))}
-          </Box>
 
           {authMode === 'keycloak' ? (
             <>
@@ -1523,6 +1489,38 @@ export default function App({
               </Paper>
             </Box>
           )}
+
+          <Box
+            sx={{
+              display: 'grid',
+              gap: 3,
+              gridTemplateColumns: { xs: '1fr', md: 'repeat(3, minmax(0, 1fr))' },
+            }}
+          >
+            {(planOptions.length > 0 ? planOptions : []).map((plan) => (
+              <Card key={plan.id} variant="outlined">
+                <CardContent>
+                  <Stack spacing={1.5}>
+                    <Stack
+                      direction="row"
+                      sx={{ justifyContent: 'space-between', alignItems: 'center' }}
+                    >
+                      <Typography variant="h5">{plan.name}</Typography>
+                      <Chip label={plan.priceLabel} size="small" color="primary" />
+                    </Stack>
+                    <Typography color="text.secondary">{plan.description}</Typography>
+                    <Stack spacing={1}>
+                      {plan.features.map((feature) => (
+                        <Typography key={feature} variant="body2">
+                          - {feature}
+                        </Typography>
+                      ))}
+                    </Stack>
+                  </Stack>
+                </CardContent>
+              </Card>
+            ))}
+          </Box>
 
           <Paper sx={{ p: 3 }}>
             <Stack spacing={1.5}>
