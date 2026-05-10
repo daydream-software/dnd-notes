@@ -1,40 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
-  <!--
-    D&D Notes brand mark — d20 silhouette
-    Canonical source: packages/theme/assets/favicon.svg
-    Copy to each app's public/favicon.svg when this file changes.
-    Palette: #a78bfa (primary), #f59e0b (accent), #0f172a (background)
-  -->
-
-  <!-- Dark background disc -->
-  <rect width="32" height="32" rx="7" fill="#0f172a"/>
-
-  <!-- d20 outer polygon (pentagon rotated so flat edge is at top) -->
-  <!-- Vertices of a regular pentagon centered at (16,17), r=13, top-flat -->
-  <!-- top-left: (6.1, 10.2), top-right: (25.9, 10.2), bottom-right: (30, 22), bottom: (16, 29.5), bottom-left: (2, 22) -->
-  <polygon
-    points="16,3.5 29.3,12.2 24.2,28 7.8,28 2.7,12.2"
-    fill="#a78bfa"
-    opacity="0.15"
-    stroke="#a78bfa"
-    stroke-width="1.5"
-    stroke-linejoin="round"
-  />
-
-  <!-- Inner triangle (top face of d20) -->
-  <polygon
-    points="16,8 23.5,21 8.5,21"
-    fill="none"
-    stroke="#a78bfa"
-    stroke-width="1.25"
-    stroke-linejoin="round"
-  />
-
-  <!-- Left face edge -->
-  <line x1="16" y1="3.5" x2="8.5" y2="21" stroke="#a78bfa" stroke-width="1" opacity="0.6"/>
-  <!-- Right face edge -->
-  <line x1="16" y1="3.5" x2="23.5" y2="21" stroke="#a78bfa" stroke-width="1" opacity="0.6"/>
-
-  <!-- Amber accent pip — the "20" crit moment -->
-  <circle cx="16" cy="15.5" r="2" fill="#f59e0b"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" color="#a78bfa">
+  <title>Daydream Software</title>
+  <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <circle cx="32" cy="32" r="14"/>
+    <line x1="32" y1="6"  x2="32" y2="11"/>
+    <line x1="32" y1="53" x2="32" y2="58"/>
+    <line x1="6"  y1="32" x2="11" y2="32"/>
+    <line x1="53" y1="32" x2="58" y2="32"/>
+    <line x1="14.2" y1="14.2" x2="17.7" y2="17.7"/>
+    <line x1="46.3" y1="46.3" x2="49.8" y2="49.8"/>
+    <line x1="14.2" y1="49.8" x2="17.7" y2="46.3"/>
+    <line x1="46.3" y1="17.7" x2="49.8" y2="14.2"/>
+  </g>
+  <path d="M 32 23 A 9 9 0 0 1 32 41 A 4.5 9 0 0 0 32 23 Z"
+        fill="currentColor" fill-opacity="0.95"
+        stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
 </svg>
