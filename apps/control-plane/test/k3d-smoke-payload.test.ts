@@ -34,7 +34,7 @@ describe('k3d smoke tenant payload builder', () => {
       'bash',
       [
         '-lc',
-        `${payloadBuilderMatch[0]}\nbuild_tenant_create_payload "$TENANT_ID" "$TENANT_SLUG" "$TENANT_TAG"`,
+        `${payloadBuilderMatch[0]}\nbuild_tenant_create_payload "$TENANT_ID" "$TENANT_SLUG" "$TENANT_TAG" "$TENANT_ADMIN_EMAIL"`,
       ],
       {
         encoding: 'utf8',
@@ -43,6 +43,7 @@ describe('k3d smoke tenant payload builder', () => {
           TENANT_ID: 'smoke-1',
           TENANT_SLUG: 'smoke-1',
           TENANT_TAG: 'k3d"build\\tag',
+          TENANT_ADMIN_EMAIL: 'owner@example.com',
         },
       },
     )
@@ -52,6 +53,10 @@ describe('k3d smoke tenant payload builder', () => {
       id: 'smoke-1',
       slug: 'smoke-1',
       ownerId: 'smoke-owner',
+      // initialAdminEmail is required so the provisioner can fall back
+      // to a Keycloak admin user-by-email lookup when the portal_account
+      // has no keycloak_sub yet (#196 / #200).
+      initialAdminEmail: 'owner@example.com',
       version: 'k3d"build\\tag',
     })
   })

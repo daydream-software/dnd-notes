@@ -441,7 +441,15 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         // The KC step runs before applyTenantResources so the client is in place
         // when the pod first initialises. Failure here is intentionally fatal for
         // provisioning — the tenant SPA cannot authenticate without it.
-        if (this.keycloakAdminClient) {
+        //
+        // Skip entirely when tenantRuntimeAuth.mode === 'local': the tenant API
+        // does not enforce Keycloak roles in local mode, so there's no reason to
+        // make provisioning depend on Keycloak admin availability for that path
+        // (CodeRabbit #200).
+        if (
+          this.keycloakAdminClient &&
+          this.tenantRuntimeAuth.mode === 'keycloak'
+        ) {
           const hostname = bundle.resources.hostname
           const tenantClientId = `dnd-notes-tenant-${refreshedTenant.id}`
           await this.keycloakAdminClient.ensureClient({
@@ -480,21 +488,31 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           )
 
           // Assign the role to the tenant creator's Keycloak user so the
-          // first member can actually access the tenant. The portal_account
-          // row carries the keycloak_sub once the customer has signed in via
-          // Keycloak at least once. If the owner has no sub yet (transition
-          // from local → keycloak mode) the assignment is deferred to the
-          // /portal/me middleware, which performs the same idempotent role
-          // assignment on first Keycloak login. Skipping is therefore safe
-          // and intentional — re-provisioning after the owner's first
-          // Keycloak login will pick up the sub and assign the role.
-          const ownerAccount = await this.tenantRegistry.getPortalAccount(
-            refreshedTenant.ownerId,
+          // first member can actually access the tenant.
+          //
+          // Resolution order:
+          //   1. portal_account.keycloak_sub — the canonical link, populated
+          //      after the customer signs in through the portal Keycloak
+          //      flow at least once.
+          //   2. tenant.initialAdminEmail — admin-created tenants (control-
+          //      plane API or operator portal) record the intended owner's
+          //      email at create time. We resolve it to a Keycloak user id
+          //      via the admin REST API. This is the path the k3d smoke
+          //      and operator-portal flows depend on, since they create the
+          //      tenant before any portal sign-in has produced a sub.
+          //
+          // If neither resolution yields a user, the assignment is deferred
+          // to the portal middleware, which retries the sweep on first
+          // Keycloak login (#200 transition path). Skipping is safe — re-
+          // provisioning after the owner has signed in once will pick up
+          // the sub and assign the role.
+          const ownerKeycloakSub = await this.resolveTenantOwnerKeycloakSub(
+            refreshedTenant,
           )
 
-          if (ownerAccount?.keycloakSub) {
+          if (ownerKeycloakSub) {
             await this.keycloakAdminClient.assignClientRoleToUser(
-              ownerAccount.keycloakSub,
+              ownerKeycloakSub,
               tenantClientId,
               tenantMemberRoleName,
             )
@@ -636,6 +654,49 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     }
 
     return tenant
+  }
+
+  /**
+   * Returns the Keycloak `sub` of the tenant's owner using the resolution
+   * order documented at the call site:
+   *
+   *   1. portal_account.keycloak_sub (canonical, populated after the first
+   *      portal Keycloak sign-in).
+   *   2. tenant.initialAdminEmail looked up via the admin REST API.
+   *
+   * Returns null when neither path produces a user. Errors from the admin
+   * API surface as `KeycloakAdminError` so the caller can treat them the
+   * same as any other provisioning failure.
+   *
+   * Caller is expected to have already verified that
+   * `this.keycloakAdminClient` is defined and that
+   * `this.tenantRuntimeAuth.mode === 'keycloak'`.
+   */
+  private async resolveTenantOwnerKeycloakSub(
+    tenant: Tenant,
+  ): Promise<string | null> {
+    const ownerAccount = await this.tenantRegistry.getPortalAccount(
+      tenant.ownerId,
+    )
+
+    if (ownerAccount?.keycloakSub) {
+      return ownerAccount.keycloakSub
+    }
+
+    const fallbackEmail = tenant.initialAdminEmail
+    if (!fallbackEmail || fallbackEmail.trim() === '') {
+      return null
+    }
+
+    // Caller-side guard already ensured keycloakAdminClient exists; the cast
+    // here keeps TypeScript happy without re-checking at the call site.
+    const keycloakAdminClient = this.keycloakAdminClient
+    if (!keycloakAdminClient) {
+      return null
+    }
+
+    const user = await keycloakAdminClient.findUserByEmail(fallbackEmail)
+    return user?.id ?? null
   }
 }
 

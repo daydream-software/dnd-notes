@@ -15,10 +15,14 @@ interface FakeServerState {
   clientRoles: Record<string, { id: string; name: string }>
   /** Map of `${userId}/${clientInternalId}` → list of assigned role records. */
   userClientRoleMappings: Record<string, Array<{ id: string; name: string }>>
+  /** Map of email → Keycloak user record. */
+  usersByEmail: Record<string, { id: string; email?: string }>
   /** Override: when true, GET role responds 404 even if the role exists in `clientRoles`. */
   forceRoleGetMiss?: boolean
   /** Override: when true, POST role responds with the configured status. */
   roleCreateResponse?: { status: number; body?: object }
+  /** Override: when set, GET /users responds with this status + raw body. */
+  usersResponse?: { status: number; body: string }
   tokenResponse?: { status: number; body: object }
   adminResponse?: { status: number; body: object }
 }
@@ -93,6 +97,31 @@ async function startFakeKeycloakAdminServer(state: FakeServerState) {
 
         response.writeHead(405)
         response.end()
+        return
+      }
+
+      // Users-by-email lookup (`/admin/realms/{realm}/users?email=<email>&exact=true`).
+      // Mirrors the subset of the Keycloak admin REST API consumed by
+      // `KeycloakAdminClient.findUserByEmail`.
+      if (
+        method === 'GET' &&
+        url.startsWith(`/admin/realms/${TEST_REALM}/users?`)
+      ) {
+        state.adminRequests.push({ method, path: url, body })
+
+        if (state.usersResponse) {
+          response.writeHead(state.usersResponse.status, {
+            'content-type': 'application/json',
+          })
+          response.end(state.usersResponse.body)
+          return
+        }
+
+        const params = new URLSearchParams(url.split('?')[1])
+        const email = params.get('email') ?? ''
+        const found = state.usersByEmail[email]
+        response.writeHead(200, { 'content-type': 'application/json' })
+        response.end(JSON.stringify(found ? [found] : []))
         return
       }
 
@@ -306,6 +335,7 @@ describe('KeycloakAdminClient', () => {
       clients: {},
       clientRoles: {},
       userClientRoleMappings: {},
+      usersByEmail: {},
     }
   })
 
@@ -688,6 +718,86 @@ describe('KeycloakAdminClient', () => {
         (error) => {
           assert.ok(error instanceof KeycloakAdminError)
           assert.equal(error.statusCode, 401)
+          return true
+        },
+      )
+    })
+  })
+
+  describe('findUserByEmail (#196 / #200 admin-tenant role gate)', () => {
+    it('returns the matching user id when Keycloak finds a user by email', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.usersByEmail['owner@example.com'] = {
+        id: 'kc-user-owner',
+        email: 'owner@example.com',
+      }
+      const client = makeClient(server.baseUrl)
+
+      const result = await client.findUserByEmail('owner@example.com')
+
+      assert.deepEqual(result, { id: 'kc-user-owner' })
+      const userReq = state.adminRequests.find((r) =>
+        r.path.startsWith(`/admin/realms/${TEST_REALM}/users?`),
+      )
+      assert.ok(userReq, 'expected GET /users request')
+      // exact=true is required so partial matches do not return a wrong user.
+      assert.match(userReq.path, /[?&]exact=true(?:&|$)/)
+      // The email is URL-encoded.
+      assert.match(userReq.path, /email=owner%40example\.com/)
+    })
+
+    it('returns null when no user matches the email', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      const client = makeClient(server.baseUrl)
+
+      const result = await client.findUserByEmail('missing@example.com')
+
+      assert.equal(result, null)
+    })
+
+    it('throws KeycloakAdminError when Keycloak returns a non-2xx status', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.usersResponse = { status: 503, body: '' }
+      const client = makeClient(server.baseUrl)
+
+      await assert.rejects(
+        () => client.findUserByEmail('owner@example.com'),
+        (error) => {
+          assert.ok(error instanceof KeycloakAdminError)
+          assert.equal(error.statusCode, 503)
+          return true
+        },
+      )
+    })
+
+    it('throws KeycloakAdminError when the response payload is not JSON', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.usersResponse = { status: 200, body: 'not-json' }
+      const client = makeClient(server.baseUrl)
+
+      await assert.rejects(
+        () => client.findUserByEmail('owner@example.com'),
+        (error) => {
+          assert.ok(error instanceof KeycloakAdminError)
+          assert.equal(error.statusCode, 0)
+          return true
+        },
+      )
+    })
+
+    it('throws KeycloakAdminError when the matched user has no id field', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.usersResponse = {
+        status: 200,
+        body: JSON.stringify([{ email: 'owner@example.com' }]),
+      }
+      const client = makeClient(server.baseUrl)
+
+      await assert.rejects(
+        () => client.findUserByEmail('owner@example.com'),
+        (error) => {
+          assert.ok(error instanceof KeycloakAdminError)
+          assert.equal(error.statusCode, 0)
           return true
         },
       )

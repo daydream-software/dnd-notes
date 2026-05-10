@@ -32,6 +32,15 @@ import {
   type TenantControlClient,
 } from './tenant-control-client.js'
 import type { KeycloakAdminClient } from './keycloak-admin-client.js'
+
+/**
+ * Narrow subset of `KeycloakAdminClient` that `createApp` actually uses
+ * (currently only the per-tenant role-assignment sweep). Typing the
+ * `keycloakAdminClient` option this way lets tests provide a minimal,
+ * type-safe fake without an `as unknown as KeycloakAdminClient` cast and
+ * keeps drift detection meaningful (CodeRabbit #200).
+ */
+type AppKeycloakAdminClient = Pick<KeycloakAdminClient, 'assignClientRoleToUser'>
 import { formatUnknownError } from './error-formatting.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import {
@@ -299,9 +308,10 @@ interface CreateAppOptions {
    * identity at the moment a pre-existing local portal_account is auto-linked
    * to that identity (#196 transition path: local → keycloak). When absent
    * the sweep is skipped — re-provisioning the tenant is the alternative
-   * trigger.
+   * trigger. Typed as a `Pick<>` of the concrete admin client to keep test
+   * fakes minimal and type-safe.
    */
-  keycloakAdminClient?: KeycloakAdminClient
+  keycloakAdminClient?: AppKeycloakAdminClient
 }
 
 const require = createRequire(import.meta.url)

@@ -18,6 +18,10 @@
  *   - assignClientRoleToUser: resolves the role's UUID and POSTs the
  *     role-mapping. Already-assigned mappings are accepted as no-ops
  *     (Keycloak returns 204 in that case).
+ *   - findUserByEmail: GET /users?email=<exact>&exact=true → returns the
+ *     first matching user or null. Used by the per-tenant role gate (#196)
+ *     as an email-fallback when an admin-created tenant has no
+ *     `keycloak_sub` on its portal_account row yet.
  */
 
 import { isDeepStrictEqual } from 'node:util'
@@ -377,6 +381,71 @@ export class KeycloakAdminClient {
         `Keycloak admin POST role-mapping for user "${userId}" on client "${clientId}" returned HTTP ${assignResponse.status}.`,
       )
     }
+  }
+
+  /**
+   * Resolves a Keycloak user by their email address using an exact-match
+   * lookup. Returns `{ id }` (the `sub`) when a unique user exists, or
+   * `null` when no user matches. Throws `KeycloakAdminError` on transport
+   * or parse failure.
+   *
+   * Used by tenant provisioning (#196) as the email-fallback for admin-
+   * created tenants whose portal_account row has no `keycloak_sub` yet —
+   * we still need to assign the per-tenant `tenant-member` role so the
+   * owner can authenticate against the tenant API on first login.
+   *
+   * Only the `id` field is returned because that is the only field the
+   * provisioner needs (the role-mapping POST is keyed on user id).
+   */
+  async findUserByEmail(email: string): Promise<{ id: string } | null> {
+    let response: Response
+
+    try {
+      response = await this.adminFetch(
+        `/users?email=${encodeURIComponent(email)}&exact=true`,
+      )
+    } catch (error) {
+      if (error instanceof KeycloakAdminError) {
+        throw error
+      }
+
+      throw new KeycloakAdminError(
+        0,
+        `Failed to reach Keycloak admin API: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    if (!response.ok) {
+      throw new KeycloakAdminError(
+        response.status,
+        `Keycloak admin GET users by email returned HTTP ${response.status}.`,
+      )
+    }
+
+    let users: { id?: string }[]
+
+    try {
+      users = (await response.json()) as { id?: string }[]
+    } catch {
+      throw new KeycloakAdminError(
+        0,
+        'Keycloak admin GET users by email returned a non-JSON response.',
+      )
+    }
+
+    if (!Array.isArray(users) || users.length === 0) {
+      return null
+    }
+
+    const first = users[0]
+    if (!first || typeof first.id !== 'string' || first.id.trim() === '') {
+      throw new KeycloakAdminError(
+        0,
+        'Keycloak admin GET users by email returned a payload without an id.',
+      )
+    }
+
+    return { id: first.id }
   }
 
   /**
