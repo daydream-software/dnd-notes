@@ -550,7 +550,7 @@ describe('customer portal — keycloak mode', () => {
     render(<App keycloakClientFactory={() => stub} />)
 
     expect(await screen.findByText('Customer dashboard')).toBeTruthy()
-    expect(screen.getByText('Misty Harbor')).toBeTruthy()
+    expect(await screen.findByText('Misty Harbor')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Sign in with Keycloak' })).toBeNull()
     expect(stub.freshToken).toHaveBeenCalledOnce()
     expect(dashboardAuthHeader).toBe('Bearer kc-access-token')
