@@ -73,7 +73,7 @@ This is set in each app's `src/index.css`. Do not override it with a flat color 
 ### Copy & tone
 
 - Sentence case everywhere: buttons, headings, labels. No Title Case, no ALL CAPS except the brand pill (`D&D NOTES` with `letter-spacing: 0.08em`).
-- No emoji in UI copy or code. Use MUI Rounded icons instead.
+- No emoji in UI copy, user-facing strings, or source code. Use MUI Rounded icons instead. **Exception:** Squad agent dispatch descriptions (e.g. `Agent({ description: "⚛️ Stef: ..." })`) use a per-member convention emoji as a visual tracking marker in scheduler logs — these are internal metadata, not UI copy. See `.claude/agents/{member}.md` for each member's marker.
 - Voice is calm and declarative — no exclamation points, no marketing puff.
 
 ---
