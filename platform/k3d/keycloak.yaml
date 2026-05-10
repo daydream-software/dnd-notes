@@ -216,6 +216,20 @@ spec:
               value: https://keycloak.127.0.0.1.nip.io
             - name: KC_HOSTNAME_STRICT
               value: "false"
+            # Persist Keycloak state in Postgres so per-tenant clients (created
+            # dynamically by the control-plane at provisioning time) survive
+            # pod restarts. Without these vars, Keycloak silently falls back to
+            # an ephemeral H2 file DB in /opt/keycloak/data/h2/, which has no
+            # PVC and is wiped on every pod restart. See bootstrap.sh for the
+            # matching CREATE DATABASE keycloak step.
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://platform-postgres.dnd-notes-platform.svc.cluster.local:5432/keycloak
+            - name: KC_DB_USERNAME
+              value: postgres
+            - name: KC_DB_PASSWORD
+              value: postgres
           ports:
             - name: http
               containerPort: 8080
