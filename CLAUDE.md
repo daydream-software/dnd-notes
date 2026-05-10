@@ -71,6 +71,7 @@ Use the `Agent` tool to spawn real subagents. Never role-play or simulate a memb
 Agent({
   subagent_type: "stef",          // or "data", "brand", "chunk", "mikey", "scribe", "squad"
   run_in_background: true,        // true for most work; false for sync review gates
+  isolation: "worktree",          // see "Worktree isolation" below
   model: "sonnet",                // "sonnet", "opus", or "haiku" — short names only
   description: "⚛️ Stef: build note editor form",
   prompt: "TEAM_ROOT: /path/to/repo\n\n..."
@@ -78,6 +79,19 @@ Agent({
 ```
 
 Always pass `TEAM_ROOT` (absolute path from `git rev-parse --show-toplevel`) in every spawn prompt.
+
+### Worktree isolation
+
+Use `isolation: "worktree"` whenever an agent will write code, run a build, or otherwise mutate the filesystem **and** another agent or the coordinator may be active in parallel. The runtime creates a temporary git worktree, the agent works in isolation, and the harness cleans it up automatically if no changes were made (otherwise it returns the worktree path + branch name in the result).
+
+Without isolation, parallel agents share `git checkout` state — one agent's `checkout feat/X` swaps the coordinator's working tree out from under them, and stray commits can land on the wrong branch.
+
+Reasonable rules of thumb:
+
+- Single agent + coordinator idle → isolation optional (small overhead win)
+- Two or more agents in parallel that each touch different branches → **always isolate**
+- Coordinator is actively editing/building while an agent runs → **always isolate the agent**
+- Read-only agents (Explore, scribe doing pure logging) → isolation optional
 
 ### Routing
 
