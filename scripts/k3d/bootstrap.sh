@@ -318,7 +318,6 @@ install_cert_manager
 apply_cert_manager_ca
 
 kubectl apply -f "${ROOT}/platform/k3d/postgres.yaml"
-apply_keycloak_manifest
 
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-postgres 180s
 
@@ -330,6 +329,21 @@ if [[ "$(
   kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
     psql -U postgres -c "CREATE DATABASE control_plane"
 fi
+
+# Create the keycloak database. Keycloak's deployment is configured (see
+# platform/k3d/keycloak.yaml) to use this DB instead of the default ephemeral
+# H2 file storage, so per-tenant clients created dynamically by the control-plane
+# survive Keycloak pod restarts.
+if [[ "$(
+  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+    psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'keycloak'"
+)" != "1" ]]; then
+  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+    psql -U postgres -c "CREATE DATABASE keycloak"
+fi
+
+# Apply Keycloak after both DBs exist so its first boot can connect immediately.
+apply_keycloak_manifest
 
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
 
