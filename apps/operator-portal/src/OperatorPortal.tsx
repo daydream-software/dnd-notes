@@ -52,7 +52,7 @@ import type {
 
 const { useCallback, useEffect, useMemo, useRef, useState } = React
 
-const surfaceRadius = 6
+export const surfaceRadius = '18px'
 
 function formatTimestamp(value: string | null) {
   return value ? new Date(value).toLocaleString() : 'Not recorded'

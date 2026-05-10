@@ -25,7 +25,7 @@ interface TenantDeprovisionDialogProps {
   onError: (message: string) => void
   onRefresh: () => Promise<void>
   open: boolean
-  surfaceRadius: number
+  surfaceRadius: string
   tenantStatus: FleetTenantStatus | null
 }
 

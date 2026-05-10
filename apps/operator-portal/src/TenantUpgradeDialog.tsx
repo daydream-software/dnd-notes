@@ -25,7 +25,7 @@ interface TenantUpgradeDialogProps {
   onUpgraded: (message: string) => void
   open: boolean
   suggestedVersion: string
-  surfaceRadius: number
+  surfaceRadius: string
   tenantStatus: FleetTenantStatus | null
 }
 
