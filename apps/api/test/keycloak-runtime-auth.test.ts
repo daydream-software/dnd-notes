@@ -9,6 +9,11 @@ import fakeKeycloakModule from '../../../tests/fake-keycloak.js'
 
 const tenantClientId = 'dnd-notes-tenant-app'
 const controlPlaneClientId = 'dnd-notes-control-plane'
+// The per-tenant role gate (#196) requires every authenticated tenant token
+// to carry the `tenant-member` role under `resource_access[clientId].roles`.
+// Tests issue tokens with this role by default; the "missing role" 403 case
+// is exercised explicitly.
+const tenantMemberRoles = ['tenant-member']
 const { startFakeKeycloakServer } = fakeKeycloakModule
 
 function createKeycloakRuntimeAuth(baseUrl: string, issuer: string) {
@@ -37,6 +42,7 @@ test('tenant runtime auth accepts Keycloak bearer tokens and links owner account
     email: 'owner@example.com',
     subject,
     userName: 'Owner Example',
+    roles: tenantMemberRoles,
   })
   const authed = withAuth(request(app), token)
 
@@ -69,6 +75,7 @@ test('tenant runtime auth preserves the linked owner when a Keycloak email chang
     email: 'owner@example.com',
     subject,
     userName: 'Owner Example',
+    roles: tenantMemberRoles,
   })
   const initialSessionResponse = await withAuth(request(app), initialToken).get('/api/auth/session')
   assert.equal(initialSessionResponse.status, 200)
@@ -86,6 +93,7 @@ test('tenant runtime auth preserves the linked owner when a Keycloak email chang
     email: claimedEmail,
     subject,
     userName: 'Renamed Owner',
+    roles: tenantMemberRoles,
   })
   const changedEmailAuth = withAuth(request(app), changedEmailToken)
 
@@ -138,12 +146,14 @@ test('tenant runtime auth returns 409 when another Keycloak subject claims an ex
     email: 'owner@example.com',
     subject: 'linked-owner-subject',
     userName: 'Linked Owner',
+    roles: tenantMemberRoles,
   })
   const conflictingToken = keycloak.issueToken({
     clientId: tenantClientId,
     email: 'owner@example.com',
     subject: 'conflicting-owner-subject',
     userName: 'Conflicting Owner',
+    roles: tenantMemberRoles,
   })
 
   const linkedSessionResponse = await withAuth(request(app), linkedToken).get('/api/auth/session')
@@ -187,6 +197,7 @@ test('tenant runtime auth maps typed Keycloak link conflicts to 409 without read
     email: 'owner@example.com',
     subject: 'typed-conflict-subject',
     userName: 'Typed Conflict',
+    roles: tenantMemberRoles,
   })
 
   const response = await withAuth(request(app), token).get('/api/auth/session')
@@ -269,12 +280,14 @@ test('guest share-link flows stay local alongside Keycloak bearer auth', async (
     email: 'owner@example.com',
     subject: 'owner-subject',
     userName: 'Owner Example',
+    roles: tenantMemberRoles,
   })
   const claimantToken = keycloak.issueToken({
     clientId: tenantClientId,
     email: 'claimant@example.com',
     subject: 'claimant-subject',
     userName: 'Claimant Example',
+    roles: tenantMemberRoles,
   })
   const owner = withAuth(request(app), ownerToken)
   const claimant = withAuth(request(app), claimantToken)
@@ -310,4 +323,139 @@ test('guest share-link flows stay local alongside Keycloak bearer auth', async (
   assert.equal(campaignsResponse.status, 200)
   assert.equal(campaignsResponse.body.campaigns.length, 1)
   assert.equal(campaignsResponse.body.campaigns[0].id, defaultCampaignId)
+})
+
+test('tenant runtime auth rejects Keycloak tokens that are missing the tenant-member role with 403', async (t) => {
+  const keycloak = await startFakeKeycloakServer()
+  t.after(() => keycloak.close())
+
+  const { app, cleanup } = await createTestApp({
+    runtimeAuth: createKeycloakRuntimeAuth(keycloak.baseUrl, keycloak.issuer),
+  })
+  t.after(cleanup)
+
+  // Token is signed by the right issuer for the right client and carries an
+  // email + sub — only the per-tenant `tenant-member` role is missing. The
+  // role gate (#196) must convert this into a 403 with a distinguishable
+  // message so the front-end can surface a "claim access" hint.
+  const tokenWithoutRole = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: 'unauthorized@example.com',
+    subject: 'unauthorized-subject',
+    userName: 'No Role User',
+    // Explicitly empty — no resource_access[clientId].roles.
+    roles: [],
+  })
+
+  const response = await withAuth(request(app), tokenWithoutRole).get('/api/campaigns')
+  assert.equal(response.status, 403)
+  assert.match(
+    response.body.error,
+    /not authorized for this tenant/i,
+  )
+})
+
+test('tenant runtime auth rejects Keycloak tokens that carry an unrelated role with 403', async (t) => {
+  const keycloak = await startFakeKeycloakServer()
+  t.after(() => keycloak.close())
+
+  const { app, cleanup } = await createTestApp({
+    runtimeAuth: createKeycloakRuntimeAuth(keycloak.baseUrl, keycloak.issuer),
+  })
+  t.after(cleanup)
+
+  // Roles are present but none match `tenant-member` — must still 403, not 200.
+  const tokenWithWrongRole = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: 'wrong-role@example.com',
+    subject: 'wrong-role-subject',
+    userName: 'Wrong Role User',
+    roles: ['unrelated-role', 'control-plane-admin'],
+  })
+
+  const response = await withAuth(request(app), tokenWithWrongRole).get('/api/campaigns')
+  assert.equal(response.status, 403)
+})
+
+test('tenant runtime auth in local mode is unaffected by the per-tenant role gate', async (t) => {
+  // Tenant in `local` mode: no Keycloak at all. The role check must not run
+  // (otherwise legacy local-auth tenants would be locked out). Local-session
+  // owners go through the session-token path and get 401, never 403.
+  const { app, cleanup, noteStore } = await createTestApp()
+  t.after(cleanup)
+
+  // Create a local owner and grab a session token via login.
+  await noteStore.createOwnerAccount({
+    displayName: 'Local Owner',
+    email: 'local@example.com',
+    password: 'moonlit-secret',
+  })
+
+  const loginResponse = await request(app).post('/api/auth/login').send({
+    email: 'local@example.com',
+    password: 'moonlit-secret',
+  })
+  assert.equal(loginResponse.status, 200)
+  const sessionToken = loginResponse.body.token as string
+  assert.equal(typeof sessionToken, 'string')
+
+  // The session token has no Keycloak roles. In local mode the role gate is
+  // entirely bypassed — local owner reaches /api/campaigns successfully.
+  const sessionResponse = await withAuth(request(app), sessionToken).get('/api/auth/session')
+  assert.equal(sessionResponse.status, 200)
+  assert.equal(sessionResponse.body.owner.email, 'local@example.com')
+
+  const campaignsResponse = await withAuth(request(app), sessionToken).get('/api/campaigns')
+  assert.equal(campaignsResponse.status, 200)
+
+  // Bogus bearer token in local mode → 401 (invalid session), NOT 403. The
+  // 401/403 split is preserved across modes.
+  const bogusResponse = await withAuth(request(app), 'definitely-not-a-real-token').get('/api/campaigns')
+  assert.equal(bogusResponse.status, 401)
+})
+
+test('tenant runtime auth grants access on the FIRST keycloak login once the role is present (transition path)', async (t) => {
+  // Models the local → keycloak transition: a tenant was created in local
+  // mode (an owner_account exists with no keycloak_sub). The control-plane
+  // assigns the per-tenant role to the matching Keycloak user (via the
+  // /portal/me auto-link sweep, exercised separately in the control-plane
+  // tests). On first Keycloak login, the resulting token carries the role
+  // and the tenant API auto-links the existing local owner_account by email.
+  const keycloak = await startFakeKeycloakServer()
+  t.after(() => keycloak.close())
+
+  const { app, cleanup, noteStore } = await createTestApp({
+    runtimeAuth: createKeycloakRuntimeAuth(keycloak.baseUrl, keycloak.issuer),
+  })
+  t.after(cleanup)
+
+  // Pre-existing local owner from the local-auth era.
+  const legacyOwner = await noteStore.createOwnerAccount({
+    displayName: 'Legacy Local Owner',
+    email: 'legacy@example.com',
+    password: 'moonlit-secret',
+  })
+  assert.ok(legacyOwner)
+  assert.equal(legacyOwner.keycloakSub, null)
+
+  // First Keycloak login carries the role (assigned by the control-plane
+  // when the customer auto-linked their portal_account).
+  const firstKeycloakToken = keycloak.issueToken({
+    clientId: tenantClientId,
+    email: 'legacy@example.com',
+    subject: 'legacy-keycloak-sub',
+    userName: 'Legacy Migrated',
+    roles: tenantMemberRoles,
+  })
+
+  const sessionResponse = await withAuth(request(app), firstKeycloakToken).get('/api/auth/session')
+  assert.equal(sessionResponse.status, 200)
+  assert.equal(sessionResponse.body.owner.id, legacyOwner.id)
+  assert.equal(sessionResponse.body.owner.keycloakSub, 'legacy-keycloak-sub')
+
+  // The legacy owner row is now linked.
+  const ownerAccounts = await noteStore.listOwnerAccounts()
+  const linkedOwner = ownerAccounts.find((owner) => owner.id === legacyOwner.id)
+  assert.ok(linkedOwner)
+  assert.equal(linkedOwner.keycloakSub, 'legacy-keycloak-sub')
 })

@@ -321,6 +321,10 @@ const app = createApp({
   tenantBaseDomain: TENANT_BASE_DOMAIN,
   tenantPublicScheme: TENANT_PUBLIC_SCHEME,
   tenantControlClient,
+  // Used by the portal middleware for the #196 transition path: when an
+  // existing local owner is auto-linked to a Keycloak identity, assign the
+  // per-tenant member role for every tenant they already own.
+  keycloakAdminClient: keycloakAdminClient ?? undefined,
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000
 const serverRef: { current?: Server } = {}

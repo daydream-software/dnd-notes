@@ -37,6 +37,15 @@ const defaultDeleteTimeoutMs = 120_000
 const maxKubernetesLabelValueLength = 63
 const containerImageTagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/
 
+/**
+ * Per-tenant client role used by the tenant API to gate access. The role is
+ * created on the per-tenant Keycloak client (`dnd-notes-tenant-{tenantId}`)
+ * at provision time and assigned to the tenant creator's Keycloak user. The
+ * tenant API checks `resource_access[clientId].roles` for this role on every
+ * authenticated request (#196).
+ */
+export const tenantMemberRoleName = 'tenant-member'
+
 type KubernetesObjectClient = Pick<
   KubernetesObjectApi,
   'create' | 'delete' | 'read' | 'replace'
@@ -459,6 +468,37 @@ export class TenantProvisioningService implements TenantProvisioningPort {
               `http://${hostname}`,
             ],
           })
+
+          // Create the per-tenant member role on the per-tenant client. The
+          // tenant API gates access on this role (#196) and the absence of it
+          // for an otherwise valid Keycloak token returns 403. Failure here
+          // is fatal for the same reason ensureClient is fatal — the tenant
+          // is unusable in keycloak mode without it.
+          await this.keycloakAdminClient.ensureClientRole(
+            tenantClientId,
+            tenantMemberRoleName,
+          )
+
+          // Assign the role to the tenant creator's Keycloak user so the
+          // first member can actually access the tenant. The portal_account
+          // row carries the keycloak_sub once the customer has signed in via
+          // Keycloak at least once. If the owner has no sub yet (transition
+          // from local → keycloak mode) the assignment is deferred to the
+          // /portal/me middleware, which performs the same idempotent role
+          // assignment on first Keycloak login. Skipping is therefore safe
+          // and intentional — re-provisioning after the owner's first
+          // Keycloak login will pick up the sub and assign the role.
+          const ownerAccount = await this.tenantRegistry.getPortalAccount(
+            refreshedTenant.ownerId,
+          )
+
+          if (ownerAccount?.keycloakSub) {
+            await this.keycloakAdminClient.assignClientRoleToUser(
+              ownerAccount.keycloakSub,
+              tenantClientId,
+              tenantMemberRoleName,
+            )
+          }
         }
 
         await this.infrastructureManager.applyTenantResources(bundle)

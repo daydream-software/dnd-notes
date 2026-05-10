@@ -7,6 +7,9 @@ import fakeKeycloakModule from '../../../tests/fake-keycloak.js'
 
 const keycloakRealm = 'dnd-notes'
 const keycloakClientId = 'dnd-notes-web'
+// Per-tenant role gate (#196): every authenticated tenant token must carry
+// the `tenant-member` role under `resource_access[clientId].roles`.
+const tenantMemberRoles = ['tenant-member']
 const { startFakeKeycloakServer } = fakeKeycloakModule
 
 function createRuntimeAuth(baseUrl: string, issuer: string) {
@@ -69,6 +72,7 @@ test('tenant routes accept Keycloak JWTs and keep share-link guest flows local',
     subject: 'tenant-owner-sub',
     email: 'owner@example.com',
     userName: 'Tenant Owner',
+    roles: tenantMemberRoles,
   })
 
   const sessionResponse = await request(app)
@@ -111,6 +115,7 @@ test('tenant routes accept Keycloak JWTs and keep share-link guest flows local',
     subject: 'tenant-collaborator-sub',
     email: 'ally@example.com',
     userName: 'Campaign Ally',
+    roles: tenantMemberRoles,
   })
   const claimResponse = await request(app)
     .post(`/api/shared/${shareLinkResponse.body.token}/membership/claim`)
@@ -142,6 +147,7 @@ test('tenant routes tolerate a small future nbf skew from Keycloak', async (t) =
     email: 'owner@example.com',
     userName: 'Tenant Owner',
     notBeforeOffsetSeconds: 5,
+    roles: tenantMemberRoles,
   })
 
   const response = await request(app)

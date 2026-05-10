@@ -15,7 +15,21 @@ interface TenantJwtClaims extends JwtClaims {
   email?: string
   name?: string
   preferred_username?: string
+  resource_access?: Record<string, { roles?: string[] } | undefined>
 }
+
+/**
+ * Per-tenant client role expected on every authenticated Keycloak token. The
+ * role lives on the per-tenant Keycloak client (`dnd-notes-tenant-{tenantId}`)
+ * and is created + assigned by the control-plane at provisioning time (#196).
+ * Tokens that pass signature/issuer/audience validation but lack this role
+ * are rejected with HTTP 403 — the user is authenticated but not authorized
+ * for this tenant.
+ */
+const tenantMemberRoleName = 'tenant-member'
+
+const FORBIDDEN_TOKEN_MESSAGE =
+  'Your account is not authorized for this tenant. The tenant owner must grant you access.'
 
 export class KeycloakTokenValidationError extends Error {
   constructor(
@@ -151,6 +165,19 @@ export function createTenantRuntimeAuth(
 
       if (typeof claims.email !== 'string' || claims.email.trim() === '') {
         throw new KeycloakTokenValidationError(401, INVALID_TOKEN_MESSAGE)
+      }
+
+      // Per-tenant role gate (#196): the token must carry the
+      // `tenant-member` role under `resource_access[clientId].roles` of the
+      // per-tenant Keycloak client. The control-plane creates the role at
+      // provisioning time and assigns it to the tenant creator. Without it
+      // the token is valid (signature/issuer/audience all checked above)
+      // but the user has not been granted access to this tenant — return
+      // 403 with a distinguishable message so the front-end can prompt
+      // the user to claim or request access.
+      const clientRoles = claims.resource_access?.[clientId]?.roles ?? []
+      if (!clientRoles.includes(tenantMemberRoleName)) {
+        throw new KeycloakTokenValidationError(403, FORBIDDEN_TOKEN_MESSAGE)
       }
 
       return {

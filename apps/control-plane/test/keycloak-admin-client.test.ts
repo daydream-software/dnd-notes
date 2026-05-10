@@ -11,6 +11,14 @@ interface FakeServerState {
   tokenRequests: number
   adminRequests: Array<{ method: string; path: string; body: string }>
   clients: Record<string, KeycloakClientSpec & { id: string }>
+  /** Map of `${clientInternalId}/${roleName}` → role record. */
+  clientRoles: Record<string, { id: string; name: string }>
+  /** Map of `${userId}/${clientInternalId}` → list of assigned role records. */
+  userClientRoleMappings: Record<string, Array<{ id: string; name: string }>>
+  /** Override: when true, GET role responds 404 even if the role exists in `clientRoles`. */
+  forceRoleGetMiss?: boolean
+  /** Override: when true, POST role responds with the configured status. */
+  roleCreateResponse?: { status: number; body?: object }
   tokenResponse?: { status: number; body: object }
   adminResponse?: { status: number; body: object }
 }
@@ -49,6 +57,121 @@ async function startFakeKeycloakAdminServer(state: FakeServerState) {
             expires_in: 300,
           }),
         )
+        return
+      }
+
+      // Role-mapping endpoints (`/admin/realms/{realm}/users/{userId}/role-mappings/clients/{clientUUID}`)
+      const roleMappingPattern = new RegExp(
+        `^/admin/realms/${TEST_REALM}/users/([^/]+)/role-mappings/clients/([^/]+)$`,
+      )
+      const roleMappingMatch = url.match(roleMappingPattern)
+      if (roleMappingMatch) {
+        state.adminRequests.push({ method, path: url, body })
+        const userId = decodeURIComponent(roleMappingMatch[1] ?? '')
+        const clientInternalId = roleMappingMatch[2] ?? ''
+        const mappingKey = `${userId}/${clientInternalId}`
+
+        if (method === 'POST') {
+          let assignments: Array<{ id: string; name: string }>
+
+          try {
+            assignments = JSON.parse(body) as Array<{ id: string; name: string }>
+          } catch {
+            response.writeHead(400)
+            response.end()
+            return
+          }
+
+          state.userClientRoleMappings[mappingKey] = [
+            ...(state.userClientRoleMappings[mappingKey] ?? []),
+            ...assignments,
+          ]
+          response.writeHead(204)
+          response.end()
+          return
+        }
+
+        response.writeHead(405)
+        response.end()
+        return
+      }
+
+      // Per-client role endpoints (`/admin/realms/{realm}/clients/{clientUUID}/roles[/{roleName}]`)
+      const clientRolesPattern = new RegExp(
+        `^/admin/realms/${TEST_REALM}/clients/([^/]+)/roles(?:/([^/?]+))?$`,
+      )
+      const clientRolesMatch = url.match(clientRolesPattern)
+      if (clientRolesMatch) {
+        state.adminRequests.push({ method, path: url, body })
+        const clientInternalId = clientRolesMatch[1] ?? ''
+        const roleName = clientRolesMatch[2]
+          ? decodeURIComponent(clientRolesMatch[2])
+          : undefined
+        const roleKey = `${clientInternalId}/${roleName ?? ''}`
+
+        if (method === 'GET' && roleName) {
+          if (state.forceRoleGetMiss) {
+            response.writeHead(404)
+            response.end()
+            return
+          }
+
+          const role = state.clientRoles[roleKey]
+
+          if (role) {
+            response.writeHead(200, { 'content-type': 'application/json' })
+            response.end(JSON.stringify(role))
+          } else {
+            response.writeHead(404)
+            response.end()
+          }
+
+          return
+        }
+
+        if (method === 'POST' && !roleName) {
+          if (state.roleCreateResponse) {
+            response.writeHead(state.roleCreateResponse.status, {
+              'content-type': 'application/json',
+            })
+            response.end(JSON.stringify(state.roleCreateResponse.body ?? {}))
+            return
+          }
+
+          let payload: { name?: string }
+          try {
+            payload = JSON.parse(body) as { name?: string }
+          } catch {
+            response.writeHead(400)
+            response.end()
+            return
+          }
+
+          if (!payload.name) {
+            response.writeHead(400)
+            response.end()
+            return
+          }
+
+          const newRoleKey = `${clientInternalId}/${payload.name}`
+
+          if (state.clientRoles[newRoleKey]) {
+            response.writeHead(409)
+            response.end()
+            return
+          }
+
+          state.clientRoles[newRoleKey] = {
+            id: `role-id-${payload.name}`,
+            name: payload.name,
+          }
+          response.writeHead(201)
+          response.end()
+          return
+        }
+
+        response.writeHead(405)
+        response.end()
         return
       }
 
@@ -181,6 +304,8 @@ describe('KeycloakAdminClient', () => {
       tokenRequests: 0,
       adminRequests: [],
       clients: {},
+      clientRoles: {},
+      userClientRoleMappings: {},
     }
   })
 
@@ -364,6 +489,160 @@ describe('KeycloakAdminClient', () => {
 
       const deleteReq = state.adminRequests.find((r) => r.method === 'DELETE')
       assert.equal(deleteReq, undefined)
+    })
+  })
+
+  describe('ensureClientRole (#196 per-tenant role gate)', () => {
+    it('creates the role when it does not exist on the client', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.clients['parent-client'] = {
+        id: 'id-parent-client',
+        clientId: 'parent-client',
+        enabled: true,
+      }
+      const client = makeClient(server.baseUrl)
+
+      await client.ensureClientRole('parent-client', 'tenant-member')
+
+      assert.ok(state.clientRoles['id-parent-client/tenant-member'])
+      assert.equal(
+        state.clientRoles['id-parent-client/tenant-member']?.name,
+        'tenant-member',
+      )
+      // POST should have been issued.
+      const postReq = state.adminRequests.find(
+        (r) => r.method === 'POST' && r.path.endsWith('/roles'),
+      )
+      assert.ok(postReq)
+    })
+
+    it('is a no-op when the role already exists (idempotent)', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.clients['parent-client'] = {
+        id: 'id-parent-client',
+        clientId: 'parent-client',
+        enabled: true,
+      }
+      state.clientRoles['id-parent-client/tenant-member'] = {
+        id: 'role-id-tenant-member',
+        name: 'tenant-member',
+      }
+      const client = makeClient(server.baseUrl)
+
+      await client.ensureClientRole('parent-client', 'tenant-member')
+
+      // No POST issued — only the GET role probe.
+      const postReq = state.adminRequests.find(
+        (r) => r.method === 'POST' && r.path.endsWith('/roles'),
+      )
+      assert.equal(postReq, undefined)
+    })
+
+    it('treats a 409 on POST as a successful no-op (concurrent create race)', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.clients['parent-client'] = {
+        id: 'id-parent-client',
+        clientId: 'parent-client',
+        enabled: true,
+      }
+      // Force the GET to miss so the wrapper falls through to POST, but POST
+      // returns 409 — simulating another provisioner creating the role
+      // between our GET and POST.
+      state.forceRoleGetMiss = true
+      state.roleCreateResponse = { status: 409, body: { error: 'conflict' } }
+      const client = makeClient(server.baseUrl)
+
+      // Must not throw.
+      await client.ensureClientRole('parent-client', 'tenant-member')
+    })
+
+    it('throws KeycloakAdminError when the parent client does not exist', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      const client = makeClient(server.baseUrl)
+
+      await assert.rejects(
+        () => client.ensureClientRole('missing-client', 'tenant-member'),
+        (error) => {
+          assert.ok(error instanceof KeycloakAdminError)
+          assert.equal(error.statusCode, 404)
+          return true
+        },
+      )
+    })
+  })
+
+  describe('assignClientRoleToUser (#196 per-tenant role gate)', () => {
+    it('issues a POST role-mapping with the resolved role id and name', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.clients['parent-client'] = {
+        id: 'id-parent-client',
+        clientId: 'parent-client',
+        enabled: true,
+      }
+      state.clientRoles['id-parent-client/tenant-member'] = {
+        id: 'role-id-tenant-member',
+        name: 'tenant-member',
+      }
+      const client = makeClient(server.baseUrl)
+
+      await client.assignClientRoleToUser(
+        'kc-user-sub-123',
+        'parent-client',
+        'tenant-member',
+      )
+
+      const mapping = state.userClientRoleMappings['kc-user-sub-123/id-parent-client']
+      assert.ok(mapping)
+      assert.equal(mapping?.length, 1)
+      assert.equal(mapping?.[0]?.id, 'role-id-tenant-member')
+      assert.equal(mapping?.[0]?.name, 'tenant-member')
+    })
+
+    it('throws KeycloakAdminError when the role cannot be resolved', async () => {
+      server = await startFakeKeycloakAdminServer(state)
+      state.clients['parent-client'] = {
+        id: 'id-parent-client',
+        clientId: 'parent-client',
+        enabled: true,
+      }
+      // No role registered.
+      const client = makeClient(server.baseUrl)
+
+      await assert.rejects(
+        () => client.assignClientRoleToUser('any-user', 'parent-client', 'tenant-member'),
+        (error) => {
+          assert.ok(error instanceof KeycloakAdminError)
+          assert.equal(error.statusCode, 404)
+          return true
+        },
+      )
+    })
+
+    it('is naturally idempotent — assigning the same role twice produces two POSTs but no errors', async () => {
+      // Keycloak itself returns 204 for already-assigned mappings; the fake
+      // server appends to a list per call. The wrapper does not de-duplicate;
+      // it relies on Keycloak to be the source of truth. Assert the wrapper
+      // does not throw on repeated assignment.
+      server = await startFakeKeycloakAdminServer(state)
+      state.clients['parent-client'] = {
+        id: 'id-parent-client',
+        clientId: 'parent-client',
+        enabled: true,
+      }
+      state.clientRoles['id-parent-client/tenant-member'] = {
+        id: 'role-id-tenant-member',
+        name: 'tenant-member',
+      }
+      const client = makeClient(server.baseUrl)
+
+      await client.assignClientRoleToUser('user-1', 'parent-client', 'tenant-member')
+      await client.assignClientRoleToUser('user-1', 'parent-client', 'tenant-member')
+
+      // Two POSTs were issued; both succeeded.
+      const postReqs = state.adminRequests.filter(
+        (r) => r.method === 'POST' && r.path.includes('/role-mappings/clients/'),
+      )
+      assert.equal(postReqs.length, 2)
     })
   })
 
