@@ -719,3 +719,221 @@ describe('Portal Keycloak auth — auto-create on first login', () => {
     assert.equal(created.displayName, 'localpart')
   })
 })
+
+describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transition)', () => {
+  const keycloakRealm = 'dnd-notes-dev'
+  const portalClientId = 'dnd-notes-customer-portal'
+  const { startFakeKeycloakServer } = fakeKeycloakModule
+  let tenantRegistry: TenantRegistry
+  let keycloak: Awaited<ReturnType<typeof startFakeKeycloakServer>> | undefined
+  let cleanupTenantRegistry: (() => Promise<void>) | undefined
+
+  // Lightweight fake matching the public surface of KeycloakAdminClient that
+  // the portal middleware calls into. Records the sweep's role-assignment
+  // calls so tests can assert the bridge fired (or didn't) for each tenant.
+  class FakeKeycloakAdminClient {
+    assignClientRoleCalls: Array<{
+      userId: string
+      clientId: string
+      roleName: string
+    }> = []
+    shouldThrow = false
+
+    async assignClientRoleToUser(
+      userId: string,
+      clientId: string,
+      roleName: string,
+    ): Promise<void> {
+      if (this.shouldThrow) {
+        throw new Error('synthetic Keycloak admin failure')
+      }
+
+      this.assignClientRoleCalls.push({ userId, clientId, roleName })
+    }
+  }
+
+  beforeEach(() => {
+    const registry = createTestTenantRegistry()
+    tenantRegistry = registry.tenantRegistry
+    cleanupTenantRegistry = registry.cleanup
+  })
+
+  afterEach(async () => {
+    await keycloak?.close()
+    keycloak = undefined
+    await cleanupTenantRegistry?.()
+    cleanupTenantRegistry = undefined
+  })
+
+  it('assigns the per-tenant role for every owned tenant the moment a local account is auto-linked', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    // Pre-existing local-mode portal account with two existing tenants.
+    await tenantRegistry.createPortalAccount({
+      id: 'legacy-owner-1',
+      email: 'legacy@example.com',
+      displayName: 'Legacy Owner',
+    })
+    await tenantRegistry.createTenant({
+      id: 'tenant-alpha',
+      slug: 'alpha',
+      ownerId: 'legacy-owner-1',
+      version: '1.0.0',
+    })
+    await tenantRegistry.createTenant({
+      id: 'tenant-beta',
+      slug: 'beta',
+      ownerId: 'legacy-owner-1',
+      version: '1.0.0',
+    })
+
+    const portalKeycloakAuth = createPortalKeycloakAuth({
+      mode: 'keycloak',
+      keycloakUrl: keycloak.baseUrl,
+      keycloakRealm,
+      clientId: portalClientId,
+    })
+    const fakeKeycloakAdminClient = new FakeKeycloakAdminClient()
+    const app = createApp({
+      tenantRegistry,
+      adminToken: 'any-token',
+      portalAuthMode: 'keycloak',
+      portalKeycloakAuth,
+      // Cast: real `KeycloakAdminClient` carries token-cache state we don't
+      // need to model in this test — only the methods called by the sweep.
+      keycloakAdminClient: fakeKeycloakAdminClient as unknown as Parameters<
+        typeof createApp
+      >[0]['keycloakAdminClient'],
+    })
+    const keycloakSub = 'kc-sub-legacy'
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'legacy@example.com',
+      subject: keycloakSub,
+    })
+
+    await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    // Sweep fired exactly once per owned tenant, all targeting the same
+    // Keycloak user (the freshly-linked sub).
+    assert.equal(fakeKeycloakAdminClient.assignClientRoleCalls.length, 2)
+    const assignedClientIds = fakeKeycloakAdminClient.assignClientRoleCalls
+      .map((call) => call.clientId)
+      .sort()
+    assert.deepEqual(assignedClientIds, [
+      'dnd-notes-tenant-tenant-alpha',
+      'dnd-notes-tenant-tenant-beta',
+    ])
+    for (const call of fakeKeycloakAdminClient.assignClientRoleCalls) {
+      assert.equal(call.userId, keycloakSub)
+      assert.equal(call.roleName, 'tenant-member')
+    }
+  })
+
+  it('skips the sweep when the Keycloak identity is already linked (fast path) — no admin REST traffic', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    const keycloakSub = 'kc-sub-already-linked'
+    await tenantRegistry.createPortalAccount({
+      id: 'linked-acct-1',
+      email: 'linked@example.com',
+      displayName: 'Already Linked',
+      keycloakSub,
+      authProvider: 'keycloak',
+    })
+    await tenantRegistry.createTenant({
+      id: 'tenant-already',
+      slug: 'already',
+      ownerId: 'linked-acct-1',
+      version: '1.0.0',
+    })
+
+    const portalKeycloakAuth = createPortalKeycloakAuth({
+      mode: 'keycloak',
+      keycloakUrl: keycloak.baseUrl,
+      keycloakRealm,
+      clientId: portalClientId,
+    })
+    const fakeKeycloakAdminClient = new FakeKeycloakAdminClient()
+    const app = createApp({
+      tenantRegistry,
+      adminToken: 'any-token',
+      portalAuthMode: 'keycloak',
+      portalKeycloakAuth,
+      keycloakAdminClient: fakeKeycloakAdminClient as unknown as Parameters<
+        typeof createApp
+      >[0]['keycloakAdminClient'],
+    })
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'linked@example.com',
+      subject: keycloakSub,
+    })
+
+    await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    // Fast path: no role-assignment calls fire. The sweep is scoped to the
+    // auto-link branch; assigning roles on every authenticated request would
+    // hammer the Keycloak admin REST API.
+    assert.equal(fakeKeycloakAdminClient.assignClientRoleCalls.length, 0)
+  })
+
+  it('does not block the portal request when the role-assignment sweep fails (soft failure)', async () => {
+    keycloak = await startFakeKeycloakServer(keycloakRealm)
+
+    await tenantRegistry.createPortalAccount({
+      id: 'soft-fail-owner',
+      email: 'soft-fail@example.com',
+      displayName: 'Soft Fail Owner',
+    })
+    await tenantRegistry.createTenant({
+      id: 'tenant-soft-fail',
+      slug: 'soft-fail',
+      ownerId: 'soft-fail-owner',
+      version: '1.0.0',
+    })
+
+    const portalKeycloakAuth = createPortalKeycloakAuth({
+      mode: 'keycloak',
+      keycloakUrl: keycloak.baseUrl,
+      keycloakRealm,
+      clientId: portalClientId,
+    })
+    const fakeKeycloakAdminClient = new FakeKeycloakAdminClient()
+    fakeKeycloakAdminClient.shouldThrow = true
+    const app = createApp({
+      tenantRegistry,
+      adminToken: 'any-token',
+      portalAuthMode: 'keycloak',
+      portalKeycloakAuth,
+      keycloakAdminClient: fakeKeycloakAdminClient as unknown as Parameters<
+        typeof createApp
+      >[0]['keycloakAdminClient'],
+    })
+    const keycloakSub = 'kc-sub-soft-fail'
+    const token = keycloak.issueToken({
+      clientId: portalClientId,
+      email: 'soft-fail@example.com',
+      subject: keycloakSub,
+    })
+
+    // Even though the admin REST throws, the portal request still succeeds —
+    // the customer can still see their dashboard. Re-provisioning the tenant
+    // remains the canonical path to acquire the role.
+    await request(app)
+      .get('/portal/me')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+
+    // Sub was still persisted on the auto-link branch (the sweep failure is
+    // strictly downstream).
+    const linked = await tenantRegistry.getPortalAccountByKeycloakSub(keycloakSub)
+    assert.ok(linked)
+  })
+})

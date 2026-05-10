@@ -19,7 +19,7 @@ import {
   applyLeastPrivilegeTenantGrants,
   initializeTenantNoteStoreDatabase,
 } from './tenant-database-bootstrap.js'
-import type { KeycloakAdminClient } from './keycloak-admin-client.js'
+import { KeycloakAdminError, type KeycloakAdminClient } from './keycloak-admin-client.js'
 import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
 import type {
   Tenant,
@@ -36,6 +36,15 @@ const defaultReadyPollIntervalMs = 2_000
 const defaultDeleteTimeoutMs = 120_000
 const maxKubernetesLabelValueLength = 63
 const containerImageTagPattern = /^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$/
+
+/**
+ * Per-tenant client role used by the tenant API to gate access. The role is
+ * created on the per-tenant Keycloak client (`dnd-notes-tenant-{tenantId}`)
+ * at provision time and assigned to the tenant creator's Keycloak user. The
+ * tenant API checks `resource_access[clientId].roles` for this role on every
+ * authenticated request (#196).
+ */
+export const tenantMemberRoleName = 'tenant-member'
 
 type KubernetesObjectClient = Pick<
   KubernetesObjectApi,
@@ -432,7 +441,15 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         // The KC step runs before applyTenantResources so the client is in place
         // when the pod first initialises. Failure here is intentionally fatal for
         // provisioning — the tenant SPA cannot authenticate without it.
-        if (this.keycloakAdminClient) {
+        //
+        // Skip entirely when tenantRuntimeAuth.mode === 'local': the tenant API
+        // does not enforce Keycloak roles in local mode, so there's no reason to
+        // make provisioning depend on Keycloak admin availability for that path
+        // (CodeRabbit #200).
+        if (
+          this.keycloakAdminClient &&
+          this.tenantRuntimeAuth.mode === 'keycloak'
+        ) {
           const hostname = bundle.resources.hostname
           const tenantClientId = `dnd-notes-tenant-${refreshedTenant.id}`
           await this.keycloakAdminClient.ensureClient({
@@ -459,6 +476,50 @@ export class TenantProvisioningService implements TenantProvisioningPort {
               `http://${hostname}`,
             ],
           })
+
+          // Create the per-tenant member role on the per-tenant client. The
+          // tenant API gates access on this role (#196) and the absence of it
+          // for an otherwise valid Keycloak token returns 403. Failure here
+          // is fatal for the same reason ensureClient is fatal — the tenant
+          // is unusable in keycloak mode without it.
+          await this.keycloakAdminClient.ensureClientRole(
+            tenantClientId,
+            tenantMemberRoleName,
+          )
+
+          // Assign the role to the tenant creator's Keycloak user so the
+          // first member can actually access the tenant.
+          //
+          // Resolution order:
+          //   1. portal_account.keycloak_sub — the canonical link, populated
+          //      after the customer signs in through the portal Keycloak
+          //      flow at least once.
+          //   2. tenant.initialAdminEmail — admin-created tenants (control-
+          //      plane API or operator portal) record the intended owner's
+          //      email at create time. We resolve it to a Keycloak user id
+          //      via the admin REST API. This is the path the k3d smoke
+          //      and operator-portal flows depend on, since they create the
+          //      tenant before any portal sign-in has produced a sub.
+          //
+          // If neither resolution yields a user, or if the email lookup
+          // returns more than one Keycloak user (ambiguous match in realms
+          // that allow duplicate emails), the assignment is deferred to the
+          // portal middleware, which retries the sweep on first Keycloak
+          // login (#200 transition path). Skipping is safe — re-provisioning
+          // after the owner has signed in once will pick up the sub via the
+          // canonical portal_account.keycloak_sub link and assign the role.
+          const ownerKeycloakSub = await this.resolveTenantOwnerKeycloakSub(
+            refreshedTenant,
+            registryClient,
+          )
+
+          if (ownerKeycloakSub) {
+            await this.keycloakAdminClient.assignClientRoleToUser(
+              ownerKeycloakSub,
+              tenantClientId,
+              tenantMemberRoleName,
+            )
+          }
         }
 
         await this.infrastructureManager.applyTenantResources(bundle)
@@ -596,6 +657,73 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     }
 
     return tenant
+  }
+
+  /**
+   * Returns the Keycloak `sub` of the tenant's owner using the resolution
+   * order documented at the call site:
+   *
+   *   1. portal_account.keycloak_sub (canonical, populated after the first
+   *      portal Keycloak sign-in).
+   *   2. tenant.initialAdminEmail looked up via the admin REST API.
+   *
+   * Returns null when neither path produces a *unique* user. An ambiguous
+   * email match (multiple Keycloak users with the same email) is treated
+   * the same as "not found" — we log a warning and defer the role
+   * assignment to the next provisioning sweep, where the canonical
+   * portal_account.keycloak_sub link should be in place. Other admin-API
+   * errors surface as `KeycloakAdminError` so the caller can treat them
+   * the same as any other provisioning failure.
+   *
+   * Caller is expected to have already verified that
+   * `this.keycloakAdminClient` is defined and that
+   * `this.tenantRuntimeAuth.mode === 'keycloak'`. The `registryClient`
+   * argument MUST be the lock-scoped client passed into `withTenantLock`,
+   * so the portal-account read participates in the same locked transaction
+   * as the rest of provisioning (no fresh registry connection while the
+   * tenant lock is held).
+   */
+  private async resolveTenantOwnerKeycloakSub(
+    tenant: Tenant,
+    registryClient: TenantRegistryClientLike,
+  ): Promise<string | null> {
+    const ownerAccount = await this.tenantRegistry.getPortalAccount(
+      tenant.ownerId,
+      registryClient,
+    )
+
+    if (ownerAccount?.keycloakSub) {
+      return ownerAccount.keycloakSub
+    }
+
+    const fallbackEmail = tenant.initialAdminEmail
+    if (!fallbackEmail || fallbackEmail.trim() === '') {
+      return null
+    }
+
+    // Caller-side guard already ensured keycloakAdminClient exists; the cast
+    // here keeps TypeScript happy without re-checking at the call site.
+    const keycloakAdminClient = this.keycloakAdminClient
+    if (!keycloakAdminClient) {
+      return null
+    }
+
+    try {
+      const user = await keycloakAdminClient.findUserByEmail(fallbackEmail)
+      return user?.id ?? null
+    } catch (error) {
+      // Ambiguous email match — Keycloak returned more than one user for
+      // this address. We refuse to guess; assignment is deferred to the
+      // portal-login sweep on first sign-in. Other KeycloakAdminError
+      // codes (auth failures, 5xx) keep propagating and fail provisioning.
+      if (error instanceof KeycloakAdminError && error.statusCode === 409) {
+        console.warn(
+          `[provisioning] Keycloak email "${fallbackEmail}" matched multiple users for tenant "${tenant.id}"; deferring tenant-member role assignment.`,
+        )
+        return null
+      }
+      throw error
+    }
   }
 }
 

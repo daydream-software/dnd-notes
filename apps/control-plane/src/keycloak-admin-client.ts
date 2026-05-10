@@ -12,6 +12,16 @@
  *     realm-imported client already matches the desired spec.
  *   - deleteClient: GET by clientId → DELETE internal id; no-op if not found.
  *   - getClient: GET by clientId → returns spec or null.
+ *   - ensureClientRole: GET role by name → POST if missing. Treats 409
+ *     (concurrent create) as a no-op. Used by the per-tenant role gate
+ *     (#196) to attach a `tenant-member` role to the per-tenant client.
+ *   - assignClientRoleToUser: resolves the role's UUID and POSTs the
+ *     role-mapping. Already-assigned mappings are accepted as no-ops
+ *     (Keycloak returns 204 in that case).
+ *   - findUserByEmail: GET /users?email=<exact>&exact=true → returns the
+ *     first matching user or null. Used by the per-tenant role gate (#196)
+ *     as an email-fallback when an admin-created tenant has no
+ *     `keycloak_sub` on its portal_account row yet.
  */
 
 import { isDeepStrictEqual } from 'node:util'
@@ -248,6 +258,207 @@ export class KeycloakAdminClient {
         `Keycloak admin POST client "${spec.clientId}" returned HTTP ${response.status}.`,
       )
     }
+  }
+
+  /**
+   * Ensures a client role with the given name exists on the client identified
+   * by `clientId`. Idempotent: if the role already exists, the call is a
+   * no-op. Treats Keycloak's 409 (returned when a concurrent process creates
+   * the role between our GET and POST) as a successful no-op.
+   *
+   * Throws `KeycloakAdminError` when the parent client does not exist —
+   * roles are namespaced under a client, so there is no sensible default
+   * behavior in that case.
+   */
+  async ensureClientRole(clientId: string, roleName: string): Promise<void> {
+    const client = await this.getClient(clientId)
+
+    if (!client) {
+      throw new KeycloakAdminError(
+        404,
+        `Cannot create role "${roleName}" — Keycloak client "${clientId}" does not exist.`,
+      )
+    }
+
+    // Fast path: role already exists.
+    const existingRoleResponse = await this.adminFetch(
+      `/clients/${client.id}/roles/${encodeURIComponent(roleName)}`,
+    )
+
+    if (existingRoleResponse.ok) {
+      return
+    }
+
+    if (existingRoleResponse.status !== 404) {
+      throw new KeycloakAdminError(
+        existingRoleResponse.status,
+        `Keycloak admin GET role "${roleName}" on client "${clientId}" returned HTTP ${existingRoleResponse.status}.`,
+      )
+    }
+
+    // Create the role. Tolerate 409 — a concurrent provisioner may have
+    // created it between our GET and POST.
+    const createResponse = await this.adminFetch(`/clients/${client.id}/roles`, {
+      method: 'POST',
+      body: JSON.stringify({ name: roleName }),
+    })
+
+    if (!createResponse.ok && createResponse.status !== 409) {
+      throw new KeycloakAdminError(
+        createResponse.status,
+        `Keycloak admin POST role "${roleName}" on client "${clientId}" returned HTTP ${createResponse.status}.`,
+      )
+    }
+  }
+
+  /**
+   * Assigns the named client role to the user identified by `userId` (the
+   * Keycloak `sub` claim — Keycloak's user primary key is the sub).
+   *
+   * Resolves the role's internal UUID via the admin REST API and issues a
+   * POST against `/users/{userId}/role-mappings/clients/{clientUUID}` with
+   * the `[{id, name}]` payload Keycloak expects. Already-assigned mappings
+   * are accepted as no-ops — Keycloak returns 204 either way, so the call
+   * is naturally idempotent.
+   *
+   * Throws `KeycloakAdminError` when the client, role, or user cannot be
+   * resolved.
+   */
+  async assignClientRoleToUser(
+    userId: string,
+    clientId: string,
+    roleName: string,
+  ): Promise<void> {
+    const client = await this.getClient(clientId)
+
+    if (!client) {
+      throw new KeycloakAdminError(
+        404,
+        `Cannot assign role "${roleName}" — Keycloak client "${clientId}" does not exist.`,
+      )
+    }
+
+    const roleResponse = await this.adminFetch(
+      `/clients/${client.id}/roles/${encodeURIComponent(roleName)}`,
+    )
+
+    if (!roleResponse.ok) {
+      throw new KeycloakAdminError(
+        roleResponse.status,
+        `Keycloak admin GET role "${roleName}" on client "${clientId}" returned HTTP ${roleResponse.status}.`,
+      )
+    }
+
+    let role: { id?: string; name?: string }
+
+    try {
+      role = (await roleResponse.json()) as { id?: string; name?: string }
+    } catch {
+      throw new KeycloakAdminError(
+        0,
+        `Keycloak admin GET role "${roleName}" on client "${clientId}" returned a non-JSON response.`,
+      )
+    }
+
+    if (!role.id || !role.name) {
+      throw new KeycloakAdminError(
+        0,
+        `Keycloak admin GET role "${roleName}" on client "${clientId}" returned a payload without id/name.`,
+      )
+    }
+
+    const assignResponse = await this.adminFetch(
+      `/users/${encodeURIComponent(userId)}/role-mappings/clients/${client.id}`,
+      {
+        method: 'POST',
+        body: JSON.stringify([{ id: role.id, name: role.name }]),
+      },
+    )
+
+    if (!assignResponse.ok) {
+      throw new KeycloakAdminError(
+        assignResponse.status,
+        `Keycloak admin POST role-mapping for user "${userId}" on client "${clientId}" returned HTTP ${assignResponse.status}.`,
+      )
+    }
+  }
+
+  /**
+   * Resolves a Keycloak user by their email address using an exact-match
+   * lookup. Returns `{ id }` (the `sub`) when a unique user exists, or
+   * `null` when no user matches. Throws `KeycloakAdminError` on transport
+   * or parse failure.
+   *
+   * Used by tenant provisioning (#196) as the email-fallback for admin-
+   * created tenants whose portal_account row has no `keycloak_sub` yet —
+   * we still need to assign the per-tenant `tenant-member` role so the
+   * owner can authenticate against the tenant API on first login.
+   *
+   * Only the `id` field is returned because that is the only field the
+   * provisioner needs (the role-mapping POST is keyed on user id).
+   */
+  async findUserByEmail(email: string): Promise<{ id: string } | null> {
+    let response: Response
+
+    try {
+      response = await this.adminFetch(
+        `/users?email=${encodeURIComponent(email)}&exact=true`,
+      )
+    } catch (error) {
+      if (error instanceof KeycloakAdminError) {
+        throw error
+      }
+
+      throw new KeycloakAdminError(
+        0,
+        `Failed to reach Keycloak admin API: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    if (!response.ok) {
+      throw new KeycloakAdminError(
+        response.status,
+        `Keycloak admin GET users by email returned HTTP ${response.status}.`,
+      )
+    }
+
+    let users: { id?: string }[]
+
+    try {
+      users = (await response.json()) as { id?: string }[]
+    } catch {
+      throw new KeycloakAdminError(
+        0,
+        'Keycloak admin GET users by email returned a non-JSON response.',
+      )
+    }
+
+    if (!Array.isArray(users) || users.length === 0) {
+      return null
+    }
+
+    // Reject ambiguous matches. The method contract is "lookup the unique
+    // Keycloak user for this email"; if the realm allows duplicate emails
+    // and more than one user is returned, returning the first hit could
+    // grant tenant roles to the wrong account. Caller is expected to treat
+    // this as "no unique match" — provisioning catches the 409 and defers
+    // role assignment to the next provisioning sweep.
+    if (users.length > 1) {
+      throw new KeycloakAdminError(
+        409,
+        `Keycloak admin GET users by email returned ${users.length} users for "${email}"; refusing to pick one.`,
+      )
+    }
+
+    const first = users[0]
+    if (!first || typeof first.id !== 'string' || first.id.trim() === '') {
+      throw new KeycloakAdminError(
+        0,
+        'Keycloak admin GET users by email returned a payload without an id.',
+      )
+    }
+
+    return { id: first.id }
   }
 
   /**

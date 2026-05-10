@@ -73,7 +73,13 @@ data:
           "enabled": true,
           "serviceAccountClientId": "dnd-notes-keycloak-admin",
           "clientRoles": {
-            "realm-management": ["manage-clients", "view-clients", "view-realm"]
+            "realm-management": [
+              "manage-clients",
+              "view-clients",
+              "view-realm",
+              "view-users",
+              "manage-users"
+            ]
           }
         }
       ],

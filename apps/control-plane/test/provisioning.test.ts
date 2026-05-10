@@ -17,6 +17,7 @@ import { TenantRegistry } from '../src/tenant-registry.js'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 import type { Tenant, TenantProvisioningResources } from '../src/types.js'
+import { KeycloakAdminError } from '../src/keycloak-admin-client.js'
 
 class FakeDatabaseManager {
   createdDatabaseNames: string[] = []
@@ -215,10 +216,57 @@ class FakeInfrastructureManager {
 class FakeKeycloakAdminClient {
   ensureCalls: Array<Record<string, unknown>> = []
   deleteCalls: string[] = []
+  ensureClientRoleCalls: Array<{ clientId: string; roleName: string }> = []
+  assignClientRoleCalls: Array<{
+    userId: string
+    clientId: string
+    roleName: string
+  }> = []
+  findUserByEmailCalls: string[] = []
+  /**
+   * In-memory map of email → Keycloak user id. Tests configure this to
+   * exercise the email-fallback path used by tenant provisioning when the
+   * portal_account row has no `keycloak_sub` yet (#196 / #200).
+   */
+  usersByEmail = new Map<string, { id: string }>()
+  /**
+   * Emails for which `findUserByEmail` should simulate an ambiguous match
+   * (Keycloak realm allows duplicate emails and returned more than one
+   * user). Mirrors the real client's 409 behaviour added for #200.
+   */
+  ambiguousEmails = new Set<string>()
   shouldThrowOnDelete = false
+  shouldThrowOnAssign = false
 
   async ensureClient(spec: Record<string, unknown>): Promise<void> {
     this.ensureCalls.push(spec)
+  }
+
+  async ensureClientRole(clientId: string, roleName: string): Promise<void> {
+    this.ensureClientRoleCalls.push({ clientId, roleName })
+  }
+
+  async assignClientRoleToUser(
+    userId: string,
+    clientId: string,
+    roleName: string,
+  ): Promise<void> {
+    if (this.shouldThrowOnAssign) {
+      throw new Error('synthetic Keycloak role-assignment failure')
+    }
+
+    this.assignClientRoleCalls.push({ userId, clientId, roleName })
+  }
+
+  async findUserByEmail(email: string): Promise<{ id: string } | null> {
+    this.findUserByEmailCalls.push(email)
+    if (this.ambiguousEmails.has(email)) {
+      throw new KeycloakAdminError(
+        409,
+        `Keycloak admin GET users by email returned 2 users for "${email}"; refusing to pick one.`,
+      )
+    }
+    return this.usersByEmail.get(email) ?? null
   }
 
   async deleteClient(clientId: string): Promise<void> {
@@ -228,6 +276,19 @@ class FakeKeycloakAdminClient {
 
     this.deleteCalls.push(clientId)
   }
+}
+
+/**
+ * Default `tenantRuntimeAuth` for provisioning tests that exercise the
+ * Keycloak path. Mirrors the shape consumed by `TenantProvisioningService`
+ * — every field that is required when mode === 'keycloak'.
+ */
+const keycloakTenantRuntimeAuth = {
+  mode: 'keycloak' as const,
+  keycloakUrl: 'https://auth.example.com',
+  keycloakJwksUrl:
+    'http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-prod/protocol/openid-connect/certs',
+  keycloakRealm: 'dnd-notes-prod',
 }
 
 function createTenantRecord(overrides: Partial<Tenant> = {}): Tenant {
@@ -1363,6 +1424,7 @@ describe('TenantProvisioningService', () => {
       databaseManager,
       infrastructureManager,
       keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
       baseDomain: 'dnd-notes.test',
       imageRepository: 'ghcr.io/daydream-software/dnd-notes',
     })
@@ -1411,6 +1473,7 @@ describe('TenantProvisioningService', () => {
       databaseManager,
       infrastructureManager,
       keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
       baseDomain: 'dnd-notes.test',
       imageRepository: 'ghcr.io/daydream-software/dnd-notes',
     })
@@ -1461,6 +1524,7 @@ describe('TenantProvisioningService', () => {
       databaseManager,
       infrastructureManager,
       keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
       baseDomain: 'dnd-notes.test',
       imageRepository: 'ghcr.io/daydream-software/dnd-notes',
     })
@@ -1506,6 +1570,7 @@ describe('TenantProvisioningService', () => {
       databaseManager,
       infrastructureManager,
       keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
       baseDomain: 'dnd-notes.test',
       imageRepository: 'ghcr.io/daydream-software/dnd-notes',
     })
@@ -1572,6 +1637,400 @@ describe('TenantProvisioningService', () => {
       })
 
       assert.equal(depResult.tenant.currentState, 'deprovisioned')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('creates the tenant-member client role on provision (#196 role gate)', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(keycloakAdminClient.ensureClientRoleCalls.length, 1)
+      assert.deepEqual(keycloakAdminClient.ensureClientRoleCalls[0], {
+        clientId: 'dnd-notes-tenant-tenant-demo',
+        roleName: 'tenant-member',
+      })
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('is idempotent on the role-creation step — re-provisioning calls ensureClientRole again', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+        version: '1.1.0',
+      })
+
+      assert.equal(keycloakAdminClient.ensureClientRoleCalls.length, 2)
+      // Both calls target the same role on the same per-tenant client.
+      assert.equal(
+        keycloakAdminClient.ensureClientRoleCalls[0]?.clientId,
+        keycloakAdminClient.ensureClientRoleCalls[1]?.clientId,
+      )
+      assert.equal(
+        keycloakAdminClient.ensureClientRoleCalls[0]?.roleName,
+        keycloakAdminClient.ensureClientRoleCalls[1]?.roleName,
+      )
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('assigns the tenant-member role to the creator when their portal_account has a keycloak_sub', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      // Owner has signed in via Keycloak before creating the tenant — sub is set.
+      await tenantRegistry.createPortalAccount({
+        id: 'owner-1',
+        email: 'creator@example.com',
+        displayName: 'Tenant Creator',
+        authProvider: 'keycloak',
+        keycloakSub: 'creator-keycloak-sub',
+      })
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 1)
+      assert.deepEqual(keycloakAdminClient.assignClientRoleCalls[0], {
+        userId: 'creator-keycloak-sub',
+        clientId: 'dnd-notes-tenant-tenant-demo',
+        roleName: 'tenant-member',
+      })
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('skips role assignment when the tenant creator has no keycloak_sub yet (transition path)', async () => {
+    // Owner exists in portal_accounts but has not signed in via Keycloak yet —
+    // happens when the tenant was created in `local` mode and is being
+    // provisioned/re-provisioned. The role-assignment step is deliberately
+    // deferred to the /portal/me auto-link sweep (or the next re-provision
+    // after the owner's first KC login).
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createPortalAccount({
+        id: 'owner-1',
+        email: 'creator@example.com',
+        displayName: 'Tenant Creator',
+        // No keycloakSub.
+        authProvider: 'local',
+      })
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      // Role created, but no assignment fired — owner has no sub.
+      assert.equal(keycloakAdminClient.ensureClientRoleCalls.length, 1)
+      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 0)
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('falls back to a Keycloak user-by-email lookup when no portal_account.keycloak_sub is recorded (admin-created tenant path)', async () => {
+    // Admin-created tenant: the control-plane API was called with an
+    // `initialAdminEmail` but the owner has not signed in through the
+    // portal yet, so portal_accounts has no row (or no keycloak_sub) for
+    // them. The provisioner must still assign the per-tenant role to the
+    // intended owner — the smoke and operator-portal flows depend on it.
+    // We resolve the email to a Keycloak user id via the admin REST API
+    // and assign the role to that id.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+    keycloakAdminClient.usersByEmail.set('admin-owner@example.com', {
+      id: 'kc-user-id-admin-owner',
+    })
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      // No portal_accounts row created for the owner — the only signal we
+      // have is the tenant.initialAdminEmail recorded at create time.
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'admin-owner-account-id',
+        initialAdminEmail: 'admin-owner@example.com',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.deepEqual(keycloakAdminClient.findUserByEmailCalls, [
+        'admin-owner@example.com',
+      ])
+      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 1)
+      assert.deepEqual(keycloakAdminClient.assignClientRoleCalls[0], {
+        userId: 'kc-user-id-admin-owner',
+        clientId: 'dnd-notes-tenant-tenant-demo',
+        roleName: 'tenant-member',
+      })
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('skips role assignment when the email-fallback finds no matching Keycloak user', async () => {
+    // Admin-created tenant whose initialAdminEmail does not (yet) correspond
+    // to a Keycloak user. The provisioner must not throw — the role is
+    // simply not assigned, and the next re-provision (after the owner has
+    // self-registered in Keycloak) will pick it up.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+    // Intentionally do NOT add the email to usersByEmail.
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'admin-owner-account-id',
+        initialAdminEmail: 'unknown@example.com',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 0)
+      assert.deepEqual(keycloakAdminClient.findUserByEmailCalls, [
+        'unknown@example.com',
+      ])
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('defers tenant-member role assignment when the email lookup is ambiguous (CodeRabbit #200)', async () => {
+    // Realms that allow duplicate emails can return more than one Keycloak
+    // user for a single address. findUserByEmail throws KeycloakAdminError
+    // with statusCode === 409 in that case (it refuses to guess), and the
+    // provisioner must catch it, log a warning, and continue — assignment
+    // is deferred to the next provisioning sweep, where the canonical
+    // portal_account.keycloak_sub link should be in place.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+    keycloakAdminClient.ambiguousEmails.add('shared@example.com')
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'admin-owner-account-id',
+        initialAdminEmail: 'shared@example.com',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      // Provisioning must succeed — the ambiguity is non-fatal.
+      assert.equal(result.tenant.currentState, 'ready')
+      // The role is created but not assigned to anyone.
+      assert.equal(keycloakAdminClient.ensureClientRoleCalls.length, 1)
+      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 0)
+      // The lookup was attempted exactly once.
+      assert.deepEqual(keycloakAdminClient.findUserByEmailCalls, [
+        'shared@example.com',
+      ])
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('skips per-tenant Keycloak provisioning when tenant runtime auth is local (CodeRabbit #200)', async () => {
+    // When tenantRuntimeAuth.mode === 'local' the tenant API does not
+    // enforce Keycloak roles, so the provisioner has no reason to depend
+    // on Keycloak admin availability. A Keycloak admin client may still
+    // be configured globally (control-plane uses Keycloak even though some
+    // tenants stay on local auth) — the provisioner must skip the per-
+    // tenant KC steps in that case.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      // mode: 'local' → no per-tenant Keycloak operations expected.
+      tenantRuntimeAuth: { mode: 'local' },
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        initialAdminEmail: 'irrelevant@example.com',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(result.tenant.currentState, 'ready')
+      assert.equal(keycloakAdminClient.ensureCalls.length, 0)
+      assert.equal(keycloakAdminClient.ensureClientRoleCalls.length, 0)
+      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 0)
+      assert.equal(keycloakAdminClient.findUserByEmailCalls.length, 0)
     } finally {
       await provisioningService.close()
       await cleanup()

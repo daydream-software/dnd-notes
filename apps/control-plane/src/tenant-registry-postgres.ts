@@ -949,12 +949,16 @@ export class TenantRegistry {
     }
   }
 
-  async getPortalAccount(accountId: string): Promise<PortalAccount | null> {
+  async getPortalAccount(
+    accountId: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<PortalAccount | null> {
     const row = await this.run<PortalAccountRow>(
       `SELECT ${portalAccountSelectColumns}
        FROM portal_accounts
        WHERE id = $1`,
       [accountId],
+      executor,
     )
 
     return row.rows[0] ? this.mapRowToPortalAccount(row.rows[0]) : null

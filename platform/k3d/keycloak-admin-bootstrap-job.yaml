@@ -165,8 +165,13 @@ spec:
                 -H "Authorization: Bearer ${TOKEN}" \
                 "${KC_BASE_URL}/admin/realms/${KC_REALM}/clients/${RM_CLIENT_ID}/roles")
 
+              # view-users / manage-users are required so the per-tenant role
+              # gate (#196) can resolve admin-created tenant owners by email
+              # (`findUserByEmail`) and assign client-role mappings to their
+              # Keycloak user (`assignClientRoleToUser`). Without them the
+              # provisioner returns 403 from Keycloak and the smoke fails.
               missing_roles="[]"
-              for role_name in manage-clients view-clients view-realm; do
+              for role_name in manage-clients view-clients view-realm view-users manage-users; do
                 if echo "${bound_names}" | grep -qw "${role_name}"; then
                   echo "[bootstrap] Role ${role_name} already bound — skipping."
                 else

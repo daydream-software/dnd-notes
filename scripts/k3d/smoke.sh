@@ -225,16 +225,23 @@ build_tenant_create_payload() {
   local tenant_id="$1"
   local tenant_slug="$2"
   local tenant_image_tag="$3"
+  local tenant_admin_email="$4"
 
+  # initialAdminEmail is what the provisioner uses to look up the tenant
+  # owner in Keycloak when no portal_account.keycloak_sub is recorded yet
+  # (admin-created tenant path — #196 / #200). Without it the per-tenant
+  # `tenant-member` role is never assigned and the API returns 403 to the
+  # smoke's password-grant token.
   node -e '
-    const [tenantId, tenantSlug, tenantImageTag] = process.argv.slice(1)
+    const [tenantId, tenantSlug, tenantImageTag, tenantAdminEmail] = process.argv.slice(1)
     process.stdout.write(JSON.stringify({
       id: tenantId,
       slug: tenantSlug,
       ownerId: "smoke-owner",
+      initialAdminEmail: tenantAdminEmail,
       version: tenantImageTag,
     }))
-  ' "$tenant_id" "$tenant_slug" "$tenant_image_tag"
+  ' "$tenant_id" "$tenant_slug" "$tenant_image_tag" "$tenant_admin_email"
 }
 
 get_keycloak_access_token() {
@@ -400,7 +407,7 @@ request_json_to_file \
   -X POST \
   -H "Authorization: Bearer ${control_plane_bearer_token}" \
   -H 'Content-Type: application/json' \
-  -d "$(build_tenant_create_payload "${tenant_id}" "${tenant_slug}" "${TENANT_IMAGE_TAG}")" \
+  -d "$(build_tenant_create_payload "${tenant_id}" "${tenant_slug}" "${TENANT_IMAGE_TAG}" "${TENANT_KEYCLOAK_USERNAME}")" \
   "http://127.0.0.1:${CONTROL_PLANE_PORT}/internal/tenants"
 
 request_json_to_file \

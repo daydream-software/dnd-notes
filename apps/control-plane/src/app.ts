@@ -24,12 +24,23 @@ import {
 import {
   TenantProvisioningConflictError,
   TenantProvisioningValidationError,
+  tenantMemberRoleName,
   type TenantProvisioningPort,
 } from './provisioning.js'
 import {
   TenantControlError,
   type TenantControlClient,
 } from './tenant-control-client.js'
+import type { KeycloakAdminClient } from './keycloak-admin-client.js'
+
+/**
+ * Narrow subset of `KeycloakAdminClient` that `createApp` actually uses
+ * (currently only the per-tenant role-assignment sweep). Typing the
+ * `keycloakAdminClient` option this way lets tests provide a minimal,
+ * type-safe fake without an `as unknown as KeycloakAdminClient` cast and
+ * keeps drift detection meaningful (CodeRabbit #200).
+ */
+type AppKeycloakAdminClient = Pick<KeycloakAdminClient, 'assignClientRoleToUser'>
 import { formatUnknownError } from './error-formatting.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import {
@@ -291,6 +302,16 @@ interface CreateAppOptions {
   tenantBaseDomain?: string
   tenantPublicScheme?: 'http' | 'https'
   tenantControlClient?: TenantControlClient
+  /**
+   * Optional Keycloak admin client. When provided, the portal Keycloak
+   * middleware assigns the per-tenant member role to the user's Keycloak
+   * identity at the moment a pre-existing local portal_account is auto-linked
+   * to that identity (#196 transition path: local → keycloak). When absent
+   * the sweep is skipped — re-provisioning the tenant is the alternative
+   * trigger. Typed as a `Pick<>` of the concrete admin client to keep test
+   * fakes minimal and type-safe.
+   */
+  keycloakAdminClient?: AppKeycloakAdminClient
 }
 
 const require = createRequire(import.meta.url)
@@ -759,6 +780,7 @@ export function createApp({
   tenantBaseDomain,
   tenantPublicScheme = 'https',
   tenantControlClient,
+  keycloakAdminClient,
 }: CreateAppOptions): Express {
   const app = express()
   app.set('trust proxy', trustProxy)
@@ -1148,6 +1170,49 @@ export function createApp({
           }
 
           portalAccount = linked
+
+          // Per-tenant role-assignment sweep (#196 transition path). Triggered
+          // exactly at the auto-link moment — i.e. the first time we observe
+          // that a Keycloak identity matches an existing local owner. For
+          // every tenant the account already owns, ensure the per-tenant
+          // member role is assigned in Keycloak. This is the bridge for
+          // tenants created in `local` mode and later flipped to `keycloak`
+          // mode: provision-time assignment did not fire because the owner
+          // had no keycloak_sub yet.
+          //
+          // Soft failure: any KC admin error here is logged and swallowed —
+          // re-provisioning the tenant remains the canonical fallback path.
+          // We do not block the portal request because the customer has no
+          // way to recover from a KC outage on their own.
+          if (keycloakAdminClient) {
+            try {
+              const ownedTenants = await tenantRegistry.listTenantsByOwnerId(
+                portalAccount.id,
+              )
+
+              for (const ownedTenant of ownedTenants) {
+                const tenantClientId = `dnd-notes-tenant-${ownedTenant.id}`
+
+                try {
+                  await keycloakAdminClient.assignClientRoleToUser(
+                    keycloakSub,
+                    tenantClientId,
+                    tenantMemberRoleName,
+                  )
+                } catch (assignError) {
+                  console.warn(
+                    `Per-tenant role assignment failed for tenant "${ownedTenant.id}" during auto-link of account "${portalAccount.id}" — continuing:`,
+                    assignError,
+                  )
+                }
+              }
+            } catch (sweepError) {
+              console.warn(
+                `Per-tenant role-assignment sweep failed for account "${portalAccount.id}" during auto-link — continuing:`,
+                sweepError,
+              )
+            }
+          }
         } else {
           // Auto-create path: no local account exists. Any user authenticated by
           // the customer realm is provisioned a portal account on first login
