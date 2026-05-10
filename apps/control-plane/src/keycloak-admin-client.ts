@@ -437,6 +437,19 @@ export class KeycloakAdminClient {
       return null
     }
 
+    // Reject ambiguous matches. The method contract is "lookup the unique
+    // Keycloak user for this email"; if the realm allows duplicate emails
+    // and more than one user is returned, returning the first hit could
+    // grant tenant roles to the wrong account. Caller is expected to treat
+    // this as "no unique match" — provisioning catches the 409 and defers
+    // role assignment to the next provisioning sweep.
+    if (users.length > 1) {
+      throw new KeycloakAdminError(
+        409,
+        `Keycloak admin GET users by email returned ${users.length} users for "${email}"; refusing to pick one.`,
+      )
+    }
+
     const first = users[0]
     if (!first || typeof first.id !== 'string' || first.id.trim() === '') {
       throw new KeycloakAdminError(

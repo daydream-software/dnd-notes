@@ -802,5 +802,32 @@ describe('KeycloakAdminClient', () => {
         },
       )
     })
+
+    it('throws KeycloakAdminError(409) when Keycloak returns multiple users for one email (CodeRabbit #200)', async () => {
+      // Some Keycloak realms allow duplicate emails. The contract for
+      // findUserByEmail is "lookup the unique user for this email" — we
+      // must not silently grant per-tenant roles to whichever user
+      // happens to come first in the response. The provisioning caller
+      // catches this 409 and defers role assignment.
+      server = await startFakeKeycloakAdminServer(state)
+      state.usersResponse = {
+        status: 200,
+        body: JSON.stringify([
+          { id: 'kc-user-a', email: 'shared@example.com' },
+          { id: 'kc-user-b', email: 'shared@example.com' },
+        ]),
+      }
+      const client = makeClient(server.baseUrl)
+
+      await assert.rejects(
+        () => client.findUserByEmail('shared@example.com'),
+        (error) => {
+          assert.ok(error instanceof KeycloakAdminError)
+          assert.equal(error.statusCode, 409)
+          assert.match(error.message, /multiple|2 users/i)
+          return true
+        },
+      )
+    })
   })
 })

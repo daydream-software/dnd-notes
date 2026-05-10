@@ -17,6 +17,7 @@ import { TenantRegistry } from '../src/tenant-registry.js'
 import { maxTenantSubdomainLength } from '../src/tenant-subdomain.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
 import type { Tenant, TenantProvisioningResources } from '../src/types.js'
+import { KeycloakAdminError } from '../src/keycloak-admin-client.js'
 
 class FakeDatabaseManager {
   createdDatabaseNames: string[] = []
@@ -228,6 +229,12 @@ class FakeKeycloakAdminClient {
    * portal_account row has no `keycloak_sub` yet (#196 / #200).
    */
   usersByEmail = new Map<string, { id: string }>()
+  /**
+   * Emails for which `findUserByEmail` should simulate an ambiguous match
+   * (Keycloak realm allows duplicate emails and returned more than one
+   * user). Mirrors the real client's 409 behaviour added for #200.
+   */
+  ambiguousEmails = new Set<string>()
   shouldThrowOnDelete = false
   shouldThrowOnAssign = false
 
@@ -253,6 +260,12 @@ class FakeKeycloakAdminClient {
 
   async findUserByEmail(email: string): Promise<{ id: string } | null> {
     this.findUserByEmailCalls.push(email)
+    if (this.ambiguousEmails.has(email)) {
+      throw new KeycloakAdminError(
+        409,
+        `Keycloak admin GET users by email returned 2 users for "${email}"; refusing to pick one.`,
+      )
+    }
     return this.usersByEmail.get(email) ?? null
   }
 
@@ -1917,6 +1930,58 @@ describe('TenantProvisioningService', () => {
       assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 0)
       assert.deepEqual(keycloakAdminClient.findUserByEmailCalls, [
         'unknown@example.com',
+      ])
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('defers tenant-member role assignment when the email lookup is ambiguous (CodeRabbit #200)', async () => {
+    // Realms that allow duplicate emails can return more than one Keycloak
+    // user for a single address. findUserByEmail throws KeycloakAdminError
+    // with statusCode === 409 in that case (it refuses to guess), and the
+    // provisioner must catch it, log a warning, and continue — assignment
+    // is deferred to the next provisioning sweep, where the canonical
+    // portal_account.keycloak_sub link should be in place.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+    keycloakAdminClient.ambiguousEmails.add('shared@example.com')
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'admin-owner-account-id',
+        initialAdminEmail: 'shared@example.com',
+        version: '1.0.0',
+      })
+
+      const result = await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      // Provisioning must succeed — the ambiguity is non-fatal.
+      assert.equal(result.tenant.currentState, 'ready')
+      // The role is created but not assigned to anyone.
+      assert.equal(keycloakAdminClient.ensureClientRoleCalls.length, 1)
+      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 0)
+      // The lookup was attempted exactly once.
+      assert.deepEqual(keycloakAdminClient.findUserByEmailCalls, [
+        'shared@example.com',
       ])
     } finally {
       await provisioningService.close()

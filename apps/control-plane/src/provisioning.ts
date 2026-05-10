@@ -19,7 +19,7 @@ import {
   applyLeastPrivilegeTenantGrants,
   initializeTenantNoteStoreDatabase,
 } from './tenant-database-bootstrap.js'
-import type { KeycloakAdminClient } from './keycloak-admin-client.js'
+import { KeycloakAdminError, type KeycloakAdminClient } from './keycloak-admin-client.js'
 import { assertPersistedTenantSubdomain } from './tenant-subdomain.js'
 import type {
   Tenant,
@@ -501,13 +501,16 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           //      and operator-portal flows depend on, since they create the
           //      tenant before any portal sign-in has produced a sub.
           //
-          // If neither resolution yields a user, the assignment is deferred
-          // to the portal middleware, which retries the sweep on first
-          // Keycloak login (#200 transition path). Skipping is safe — re-
-          // provisioning after the owner has signed in once will pick up
-          // the sub and assign the role.
+          // If neither resolution yields a user, or if the email lookup
+          // returns more than one Keycloak user (ambiguous match in realms
+          // that allow duplicate emails), the assignment is deferred to the
+          // portal middleware, which retries the sweep on first Keycloak
+          // login (#200 transition path). Skipping is safe — re-provisioning
+          // after the owner has signed in once will pick up the sub via the
+          // canonical portal_account.keycloak_sub link and assign the role.
           const ownerKeycloakSub = await this.resolveTenantOwnerKeycloakSub(
             refreshedTenant,
+            registryClient,
           )
 
           if (ownerKeycloakSub) {
@@ -664,19 +667,29 @@ export class TenantProvisioningService implements TenantProvisioningPort {
    *      portal Keycloak sign-in).
    *   2. tenant.initialAdminEmail looked up via the admin REST API.
    *
-   * Returns null when neither path produces a user. Errors from the admin
-   * API surface as `KeycloakAdminError` so the caller can treat them the
-   * same as any other provisioning failure.
+   * Returns null when neither path produces a *unique* user. An ambiguous
+   * email match (multiple Keycloak users with the same email) is treated
+   * the same as "not found" — we log a warning and defer the role
+   * assignment to the next provisioning sweep, where the canonical
+   * portal_account.keycloak_sub link should be in place. Other admin-API
+   * errors surface as `KeycloakAdminError` so the caller can treat them
+   * the same as any other provisioning failure.
    *
    * Caller is expected to have already verified that
    * `this.keycloakAdminClient` is defined and that
-   * `this.tenantRuntimeAuth.mode === 'keycloak'`.
+   * `this.tenantRuntimeAuth.mode === 'keycloak'`. The `registryClient`
+   * argument MUST be the lock-scoped client passed into `withTenantLock`,
+   * so the portal-account read participates in the same locked transaction
+   * as the rest of provisioning (no fresh registry connection while the
+   * tenant lock is held).
    */
   private async resolveTenantOwnerKeycloakSub(
     tenant: Tenant,
+    registryClient: TenantRegistryClientLike,
   ): Promise<string | null> {
     const ownerAccount = await this.tenantRegistry.getPortalAccount(
       tenant.ownerId,
+      registryClient,
     )
 
     if (ownerAccount?.keycloakSub) {
@@ -695,8 +708,22 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       return null
     }
 
-    const user = await keycloakAdminClient.findUserByEmail(fallbackEmail)
-    return user?.id ?? null
+    try {
+      const user = await keycloakAdminClient.findUserByEmail(fallbackEmail)
+      return user?.id ?? null
+    } catch (error) {
+      // Ambiguous email match — Keycloak returned more than one user for
+      // this address. We refuse to guess; assignment is deferred to the
+      // portal-login sweep on first sign-in. Other KeycloakAdminError
+      // codes (auth failures, 5xx) keep propagating and fail provisioning.
+      if (error instanceof KeycloakAdminError && error.statusCode === 409) {
+        console.warn(
+          `[provisioning] Keycloak email "${fallbackEmail}" matched multiple users for tenant "${tenant.id}"; deferring tenant-member role assignment.`,
+        )
+        return null
+      }
+      throw error
+    }
   }
 }
 
