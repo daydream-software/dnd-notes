@@ -10,11 +10,33 @@ import {
 } from './app-test-helpers'
 import { createJsonResponse, readMockRequest } from './test-helpers'
 
+interface Note {
+  id: string
+  campaignId: string
+  title: string
+  body: string
+  tags: string[]
+  linkedNoteIds: string[]
+  status: string
+  sessionName: string | null
+  createdBy: { membershipId: string; displayName: string; role: string }
+  lastEditedBy: null
+  createdAt: string
+  updatedAt: string
+}
+
+interface FirstRunMockOptions {
+  /** Notes returned by GET /api/notes after campaign creation. Defaults to []. */
+  notesAfterCreation?: Note[]
+}
+
 /**
  * Minimal fetch mock for the first-run flow (no campaigns).
  * Returns an empty campaigns list so the app renders the first-run hero form.
  */
-function setupFirstRunFetchMock() {
+function setupFirstRunFetchMock(options: FirstRunMockOptions = {}) {
+  const { notesAfterCreation = [] } = options
+
   const createdCampaign = {
     ...campaign,
     id: 'new-campaign-1',
@@ -87,7 +109,7 @@ function setupFirstRunFetchMock() {
     }
 
     if (path === '/api/notes' && method === 'GET') {
-      return createJsonResponse({ notes: [] })
+      return createJsonResponse({ notes: notesAfterCreation })
     }
 
     if (path === '/api/notes/sessions' && method === 'GET') {
@@ -116,8 +138,10 @@ async function registerOwnerFirstRun(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('First-run UX — empty notes CTA + campaign template picker', () => {
+  let firstRunMock: ReturnType<typeof setupFirstRunFetchMock>
+
   beforeEach(() => {
-    setupFirstRunFetchMock()
+    firstRunMock = setupFirstRunFetchMock()
   })
 
   afterEach(() => {
@@ -136,8 +160,11 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
       const user = userEvent.setup()
       await registerOwnerFirstRun(user)
 
-      // Default is blank — no chips should be visible
-      expect(screen.queryByRole('status')).toBeNull()
+      // Default is blank — no starter preview chips should be visible
+      expect(screen.queryByText('NPC roster')).toBeNull()
+      expect(screen.queryByText('Faction tracker')).toBeNull()
+      expect(screen.queryByText('Location ledger')).toBeNull()
+      expect(screen.queryByText('Session log')).toBeNull()
     })
 
     it('shows starter note chips when "Starter pack" is selected', async () => {
@@ -156,7 +183,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
 
     it('seeds starter notes when the campaign is created with "Starter pack"', async () => {
       const user = userEvent.setup()
-      const { noteRequests } = setupFirstRunFetchMock()
+      const { noteRequests } = firstRunMock
       await registerOwnerFirstRun(user)
 
       await user.click(screen.getByLabelText('Campaign starter'))
@@ -178,7 +205,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
 
     it('does not seed any notes when "Blank campaign" is kept', async () => {
       const user = userEvent.setup()
-      const { noteRequests } = setupFirstRunFetchMock()
+      const { noteRequests } = firstRunMock
       await registerOwnerFirstRun(user)
 
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
@@ -193,7 +220,6 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
   describe('Empty notes CTA in browse pane', () => {
     it('renders the "New note" CTA button when there are no notes', async () => {
       const user = userEvent.setup()
-      setupFirstRunFetchMock()
       await registerOwnerFirstRun(user)
 
       // Create the campaign (blank) to enter the workspace
@@ -212,7 +238,6 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
 
     it('clicking the "New note" CTA opens the note editor', async () => {
       const user = userEvent.setup()
-      setupFirstRunFetchMock()
       await registerOwnerFirstRun(user)
 
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
@@ -229,18 +254,45 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
     })
 
     it('does not render the "New note" CTA when a tag filter is active', async () => {
-      // This test uses the standard mock (with notes) to trigger the tag-filter empty state
-      // We verify that the CTA is NOT shown in the filtered empty state
-      // (covered indirectly — the conditional only renders CTA when !selectedTagFilter && !selectedSessionName)
-      // Confirmed via code inspection; CTA is guarded by canEditWorkspace + mode checks
-      expect(true).toBe(true)
+      // Re-install the mock with one tagged note so the tag chip renders in the UI
+      const taggedNote = {
+        id: 'note-tagged-1',
+        campaignId: 'new-campaign-1',
+        title: 'Tagged note',
+        body: '',
+        tags: ['combat'],
+        linkedNoteIds: [],
+        status: 'draft',
+        sessionName: null,
+        createdBy: { membershipId: membership.id, displayName: owner.displayName, role: 'owner' },
+        lastEditedBy: null,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      }
+      firstRunMock = setupFirstRunFetchMock({ notesAfterCreation: [taggedNote] })
+
+      const user = userEvent.setup()
+      await registerOwnerFirstRun(user)
+
+      await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
+      await user.click(screen.getByRole('button', { name: 'Create campaign' }))
+
+      await screen.findByLabelText('Search notes')
+
+      // Click the "combat" tag filter chip
+      await user.click(screen.getByRole('button', { name: /combat/ }))
+
+      // The contained "New note" CTA is suppressed when a tag filter is active
+      const newNoteButtons = screen.queryAllByRole('button', { name: 'New note' })
+      expect(newNoteButtons.length).toBeLessThan(3)
+      // The tag-filter empty state message is also not the CTA alert
+      expect(screen.queryByText(/Create the first one/)).toBeNull()
     })
   })
 
   describe('within NotesBrowsePane — aria-label on New note header button', () => {
     it('the New note icon button in the workspace header carries its aria-label', async () => {
       const user = userEvent.setup()
-      setupFirstRunFetchMock()
       await registerOwnerFirstRun(user)
 
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')

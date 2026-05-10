@@ -4412,7 +4412,9 @@ function App() {
                               ? `No notes tagged ${selectedTagFilter} yet. Clear the filter or add that tag to a note to reuse it later.`
                               : noteBrowseMode === 'sessions' && selectedSessionName
                               ? 'No notes remain in this session. Head back to the session list or save a note with the same session name.'
-                              : 'No notes yet in this campaign. Create the first one to start using the workspace.'}
+                              : canEditWorkspace
+                              ? 'No notes yet in this campaign. Create the first one to start using the workspace.'
+                              : 'No notes yet in this campaign.'}
                           </Alert>
                         )
                       ) : (
