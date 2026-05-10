@@ -207,7 +207,7 @@ describe('operator portal', () => {
     vi.restoreAllMocks()
   })
 
-  it('shows the Keycloak sign-in action when there is no operator session yet', async () => {
+  it('shows the sign-in action when there is no operator session yet', async () => {
     initMock.mockResolvedValue(null)
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
       throw new Error('Unexpected fetch')
@@ -217,13 +217,13 @@ describe('operator portal', () => {
 
     const user = userEvent.setup()
     const button = await screen.findByRole('button', {
-      name: 'Continue with Keycloak',
+      name: 'Continue',
     })
 
     expect(screen.getByText('Operator control portal')).toBeTruthy()
     expect(
       screen.getByText(
-        'Sign in with the workforce/admin Keycloak realm before inspecting fleet state.',
+        'Sign in with your workforce or admin account before inspecting fleet state.',
       ),
     ).toBeTruthy()
 
@@ -324,7 +324,7 @@ describe('operator portal', () => {
     await user.click(screen.getByRole('button', { name: 'Sign out' }))
 
     expect(
-      await screen.findByRole('button', { name: 'Continue with Keycloak' }),
+      await screen.findByRole('button', { name: 'Continue' }),
     ).toBeTruthy()
     await waitFor(() => {
       expect(screen.queryByText('Fleet refresh failed')).toBeNull()

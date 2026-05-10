@@ -235,7 +235,7 @@ export default function App({
           setError(
             bootstrapError instanceof Error
               ? bootstrapError.message
-              : 'Could not initialize the Keycloak session.',
+              : 'Could not initialize your session. Reload and try again.',
           )
         }
       } finally {
@@ -454,7 +454,7 @@ export default function App({
       setError(
         loginError instanceof Error
           ? loginError.message
-          : 'Could not start the Keycloak sign-in flow.',
+          : 'Could not start the sign-in flow. Reload and try again.',
       )
     }
   }, [])
@@ -668,7 +668,7 @@ export default function App({
               onClick={() => void handleKeycloakLogin()}
               sx={{ alignSelf: 'flex-start' }}
             >
-              Sign in with Keycloak
+              Sign in
             </Button>
           </Stack>
         </CardContent>

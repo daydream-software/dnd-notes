@@ -113,16 +113,16 @@ describe('App Keycloak runtime auth', () => {
 
     const user = userEvent.setup()
     const button = await screen.findByRole('button', {
-      name: 'Continue with Keycloak',
+      name: 'Continue',
     })
-    expect(screen.getByText('Sign in with Keycloak')).toBeTruthy()
+    expect(screen.getByText('Sign in to your campaigns')).toBeTruthy()
 
     await user.click(button)
 
     expect(loginMock).toHaveBeenCalledTimes(1)
   })
 
-  it('restores a saved Keycloak session into the workspace', async () => {
+  it('restores a saved session into the workspace', async () => {
     localStorage.setItem(
       'dnd-notes:keycloak-auth-tokens',
       JSON.stringify({
@@ -198,10 +198,10 @@ describe('App Keycloak runtime auth', () => {
     render(<App />)
 
     expect(await screen.findByText('Storm ledger updated')).toBeTruthy()
-    expect(screen.queryByText('Sign in with Keycloak')).toBeNull()
+    expect(screen.queryByText('Sign in to your campaigns')).toBeNull()
   })
 
-  it('shows an auth error instead of silently no-oping when the Keycloak client is missing', async () => {
+  it('shows an auth error instead of silently no-oping when the sign-in client is missing', async () => {
     initMock.mockRejectedValue(new Error('Could not initialize the Keycloak client.'))
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
@@ -224,7 +224,7 @@ describe('App Keycloak runtime auth', () => {
 
     const user = userEvent.setup()
     const button = await screen.findByRole('button', {
-      name: 'Continue with Keycloak',
+      name: 'Continue',
     })
 
     expect(await screen.findByText('Could not initialize the Keycloak client.')).toBeTruthy()
@@ -234,7 +234,7 @@ describe('App Keycloak runtime auth', () => {
     expect(loginMock).not.toHaveBeenCalled()
     expect(
       await screen.findByText(
-        'Keycloak sign-in is not ready yet. Reload and try again.',
+        'Sign-in is not ready yet. Reload and try again.',
       ),
     ).toBeTruthy()
   })
