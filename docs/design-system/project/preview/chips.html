@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Chips & tags</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px; background: var(--bg-1); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-family: var(--font-sans); }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: var(--radius-pill); font-size: 12.5px; font-weight: 500; line-height: 1; height: 26px; }
+  .neutral { background: rgba(255,255,255,0.08); color: var(--fg-1); }
+  .brand { background: rgba(167,139,250,0.16); color: #c4b1ff; border: 1px solid rgba(167,139,250,0.32); }
+  .brand-solid { background: var(--brand-500); color: #1a0f3a; }
+  .x { width: 14px; height: 14px; border-radius: 50%; background: rgba(0,0,0,0.25); display: inline-grid; place-items: center; font-size: 9px; cursor: pointer; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <span class="chip brand-solid">npc <span class="x">×</span></span>
+  <span class="chip brand">faction</span>
+  <span class="chip brand">politics</span>
+  <span class="chip neutral">location</span>
+  <span class="chip neutral">travel</span>
+  <span class="chip neutral">session</span>
+  <span class="chip neutral">recap</span>
+  <span class="chip neutral">people</span>
+</body>
+</html>

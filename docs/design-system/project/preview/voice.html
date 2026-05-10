@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Tone & voice samples</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px 28px; background: var(--bg-1); font-family: var(--font-sans); }
+  .sample { padding: 12px 0; border-bottom: 1px solid var(--divider); display: grid; grid-template-columns: 100px 1fr; gap: 16px; align-items: baseline; }
+  .sample:last-child { border-bottom: 0; }
+  .label { color: var(--fg-3); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; font-weight: 500; }
+  .quote { color: var(--fg-1); font-size: 15px; line-height: 1.55; }
+  .quote em { color: var(--fg-muted); font-style: normal; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="sample"><span class="label">Empty</span><span class="quote">Switch between browsing and editing without stretching the page.</span></div>
+  <div class="sample"><span class="label">Save state</span><span class="quote">New notes are saved straight to the selected campaign.</span></div>
+  <div class="sample"><span class="label">Permission</span><span class="quote">Viewer links can read shared notes but cannot save changes.</span></div>
+  <div class="sample"><span class="label">Template</span><span class="quote"><em>Faction brief —</em> Capture goals, pressure, and relationships for a faction.</span></div>
+  <div class="sample"><span class="label">Scaffold</span><span class="quote">Role in the story:<br>What they want:<br>Secrets or leverage:</span></div>
+  <div class="sample"><span class="label">Loading</span><span class="quote">Saving… · Capturing… · Deleting…</span></div>
+</body>
+</html>

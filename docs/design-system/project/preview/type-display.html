@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Type — display & headings</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 28px 32px; background: var(--bg-1); }
+  .row { display: flex; align-items: baseline; gap: 24px; padding: 8px 0; border-bottom: 1px solid var(--divider); }
+  .row:last-child { border-bottom: 0; }
+  .label { color: var(--fg-3); font-size: 12px; min-width: 96px; font-feature-settings: "tnum"; letter-spacing: 0.04em; text-transform: uppercase; }
+  .specimen { color: var(--fg-1); font-weight: 600; line-height: 1.15; }
+  .meta { color: var(--fg-muted); font-size: 12px; margin-left: auto; font-family: var(--font-mono); }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="row">
+    <span class="label">Display</span>
+    <span class="specimen" style="font-size:40px">D&amp;D Notes</span>
+    <span class="meta">40 / 600</span>
+  </div>
+  <div class="row">
+    <span class="label">H1</span>
+    <span class="specimen" style="font-size:32px">Faction brief</span>
+    <span class="meta">32 / 600</span>
+  </div>
+  <div class="row">
+    <span class="label">H2</span>
+    <span class="specimen" style="font-size:27px">Session recap</span>
+    <span class="meta">27 / 600</span>
+  </div>
+  <div class="row">
+    <span class="label">H3</span>
+    <span class="specimen" style="font-size:23px">NPC roster</span>
+    <span class="meta">23 / 600</span>
+  </div>
+</body>
+</html>

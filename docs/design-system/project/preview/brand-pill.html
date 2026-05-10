@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Brand pill</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 36px; background: var(--page-bg); font-family: var(--font-sans); display: flex; flex-direction: column; gap: 18px; align-items: flex-start; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 8px 14px; border-radius: var(--radius-pill); border: 1px solid rgba(167,139,250,0.2); background: rgba(15,23,42,0.72); color: rgba(255,255,255,0.78); backdrop-filter: blur(12px); box-shadow: 0 12px 30px rgba(2,6,23,0.24); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; }
+  svg { width: 16px; height: 16px; fill: currentColor; }
+  .hint { color: var(--fg-muted); font-size: 12px; font-family: var(--font-mono); }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <span class="pill">
+    <svg viewBox="0 0 24 24"><path d="M21 4H3a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h18a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2m0 14H3V8l9 5 9-5z"/></svg>
+    D&amp;D Notes
+  </span>
+  <span class="hint">desktop-only (display: none below lg)</span>
+</body>
+</html>

@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Logo — Daydream mark</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 28px; background: var(--page-bg); font-family: var(--font-sans); color: var(--fg-1); }
+  .stack { display: grid; gap: 18px; }
+  .row { display: grid; grid-template-columns: 1.4fr 1fr; gap: 18px; align-items: start; }
+  .section-title { font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: #c4b1ff; font-weight: 700; margin: 0 0 4px; }
+  .card { background: rgba(15,23,42,0.7); border: 1px solid rgba(167,139,250,0.18); border-radius: 18px; padding: 20px; }
+  h2 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }
+  .eyebrow { color: #c4b1ff; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; margin-bottom: 12px; }
+  p, li { color: var(--fg-3); font-size: 12.5px; line-height: 1.55; margin: 0; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 14px; }
+  .swatch { aspect-ratio: 1; border-radius: 16px; display: grid; place-items: center; position: relative; overflow: hidden; }
+  .swatch.light { background: #f5f3ff; }
+  .swatch.dark { background: #0b1226; border: 1px solid rgba(167,139,250,0.2); }
+  .swatch.brand { background: linear-gradient(135deg, #a78bfa, #7c3aed); }
+  .label { font-size: 10.5px; color: var(--fg-muted); text-align: center; margin-top: 8px; letter-spacing: 0.04em; text-transform: uppercase; }
+
+  .hero { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; align-items: stretch; margin-top: 14px; }
+  .hero-card { padding: 28px 24px; border-radius: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .hero-card.dark { background: #0b1226; border: 1px solid rgba(167,139,250,0.2); }
+  .hero-card.light { background: #f5f3ff; }
+  .lockup { display: flex; align-items: center; gap: 14px; }
+  .wordmark { font-weight: 800; font-size: 28px; letter-spacing: -0.02em; }
+  .wordmark.on-dark { color: #f5f3ff; }
+  .wordmark.on-light { color: #1a0f3a; }
+  .tag { font-size: 11.5px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 600; }
+  .tag.on-dark { color: #c4b1ff; }
+  .tag.on-light { color: #7c3aed; }
+
+  .sizes { display: flex; align-items: flex-end; gap: 24px; padding: 18px; border-radius: 14px; background: #0b1226; border: 1px solid rgba(167,139,250,0.16); margin-top: 14px; }
+  .size-cell { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .size-cell .label { margin-top: 0; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <!-- ===================================================================
+         PRODUCT MARK · Daydream Notes
+         Quill feather dipped into an ink bottle. The bottle is a Phosphor
+         hand-soap silhouette with the push-nozzle removed — squat body,
+         shoulder, short neck, flat cap. Feather enters from upper-left at
+         ~30°, tip submerged. Same stroke weight + currentColor as dd-mark.
+         =================================================================== -->
+    <symbol id="notes-mark" viewBox="0 0 64 64">
+      <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <!-- Ink bottle (hand-soap minus nozzle): squat body 26w × 18h, rounded shoulders,
+             short neck stepping up to a flat cap. Centered horizontally on x=36, base at y=58. -->
+        <!-- body -->
+        <path d="M 23 58 H 49 A 4 4 0 0 0 53 54 V 44 A 4 4 0 0 0 49 40 H 23 A 4 4 0 0 0 19 44 V 54 A 4 4 0 0 0 23 58 Z"/>
+        <!-- ink fill line (suggests liquid level inside the bottle) -->
+        <line x1="22" y1="48" x2="50" y2="48" stroke-opacity="0.55"/>
+        <!-- shoulder + neck (stepping up from body) -->
+        <path d="M 28 40 V 36 A 2 2 0 0 1 30 34 H 42 A 2 2 0 0 1 44 36 V 40"/>
+        <!-- cap (flat lid sitting on the neck) -->
+        <path d="M 30 34 V 31 H 42 V 34"/>
+      </g>
+      <!-- Feather: diving in from upper-left at ~30°. Built along an axis from (8, 8) to (32, 32),
+           tip submerged just inside the bottle's neck. Spine is the diagonal line; vane is a
+           single curved blade on its right (lower) side. Phosphor "feather"-style. -->
+      <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <!-- spine -->
+        <line x1="9" y1="9" x2="32" y2="32"/>
+        <!-- vane: outer curve from feather base (10, 8) to nib (32, 32), inner curve back along the spine.
+             Closed teardrop on the lower-right side of the spine. -->
+        <path d="M 10 8
+                 C 24 10, 32 18, 32 32
+                 C 22 32, 14 24, 9 9 Z"
+              fill="currentColor" fill-opacity="0.18"/>
+        <!-- barb lines (3 short ribs on the vane, perpendicular-ish to the spine) -->
+        <line x1="14" y1="14" x2="18.5" y2="18"   stroke-width="2"/>
+        <line x1="18" y1="18" x2="23"   y2="22"   stroke-width="2"/>
+        <line x1="22" y1="22" x2="27"   y2="26.5" stroke-width="2"/>
+      </g>
+    </symbol>
+
+    <!-- ===================================================================
+         CORPORATE MARK · Daydream Software (sun + nested moon)
+         =================================================================== -->
+    <symbol id="dd-mark" viewBox="0 0 64 64">
+      <!-- Single centered glyph at (32, 32). Sun on the outside (circle r=14 + 8 rays),
+           half-moon nested INSIDE the sun's disc — its straight edge runs vertically through center,
+           crescent tucks to the right. Reads as a moon hiding inside the sun. -->
+
+      <!-- Sun: ring + 8 rays, centered at (32, 32). Rays are ~4px long. -->
+      <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <circle cx="32" cy="32" r="14"/>
+        <!-- cardinals -->
+        <line x1="32" y1="6"  x2="32" y2="11"/>
+        <line x1="32" y1="53" x2="32" y2="58"/>
+        <line x1="6"  y1="32" x2="11" y2="32"/>
+        <line x1="53" y1="32" x2="58" y2="32"/>
+        <!-- diagonals (at 45°, 26 from center to inner end, 18.4 to outer) -->
+        <line x1="14.2" y1="14.2" x2="17.7" y2="17.7"/>
+        <line x1="46.3" y1="46.3" x2="49.8" y2="49.8"/>
+        <line x1="14.2" y1="49.8" x2="17.7" y2="46.3"/>
+        <line x1="46.3" y1="17.7" x2="49.8" y2="14.2"/>
+      </g>
+
+      <!-- Moon: nested INSIDE the sun's disc. Smaller solid crescent, opens left,
+           so its bulge sits on the right half of the sun's interior. -->
+      <!-- Built from two arcs on a 64-grid:
+           outer right semicircle radius 9 from (32,23) to (32,41),
+           inner left arc radius 4.5 (concave) closing back. -->
+      <path
+        d="M 32 23
+           A 9 9 0 0 1 32 41
+           A 4.5 9 0 0 0 32 23 Z"
+        fill="currentColor" fill-opacity="0.95"
+        stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="stack">
+
+<!-- ============== PRODUCT MARK ============== -->
+<div class="row">
+  <div class="card">
+    <div class="eyebrow">Product mark · Daydream Notes</div>
+    <h2 style="font-size: 22px; letter-spacing: -0.01em;">Quill in the ink</h2>
+    <p>The product is for taking notes — so the mark is the gesture of taking one. A <strong>quill feather</strong> (Phosphor <em>feather</em> family) dives into an <strong>ink bottle</strong> (Phosphor <em>hand-soap</em> with the push-nozzle removed: squat body, shoulder, short neck, flat cap). Stroke weight, color handling, and clear-space rules match the corporate mark below — they read as the same family.</p>
+
+    <div class="hero">
+      <div class="hero-card dark">
+        <div class="tag on-dark">Primary · on dark</div>
+        <div class="lockup" style="color: #c4b1ff;">
+          <svg width="64" height="64"><use href="#notes-mark"/></svg>
+          <div class="wordmark on-dark">Notes</div>
+        </div>
+        <p style="color: rgba(245,243,255,0.72);">App icon, in-app brand pill, marketing nav for the notes product.</p>
+      </div>
+      <div class="hero-card light">
+        <div class="tag on-light">Inverse · on light</div>
+        <div class="lockup" style="color: #7c3aed;">
+          <svg width="64" height="64"><use href="#notes-mark"/></svg>
+          <div class="wordmark on-light">Notes</div>
+        </div>
+        <p style="color: #4c1d95;">Light marketing surfaces, printed material, App Store listing.</p>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 18px;">On all three surface tones</h2>
+    <div class="grid">
+      <div>
+        <div class="swatch dark" style="color: #c4b1ff;">
+          <svg width="80" height="80"><use href="#notes-mark"/></svg>
+        </div>
+        <div class="label">On slate · brand-500</div>
+      </div>
+      <div>
+        <div class="swatch light" style="color: #7c3aed;">
+          <svg width="80" height="80"><use href="#notes-mark"/></svg>
+        </div>
+        <div class="label">On lavender · brand-700</div>
+      </div>
+      <div>
+        <div class="swatch brand" style="color: #fefefe;">
+          <svg width="80" height="80"><use href="#notes-mark"/></svg>
+        </div>
+        <div class="label">On purple · white</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 18px;">Size ladder</h2>
+    <div class="sizes" style="color: #c4b1ff;">
+      <div class="size-cell"><svg width="16" height="16"><use href="#notes-mark"/></svg><span class="label">16 · favicon</span></div>
+      <div class="size-cell"><svg width="20" height="20"><use href="#notes-mark"/></svg><span class="label">20 · navbar</span></div>
+      <div class="size-cell"><svg width="28" height="28"><use href="#notes-mark"/></svg><span class="label">28 · brand pill</span></div>
+      <div class="size-cell"><svg width="40" height="40"><use href="#notes-mark"/></svg><span class="label">40 · header</span></div>
+      <div class="size-cell"><svg width="64" height="64"><use href="#notes-mark"/></svg><span class="label">64 · landing</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Construction</div>
+    <h2>Two glyphs, one gesture</h2>
+    <p>Bottle anchors the lower-right (cx=36, base y=58). Feather enters from upper-left at ~45° and its nib lands inside the neck — the act of dipping is captured at the moment of contact.</p>
+
+    <div style="margin-top: 16px; padding: 18px; border-radius: 14px; background: rgba(167,139,250,0.06); border: 1px dashed rgba(167,139,250,0.24); display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: center;">
+      <div style="display: grid; place-items: center; color: #c4b1ff;">
+        <svg viewBox="0 0 64 64" width="110" height="110">
+          <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+            <line x1="9" y1="9" x2="32" y2="32"/>
+            <path d="M 10 8 C 24 10, 32 18, 32 32 C 22 32, 14 24, 9 9 Z" fill="currentColor" fill-opacity="0.18"/>
+            <line x1="14" y1="14" x2="18.5" y2="18"   stroke-width="2"/>
+            <line x1="18" y1="18" x2="23"   y2="22"   stroke-width="2"/>
+            <line x1="22" y1="22" x2="27"   y2="26.5" stroke-width="2"/>
+          </g>
+        </svg>
+        <div class="label" style="margin-top: 4px;">Feather · spine + vane + 3 barbs</div>
+      </div>
+      <div style="display: grid; place-items: center; color: #c4b1ff;">
+        <svg viewBox="0 0 64 64" width="110" height="110">
+          <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+            <path d="M 23 58 H 49 A 4 4 0 0 0 53 54 V 44 A 4 4 0 0 0 49 40 H 23 A 4 4 0 0 0 19 44 V 54 A 4 4 0 0 0 23 58 Z"/>
+            <line x1="22" y1="48" x2="50" y2="48" stroke-opacity="0.55"/>
+            <path d="M 28 40 V 36 A 2 2 0 0 1 30 34 H 42 A 2 2 0 0 1 44 36 V 40"/>
+            <path d="M 30 34 V 31 H 42 V 34"/>
+          </g>
+        </svg>
+        <div class="label" style="margin-top: 4px;">Ink bottle · hand-soap minus nozzle</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 18px;">Composition rules</h2>
+    <ul style="margin: 6px 0 0; padding-left: 18px;">
+      <li>Both glyphs use <strong>currentColor</strong>. Recolor the parent, the mark recolors with you.</li>
+      <li>Stroke is <strong>2.6 px</strong> on the 64-grid. Match the corporate mark's weight — they're meant to sit side by side.</li>
+      <li>Vane has a faint <strong>fill-opacity 0.18</strong> tint to give the feather body without competing with the bottle silhouette.</li>
+      <li>Ink-level line on the bottle uses <strong>stroke-opacity 0.55</strong> — visual interest without adding clutter at favicon size.</li>
+      <li>Clear space = one ink-bottle width (~14px on the 64-grid).</li>
+      <li>Pairs with <strong>Inter 700</strong> for the wordmark "Notes" (one weight lighter than the corporate "Daydream" — so the parent brand stays dominant in lockups).</li>
+    </ul>
+
+    <h2 style="margin-top: 16px;">When to flag this</h2>
+    <p>Working sketch. Variants worth trying — feather as outline only (no vane fill), bottle with a wax-seal cap instead of flat lid, or feather entering vertically (top-down dip) for a calmer composition. Tell me which way to push.</p>
+  </div>
+</div>
+
+<!-- ============== CORPORATE MARK ============== -->
+<div class="row">
+  <div class="card">
+    <div class="eyebrow">Corporate mark · Daydream Software</div>
+    <h2 style="font-size: 22px; letter-spacing: -0.01em;">Moon nested in sun</h2>
+    <p>One concentric glyph: Iconoir-style <strong>sun</strong> on the outside, a small <strong>crescent moon</strong> tucked inside its disc. The dual nature of <em>Daydream</em> — day awake, night dreaming — collapsed into a single mark.</p>
+
+    <div class="hero">
+      <div class="hero-card dark">
+        <div class="tag on-dark">Primary · on dark</div>
+        <div class="lockup" style="color: #c4b1ff;">
+          <svg width="64" height="64"><use href="#dd-mark"/></svg>
+          <div class="wordmark on-dark">Daydream</div>
+        </div>
+        <p style="color: rgba(245,243,255,0.72);">Used in app chrome, marketing nav, the workspace recreation's brand pill.</p>
+      </div>
+      <div class="hero-card light">
+        <div class="tag on-light">Inverse · on light</div>
+        <div class="lockup" style="color: #7c3aed;">
+          <svg width="64" height="64"><use href="#dd-mark"/></svg>
+          <div class="wordmark on-light">Daydream</div>
+        </div>
+        <p style="color: #4c1d95;">Falls back cleanly on light marketing surfaces and printed material.</p>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 18px;">On all three surface tones</h2>
+    <div class="grid">
+      <div>
+        <div class="swatch dark" style="color: #c4b1ff;">
+          <svg width="72" height="72"><use href="#dd-mark"/></svg>
+        </div>
+        <div class="label">On slate · brand-500</div>
+      </div>
+      <div>
+        <div class="swatch light" style="color: #7c3aed;">
+          <svg width="72" height="72"><use href="#dd-mark"/></svg>
+        </div>
+        <div class="label">On lavender · brand-700</div>
+      </div>
+      <div>
+        <div class="swatch brand" style="color: #fefefe;">
+          <svg width="72" height="72"><use href="#dd-mark"/></svg>
+        </div>
+        <div class="label">On purple · white</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 18px;">Size ladder (legibility floor)</h2>
+    <div class="sizes" style="color: #c4b1ff;">
+      <div class="size-cell"><svg width="16" height="16"><use href="#dd-mark"/></svg><span class="label">16 · favicon</span></div>
+      <div class="size-cell"><svg width="20" height="20"><use href="#dd-mark"/></svg><span class="label">20 · navbar</span></div>
+      <div class="size-cell"><svg width="28" height="28"><use href="#dd-mark"/></svg><span class="label">28 · brand pill</span></div>
+      <div class="size-cell"><svg width="40" height="40"><use href="#dd-mark"/></svg><span class="label">40 · header</span></div>
+      <div class="size-cell"><svg width="64" height="64"><use href="#dd-mark"/></svg><span class="label">64 · landing</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="eyebrow">Construction</div>
+    <h2>Concentric, on a single center</h2>
+    <p>Sun ring + 8 rays centered at (32, 32). Moon crescent nested in the same center, opening leftward so its bulge fills the right interior. The moon never touches the sun's ring — clear space all around.</p>
+
+    <div style="margin-top: 16px; padding: 18px; border-radius: 14px; background: rgba(167,139,250,0.06); border: 1px dashed rgba(167,139,250,0.24); display: grid; grid-template-columns: 1fr 1fr; gap: 14px; align-items: center;">
+      <div style="display: grid; place-items: center; color: #c4b1ff; opacity: 0.85;">
+        <svg viewBox="0 0 64 64" width="110" height="110" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+          <circle cx="32" cy="32" r="14"/>
+          <line x1="32" y1="6"  x2="32" y2="11"/>
+          <line x1="32" y1="53" x2="32" y2="58"/>
+          <line x1="6"  y1="32" x2="11" y2="32"/>
+          <line x1="53" y1="32" x2="58" y2="32"/>
+          <line x1="14.2" y1="14.2" x2="17.7" y2="17.7"/>
+          <line x1="46.3" y1="46.3" x2="49.8" y2="49.8"/>
+          <line x1="14.2" y1="49.8" x2="17.7" y2="46.3"/>
+          <line x1="46.3" y1="17.7" x2="49.8" y2="14.2"/>
+        </svg>
+        <div class="label" style="margin-top: 4px;">Sun · ring + 8 rays</div>
+      </div>
+      <div style="display: grid; place-items: center; color: #c4b1ff;">
+        <svg viewBox="0 0 64 64" width="110" height="110">
+          <path
+            d="M 32 23
+               A 9 9 0 0 1 32 41
+               A 4.5 9 0 0 0 32 23 Z"
+            fill="currentColor" fill-opacity="0.95"
+            stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+        </svg>
+        <div class="label" style="margin-top: 4px;">Moon · crescent, nested</div>
+      </div>
+    </div>
+
+    <h2 style="margin-top: 18px;">Composition rules</h2>
+    <ul style="margin: 6px 0 0; padding-left: 18px;">
+      <li>Both shapes use <strong>currentColor</strong>. Recolor the parent, the mark recolors with you.</li>
+      <li>Sun ring stroke is <strong>2.6 px</strong> on the 64-grid. If you need a heavier mark, scale the SVG — don't bump the stroke.</li>
+      <li>Moon never touches the sun's interior ring — leaves ~5px of breathing room at the smallest sizes.</li>
+      <li>Glyph is centered on (32, 32). Drop it into any square, no manual alignment needed.</li>
+      <li>Clear space around the full mark = one ray length (~5px on the 64-grid).</li>
+      <li>Pairs with <strong>Inter 800</strong> at -0.02em tracking for the wordmark.</li>
+    </ul>
+
+    <h2 style="margin-top: 16px;">When to flag this</h2>
+    <p>Still a working sketch. Variants worth trying if this isn't the one — moon as a stroked outline instead of a solid fill, fewer rays (4 cardinals only), or the moon shifted slightly off-center for asymmetric tension. Tell me which way to push and I'll iterate.</p>
+  </div>
+</div>
+
+</div><!-- /.stack -->
+
+</body>
+</html>

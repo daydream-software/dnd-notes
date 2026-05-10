@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Radii & spacing</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px; background: var(--bg-1); }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(5, 1fr); align-items: end; }
+  .demo { display: flex; flex-direction: column; align-items: center; gap: 8px; }
+  .box { width: 76px; height: 76px; background: rgba(15,23,42,0.88); border: 1px solid var(--brand-line); }
+  .name { color: var(--fg-1); font-size: 12px; font-weight: 500; }
+  .meta { color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="grid">
+  <div class="demo"><div class="box" style="border-radius:8px"></div><span class="name">sm</span><span class="meta">8px</span></div>
+  <div class="demo"><div class="box" style="border-radius:12px"></div><span class="name">md</span><span class="meta">12px</span></div>
+  <div class="demo"><div class="box" style="border-radius:18px"></div><span class="name">lg / default</span><span class="meta">18px</span></div>
+  <div class="demo"><div class="box" style="border-radius:24px"></div><span class="name">xl</span><span class="meta">24px</span></div>
+  <div class="demo"><div class="box" style="border-radius:999px"></div><span class="name">pill</span><span class="meta">999px</span></div>
+  </div>
+</body>
+</html>
