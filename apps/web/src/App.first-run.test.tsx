@@ -279,10 +279,16 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
 
       await screen.findByLabelText('Search notes')
 
-      // Click the "combat" tag filter chip
+      // Click the "combat" tag filter chip (filter active, 1 result visible)
       await user.click(screen.getByRole('button', { name: /combat/ }))
 
-      // The contained "New note" CTA is suppressed when a tag filter is active
+      // Force a truly empty filtered state by typing a search query that matches nothing
+      await user.type(screen.getByLabelText('Search notes'), 'zzz-no-match')
+
+      // Verify the list is genuinely empty — the tagged note is gone
+      expect(screen.queryByText('Tagged note')).toBeNull()
+
+      // The contained "New note" CTA must not appear even when the filtered list is empty
       const newNoteButtons = screen.queryAllByRole('button', { name: 'New note' })
       expect(newNoteButtons.length).toBeLessThan(3)
       // The tag-filter empty state message is also not the CTA alert
