@@ -64,10 +64,15 @@ function CopyField({ label, value }: CopyFieldProps) {
   const [copied, setCopied] = useState(false)
 
   const handleCopy = useCallback(() => {
-    void navigator.clipboard.writeText(value).then(() => {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    })
+    if (!navigator.clipboard?.writeText) return
+    navigator.clipboard.writeText(value)
+      .then(() => {
+        setCopied(true)
+        window.setTimeout(() => setCopied(false), 1500)
+      })
+      .catch(() => {
+        setCopied(false)
+      })
   }, [value])
 
   return (
@@ -82,7 +87,7 @@ function CopyField({ label, value }: CopyFieldProps) {
       <Typography
         variant="body2"
         sx={{
-          fontFamily: 'Geist Mono, monospace',
+          fontFamily: 'Geist Mono',
           color: 'text.primary',
           overflow: 'hidden',
           textOverflow: 'ellipsis',

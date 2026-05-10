@@ -1334,6 +1334,7 @@ export function buildTenantResourceNames(params: {
     namespace,
     deploymentName: 'dnd-notes',
     serviceName: 'dnd-notes',
+    pvcName: null,
     configMapName: 'dnd-notes-runtime',
     secretName: 'dnd-notes-runtime-secret',
     hostname: `${params.subdomain}.${params.baseDomain}`,
