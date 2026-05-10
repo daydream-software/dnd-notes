@@ -370,6 +370,8 @@ describe('operator portal', () => {
 
     expect(await screen.findByTestId('access-denied-view')).toBeTruthy()
     expect(screen.getByText('Access not authorized')).toBeTruthy()
+    const customerPortalLink = screen.getByRole('link', { name: /portal/i }) as HTMLAnchorElement
+    expect(customerPortalLink.getAttribute('href')).toBe('https://portal.127.0.0.1.nip.io')
     expect(screen.queryByText('Fleet tenants')).toBeNull()
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
   })

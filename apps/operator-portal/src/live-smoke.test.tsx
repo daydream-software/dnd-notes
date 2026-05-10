@@ -15,9 +15,17 @@ function createMockJwt(claims: Record<string, unknown>) {
       .replace(/=+$/g, '')
 
   // Always include the workforce role so the gate passes in every smoke test.
+  const existingRealmRoles =
+    (claims as { realm_access?: { roles?: unknown } }).realm_access?.roles
+  const normalizedRealmRoles = Array.isArray(existingRealmRoles)
+    ? existingRealmRoles.filter((role): role is string => typeof role === 'string')
+    : []
+
   const claimsWithRole = {
-    realm_access: { roles: ['control-plane-workforce'] },
     ...claims,
+    realm_access: {
+      roles: Array.from(new Set(['control-plane-workforce', ...normalizedRealmRoles])),
+    },
   }
 
   return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(claimsWithRole)}.signature`
