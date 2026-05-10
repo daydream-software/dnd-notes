@@ -1135,24 +1135,26 @@ describe('operator portal lifecycle actions', () => {
       configurable: true,
     })
 
-    render(<App />)
+    try {
+      render(<App />)
 
-    expect(await screen.findByText('Resource identifiers')).toBeTruthy()
+      expect(await screen.findByText('Resource identifiers')).toBeTruthy()
 
-    const copyButton = screen.getByRole('button', { name: 'Copy Namespace' })
-    await user.click(copyButton)
+      const copyButton = screen.getByRole('button', { name: 'Copy Namespace' })
+      await user.click(copyButton)
 
-    // "Copied" should never appear when the clipboard is unavailable
-    expect(screen.queryByText('Copied')).toBeNull()
-
-    // Restore original clipboard descriptor
-    if (originalClipboard) {
-      Object.defineProperty(navigator, 'clipboard', originalClipboard)
-    } else {
-      Object.defineProperty(navigator, 'clipboard', {
-        value: undefined,
-        configurable: true,
-      })
+      // "Copied" should never appear when the clipboard is unavailable
+      expect(screen.queryByText('Copied')).toBeNull()
+    } finally {
+      // Restore original clipboard descriptor
+      if (originalClipboard) {
+        Object.defineProperty(navigator, 'clipboard', originalClipboard)
+      } else {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: undefined,
+          configurable: true,
+        })
+      }
     }
   })
 })
