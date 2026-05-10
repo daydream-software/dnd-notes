@@ -29,6 +29,7 @@
     ".squad/ceremonies.md",
     ".squad/qa-brief-*.md",
     ".squad/phase2-recommendation.md",
-    "docs/archive/**"
+    "docs/archive/**",
+    "docs/design-system/**"
   ]
 }

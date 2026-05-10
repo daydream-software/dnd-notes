@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Type — body & UI text</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px 32px; background: var(--bg-1); }
+  .row { display: flex; gap: 24px; padding: 10px 0; border-bottom: 1px solid var(--divider); align-items: baseline; }
+  .row:last-child { border-bottom: 0; }
+  .label { color: var(--fg-3); font-size: 12px; min-width: 110px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .meta { color: var(--fg-muted); font-size: 12px; margin-left: auto; font-family: var(--font-mono); }
+  .body { color: var(--fg-1); font-size: 16px; line-height: 1.65; max-width: 380px; }
+  .body-sm { color: var(--fg-1); font-size: 14px; line-height: 1.55; }
+  .caption { color: var(--fg-3); font-size: 12px; }
+  .uppercase { color: var(--fg-2); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; font-weight: 500; }
+  .mono { color: var(--fg-1); font-family: var(--font-mono); font-size: 13.5px; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="row">
+    <span class="label">Body</span>
+    <span class="body">Capture goals, pressure, and relationships for a faction.</span>
+    <span class="meta">16 / 400 / 1.65</span>
+  </div>
+  <div class="row">
+    <span class="label">Body sm</span>
+    <span class="body-sm">Switch between browsing and editing without stretching the page.</span>
+    <span class="meta">14 / 400</span>
+  </div>
+  <div class="row">
+    <span class="label">Caption</span>
+    <span class="caption">Last updated 5 minutes ago</span>
+    <span class="meta">12 / 400</span>
+  </div>
+  <div class="row">
+    <span class="label">Brand pill</span>
+    <span class="uppercase">D&amp;D Notes</span>
+    <span class="meta">12 / 500 / 0.08em</span>
+  </div>
+  <div class="row">
+    <span class="label">Mono</span>
+    <span class="mono">npm run dev</span>
+    <span class="meta">13.5 / 400</span>
+  </div>
+</body>
+</html>

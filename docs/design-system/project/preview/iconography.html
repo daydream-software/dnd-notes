@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Iconography — MUI Rounded</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,0,0&display=block" rel="stylesheet">
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px; background: var(--bg-1); font-family: var(--font-sans); }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(7, 1fr); align-items: start; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 6px; color: var(--fg-1); padding: 10px 6px; border: 1px solid var(--divider); border-radius: var(--radius-md); }
+  .cell .material-symbols-rounded { font-size: 24px; color: var(--fg-1); }
+  .name { font-family: var(--font-mono); font-size: 10.5px; color: var(--fg-muted); }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="grid">
+  <div class="cell"><span class="material-symbols-rounded">save</span><span class="name">save</span></div>
+  <div class="cell"><span class="material-symbols-rounded">search</span><span class="name">search</span></div>
+  <div class="cell"><span class="material-symbols-rounded">bolt</span><span class="name">bolt</span></div>
+  <div class="cell"><span class="material-symbols-rounded">sticky_note_2</span><span class="name">sticky_note_2</span></div>
+  <div class="cell"><span class="material-symbols-rounded">format_bold</span><span class="name">format_bold</span></div>
+  <div class="cell"><span class="material-symbols-rounded">format_italic</span><span class="name">format_italic</span></div>
+  <div class="cell"><span class="material-symbols-rounded">format_list_bulleted</span><span class="name">list_bulleted</span></div>
+  <div class="cell"><span class="material-symbols-rounded">format_list_numbered</span><span class="name">list_numbered</span></div>
+  <div class="cell"><span class="material-symbols-rounded">link</span><span class="name">link</span></div>
+  <div class="cell"><span class="material-symbols-rounded">clear</span><span class="name">clear</span></div>
+  <div class="cell"><span class="material-symbols-rounded">add</span><span class="name">add</span></div>
+  <div class="cell"><span class="material-symbols-rounded">edit</span><span class="name">edit</span></div>
+  <div class="cell"><span class="material-symbols-rounded">delete</span><span class="name">delete</span></div>
+  <div class="cell"><span class="material-symbols-rounded">share</span><span class="name">share</span></div>
+  </div>
+</body>
+</html>

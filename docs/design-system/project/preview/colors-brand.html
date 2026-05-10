@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Brand purples</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px; background: var(--bg-1); }
+  .grid { display: grid; gap: 12px; grid-template-columns: repeat(4, 1fr); align-items: start; }
+  .swatch { border-radius: var(--radius-md); padding: 14px 14px 12px; min-height: 96px; display: flex; flex-direction: column; justify-content: space-between; box-shadow: var(--shadow-sm); border: 1px solid var(--brand-line-faint); }
+  .name { font-size: 12px; font-weight: 600; letter-spacing: 0.04em; }
+  .hex { font-family: var(--font-mono); font-size: 11.5px; opacity: 0.85; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="grid">
+  <div class="swatch" style="background:#ede6ff;color:#1a0f3a"><span class="name">brand-50</span><span class="hex">#EDE6FF</span></div>
+  <div class="swatch" style="background:#a78bfa;color:#1a0f3a"><span class="name">brand-500 / primary</span><span class="hex">#A78BFA</span></div>
+  <div class="swatch" style="background:#8b5cf6;color:#fff"><span class="name">brand-600 / press</span><span class="hex">#8B5CF6</span></div>
+  <div class="swatch" style="background:#7c3aed;color:#fff"><span class="name">brand-700 / halo</span><span class="hex">#7C3AED</span></div>
+  <div class="swatch" style="background:#863bff;color:#fff"><span class="name">brand-800 / logo</span><span class="hex">#863BFF</span></div>
+  <div class="swatch" style="background:#4c1d95;color:#fff"><span class="name">brand-900</span><span class="hex">#4C1D95</span></div>
+  <div class="swatch" style="background:rgba(167,139,250,0.16);color:#f8fafc;border-color:var(--brand-line)"><span class="name">brand-tint</span><span class="hex">a78bfa @ 16%</span></div>
+  <div class="swatch" style="background:transparent;color:#f8fafc;border:1px solid rgba(167,139,250,0.22)"><span class="name">brand-line</span><span class="hex">a78bfa @ 22%</span></div>
+  </div>
+</body>
+</html>

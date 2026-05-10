@@ -1,0 +1,212 @@
+/* =========================================================================
+   D&D Notes — Colors & Type
+   Sourced from apps/web/src/main.tsx + index.css + CampaignWorkspaceSurface.tsx
+   ========================================================================= */
+
+/* ----- Self-hosted brand fonts ----- */
+@font-face {
+  font-family: 'Geist';
+  src: url('assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  /* ----- Brand purples ----- */
+  --brand-500: #a78bfa;            /* MUI primary.main — workspace accents, chips, primary buttons */
+  --brand-400: #b39dfb;            /* hover lift on brand-500 */
+  --brand-600: #8b5cf6;            /* press / deeper interactive */
+  --brand-700: #7c3aed;            /* radial halo at top of body bg */
+  --brand-800: #863bff;            /* logo fill (display-p3) */
+  --brand-900: #4c1d95;            /* deep accent, rarely used */
+  --brand-50: #ede6ff;             /* logo highlight tint */
+
+  /* Translucent brand washes — borders, glows, pill backgrounds */
+  --brand-line-strong: rgba(167, 139, 250, 0.22);
+  --brand-line: rgba(167, 139, 250, 0.20);
+  --brand-line-soft: rgba(167, 139, 250, 0.18);
+  --brand-line-faint: rgba(167, 139, 250, 0.14);
+  --brand-tint: rgba(167, 139, 250, 0.16);
+
+  /* ----- Slate foundation (MUI dark + custom backgrounds) ----- */
+  --bg-0: #020617;                 /* deepest, top of body gradient */
+  --bg-1: #0f172a;                 /* MUI background.default */
+  --bg-2: #111827;                 /* gradient bottom */
+  --bg-paper: rgba(15, 23, 42, 0.9);   /* MUI background.paper (default) */
+  --bg-paper-strong: rgba(15, 23, 42, 0.88); /* sticky header, stat pills */
+  --bg-paper-soft: rgba(15, 23, 42, 0.72);   /* brand pill backdrop */
+  --bg-paper-faint: rgba(15, 23, 42, 0.44);  /* compact desktop header */
+
+  /* ----- Foreground / text ----- */
+  --fg-1: #f8fafc;                 /* primary text on dark */
+  --fg-2: rgba(255, 255, 255, 0.78);   /* brand-pill text */
+  --fg-3: rgba(255, 255, 255, 0.72);   /* header subtitle */
+  --fg-muted: rgba(248, 250, 252, 0.6);    /* MUI text.secondary equiv */
+  --fg-disabled: rgba(248, 250, 252, 0.38);
+
+  /* ----- Semantic accents (MUI defaults under dark mode) ----- */
+  --warn: #f59e0b;                 /* MUI secondary.main — amber */
+  --warn-soft: rgba(245, 158, 11, 0.16);
+  --error: #f87171;
+  --success: #4ade80;
+  --info: #60a5fa;
+
+  /* Note status hues (used for status chips in App.tsx) */
+  --status-draft: var(--fg-muted);
+  --status-published: var(--success);
+  --status-archived: var(--warn);
+
+  /* ----- Surfaces, dividers, action states (MUI dark conventions) ----- */
+  --divider: rgba(255, 255, 255, 0.12);
+  --action-hover: rgba(255, 255, 255, 0.08);
+  --action-selected: rgba(167, 139, 250, 0.16);
+  --action-disabled-bg: rgba(255, 255, 255, 0.12);
+
+  /* ----- Background composition (drop into body) ----- */
+  --page-bg: radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
+             linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
+
+  /* ----- Radii (MUI shape.borderRadius = 18) ----- */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;               /* default card / textfield */
+  --radius-xl: 24px;               /* surface / sticky header */
+  --radius-pill: 999px;
+
+  /* ----- Elevation (slate-tinted, not neutral black) ----- */
+  --shadow-sm: 0 12px 30px rgba(2, 6, 23, 0.24);
+  --shadow-md: 0 16px 40px rgba(2, 6, 23, 0.26);
+  --shadow-lg: 0 20px 40px rgba(15, 23, 42, 0.24);
+  --shadow-xl: 0 24px 56px rgba(2, 6, 23, 0.32);
+
+  /* ----- Spacing (MUI 8px base) ----- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* ----- Effects ----- */
+  --blur-sm: blur(12px);
+  --blur-md: blur(16px);
+
+  /* ----- Type families ----- */
+  --font-sans: 'Geist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+
+  /* ----- Type scale (MUI defaults + markdown sizes from note-markdown-styles.ts) ----- */
+  --fs-display: 2.5rem;
+  --fs-h1: 2rem;        /* mobile 1.7rem */
+  --fs-h2: 1.7rem;      /* mobile 1.45rem */
+  --fs-h3: 1.45rem;     /* mobile 1.25rem */
+  --fs-h4: 1.2rem;
+  --fs-h5: 1.55rem;     /* stat-card big number */
+  --fs-h6: 1.05rem;
+  --fs-body: 1rem;
+  --fs-body-sm: 0.875rem;
+  --fs-caption: 0.75rem;
+  --fs-mono: 0.9em;
+
+  --lh-tight: 1.1;
+  --lh-snug: 1.2;
+  --lh-normal: 1.5;
+  --lh-loose: 1.65;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+
+  --tracking-uppercase: 0.08em;     /* brand pill caption */
+}
+
+/* =========================================================================
+   Semantic element styles — opt in by importing this CSS
+   ========================================================================= */
+
+html, body {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background: var(--page-bg);
+  margin: 0;
+  min-height: 100vh;
+}
+
+h1 { font-size: var(--fs-h1); line-height: var(--lh-snug); margin: 0 0 var(--space-3); font-weight: var(--fw-semibold); }
+h2 { font-size: var(--fs-h2); line-height: var(--lh-snug); margin: var(--space-6) 0 var(--space-3); font-weight: var(--fw-semibold); }
+h3 { font-size: var(--fs-h3); line-height: var(--lh-snug); margin: var(--space-5) 0 var(--space-2); font-weight: var(--fw-semibold); }
+h4 { font-size: var(--fs-h4); line-height: var(--lh-snug); margin: var(--space-4) 0 var(--space-2); font-weight: var(--fw-semibold); }
+
+p  { font-size: var(--fs-body); line-height: var(--lh-loose); margin: var(--space-3) 0; color: var(--fg-1); }
+
+a  { color: var(--brand-500); text-decoration: none; }
+a:hover { color: var(--brand-400); text-decoration: underline; }
+
+small, .caption { font-size: var(--fs-caption); color: var(--fg-3); }
+
+code {
+  background: var(--action-hover);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--fs-mono);
+  padding: 2px 6px;
+}
+
+pre {
+  background: var(--action-hover);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+}
+
+blockquote {
+  border-left: 4px solid var(--divider);
+  color: var(--fg-3);
+  margin: var(--space-4) 0;
+  padding-left: var(--space-4);
+}
+
+
+/* Material Symbols Rounded — force ligature substitution.
+   The css2 endpoint Google serves does not set font-feature-settings,
+   so without this rule the ligature text content (e.g. "check_circle")
+   renders as literal text instead of the glyph. */
+.material-symbols-rounded {
+  font-family: 'Material Symbols Rounded';
+  font-weight: normal;
+  font-style: normal;
+  font-size: 24px;
+  line-height: 1;
+  letter-spacing: normal;
+  text-transform: none;
+  display: inline-block;
+  white-space: nowrap;
+  word-wrap: normal;
+  direction: ltr;
+  font-feature-settings: 'liga';
+  -webkit-font-feature-settings: 'liga';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}

@@ -28,6 +28,8 @@ reviews:
     - "!package-lock.json"
     - "!**/*.tsbuildinfo"
     - "!apps/*/public/fonts/**"
+    - "!docs/design-system/**"
+    - "!docs/archive/**"
 
   path_instructions:
     - path: "packages/theme/**"

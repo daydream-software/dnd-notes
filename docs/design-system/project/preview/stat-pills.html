@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Stat pills</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px; background: var(--page-bg); font-family: var(--font-sans); }
+  .row { display: grid; gap: 18px; grid-template-columns: repeat(4, 1fr); align-items: start; }
+  .stat { display: flex; align-items: center; gap: 12px; padding: 14px 18px; border-radius: var(--radius-lg); background: rgba(15,23,42,0.88); border: 1px solid rgba(167,139,250,0.18); box-shadow: 0 20px 40px rgba(15,23,42,0.24); }
+  .icon { width: 40px; height: 40px; border-radius: 50%; background: rgba(167,139,250,0.16); display: grid; place-items: center; flex-shrink: 0; color: #c4b1ff; }
+  .icon svg { width: 20px; height: 20px; fill: currentColor; }
+  .label { color: var(--fg-muted); font-size: 13px; line-height: 1.2; }
+  .value { color: var(--fg-1); font-size: 24px; line-height: 1.1; font-weight: 600; margin-top: 2px; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="row">
+  <div class="stat"><span class="icon"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm4 18H6V4h7v5h5z"/></svg></span><div><div class="label">Notes</div><div class="value">142</div></div></div>
+  <div class="stat"><span class="icon"><svg viewBox="0 0 24 24"><path d="M12 2 1 21h22zm0 4 7.5 13h-15z"/></svg></span><div><div class="label">Factions</div><div class="value">7</div></div></div>
+  <div class="stat"><span class="icon"><svg viewBox="0 0 24 24"><path d="M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8m0 2c-4 0-8 2-8 6v2h16v-2c0-4-4-6-8-6"/></svg></span><div><div class="label">NPCs</div><div class="value">31</div></div></div>
+  <div class="stat"><span class="icon"><svg viewBox="0 0 24 24"><path d="M19 3h-1V1h-2v2H8V1H6v2H5a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2m0 18H5V8h14z"/></svg></span><div><div class="label">Sessions</div><div class="value">12</div></div></div>
+  </div>
+</body>
+</html>

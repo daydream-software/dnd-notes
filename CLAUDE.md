@@ -9,9 +9,28 @@ This file adds Claude Code-specific guidance on top of that.
 
 This project uses a defined design system. **Do not introduce tokens, fonts, or colors that contradict it.**
 
+### Reference bundle — `docs/design-system/`
+
+The full design-system handoff (Claude Design / claude.ai/design) is committed at `docs/design-system/`. It contains:
+
+- `README.md` and `project/README.md` — design rules, palette, typography, voice
+- `project/preview/*.html` — interactive specimens (logo, brand-pill, colors, radii, elevation, etc.)
+- `project/ui_kits/{web,customer-portal,operator-portal}/` — JSX recreations of the three apps
+- `project/assets/` — vendored Geist fonts, social icon sprite, hero image, **canonical brand marks via `preview/logo.html`** (Daydream Software corporate mark + D&D Notes product mark)
+- `chats/chat1.md` — iteration history; the design intent and trade-offs live here
+
+**Read this bundle before doing any visual / brand work.** Don't improvise iconography or visual language; derive from what's defined here.
+
 ### Single source of truth — `packages/theme`
 
 The MUI theme lives in `packages/theme/src/index.ts` and is imported by all three frontend apps via `@dnd-notes/theme`. **Never call `createTheme` inside an app.** If a change to the palette, typography, or radii is needed, edit the package — the apps pick it up automatically on next build.
+
+### Brand marks — `packages/theme/assets/`
+
+- `daydream-mark.svg` — Daydream Software corporate glyph (sun + nested moon)
+- `dnd-notes-mark.svg` — D&D Notes product glyph (quill in ink bottle)
+
+Both 64×64, `currentColor`, stroke 2.6 — sister marks. Use the **product mark** for the notes app surface; use the **corporate mark** for platform surfaces (customer-portal, operator-portal). Favicons in each app's `public/favicon.svg` are the same SVG with `color="#a78bfa"` baked in (browsers don't propagate parent CSS to favicons).
 
 ### Typography
 
@@ -54,7 +73,7 @@ This is set in each app's `src/index.css`. Do not override it with a flat color 
 ### Copy & tone
 
 - Sentence case everywhere: buttons, headings, labels. No Title Case, no ALL CAPS except the brand pill (`D&D NOTES` with `letter-spacing: 0.08em`).
-- No emoji in UI copy or code. Use MUI Rounded icons instead.
+- No emoji in UI copy, user-facing strings, or source code. Use MUI Rounded icons instead. **Exception:** Squad agent dispatch descriptions (e.g. `Agent({ description: "⚛️ Stef: ..." })`) use a per-member convention emoji as a visual tracking marker in scheduler logs — these are internal metadata, not UI copy. See `.claude/agents/{member}.md` for each member's marker.
 - Voice is calm and declarative — no exclamation points, no marketing puff.
 
 ---

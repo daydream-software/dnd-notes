@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Semantic colors</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px; background: var(--bg-1); }
+  .grid { display: grid; gap: 14px; grid-template-columns: repeat(4, 1fr); align-items: start; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--radius-pill); font-size: 12px; font-weight: 500; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .col { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+  .label { color: var(--fg-3); font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .hex { color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <div class="grid">
+  <div class="col">
+    <span class="label">Warning / secondary</span>
+    <span class="pill" style="background:rgba(245,158,11,0.16);color:#f59e0b"><span class="dot" style="background:#f59e0b"></span>Archived</span>
+    <span class="hex">#F59E0B</span>
+  </div>
+  <div class="col">
+    <span class="label">Success</span>
+    <span class="pill" style="background:rgba(74,222,128,0.16);color:#4ade80"><span class="dot" style="background:#4ade80"></span>Published</span>
+    <span class="hex">#4ADE80</span>
+  </div>
+  <div class="col">
+    <span class="label">Error</span>
+    <span class="pill" style="background:rgba(248,113,113,0.16);color:#f87171"><span class="dot" style="background:#f87171"></span>Failed</span>
+    <span class="hex">#F87171</span>
+  </div>
+  <div class="col">
+    <span class="label">Info / muted</span>
+    <span class="pill" style="background:rgba(255,255,255,0.08);color:rgba(248,250,252,0.6)"><span class="dot" style="background:rgba(248,250,252,0.6)"></span>Draft</span>
+    <span class="hex">fg-muted</span>
+  </div>
+  </div>
+</body>
+</html>

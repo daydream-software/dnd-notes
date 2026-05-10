@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Note card</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 24px; background: var(--page-bg); font-family: var(--font-sans); }
+  .card { background: rgba(15,23,42,0.88); border: 1px solid rgba(167,139,250,0.18); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: 0 16px 40px rgba(2,6,23,0.26); backdrop-filter: blur(16px); max-width: 620px; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  h3 { margin: 0; font-size: 18px; color: var(--fg-1); font-weight: 600; }
+  time { color: var(--fg-muted); font-size: 12px; }
+  .excerpt { color: rgba(255,255,255,0.72); font-size: 14px; line-height: 1.55; margin: 8px 0 12px; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .chip { padding: 4px 10px; border-radius: var(--radius-pill); font-size: 11.5px; background: rgba(167,139,250,0.16); color: #c4b1ff; border: 1px solid rgba(167,139,250,0.28); }
+  .status { padding: 4px 10px; border-radius: var(--radius-pill); font-size: 11.5px; background: rgba(74,222,128,0.16); color: #4ade80; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <article class="card">
+    <div class="head">
+      <h3>The Crimson Court</h3>
+      <span class="status">Published</span>
+    </div>
+    <p class="excerpt">A faction of vampire nobility orbiting Lady Veska. They want the relic recovered before the Solstice and have leverage over two town councilors.</p>
+    <div class="tags">
+      <span class="chip">faction</span>
+      <span class="chip">politics</span>
+      <span class="chip">act-2</span>
+    </div>
+    <time style="display:block;margin-top:12px">Last updated 5 minutes ago · Session 7</time>
+  </article>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Buttons</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  body { margin: 0; padding: 28px; background: var(--bg-1); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-family: var(--font-sans); }
+  button { font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; border-radius: var(--radius-pill); padding: 8px 18px; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 8px; transition: background-color 200ms, border-color 200ms; }
+  .contained { background: var(--brand-500); color: #1a0f3a; }
+  .contained:hover { background: var(--brand-400); }
+  .outlined { background: transparent; color: var(--brand-500); border-color: rgba(167,139,250,0.5); }
+  .outlined:hover { background: var(--action-selected); border-color: var(--brand-500); }
+  .text { background: transparent; color: var(--brand-500); padding: 8px 12px; }
+  .text:hover { background: var(--action-selected); }
+  .danger { background: transparent; color: #f87171; border: 1px solid rgba(248,113,113,0.5); border-radius: var(--radius-pill); padding: 8px 18px; }
+  .danger:hover { background: rgba(248,113,113,0.12); border-color: #f87171; }
+  svg { width: 16px; height: 16px; fill: currentColor; }
+</style>
+<style>
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900; font-style: normal; font-display: swap;
+}
+</style>
+</head>
+<body>
+  <button class="contained"><svg viewBox="0 0 24 24"><path d="M17 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V7zm-5 16a3 3 0 1 1 0-6 3 3 0 0 1 0 6m3-10H5V5h10z"/></svg>Save note</button>
+  <button class="outlined">Cancel</button>
+  <button class="text">Clear filter</button>
+  <button class="danger">Delete note</button>
+</body>
+</html>
