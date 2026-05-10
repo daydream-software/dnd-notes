@@ -31,6 +31,7 @@ How to decide who handles what.
 ## Rules
 
 1. **Eager by default** — spawn all agents who could usefully start work, including anticipatory downstream work.
+1a. **Worktree isolation for parallel writes** — when ≥2 agents run in parallel and each may mutate the filesystem (different branches, builds, etc.), spawn each with `isolation: "worktree"`. Sharing the working tree across parallel agents leads to one agent's `git checkout` swapping the coordinator's HEAD and stray commits on the wrong branch. See CLAUDE.md → "Worktree isolation".
 2. **Scribe always runs** after substantial work, always as `mode: "background"`. Never blocks.
 3. **Quick facts → coordinator answers directly.** Don't spawn an agent for "what port does the server run on?"
 4. **When two agents could handle it**, pick the one whose domain is the primary concern.
