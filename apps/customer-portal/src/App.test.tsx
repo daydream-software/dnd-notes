@@ -595,8 +595,8 @@ describe('customer portal', () => {
     const stub = makeKeycloakStub()
     render(<App keycloakClientFactory={() => stub} />)
 
-    // Wait for the initial dashboard load to complete (needs real microtasks)
-    await vi.runAllTimersAsync()
+    // Wait for the initial dashboard load to complete (flush pending microtasks)
+    await vi.advanceTimersByTimeAsync(0)
     expect(meCallCount).toBeGreaterThanOrEqual(1)
 
     // Advance past the polling interval
@@ -653,14 +653,14 @@ describe('customer portal', () => {
     const stub = makeKeycloakStub()
     render(<App keycloakClientFactory={() => stub} navigate={(url) => navigated.push(url)} />)
 
-    // Let initial load settle (catalog + dashboard)
-    await vi.runAllTimersAsync()
+    // Let initial load settle (catalog + dashboard; flush pending microtasks)
+    await vi.advanceTimersByTimeAsync(0)
     expect(meCallCount).toBeGreaterThanOrEqual(1)
 
     // Advance past the polling interval to fire the setInterval callback
     await vi.advanceTimersByTimeAsync(4100)
     // Flush the resulting microtasks (the poll async function resolves)
-    await vi.runAllTimersAsync()
+    await vi.advanceTimersByTimeAsync(0)
 
     expect(navigated).toContain('https://t-harbor.example.com')
   })

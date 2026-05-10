@@ -364,11 +364,13 @@ export default function App({
     }
 
     let cancelled = false
+    let inFlight = false
 
     const poll = async () => {
-      if (cancelled) {
+      if (cancelled || inFlight) {
         return
       }
+      inFlight = true
 
       try {
         const currentToken =
@@ -410,6 +412,8 @@ export default function App({
         }
       } catch {
         // Polling failure — skip the tick rather than tearing down the session.
+      } finally {
+        inFlight = false
       }
     }
 
@@ -939,12 +943,16 @@ export default function App({
                   <Paper sx={{ p: 3 }}>
                     <Stack spacing={2}>
                       <Typography variant="h4">
-                        {dashboard && dashboard.tenants.length === 0
+                        {dashboard === null
+                          ? null
+                          : dashboard.tenants.length === 0
                           ? 'Create your first workspace'
                           : 'Add another tenant'}
                       </Typography>
                       <Typography color="text.secondary">
-                        {dashboard && dashboard.tenants.length === 0
+                        {dashboard === null
+                          ? null
+                          : dashboard.tenants.length === 0
                           ? 'Your account is ready. Claim a tenant slug to spin up your dedicated note space.'
                           : 'Request another tenant under the same owner account. The control plane keeps the portal scoped to your owned instances only.'}
                       </Typography>
