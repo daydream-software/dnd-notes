@@ -3052,6 +3052,48 @@ function App() {
                     </Alert>
                   ) : null}
 
+                  <Stack spacing={1.5}>
+                    <TextField
+                      select
+                      label="Campaign starter"
+                      value={selectedCampaignTemplateId}
+                      onChange={(event) =>
+                        setSelectedCampaignTemplateId(event.target.value)
+                      }
+                      helperText="Optional. Seed flexible starter notes or leave the campaign blank."
+                    >
+                      {campaignStarterTemplates.map((template) => (
+                        <MenuItem key={template.id} value={template.id}>
+                          {template.name}
+                        </MenuItem>
+                      ))}
+                    </TextField>
+
+                    {selectedCampaignTemplate.starterNotes.length > 0 ? (
+                      <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                        <Stack spacing={1}>
+                          <Typography variant="body2">
+                            {selectedCampaignTemplate.description}
+                          </Typography>
+                          <Stack
+                            direction="row"
+                            spacing={1}
+                            useFlexGap
+                            sx={{ flexWrap: 'wrap' }}
+                          >
+                            {selectedCampaignTemplate.starterNotes.map((starterNote) => (
+                              <Chip
+                                key={starterNote.title}
+                                label={starterNote.title}
+                                size="small"
+                              />
+                            ))}
+                          </Stack>
+                        </Stack>
+                      </Alert>
+                    ) : null}
+                  </Stack>
+
                   <TextField
                     label="Campaign name"
                     value={campaignDraft.name}
@@ -4350,13 +4392,29 @@ function App() {
                           </Stack>
                         </Box>
                       ) : displayedNotes.length === 0 ? (
-                        <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                          {noteBrowseMode === 'notes' && selectedTagFilter
-                            ? `No notes tagged ${selectedTagFilter} yet. Clear the filter or add that tag to a note to reuse it later.`
-                            : noteBrowseMode === 'sessions' && selectedSessionName
-                            ? 'No notes remain in this session. Head back to the session list or save a note with the same session name.'
-                            : 'No notes yet in this campaign. Create the first one to start using the workspace.'}
-                        </Alert>
+                        noteBrowseMode === 'notes' && !selectedTagFilter && !selectedSessionName && canEditWorkspace ? (
+                          <Stack spacing={2} sx={{ py: 2 }}>
+                            <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                              No notes yet in this campaign. Create the first one to start using the workspace.
+                            </Alert>
+                            <Button
+                              variant="contained"
+                              startIcon={<AddRoundedIcon />}
+                              onClick={handleStartNote}
+                              sx={{ alignSelf: 'flex-start' }}
+                            >
+                              New note
+                            </Button>
+                          </Stack>
+                        ) : (
+                          <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
+                            {noteBrowseMode === 'notes' && selectedTagFilter
+                              ? `No notes tagged ${selectedTagFilter} yet. Clear the filter or add that tag to a note to reuse it later.`
+                              : noteBrowseMode === 'sessions' && selectedSessionName
+                              ? 'No notes remain in this session. Head back to the session list or save a note with the same session name.'
+                              : 'No notes yet in this campaign. Create the first one to start using the workspace.'}
+                          </Alert>
+                        )
                       ) : (
                         <List
                           disablePadding
