@@ -127,6 +127,7 @@ describe('customer portal', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   it('renders the public landing page and plan catalog', async () => {
@@ -402,8 +403,8 @@ describe('customer portal', () => {
 
     await user.click(screen.getByLabelText('Plan'))
     await user.click(await screen.findByRole('option', { name: 'Guild' }))
-    await user.click(screen.getByLabelText('Payment provider placeholder'))
-    await user.click(await screen.findByRole('option', { name: 'Square placeholder' }))
+    await user.click(screen.getByLabelText('Payment provider'))
+    await user.click(await screen.findByRole('option', { name: 'Square (coming soon)' }))
     await user.type(screen.getByLabelText('Tenant name'), 'Emberfall')
     await user.clear(screen.getByLabelText('Tenant slug'))
     await user.type(screen.getByLabelText('Tenant slug'), 'emberfall')
@@ -462,6 +463,249 @@ describe('customer portal', () => {
       expect(sessionStorage.getItem(storedTokenKey)).toBeNull()
     })
   })
+
+  it('shows "Create your first workspace" heading when dashboard has zero tenants', async () => {
+    const emptyDashboard: PortalDashboardResponse = {
+      ...baseDashboard,
+      tenants: [],
+    }
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/login' && method === 'POST') {
+        return createJsonResponse({ token: 'portal-session-token', dashboard: emptyDashboard }, 200)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
+
+    const user = userEvent.setup()
+    await screen.findByLabelText('Portal email')
+    await user.type(screen.getByLabelText('Portal email'), 'owner@example.com')
+    await user.type(screen.getAllByLabelText('Password')[1], 'secret')
+    await user.click(screen.getByRole('button', { name: 'Restore dashboard' }))
+
+    expect(
+      await screen.findByRole('heading', { name: 'Create your first workspace' }),
+    ).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Add another tenant' })).toBeNull()
+  })
+
+  it('shows "Add another tenant" heading when dashboard already has at least one tenant', async () => {
+    sessionStorage.setItem(storedTokenKey, 'portal-session-token')
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse(baseDashboard)
+      }
+
+      if (path === '/portal-api/portal/logout' && method === 'POST') {
+        return createJsonResponse({ signedOut: true })
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
+
+    expect(await screen.findByRole('heading', { name: 'Add another tenant' })).toBeTruthy()
+    expect(screen.queryByRole('heading', { name: 'Create your first workspace' })).toBeNull()
+  })
+
+  it('shows payment provider options with "(coming soon)" labels', async () => {
+    sessionStorage.setItem(storedTokenKey, 'portal-session-token')
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse(baseDashboard)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
+
+    const user = userEvent.setup()
+    await screen.findByText('Customer dashboard')
+
+    await user.click(screen.getByLabelText('Payment provider'))
+    expect(await screen.findByRole('option', { name: 'Stripe (coming soon)' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Square (coming soon)' })).toBeTruthy()
+    expect(screen.getByRole('option', { name: 'Manual review (coming soon)' })).toBeTruthy()
+  })
+
+  it('polls dashboard every ~4 s while a tenant is in a transient state and shows in-progress notice', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    sessionStorage.setItem(storedTokenKey, 'portal-session-token')
+
+    const provisioningDashboard: PortalDashboardResponse = {
+      ...baseDashboard,
+      tenants: [
+        {
+          ...baseDashboard.tenants[0]!,
+          tenant: {
+            ...baseDashboard.tenants[0]!.tenant,
+            currentState: 'provisioning',
+            desiredState: 'ready',
+          },
+          appUrl: null,
+        },
+      ],
+    }
+
+    let meCallCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        meCallCount += 1
+        return createJsonResponse(provisioningDashboard)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
+
+    // Wait for the initial dashboard load to complete (flush pending microtasks)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(meCallCount).toBeGreaterThanOrEqual(1)
+
+    // Advance past the polling interval
+    await vi.advanceTimersByTimeAsync(4100)
+    expect(meCallCount).toBeGreaterThanOrEqual(2)
+
+    expect(
+      screen.getByText('Provisioning is in progress. The dashboard updates automatically — no need to refresh.'),
+    ).toBeTruthy()
+  })
+
+  it('auto-navigates when the single tenant transitions from provisioning to ready', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+    sessionStorage.setItem(storedTokenKey, 'portal-session-token')
+
+    const provisioningDashboard: PortalDashboardResponse = {
+      ...baseDashboard,
+      tenants: [
+        {
+          ...baseDashboard.tenants[0]!,
+          tenant: {
+            ...baseDashboard.tenants[0]!.tenant,
+            currentState: 'provisioning',
+            desiredState: 'ready',
+          },
+          appUrl: null,
+        },
+      ],
+    }
+
+    const readyDashboard: PortalDashboardResponse = {
+      ...baseDashboard,
+    }
+
+    let meCallCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        meCallCount += 1
+        // First call: provisioning. Second call onwards: ready.
+        return createJsonResponse(meCallCount === 1 ? provisioningDashboard : readyDashboard)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const navigated: string[] = []
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} navigate={(url) => navigated.push(url)} />)
+
+    // Let initial load settle (catalog + dashboard; flush pending microtasks)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(meCallCount).toBeGreaterThanOrEqual(1)
+
+    // Advance past the polling interval to fire the setInterval callback
+    await vi.advanceTimersByTimeAsync(4100)
+    // Flush the resulting microtasks (the poll async function resolves)
+    await vi.advanceTimersByTimeAsync(0)
+
+    expect(navigated).toContain('https://t-harbor.example.com')
+  })
+
+  it('shows an error alert when a tenant is in failed state', async () => {
+    sessionStorage.setItem(storedTokenKey, 'portal-session-token')
+
+    const failedDashboard: PortalDashboardResponse = {
+      ...baseDashboard,
+      tenants: [
+        {
+          ...baseDashboard.tenants[0]!,
+          tenant: {
+            ...baseDashboard.tenants[0]!.tenant,
+            currentState: 'failed',
+            desiredState: 'ready',
+          },
+          appUrl: null,
+        },
+      ],
+    }
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(catalog)
+      }
+
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse(failedDashboard)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
+
+    expect(
+      await screen.findByText(
+        'Provisioning failed for this workspace. You can retry by creating a new tenant request, or contact support if the issue persists.',
+      ),
+    ).toBeTruthy()
+  })
 })
 
 describe('customer portal — keycloak mode', () => {
@@ -472,6 +716,7 @@ describe('customer portal — keycloak mode', () => {
   afterEach(() => {
     cleanup()
     vi.restoreAllMocks()
+    vi.useRealTimers()
   })
 
   it('shows the Keycloak entry card when catalog reports keycloak mode and session is unauthenticated', async () => {

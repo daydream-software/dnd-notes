@@ -125,12 +125,22 @@ function buildTenantLinkLabel(summary: PortalTenantSummary) {
 
 interface AppProps {
   keycloakClientFactory?: (config: CustomerKeycloakConfig) => CustomerKeycloakClient
+  /** Injected for tests; defaults to window.location.assign. */
+  navigate?: (url: string) => void
 }
 
 export default function App({
   keycloakClientFactory = createCustomerKeycloakClient,
+  navigate = (url) => { window.location.assign(url) },
 }: AppProps = {}) {
   const keycloakClientRef = useRef<CustomerKeycloakClient | null>(null)
+  /** Tracks tenant IDs that were already in `ready` state when first observed. */
+  const seenReadyTenantIdsRef = useRef<Set<string>>(new Set())
+  /** Stable ref to the navigate function so the polling effect doesn't re-subscribe on prop changes. */
+  const navigateRef = useRef(navigate)
+  useEffect(() => {
+    navigateRef.current = navigate
+  }, [navigate])
 
   // Keycloak-mode state
   const [isKeycloakReady, setIsKeycloakReady] = useState(false)
@@ -331,6 +341,90 @@ export default function App({
       abortController.abort()
     }
   }, [authMode, dashboard, hydratedSessionToken, sessionToken])
+
+  // --- Tenant polling (runs while any tenant is in a transient state) ---
+  const transientStates = new Set(['provisioning', 'upgrading', 'restoring', 'maintenance'])
+  const transientTenantIds =
+    dashboard?.tenants
+      .filter((s) => transientStates.has(s.tenant.currentState))
+      .map((s) => s.tenant.id)
+      .join(',') ?? ''
+
+  useEffect(() => {
+    if (!dashboard || transientTenantIds.length === 0) {
+      return
+    }
+
+    // Seed the seen-ready set from the current snapshot so we only act on
+    // state *transitions* that happen during this session — not on every load.
+    for (const tenantSummary of dashboard.tenants) {
+      if (tenantSummary.tenant.currentState === 'ready') {
+        seenReadyTenantIdsRef.current.add(tenantSummary.tenant.id)
+      }
+    }
+
+    let cancelled = false
+    let inFlight = false
+
+    const poll = async () => {
+      if (cancelled || inFlight) {
+        return
+      }
+      inFlight = true
+
+      try {
+        const currentToken =
+          authMode === 'keycloak'
+            ? await keycloakClientRef.current?.freshToken().catch(() => null)
+            : sessionToken
+
+        if (!currentToken || cancelled) {
+          return
+        }
+
+        const freshDashboard = await fetchPortalDashboard(currentToken)
+
+        if (cancelled) {
+          return
+        }
+
+        setDashboard(freshDashboard)
+
+        // Detect newly-ready tenants (transitioned to ready during this session).
+        const newlyReady = freshDashboard.tenants.filter(
+          (s) =>
+            s.tenant.currentState === 'ready' &&
+            !seenReadyTenantIdsRef.current.has(s.tenant.id),
+        )
+
+        for (const s of newlyReady) {
+          seenReadyTenantIdsRef.current.add(s.tenant.id)
+        }
+
+        // Auto-navigate when a single-tenant account's first tenant becomes ready.
+        if (
+          newlyReady.length === 1 &&
+          freshDashboard.tenants.length === 1 &&
+          newlyReady[0]!.appUrl
+        ) {
+          cancelled = true
+          navigateRef.current(newlyReady[0]!.appUrl)
+        }
+      } catch {
+        // Polling failure — skip the tick rather than tearing down the session.
+      } finally {
+        inFlight = false
+      }
+    }
+
+    const intervalId = setInterval(() => { void poll() }, 4000)
+
+    return () => {
+      cancelled = true
+      clearInterval(intervalId)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authMode, sessionToken, transientTenantIds])
 
   const activeCatalog = dashboard?.catalog ?? catalog
   const planOptions = activeCatalog?.plans ?? []
@@ -819,6 +913,19 @@ export default function App({
                                       ? `${formatStateLabel(tenantSummary.latestTransition.fromState)} → ${formatStateLabel(tenantSummary.latestTransition.toState)}`
                                       : 'No transition recorded yet'}
                                   </Typography>
+                                  {tenantSummary.tenant.currentState === 'failed' ? (
+                                    <Alert severity="error">
+                                      Provisioning failed for this workspace. You can retry
+                                      by creating a new tenant request, or contact support
+                                      if the issue persists.
+                                    </Alert>
+                                  ) : null}
+                                  {transientStates.has(tenantSummary.tenant.currentState) ? (
+                                    <Alert severity="info">
+                                      Provisioning is in progress. The dashboard updates
+                                      automatically — no need to refresh.
+                                    </Alert>
+                                  ) : null}
                                   <Typography variant="body2" color="text.secondary">
                                     Custom domain, archive/reactivate, subscription
                                     management, team invites, and usage analytics stay
@@ -835,10 +942,19 @@ export default function App({
 
                   <Paper sx={{ p: 3 }}>
                     <Stack spacing={2}>
-                      <Typography variant="h4">Add another tenant</Typography>
+                      <Typography variant="h4">
+                        {dashboard === null
+                          ? null
+                          : dashboard.tenants.length === 0
+                          ? 'Create your first workspace'
+                          : 'Add another tenant'}
+                      </Typography>
                       <Typography color="text.secondary">
-                        Request another tenant under the same owner account. The control
-                        plane keeps the portal scoped to your owned instances only.
+                        {dashboard === null
+                          ? null
+                          : dashboard.tenants.length === 0
+                          ? 'Your account is ready. Claim a tenant slug to spin up your dedicated note space.'
+                          : 'Request another tenant under the same owner account. The control plane keeps the portal scoped to your owned instances only.'}
                       </Typography>
 
                       <form onSubmit={(e) => void handleCreateTenant(e)}>
@@ -894,7 +1010,7 @@ export default function App({
                           <TextField
                             id="create-payment-provider"
                             select
-                            label="Payment provider placeholder"
+                            label="Payment provider"
                             value={createTenantDraft.paymentProvider}
                             onChange={(event) =>
                               setCreateTenantDraft((currentDraft) => ({
@@ -903,10 +1019,10 @@ export default function App({
                               }))
                             }
                           >
-                            <MenuItem value="stripe">Stripe placeholder</MenuItem>
-                            <MenuItem value="square">Square placeholder</MenuItem>
+                            <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
+                            <MenuItem value="square">Square (coming soon)</MenuItem>
                             <MenuItem value="manual-review">
-                              Manual review placeholder
+                              Manual review (coming soon)
                             </MenuItem>
                           </TextField>
                           <TextField
@@ -1074,6 +1190,19 @@ export default function App({
                                   ? `${formatStateLabel(tenantSummary.latestTransition.fromState)} → ${formatStateLabel(tenantSummary.latestTransition.toState)}`
                                   : 'No transition recorded yet'}
                               </Typography>
+                              {tenantSummary.tenant.currentState === 'failed' ? (
+                                <Alert severity="error">
+                                  Provisioning failed for this workspace. You can retry
+                                  by creating a new tenant request, or contact support
+                                  if the issue persists.
+                                </Alert>
+                              ) : null}
+                              {transientStates.has(tenantSummary.tenant.currentState) ? (
+                                <Alert severity="info">
+                                  Provisioning is in progress. The dashboard updates
+                                  automatically — no need to refresh.
+                                </Alert>
+                              ) : null}
                               <Typography variant="body2" color="text.secondary">
                                 Custom domain, archive/reactivate, subscription management,
                                 team invites, and usage analytics stay intentionally
@@ -1200,7 +1329,7 @@ export default function App({
                         <TextField
                           id="signup-payment-provider"
                           select
-                          label="Payment provider placeholder"
+                          label="Payment provider"
                           value={signupDraft.paymentProvider}
                           onChange={(event) =>
                             setSignupDraft((currentDraft) => ({
@@ -1209,9 +1338,9 @@ export default function App({
                             }))
                           }
                         >
-                          <MenuItem value="stripe">Stripe placeholder</MenuItem>
-                          <MenuItem value="square">Square placeholder</MenuItem>
-                          <MenuItem value="manual-review">Manual review placeholder</MenuItem>
+                          <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
+                          <MenuItem value="square">Square (coming soon)</MenuItem>
+                          <MenuItem value="manual-review">Manual review (coming soon)</MenuItem>
                         </TextField>
                         <Button
                           type="submit"
@@ -1233,11 +1362,17 @@ export default function App({
               <Paper sx={{ p: 3 }}>
                 <Stack spacing={2}>
                   <Typography variant="h4">
-                    {dashboard ? 'Add another tenant' : 'Already have a portal account?'}
+                    {dashboard
+                      ? dashboard.tenants.length === 0
+                        ? 'Create your first workspace'
+                        : 'Add another tenant'
+                      : 'Already have a portal account?'}
                   </Typography>
                   <Typography color="text.secondary">
                     {dashboard
-                      ? 'Request another tenant under the same owner account. The control plane keeps the portal scoped to your owned instances only.'
+                      ? dashboard.tenants.length === 0
+                        ? 'Your account is ready. Claim a tenant slug to spin up your dedicated note space.'
+                        : 'Request another tenant under the same owner account. The control plane keeps the portal scoped to your owned instances only.'
                       : 'Sign back in with the same email to restore your customer dashboard without creating a duplicate account.'}
                   </Typography>
 
@@ -1295,7 +1430,7 @@ export default function App({
                         <TextField
                           id="create-payment-provider"
                           select
-                          label="Payment provider placeholder"
+                          label="Payment provider"
                           value={createTenantDraft.paymentProvider}
                           onChange={(event) =>
                             setCreateTenantDraft((currentDraft) => ({
@@ -1304,9 +1439,9 @@ export default function App({
                             }))
                           }
                         >
-                          <MenuItem value="stripe">Stripe placeholder</MenuItem>
-                          <MenuItem value="square">Square placeholder</MenuItem>
-                          <MenuItem value="manual-review">Manual review placeholder</MenuItem>
+                          <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
+                          <MenuItem value="square">Square (coming soon)</MenuItem>
+                          <MenuItem value="manual-review">Manual review (coming soon)</MenuItem>
                         </TextField>
                         <TextField
                           id="create-billing-email"
