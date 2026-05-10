@@ -6,6 +6,8 @@ interface OperatorPortalViteEnv {
   VITE_OPERATOR_KEYCLOAK_URL?: string
   VITE_OPERATOR_KEYCLOAK_REALM?: string
   VITE_OPERATOR_KEYCLOAK_CLIENT_ID?: string
+  VITE_OPERATOR_KEYCLOAK_REQUIRED_ROLES?: string
+  VITE_OPERATOR_CUSTOMER_PORTAL_URL?: string
 }
 
 function normalizeUrl(value: string | undefined, fallback: string) {
@@ -25,11 +27,31 @@ interface OperatorRuntimeEnv {
   KEYCLOAK_URL?: string
   KEYCLOAK_REALM?: string
   KEYCLOAK_CLIENT_ID?: string
+  KEYCLOAK_REQUIRED_ROLES?: string
+  CUSTOMER_PORTAL_URL?: string
+}
+
+const defaultRequiredRoles = ['control-plane-admin', 'control-plane-workforce']
+
+function parseRequiredRoles(raw: string | undefined): string[] {
+  if (!raw) {
+    return []
+  }
+  return raw
+    .split(',')
+    .map((role) => role.trim())
+    .filter((role) => role.length > 0)
 }
 
 const runtimeEnv = (window as unknown as { __ENV__?: OperatorRuntimeEnv }).__ENV__ ?? {}
 
 export function resolveOperatorPortalConfig(viteEnv: OperatorPortalViteEnv = {}) {
+  const parsedRequiredRoles = parseRequiredRoles(
+    runtimeEnv.KEYCLOAK_REQUIRED_ROLES ?? viteEnv.VITE_OPERATOR_KEYCLOAK_REQUIRED_ROLES,
+  )
+  const requiredRoles =
+    parsedRequiredRoles.length > 0 ? parsedRequiredRoles : defaultRequiredRoles
+
   return {
     operatorApiBasePath: normalizeBasePath(
       runtimeEnv.API_BASE_PATH ?? viteEnv.VITE_OPERATOR_API_BASE_PATH,
@@ -49,6 +71,11 @@ export function resolveOperatorPortalConfig(viteEnv: OperatorPortalViteEnv = {})
         'dnd-notes-control-plane',
       ),
     } satisfies OperatorKeycloakConfig,
+    requiredRoles,
+    customerPortalUrl: normalizeUrl(
+      runtimeEnv.CUSTOMER_PORTAL_URL ?? viteEnv.VITE_OPERATOR_CUSTOMER_PORTAL_URL,
+      'https://portal.127.0.0.1.nip.io',
+    ),
   }
 }
 
@@ -56,7 +83,7 @@ const { env: viteEnv = {} } = import.meta as ImportMeta & {
   env?: OperatorPortalViteEnv
 }
 
-export const { operatorApiBasePath, operatorKeycloakConfig } =
+export const { operatorApiBasePath, operatorKeycloakConfig, requiredRoles, customerPortalUrl } =
   resolveOperatorPortalConfig(viteEnv)
 
 export function buildOperatorRedirectUri() {

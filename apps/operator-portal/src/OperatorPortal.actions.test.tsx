@@ -59,7 +59,21 @@ function createMockJwt(claims: Record<string, unknown>) {
       .replace(/\//g, '_')
       .replace(/=+$/g, '')
 
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(claims)}.signature`
+  // Always include the workforce role so the gate passes in every action test.
+  const existingRealmRoles =
+    (claims as { realm_access?: { roles?: unknown } }).realm_access?.roles
+  const normalizedRealmRoles = Array.isArray(existingRealmRoles)
+    ? existingRealmRoles.filter((role): role is string => typeof role === 'string')
+    : []
+
+  const claimsWithRole = {
+    ...claims,
+    realm_access: {
+      roles: Array.from(new Set(['control-plane-workforce', ...normalizedRealmRoles])),
+    },
+  }
+
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(claimsWithRole)}.signature`
 }
 
 function createFleetStatus() {

@@ -18,11 +18,18 @@ import {
   CircularProgress,
   Container,
   Divider,
+  Link,
   Stack,
   Typography,
 } from '@mui/material'
 import * as React from 'react'
-import { buildOperatorRedirectUri, operatorKeycloakConfig } from './config'
+import {
+  buildOperatorRedirectUri,
+  customerPortalUrl,
+  operatorKeycloakConfig,
+  requiredRoles,
+} from './config'
+import { extractEffectiveRoles, hasAnyRequiredRole } from './keycloak-roles'
 import { fetchFleetStatus } from './control-plane-api'
 import {
   clearStoredKeycloakTokens,
@@ -128,6 +135,11 @@ function decodeJwtPayload(token: string) {
   }
 }
 
+function isAuthorized(token: string): boolean {
+  const effectiveRoles = extractEffectiveRoles(token, operatorKeycloakConfig.clientId)
+  return hasAnyRequiredRole(effectiveRoles, requiredRoles)
+}
+
 function getOperatorActor(authToken: string | null) {
   if (!authToken) {
     return 'operator-portal'
@@ -187,6 +199,7 @@ export default function OperatorPortal({
 }: OperatorPortalProps = {}) {
   const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
   const [authToken, setAuthToken] = useState<string | null>(null)
+  const [isRoleAuthorized, setIsRoleAuthorized] = useState<boolean | null>(null)
   const [fleetStatus, setFleetStatus] = useState<FleetStatusResponse | null>(null)
   const [isAuthReady, setIsAuthReady] = useState(false)
   const [isLoadingFleet, setIsLoadingFleet] = useState(false)
@@ -199,6 +212,7 @@ export default function OperatorPortal({
     clearStoredKeycloakTokens()
     keycloakClientRef.current?.clear()
     setAuthToken(null)
+    setIsRoleAuthorized(null)
     setFleetStatus(null)
     setIsLoadingFleet(false)
     setError(null)
@@ -245,7 +259,13 @@ export default function OperatorPortal({
 
         persistKeycloakTokens(tokens)
         setAuthToken(tokens.accessToken)
-        await loadFleet(tokens.accessToken)
+
+        const authorized = isAuthorized(tokens.accessToken)
+        setIsRoleAuthorized(authorized)
+
+        if (authorized) {
+          await loadFleet(tokens.accessToken)
+        }
       } catch (bootstrapError) {
         if (!cancelled) {
           clearSession()
@@ -420,7 +440,7 @@ export default function OperatorPortal({
                 </Typography>
               </Box>
 
-              {authToken ? (
+              {authToken && isRoleAuthorized ? (
                 <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                   <Button
                     variant="outlined"
@@ -497,6 +517,36 @@ export default function OperatorPortal({
                   onClick={() => void handleLogin()}
                 >
                   Continue with Keycloak
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        ) : !isRoleAuthorized ? (
+          <Card sx={{ borderRadius: surfaceRadius }} data-testid="access-denied-view">
+            <CardContent sx={{ p: 4 }}>
+              <Stack spacing={2.5} sx={{ alignItems: 'flex-start' }}>
+                <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                  <SecurityRoundedIcon color="warning" sx={{ fontSize: 36 }} />
+                  <Typography variant="h5">Access not authorized</Typography>
+                </Stack>
+                <Typography color="text.secondary">
+                  You don&apos;t have access to the operator console. Your account does not have a
+                  required operator role ({requiredRoles.join(', ')}).
+                </Typography>
+                <Typography color="text.secondary">
+                  If you reached here by mistake, sign in to the customer portal instead.{' '}
+                  <Link href={customerPortalUrl} underline="hover">
+                    Go to customer portal
+                  </Link>
+                </Typography>
+                <Button
+                  variant="outlined"
+                  color="inherit"
+                  startIcon={<LogoutRoundedIcon />}
+                  onClick={() => void handleLogout()}
+                  sx={{ alignSelf: 'flex-start' }}
+                >
+                  Sign out
                 </Button>
               </Stack>
             </CardContent>

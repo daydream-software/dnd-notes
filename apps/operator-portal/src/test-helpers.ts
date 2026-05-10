@@ -1,3 +1,15 @@
+/**
+ * Build a minimal JWT string (header.payload.sig) for use in tests.
+ * The signature is a placeholder — these tokens are never verified in unit tests.
+ */
+export function makeJwt(payload: Record<string, unknown>): string {
+  const encode = (obj: Record<string, unknown>) =>
+    btoa(JSON.stringify(obj)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  const header = encode({ alg: 'RS256', typ: 'JWT' })
+  const body = encode(payload)
+  return `${header}.${body}.sig`
+}
+
 export function createJsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
