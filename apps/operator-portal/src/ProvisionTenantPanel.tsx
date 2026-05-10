@@ -28,7 +28,7 @@ interface ProvisionTenantPanelProps {
   onProvisioned: (message: string) => void
   onRefresh: () => Promise<void>
   suggestedVersion: string
-  surfaceRadius: number
+  surfaceRadius: string
 }
 
 interface ProvisionDraft {
