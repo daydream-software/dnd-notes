@@ -69,6 +69,7 @@ export interface TenantProvisioningResources {
   namespace: string
   deploymentName: string
   serviceName: string
+  pvcName: string | null
   configMapName: string
   secretName: string
   hostname: string
@@ -116,6 +117,7 @@ export interface FleetTenantStatus {
   health: 'healthy' | 'attention'
   backup: FleetTenantBackupStatus
   latestTransition: StateTransition | null
+  resources?: TenantProvisioningResources
 }
 
 export interface FleetStatusSummary {

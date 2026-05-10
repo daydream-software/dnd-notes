@@ -834,11 +834,17 @@ export function createApp({
         tenantsNeedingAttention += 1
       }
 
+      const resources =
+        tenant.subdomain && tenantProvisioningService
+          ? tenantProvisioningService.getTenantResources(tenant)
+          : undefined
+
       return {
         tenant,
         health,
         backup,
         latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
+        resources,
       }
     })
 

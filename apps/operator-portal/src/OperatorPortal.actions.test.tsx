@@ -1021,4 +1021,140 @@ describe('operator portal lifecycle actions', () => {
     expect(within(upgradeDialog).getByText('Confirm rolling update')).toBeTruthy()
     expect(screen.queryByText(/Rolled moonshae-ledger to 2\.1\.0/)).toBeNull()
   })
+
+  it('surfaces namespace, hostname, and database on a fleet card when resources are present', async () => {
+    const accessToken = createMockJwt({ email: 'stef@example.com' })
+    const fleetStatus = {
+      ...createFleetStatus(),
+      tenants: [
+        {
+          ...createFleetStatus().tenants[0],
+          resources: {
+            namespace: 'tenant-moonshae-ledger',
+            deploymentName: 'dnd-notes',
+            serviceName: 'dnd-notes',
+            pvcName: null,
+            configMapName: 'dnd-notes-runtime',
+            secretName: 'dnd-notes-runtime-secret',
+            hostname: 'moonshae-ledger.127.0.0.1.nip.io',
+            databaseName: 'db_moonshae_ledger',
+            image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+          },
+        },
+      ],
+    }
+
+    localStorage.setItem(
+      storedTokensKey,
+      JSON.stringify({
+        accessToken,
+        refreshToken: 'operator-refresh-token',
+      }),
+    )
+    initMock.mockResolvedValue({
+      accessToken,
+      refreshToken: 'operator-refresh-token',
+    })
+    refreshMock.mockResolvedValue({
+      accessToken,
+      refreshToken: 'operator-refresh-token',
+    })
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        return createJsonResponse(fleetStatus)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('moonshae-ledger')).toBeTruthy()
+    expect(screen.getByText('Resource identifiers')).toBeTruthy()
+    expect(screen.getByText('tenant-moonshae-ledger')).toBeTruthy()
+    expect(screen.getByText('moonshae-ledger.127.0.0.1.nip.io')).toBeTruthy()
+    expect(screen.getByText('db_moonshae_ledger')).toBeTruthy()
+  })
+
+  it('does not throw and does not show Copied tooltip when clipboard is unavailable', async () => {
+    const user = userEvent.setup()
+    const accessToken = createMockJwt({ email: 'stef@example.com' })
+    const fleetStatus = {
+      ...createFleetStatus(),
+      tenants: [
+        {
+          ...createFleetStatus().tenants[0],
+          resources: {
+            namespace: 'tenant-moonshae-ledger',
+            deploymentName: 'dnd-notes',
+            serviceName: 'dnd-notes',
+            pvcName: null,
+            configMapName: 'dnd-notes-runtime',
+            secretName: 'dnd-notes-runtime-secret',
+            hostname: 'moonshae-ledger.127.0.0.1.nip.io',
+            databaseName: 'db_moonshae_ledger',
+            image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+          },
+        },
+      ],
+    }
+
+    localStorage.setItem(
+      storedTokensKey,
+      JSON.stringify({
+        accessToken,
+        refreshToken: 'operator-refresh-token',
+      }),
+    )
+    initMock.mockResolvedValue({
+      accessToken,
+      refreshToken: 'operator-refresh-token',
+    })
+    refreshMock.mockResolvedValue({
+      accessToken,
+      refreshToken: 'operator-refresh-token',
+    })
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        return createJsonResponse(fleetStatus)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    // Simulate clipboard API being unavailable (e.g. insecure context)
+    const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      configurable: true,
+    })
+
+    try {
+      render(<App />)
+
+      expect(await screen.findByText('Resource identifiers')).toBeTruthy()
+
+      const copyButton = screen.getByRole('button', { name: 'Copy Namespace' })
+      await user.click(copyButton)
+
+      // "Copied" should never appear when the clipboard is unavailable
+      expect(screen.queryByText('Copied')).toBeNull()
+    } finally {
+      // Restore original clipboard descriptor
+      if (originalClipboard) {
+        Object.defineProperty(navigator, 'clipboard', originalClipboard)
+      } else {
+        Object.defineProperty(navigator, 'clipboard', {
+          value: undefined,
+          configurable: true,
+        })
+      }
+    }
+  })
 })
