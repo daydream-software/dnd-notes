@@ -2,6 +2,7 @@ import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSetting
 import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
 import BackupRoundedIcon from '@mui/icons-material/BackupRounded'
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded'
+import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import DeleteForeverRoundedIcon from '@mui/icons-material/DeleteForeverRounded'
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
@@ -18,8 +19,10 @@ import {
   CircularProgress,
   Container,
   Divider,
+  IconButton,
   Link,
   Stack,
+  Tooltip,
   Typography,
 } from '@mui/material'
 import * as React from 'react'
@@ -51,6 +54,57 @@ import type {
 } from './types'
 
 const { useCallback, useEffect, useMemo, useRef, useState } = React
+
+interface CopyFieldProps {
+  label: string
+  value: string
+}
+
+function CopyField({ label, value }: CopyFieldProps) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = useCallback(() => {
+    void navigator.clipboard.writeText(value).then(() => {
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    })
+  }, [value])
+
+  return (
+    <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', minWidth: 0 }}>
+      <Typography
+        variant="body2"
+        color="text.secondary"
+        sx={{ minWidth: 80, flexShrink: 0 }}
+      >
+        {label}
+      </Typography>
+      <Typography
+        variant="body2"
+        sx={{
+          fontFamily: 'Geist Mono, monospace',
+          color: 'text.primary',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          minWidth: 0,
+        }}
+      >
+        {value}
+      </Typography>
+      <Tooltip title={copied ? 'Copied' : 'Copy'} placement="top">
+        <IconButton
+          size="small"
+          onClick={handleCopy}
+          aria-label={`Copy ${label}`}
+          sx={{ flexShrink: 0, p: 0.25 }}
+        >
+          <ContentCopyRoundedIcon sx={{ fontSize: 14 }} />
+        </IconButton>
+      </Tooltip>
+    </Stack>
+  )
+}
 
 export const surfaceRadius = '18px'
 
@@ -748,6 +802,39 @@ export default function OperatorPortal({
                                     />
                                   ) : null}
                                 </Stack>
+
+                                {tenantStatus.resources ? (
+                                  <Box
+                                    sx={{
+                                      border: '1px solid rgba(167, 139, 250, 0.18)',
+                                      borderRadius: surfaceRadius,
+                                      p: 1.5,
+                                      backdropFilter: 'blur(12px)',
+                                    }}
+                                  >
+                                    <Typography
+                                      variant="body2"
+                                      color="text.secondary"
+                                      sx={{ mb: 1 }}
+                                    >
+                                      Resource identifiers
+                                    </Typography>
+                                    <Stack spacing={0.5}>
+                                      <CopyField
+                                        label="Namespace"
+                                        value={tenantStatus.resources.namespace}
+                                      />
+                                      <CopyField
+                                        label="Hostname"
+                                        value={tenantStatus.resources.hostname}
+                                      />
+                                      <CopyField
+                                        label="Database"
+                                        value={tenantStatus.resources.databaseName}
+                                      />
+                                    </Stack>
+                                  </Box>
+                                ) : null}
 
                                 <Typography color="text.secondary" variant="body2">
                                   {describeLatestTransition(tenantStatus)}

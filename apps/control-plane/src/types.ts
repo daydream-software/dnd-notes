@@ -116,6 +116,7 @@ export interface FleetTenantStatus {
   health: 'healthy' | 'attention'
   backup: FleetTenantBackupStatus
   latestTransition: StateTransition | null
+  resources?: TenantProvisioningResources
 }
 
 export interface FleetStatusSummary {
