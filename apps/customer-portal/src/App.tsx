@@ -232,11 +232,8 @@ export default function App({
         }
       } catch (bootstrapError) {
         if (!cancelled) {
-          setError(
-            bootstrapError instanceof Error
-              ? bootstrapError.message
-              : 'Could not initialize your session. Reload and try again.',
-          )
+          console.error(bootstrapError)
+          setError('Could not initialize your session. Reload and try again.')
         }
       } finally {
         if (!cancelled) {
@@ -451,11 +448,8 @@ export default function App({
     try {
       await keycloakClientRef.current.login(buildPortalRedirectUri())
     } catch (loginError) {
-      setError(
-        loginError instanceof Error
-          ? loginError.message
-          : 'Could not start the sign-in flow. Reload and try again.',
-      )
+      console.error(loginError)
+      setError('Could not start the sign-in flow. Reload and try again.')
     }
   }, [])
 

@@ -1543,9 +1543,8 @@ function App() {
       } catch (bootstrapError) {
         if (!cancelled) {
           clearSession()
-          if (bootstrapError instanceof Error) {
-            setError(bootstrapError.message)
-          }
+          console.error(bootstrapError)
+          setError('Could not initialize your session. Reload and try again.')
         }
       } finally {
         if (!cancelled) {
@@ -1584,11 +1583,8 @@ function App() {
           }
 
           clearSession()
-          setError(
-            refreshError instanceof Error
-              ? refreshError.message
-              : 'Your session expired. Sign in again.',
-          )
+          console.error(refreshError)
+          setError('Your session expired. Sign in again.')
         })
     }, 15_000)
 

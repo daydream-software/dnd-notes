@@ -227,7 +227,7 @@ describe('App Keycloak runtime auth', () => {
       name: 'Continue',
     })
 
-    expect(await screen.findByText('Could not initialize the Keycloak client.')).toBeTruthy()
+    expect(await screen.findByText('Could not initialize your session. Reload and try again.')).toBeTruthy()
 
     await user.click(button)
 
