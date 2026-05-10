@@ -11,6 +11,8 @@ describe('resolveOperatorPortalConfig', () => {
         realm: 'dnd-notes-dev',
         clientId: 'dnd-notes-control-plane',
       },
+      requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
+      customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
     })
   })
 
@@ -29,6 +31,8 @@ describe('resolveOperatorPortalConfig', () => {
         realm: 'operators',
         clientId: 'operator-portal',
       },
+      requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
+      customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
     })
   })
 
@@ -45,6 +49,8 @@ describe('resolveOperatorPortalConfig', () => {
         realm: 'dnd-notes-dev',
         clientId: 'dnd-notes-control-plane',
       },
+      requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
+      customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
     })
   })
 
@@ -60,6 +66,43 @@ describe('resolveOperatorPortalConfig', () => {
         realm: 'dnd-notes-dev',
         clientId: 'dnd-notes-control-plane',
       },
+      requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
+      customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
     })
+  })
+
+  it('parses KEYCLOAK_REQUIRED_ROLES from comma-separated string', () => {
+    const result = resolveOperatorPortalConfig({
+      VITE_OPERATOR_KEYCLOAK_REQUIRED_ROLES: 'control-plane-admin , control-plane-workforce ',
+    })
+    expect(result.requiredRoles).toEqual(['control-plane-admin', 'control-plane-workforce'])
+  })
+
+  it('falls back to default required roles when KEYCLOAK_REQUIRED_ROLES is blank', () => {
+    const result = resolveOperatorPortalConfig({
+      VITE_OPERATOR_KEYCLOAK_REQUIRED_ROLES: '   ',
+    })
+    expect(result.requiredRoles).toEqual(['control-plane-admin', 'control-plane-workforce'])
+  })
+
+  it('uses a single role when KEYCLOAK_REQUIRED_ROLES has one entry', () => {
+    const result = resolveOperatorPortalConfig({
+      VITE_OPERATOR_KEYCLOAK_REQUIRED_ROLES: 'control-plane-admin',
+    })
+    expect(result.requiredRoles).toEqual(['control-plane-admin'])
+  })
+
+  it('uses configured CUSTOMER_PORTAL_URL', () => {
+    const result = resolveOperatorPortalConfig({
+      VITE_OPERATOR_CUSTOMER_PORTAL_URL: 'https://portal.example.com/',
+    })
+    expect(result.customerPortalUrl).toBe('https://portal.example.com')
+  })
+
+  it('falls back to default customer portal URL when blank', () => {
+    const result = resolveOperatorPortalConfig({
+      VITE_OPERATOR_CUSTOMER_PORTAL_URL: '   ',
+    })
+    expect(result.customerPortalUrl).toBe('https://portal.127.0.0.1.nip.io')
   })
 })

@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createJsonResponse, readMockRequest } from './test-helpers'
+import { createJsonResponse, makeJwt, readMockRequest } from './test-helpers'
 
 const initMock = vi.fn<() => Promise<
   | {
@@ -161,6 +161,36 @@ const fleetStatus = {
   ],
 }
 
+// Minimal JWT tokens carrying the required operator roles for existing session tests.
+const authorizedAccessToken = makeJwt({
+  sub: 'operator-user',
+  preferred_username: 'operator',
+  realm_access: { roles: ['control-plane-workforce'] },
+})
+const authorizedRefreshToken = makeJwt({ sub: 'operator-user', typ: 'Refresh' })
+
+// Minimal JWT token for a user with no operator roles.
+const unauthorizedAccessToken = makeJwt({
+  sub: 'customer-user',
+  preferred_username: 'customer',
+  realm_access: { roles: ['default-roles-dnd-notes-dev'] },
+})
+const unauthorizedRefreshToken = makeJwt({ sub: 'customer-user', typ: 'Refresh' })
+
+// JWT carrying the operator role via client-level resource_access only.
+const clientRoleAccessToken = makeJwt({
+  sub: 'workforce-user',
+  preferred_username: 'workforce',
+  resource_access: { 'dnd-notes-control-plane': { roles: ['control-plane-workforce'] } },
+})
+
+// JWT carrying the admin role via realm_access only.
+const realmAdminAccessToken = makeJwt({
+  sub: 'admin-user',
+  preferred_username: 'admin',
+  realm_access: { roles: ['control-plane-admin'] },
+})
+
 describe('operator portal', () => {
   beforeEach(() => {
     localStorage.clear()
@@ -206,17 +236,17 @@ describe('operator portal', () => {
     localStorage.setItem(
       storedTokensKey,
       JSON.stringify({
-        accessToken: 'operator-access-token',
-        refreshToken: 'operator-refresh-token',
+        accessToken: authorizedAccessToken,
+        refreshToken: authorizedRefreshToken,
       }),
     )
     initMock.mockResolvedValue({
-      accessToken: 'operator-access-token',
-      refreshToken: 'operator-refresh-token',
+      accessToken: authorizedAccessToken,
+      refreshToken: authorizedRefreshToken,
     })
     refreshMock.mockResolvedValue({
-      accessToken: 'operator-access-token',
-      refreshToken: 'operator-refresh-token',
+      accessToken: authorizedAccessToken,
+      refreshToken: authorizedRefreshToken,
     })
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -251,17 +281,17 @@ describe('operator portal', () => {
     localStorage.setItem(
       storedTokensKey,
       JSON.stringify({
-        accessToken: 'operator-access-token',
-        refreshToken: 'operator-refresh-token',
+        accessToken: authorizedAccessToken,
+        refreshToken: authorizedRefreshToken,
       }),
     )
     initMock.mockResolvedValue({
-      accessToken: 'operator-access-token',
-      refreshToken: 'operator-refresh-token',
+      accessToken: authorizedAccessToken,
+      refreshToken: authorizedRefreshToken,
     })
     refreshMock.mockResolvedValue({
-      accessToken: 'operator-access-token',
-      refreshToken: 'operator-refresh-token',
+      accessToken: authorizedAccessToken,
+      refreshToken: authorizedRefreshToken,
     })
     logoutMock.mockResolvedValue()
 
@@ -299,5 +329,119 @@ describe('operator portal', () => {
     await waitFor(() => {
       expect(screen.queryByText('Fleet refresh failed')).toBeNull()
     })
+  })
+
+  it('renders the operator dashboard for an authenticated user with the workforce role', async () => {
+    initMock.mockResolvedValue({
+      accessToken: authorizedAccessToken,
+      refreshToken: authorizedRefreshToken,
+    })
+    refreshMock.mockResolvedValue({
+      accessToken: authorizedAccessToken,
+      refreshToken: authorizedRefreshToken,
+    })
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        return createJsonResponse(fleetStatus)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('Fleet tenants')).toBeTruthy()
+    expect(screen.queryByTestId('access-denied-view')).toBeNull()
+  })
+
+  it('renders the access-denied view for an authenticated user without an operator role', async () => {
+    initMock.mockResolvedValue({
+      accessToken: unauthorizedAccessToken,
+      refreshToken: unauthorizedRefreshToken,
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('Unexpected fetch — fleet must not be loaded for unauthorized users')
+    })
+
+    render(<App />)
+
+    expect(await screen.findByTestId('access-denied-view')).toBeTruthy()
+    expect(screen.getByText('Access not authorized')).toBeTruthy()
+    expect(screen.queryByText('Fleet tenants')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy()
+  })
+
+  it('calls keycloak.logout when signing out from the access-denied view', async () => {
+    initMock.mockResolvedValue({
+      accessToken: unauthorizedAccessToken,
+      refreshToken: unauthorizedRefreshToken,
+    })
+    logoutMock.mockResolvedValue()
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => {
+      throw new Error('Unexpected fetch')
+    })
+
+    render(<App />)
+
+    const user = userEvent.setup()
+    await screen.findByTestId('access-denied-view')
+    await user.click(screen.getByRole('button', { name: 'Sign out' }))
+
+    expect(logoutMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('grants access based on realm-level role', async () => {
+    initMock.mockResolvedValue({
+      accessToken: realmAdminAccessToken,
+      refreshToken: authorizedRefreshToken,
+    })
+    refreshMock.mockResolvedValue({
+      accessToken: realmAdminAccessToken,
+      refreshToken: authorizedRefreshToken,
+    })
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        return createJsonResponse(fleetStatus)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('Fleet tenants')).toBeTruthy()
+    expect(screen.queryByTestId('access-denied-view')).toBeNull()
+  })
+
+  it('grants access based on client-level role under resource_access', async () => {
+    initMock.mockResolvedValue({
+      accessToken: clientRoleAccessToken,
+      refreshToken: authorizedRefreshToken,
+    })
+    refreshMock.mockResolvedValue({
+      accessToken: clientRoleAccessToken,
+      refreshToken: authorizedRefreshToken,
+    })
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/fleet/status' && method === 'GET') {
+        return createJsonResponse(fleetStatus)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    render(<App />)
+
+    expect(await screen.findByText('Fleet tenants')).toBeTruthy()
+    expect(screen.queryByTestId('access-denied-view')).toBeNull()
   })
 })

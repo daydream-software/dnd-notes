@@ -14,7 +14,13 @@ function createMockJwt(claims: Record<string, unknown>) {
       .replace(/\//g, '_')
       .replace(/=+$/g, '')
 
-  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(claims)}.signature`
+  // Always include the workforce role so the gate passes in every smoke test.
+  const claimsWithRole = {
+    realm_access: { roles: ['control-plane-workforce'] },
+    ...claims,
+  }
+
+  return `${encode({ alg: 'none', typ: 'JWT' })}.${encode(claimsWithRole)}.signature`
 }
 
 function createFleetStatus() {

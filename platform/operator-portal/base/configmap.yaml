@@ -9,3 +9,5 @@ data:
   KEYCLOAK_URL: "https://keycloak.127.0.0.1.nip.io"
   KEYCLOAK_REALM: "dnd-notes-dev"
   KEYCLOAK_CLIENT_ID: "dnd-notes-control-plane"
+  KEYCLOAK_REQUIRED_ROLES: "control-plane-admin,control-plane-workforce"
+  CUSTOMER_PORTAL_URL: "https://portal.127.0.0.1.nip.io"
