@@ -583,13 +583,7 @@ export default function App({
   }
 
   return (
-    <Box
-      sx={{
-        minHeight: '100vh',
-        background:
-          'radial-gradient(circle at top, rgba(124,58,237,0.28), transparent 35%), linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%)',
-      }}
-    >
+    <Box sx={{ minHeight: '100vh' }}>
       <AppBar position="static" color="transparent" elevation={0}>
         <Toolbar sx={{ justifyContent: 'space-between', gap: 2 }}>
           <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: '0.08em' }}>
@@ -620,7 +614,7 @@ export default function App({
 
       <Container maxWidth="lg" sx={{ py: 6 }}>
         <Stack spacing={4}>
-          <Paper sx={{ p: { xs: 3, md: 5 }, backdropFilter: 'blur(24px)' }}>
+          <Paper sx={{ p: { xs: 3, md: 5 }, backdropFilter: 'blur(16px)' }}>
             <Stack spacing={2}>
               <Typography variant="overline" color="primary.main">
                 Public landing + self-serve signup
