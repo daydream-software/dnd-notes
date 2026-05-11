@@ -3156,9 +3156,11 @@ function App() {
         window.location.reload()
       }
     }
+    // Pass the full guard condition so the timeout stays active when loading
+    // finishes but overview is still null (e.g. after a failed network request).
     return (
       <WorkspaceLoadingView
-        loading={isLoadingWorkspace}
+        loading={isLoadingWorkspace || !overview || (!isSharedMode && !selectedCampaign)}
         onRetry={handleWorkspaceRetry}
       />
     )
