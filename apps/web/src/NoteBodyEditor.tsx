@@ -887,7 +887,7 @@ export default function NoteBodyEditor({
                     }
                     placeholder={
                       <Typography className="note-body-editor__placeholder" variant="body2">
-                        Start writing the note body...
+                        Start writing the note body…
                       </Typography>
                     }
                     ErrorBoundary={LexicalErrorBoundary}
