@@ -179,6 +179,9 @@ export const portalBillingProviders = ['stripe', 'square', 'manual-review'] as c
 
 export type PortalBillingProvider = (typeof portalBillingProviders)[number]
 
+export const roleSyncStatuses = ['pending', 'complete'] as const
+export type RoleSyncStatus = (typeof roleSyncStatuses)[number]
+
 export interface PortalAccount {
   id: string
   email: string
@@ -187,6 +190,7 @@ export interface PortalAccount {
   billingProvider: PortalBillingProvider | null
   authProvider: 'local' | 'keycloak'
   keycloakSub: string | null
+  roleSyncStatus: RoleSyncStatus
   createdAt: string
   updatedAt: string
 }

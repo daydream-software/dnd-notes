@@ -8,6 +8,7 @@ import {
   defaultTenantReadyTimeoutMs,
   type TenantProvisioningPort,
 } from './provisioning.js'
+import { startRoleSyncRetryLoop } from './role-sync-retry.js'
 import { createShutdownController } from './shutdown.js'
 import {
   createHttpTenantControlClient,
@@ -328,9 +329,19 @@ const app = createApp({
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000
 const serverRef: { current?: Server } = {}
+
+// Role-sync retry loop (#201). Started after migrations succeed and the server
+// is ready. Only active when a Keycloak admin client is configured — without
+// it the sweep in the middleware is also skipped, so there are no 'pending'
+// rows to retry. Stopped during graceful shutdown so in-flight ticks complete
+// before the process exits.
+let roleSyncRetryLoop: ReturnType<typeof startRoleSyncRetryLoop> | undefined
+
 const shutdownController = createShutdownController({
   getServer: () => serverRef.current,
   closeResources: async () => {
+    roleSyncRetryLoop?.stop()
+
     if (tenantProvisioningService) {
       await tenantProvisioningService.close()
     }
@@ -417,6 +428,15 @@ serverRef.current = app.listen(PORT, () => {
   console.log(`Control plane listening on port ${PORT}`)
   console.log('Registry backend: postgres')
 })
+
+// Start role-sync retry loop after the server is listening.
+if (keycloakAdminClient) {
+  roleSyncRetryLoop = startRoleSyncRetryLoop({
+    tenantRegistry,
+    keycloakAdminClient,
+  })
+  console.log('Role-sync retry loop started (60 s base interval, 5 min cap).')
+}
 
 const shutdown = () => {
   if (shutdownController.isShuttingDown()) {
