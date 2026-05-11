@@ -122,6 +122,7 @@ import { noteStatuses } from './types'
 import SiteAdminPanel from './SiteAdminPanel'
 import WorkspacePane from './WorkspacePane'
 import NoteEditorActions from './NoteEditorActions'
+import { WorkspaceLoadingView } from './WorkspaceLoadingView'
 
 interface NoteDraft {
   title: string
@@ -2805,14 +2806,10 @@ function App() {
 
   if (isBootstrapping) {
     return (
-      <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <Stack spacing={2} sx={{ alignItems: 'center' }}>
-          <CircularProgress />
-          <Typography color="text.secondary">
-            {isSharedMode ? 'Loading shared campaign…' : 'Loading owner workspace…'}
-          </Typography>
-        </Stack>
-      </Box>
+      <WorkspaceLoadingView
+        loading={isBootstrapping}
+        onRetry={() => window.location.reload()}
+      />
     )
   }
 
@@ -3150,15 +3147,20 @@ function App() {
   }
 
   if (isLoadingWorkspace || !overview || (!isSharedMode && !selectedCampaign)) {
+    const handleWorkspaceRetry = () => {
+      if (isSharedMode && guestToken) {
+        void loadSharedWorkspace(guestToken)
+      } else if (!isSharedMode && authToken && selectedCampaignId) {
+        void loadWorkspace(authToken, selectedCampaignId)
+      } else {
+        window.location.reload()
+      }
+    }
     return (
-      <Box sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center' }}>
-        <Stack spacing={2} sx={{ alignItems: 'center' }}>
-          <CircularProgress />
-          <Typography color="text.secondary">
-            {isSharedMode ? 'Loading shared notes…' : 'Loading campaign workspace…'}
-          </Typography>
-        </Stack>
-      </Box>
+      <WorkspaceLoadingView
+        loading={isLoadingWorkspace}
+        onRetry={handleWorkspaceRetry}
+      />
     )
   }
 
