@@ -331,7 +331,7 @@ export default function OperatorPortal({
           setError(
             bootstrapError instanceof Error
               ? bootstrapError.message
-              : 'Could not initialize the operator Keycloak session.',
+              : 'Could not initialize the operator session. Reload and try again.',
           )
         }
       } finally {
@@ -374,7 +374,7 @@ export default function OperatorPortal({
           setError(
             refreshError instanceof Error
               ? refreshError.message
-              : 'Keycloak session expired. Sign in again.',
+              : 'Your session expired. Sign in again.',
           )
         })
     }, 15_000)
@@ -387,7 +387,7 @@ export default function OperatorPortal({
 
   const handleLogin = useCallback(async () => {
     if (!keycloakClientRef.current) {
-      setError('Keycloak sign-in is not ready yet. Reload and try again.')
+      setError('Sign-in is not ready yet. Reload and try again.')
       return
     }
 
@@ -487,16 +487,11 @@ export default function OperatorPortal({
                   Inspect and trigger tenant lifecycle work through the existing
                   control-plane routes, not a browser-only write path.
                 </Typography>
-                <Typography color="text.secondary" variant="body2" sx={{ mt: 1.5 }}>
-                  Keycloak realm <strong>{operatorKeycloakConfig.realm}</strong> · client{' '}
-                  <strong>{operatorKeycloakConfig.clientId}</strong>
-                  {authToken ? (
-                    <>
-                      {' '}
-                      · acting as <strong>{operatorActor}</strong>
-                    </>
-                  ) : null}
-                </Typography>
+                {authToken ? (
+                  <Typography color="text.secondary" variant="body2" sx={{ mt: 1.5 }}>
+                    Acting as <strong>{operatorActor}</strong>
+                  </Typography>
+                ) : null}
               </Box>
 
               {authToken && isRoleAuthorized ? (
@@ -564,9 +559,9 @@ export default function OperatorPortal({
               <Stack spacing={2.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
                 <SecurityRoundedIcon color="secondary" sx={{ fontSize: 40 }} />
                 <Box>
-                  <Typography variant="h5">Sign in with Keycloak</Typography>
+                  <Typography variant="h5">Sign in to the operator portal</Typography>
                   <Typography color="text.secondary" sx={{ mt: 1 }}>
-                    Sign in with the workforce/admin Keycloak realm before
+                    Sign in with your workforce or admin account before
                     inspecting fleet state.
                   </Typography>
                 </Box>
@@ -575,7 +570,7 @@ export default function OperatorPortal({
                   size="large"
                   onClick={() => void handleLogin()}
                 >
-                  Continue with Keycloak
+                  Continue
                 </Button>
               </Stack>
             </CardContent>

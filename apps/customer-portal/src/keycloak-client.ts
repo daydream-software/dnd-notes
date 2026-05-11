@@ -129,7 +129,7 @@ export function createCustomerKeycloakClient(
       const tokens = readTokens(client)
 
       if (!tokens) {
-        throw new Error('Keycloak session is no longer available.')
+        throw new Error('Your session is no longer available.')
       }
 
       persistKeycloakTokens(tokens)

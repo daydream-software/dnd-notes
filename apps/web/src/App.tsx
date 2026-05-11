@@ -191,7 +191,7 @@ const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 const keycloakTokensStorageKey = 'dnd-notes:keycloak-auth-tokens'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
 const missingKeycloakClientErrorMessage =
-  'Keycloak sign-in is not ready yet. Reload and try again.'
+  'Sign-in is not ready yet. Reload and try again.'
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
 const recentActivityLimit = 20
 const defaultNotesPaneDescription =
@@ -1543,9 +1543,8 @@ function App() {
       } catch (bootstrapError) {
         if (!cancelled) {
           clearSession()
-          if (bootstrapError instanceof Error) {
-            setError(bootstrapError.message)
-          }
+          console.error(bootstrapError)
+          setError('Could not initialize your session. Reload and try again.')
         }
       } finally {
         if (!cancelled) {
@@ -1584,11 +1583,8 @@ function App() {
           }
 
           clearSession()
-          setError(
-            refreshError instanceof Error
-              ? refreshError.message
-              : 'Keycloak session expired. Sign in again.',
-          )
+          console.error(refreshError)
+          setError('Your session expired. Sign in again.')
         })
     }, 15_000)
 
@@ -2897,14 +2893,14 @@ function App() {
                     </Typography>
                     <Typography variant="h3" sx={{ mt: 1 }}>
                       {isKeycloakMode
-                        ? 'Sign in with Keycloak'
+                        ? 'Sign in to your campaigns'
                         : isRegisterMode
                           ? 'Create your owner account'
                           : 'Sign in to your campaigns'}
                     </Typography>
                     <Typography color="text.secondary" sx={{ mt: 2 }}>
                       {isKeycloakMode
-                        ? 'Use the configured Keycloak realm for tenant access. Campaign authorization still stays local to this tenant.'
+                        ? 'Use your tenant account to access campaigns. Campaign authorization stays local to this tenant.'
                         : 'Finish setting up campaigns, manage campaign details, and keep note workflows scoped to the right table.'}
                     </Typography>
                   </Box>
@@ -2980,12 +2976,12 @@ function App() {
                     >
                       {isSubmittingAuth
                         ? isKeycloakMode
-                          ? 'Redirecting to Keycloak...'
+                          ? 'Signing in...'
                           : isRegisterMode
                             ? 'Creating account...'
                             : 'Signing in...'
                         : isKeycloakMode
-                          ? 'Continue with Keycloak'
+                          ? 'Continue'
                           : isRegisterMode
                             ? 'Create owner account'
                             : 'Sign in'}
@@ -3286,7 +3282,7 @@ function App() {
                     <Typography variant="h5">Link this guest membership</Typography>
                     <Typography color="text.secondary" sx={{ mt: 0.75 }}>
                       {isKeycloakMode
-                        ? 'Use Keycloak to attach this guest history to a real tenant account. The claim still has to happen from the same browser session that joined the campaign.'
+                        ? 'Sign in with your tenant account to attach this guest history to a real account. The claim still has to happen from the same browser session that joined the campaign.'
                         : 'Create or connect a real account without changing the membership that already owns your shared note history. For this first release, the claim must happen from the same browser that joined the campaign.'}
                     </Typography>
                   </Box>
@@ -3355,14 +3351,14 @@ function App() {
                     <Button variant="contained" onClick={handleLinkSharedMembership} disabled={isLinkingAccount}>
                       {isLinkingAccount
                         ? isKeycloakMode
-                          ? 'Redirecting to Keycloak...'
+                          ? 'Signing in...'
                           : isRegisterMode
                             ? 'Creating and linking...'
                             : 'Linking account...'
                         : isKeycloakMode
                           ? authToken
                             ? 'Link this guest membership'
-                            : 'Sign in with Keycloak to link'
+                            : 'Sign in to link'
                           : isRegisterMode
                             ? 'Create and link account'
                             : 'Sign in and link account'}

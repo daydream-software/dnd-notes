@@ -717,7 +717,7 @@ describe('customer portal — keycloak mode', () => {
     vi.useRealTimers()
   })
 
-  it('shows the Keycloak entry card when catalog reports keycloak mode and session is unauthenticated', async () => {
+  it('shows the sign-in entry card when catalog reports keycloak mode and session is unauthenticated', async () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
 
@@ -732,7 +732,7 @@ describe('customer portal — keycloak mode', () => {
     render(<App keycloakClientFactory={() => stub} />)
 
     expect(
-      await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
+      await screen.findByRole('button', { name: 'Sign in' }),
     ).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Create portal account' })).toBeNull()
   })
@@ -752,13 +752,13 @@ describe('customer portal — keycloak mode', () => {
     render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
-    await user.click(await screen.findByRole('button', { name: 'Sign in with Keycloak' }))
+    await user.click(await screen.findByRole('button', { name: 'Sign in' }))
 
     expect(stub.login).toHaveBeenCalledOnce()
     expect(stub.login).toHaveBeenCalledWith(`${window.location.origin}/`)
   })
 
-  it('renders the dashboard after a successful Keycloak session is restored', async () => {
+  it('renders the dashboard after a successful session is restored', async () => {
     const kcDashboard: PortalDashboardResponse = {
       ...baseDashboard,
       account: { ...baseDashboard.account, authProvider: 'keycloak', keycloakSub: 'sub-123' },
@@ -794,7 +794,7 @@ describe('customer portal — keycloak mode', () => {
 
     expect(await screen.findByText('Customer dashboard')).toBeTruthy()
     expect(await screen.findByText('Misty Harbor')).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Sign in with Keycloak' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull()
     expect(stub.freshToken).toHaveBeenCalledOnce()
     expect(dashboardAuthHeader).toBe('Bearer kc-access-token')
   })
@@ -837,7 +837,7 @@ describe('customer portal — keycloak mode', () => {
     expect(stub.logout).toHaveBeenCalledOnce()
     expect(stub.logout).toHaveBeenCalledWith(`${window.location.origin}/`)
     expect(
-      await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
+      await screen.findByRole('button', { name: 'Sign in' }),
     ).toBeTruthy()
   })
 
@@ -874,7 +874,7 @@ describe('customer portal — keycloak mode', () => {
 
     // UI should fall back to the entry card (keycloakToken state is null)
     expect(
-      await screen.findByRole('button', { name: 'Sign in with Keycloak' }),
+      await screen.findByRole('button', { name: 'Sign in' }),
     ).toBeTruthy()
 
     // sessionStorage must also be cleared — prevents the reload loop
