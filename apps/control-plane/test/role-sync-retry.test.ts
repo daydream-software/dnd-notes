@@ -143,6 +143,57 @@ describe('TenantRegistry role-sync methods', () => {
       await cleanup()
     }
   })
+
+  it('linkPortalAccountKeycloakSub atomically sets role_sync_status to pending', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createPortalAccount(makePortalAccountParams({ id: 'a1', email: 'a1@example.com' }))
+
+      // Confirm default is complete before the link
+      const before = await tenantRegistry.getPortalAccount('a1')
+      assert.ok(before)
+      assert.equal(before.roleSyncStatus, 'complete')
+
+      const linked = await tenantRegistry.linkPortalAccountKeycloakSub('a1', 'kc-sub-a1')
+
+      // The returned account must already carry pending — no separate call needed
+      assert.ok(linked)
+      assert.equal(linked.roleSyncStatus, 'pending')
+
+      // Re-read to confirm the DB row was written, not just an in-memory artifact
+      const after = await tenantRegistry.getPortalAccount('a1')
+      assert.ok(after)
+      assert.equal(after.roleSyncStatus, 'pending')
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('linkPortalAccountKeycloakSub called again with the same sub does not change an existing complete status', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createPortalAccount(makePortalAccountParams({ id: 'a1', email: 'a1@example.com' }))
+      await tenantRegistry.linkPortalAccountKeycloakSub('a1', 'kc-sub-a1')
+
+      // Simulate the sweep completing successfully
+      await tenantRegistry.markRoleSyncComplete('a1')
+
+      const afterComplete = await tenantRegistry.getPortalAccount('a1')
+      assert.ok(afterComplete)
+      assert.equal(afterComplete.roleSyncStatus, 'complete')
+
+      // Second call with same sub — conditional UPDATE WHERE matches nothing (sub already set),
+      // so the re-read path returns the current row without overwriting it
+      const linkedAgain = await tenantRegistry.linkPortalAccountKeycloakSub('a1', 'kc-sub-a1')
+
+      assert.ok(linkedAgain)
+      assert.equal(linkedAgain.roleSyncStatus, 'complete')
+    } finally {
+      await cleanup()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------
