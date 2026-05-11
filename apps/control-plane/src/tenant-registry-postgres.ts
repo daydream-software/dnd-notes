@@ -994,6 +994,11 @@ export class TenantRegistry {
    * binding. Uses a conditional UPDATE (`WHERE COALESCE(keycloak_sub, '') = ''`)
    * so concurrent first-login requests for the same account converge atomically.
    *
+   * The UPDATE also sets `role_sync_status = 'pending'` in the same statement.
+   * This is intentional: the link and the pending marker land atomically, so the
+   * background retry loop can always recover from a process crash that occurs
+   * between the link write and the in-request role-assignment sweep.
+   *
    * Note: the condition uses COALESCE rather than `keycloak_sub IS NULL` because
    * pg-mem (the in-memory Postgres used in tests) does not evaluate `IS NULL` in
    * UPDATE WHERE clauses correctly. `COALESCE(col, '') = ''` is semantically
@@ -1011,7 +1016,7 @@ export class TenantRegistry {
   ): Promise<PortalAccount | null> {
     const updateResult = await this.run<PortalAccountRow>(
       `UPDATE portal_accounts
-       SET keycloak_sub = $1, updated_at = CURRENT_TIMESTAMP
+       SET keycloak_sub = $1, role_sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND COALESCE(keycloak_sub, '') = ''
        RETURNING ${portalAccountSelectColumns}`,
       [keycloakSub, accountId],

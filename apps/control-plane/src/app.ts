@@ -1185,22 +1185,15 @@ export function createApp({
           // We do not block the portal request because the customer has no
           // way to recover from a KC outage on their own.
           //
-          // Persistence (#201): mark the account 'pending' before the sweep
-          // so that a transient KC failure leaves a retryable marker rather
-          // than silently degrading into a permanent missing-role state.
-          // The background retry loop in index.ts picks up 'pending' rows.
-          // If the marker write itself fails we log a warning but still
-          // attempt the sweep — a missing marker is not fatal.
+          // Persistence (#201): linkPortalAccountKeycloakSub atomically sets
+          // role_sync_status = 'pending' in the same UPDATE as the sub link.
+          // If this process crashes before the sweep completes, the background
+          // retry loop in index.ts picks up the 'pending' row and retries.
+          // If the sweep fully succeeds, markRoleSyncComplete resets it below.
+          // Note: when keycloakAdminClient is not configured the account
+          // stays 'pending' indefinitely — harmless because the retry loop
+          // is also not started.
           if (keycloakAdminClient) {
-            try {
-              await tenantRegistry.markRoleSyncPending(portalAccount.id)
-            } catch (markError) {
-              console.warn(
-                `Failed to mark role-sync pending for account "${portalAccount.id}" — sweep will still run:`,
-                markError,
-              )
-            }
-
             let sweepAllSucceeded = true
 
             try {
