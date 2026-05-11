@@ -556,7 +556,7 @@ export default function OperatorPortal({
         ) : !authToken ? (
           <Card sx={{ borderRadius: surfaceRadius }}>
             <CardContent sx={{ p: 4 }}>
-              <Stack spacing={2.5} sx={{ alignItems: 'center', textAlign: 'center' }}>
+              <Stack spacing={2.5}>
                 <SecurityRoundedIcon color="secondary" sx={{ fontSize: 40 }} />
                 <Box>
                   <Typography variant="h5">Sign in to the operator portal</Typography>
@@ -569,6 +569,7 @@ export default function OperatorPortal({
                   variant="contained"
                   size="large"
                   onClick={() => void handleLogin()}
+                  sx={{ alignSelf: 'flex-start' }}
                 >
                   Continue
                 </Button>

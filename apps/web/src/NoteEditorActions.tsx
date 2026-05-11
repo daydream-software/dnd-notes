@@ -52,7 +52,7 @@ export default function NoteEditorActions({
             onClick={onDelete}
             disabled={isSaving || isDeleting}
           >
-            {isDeleting ? 'Deleting...' : 'Delete note'}
+            {isDeleting ? 'Deleting…' : 'Delete note'}
           </Button>
         ) : null}
         {canEditWorkspace ? (
@@ -62,7 +62,7 @@ export default function NoteEditorActions({
             onClick={onSave}
             disabled={isSaving || isDeleting}
           >
-            {isSaving ? 'Saving...' : 'Save note'}
+            {isSaving ? 'Saving…' : 'Save note'}
           </Button>
         ) : null}
       </Stack>

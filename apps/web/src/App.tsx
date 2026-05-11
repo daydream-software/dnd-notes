@@ -422,7 +422,7 @@ function excerpt(body: string) {
     return normalizedBody
   }
 
-  return `${normalizedBody.slice(0, 109)}...`
+  return `${normalizedBody.slice(0, 111)}…`
 }
 
 function getResolvedNoteLinks(note: Note): ResolvedNoteLink[] {
@@ -2809,7 +2809,7 @@ function App() {
         <Stack spacing={2} sx={{ alignItems: 'center' }}>
           <CircularProgress />
           <Typography color="text.secondary">
-            {isSharedMode ? 'Loading shared campaign...' : 'Loading owner workspace...'}
+            {isSharedMode ? 'Loading shared campaign…' : 'Loading owner workspace…'}
           </Typography>
         </Stack>
       </Box>
@@ -2864,8 +2864,8 @@ function App() {
                     onChange={(event) => setJoinDraft({ displayName: event.target.value })}
                   />
 
-                  <Button variant="contained" onClick={handleJoinSharedCampaign} disabled={isJoining}>
-                    {isJoining ? 'Joining campaign...' : 'Join campaign'}
+                  <Button variant="contained" onClick={handleJoinSharedCampaign} disabled={isJoining} sx={{ alignSelf: 'flex-start' }}>
+                    {isJoining ? 'Joining campaign…' : 'Join campaign'}
                   </Button>
                 </Stack>
               </CardContent>
@@ -2976,10 +2976,10 @@ function App() {
                     >
                       {isSubmittingAuth
                         ? isKeycloakMode
-                          ? 'Signing in...'
+                          ? 'Signing in…'
                           : isRegisterMode
-                            ? 'Creating account...'
-                            : 'Signing in...'
+                            ? 'Creating account…'
+                            : 'Signing in…'
                         : isKeycloakMode
                           ? 'Continue'
                           : isRegisterMode
@@ -3134,7 +3134,7 @@ function App() {
                       onClick={handleSaveCampaign}
                       disabled={isSavingCampaign}
                     >
-                      {isSavingCampaign ? 'Creating campaign...' : 'Create campaign'}
+                      {isSavingCampaign ? 'Creating campaign…' : 'Create campaign'}
                     </Button>
                     <Button variant="text" onClick={handleLogout}>
                       Sign out
@@ -3155,7 +3155,7 @@ function App() {
         <Stack spacing={2} sx={{ alignItems: 'center' }}>
           <CircularProgress />
           <Typography color="text.secondary">
-            {isSharedMode ? 'Loading shared notes...' : 'Loading campaign workspace...'}
+            {isSharedMode ? 'Loading shared notes…' : 'Loading campaign workspace…'}
           </Typography>
         </Stack>
       </Box>
@@ -3351,10 +3351,10 @@ function App() {
                     <Button variant="contained" onClick={handleLinkSharedMembership} disabled={isLinkingAccount}>
                       {isLinkingAccount
                         ? isKeycloakMode
-                          ? 'Signing in...'
+                          ? 'Signing in…'
                           : isRegisterMode
-                            ? 'Creating and linking...'
-                            : 'Linking account...'
+                            ? 'Creating and linking…'
+                            : 'Linking account…'
                         : isKeycloakMode
                           ? authToken
                             ? 'Link this guest membership'
@@ -3594,7 +3594,7 @@ function App() {
                               }
                             >
                               {isPreviewingMembershipConsolidation
-                                ? 'Previewing consolidation...'
+                                ? 'Previewing consolidation…'
                                 : 'Preview consolidation'}
                             </Button>
                             <Button
@@ -3607,7 +3607,7 @@ function App() {
                               }
                             >
                               {isApplyingMembershipConsolidation
-                                ? 'Applying consolidation...'
+                                ? 'Applying consolidation…'
                                 : 'Apply consolidation'}
                             </Button>
                           </Stack>
@@ -3756,7 +3756,7 @@ function App() {
                           onClick={handleCreateShareLink}
                           disabled={isCreatingShareLink}
                         >
-                          {isCreatingShareLink ? 'Creating link...' : 'Create shared link'}
+                          {isCreatingShareLink ? 'Creating link…' : 'Create shared link'}
                         </Button>
                       </Stack>
 
@@ -3904,7 +3904,7 @@ function App() {
                                         disabled={isRevealingShareLink}
                                       >
                                         {isRevealingShareLink
-                                          ? 'Revealing link...'
+                                          ? 'Revealing link…'
                                           : 'Reveal link'}
                                       </Button>
                                     )}
@@ -3934,8 +3934,8 @@ function App() {
                     >
                       {isSavingCampaign
                         ? campaignFormMode === 'create'
-                          ? 'Creating campaign...'
-                          : 'Saving settings...'
+                          ? 'Creating campaign…'
+                          : 'Saving settings…'
                         : campaignFormMode === 'create'
                           ? 'Create campaign'
                           : 'Save campaign settings'}
@@ -4202,7 +4202,7 @@ function App() {
                           <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                             <CircularProgress size={28} />
                             <Typography color="text.secondary" variant="body2">
-                              Loading recent activity...
+                              Loading recent activity…
                             </Typography>
                           </Stack>
                         </Box>
@@ -4384,7 +4384,7 @@ function App() {
                           <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
                             <CircularProgress size={28} />
                             <Typography color="text.secondary" variant="body2">
-                              Loading session notes...
+                              Loading session notes…
                             </Typography>
                           </Stack>
                         </Box>

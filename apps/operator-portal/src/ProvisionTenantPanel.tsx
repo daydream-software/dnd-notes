@@ -361,6 +361,7 @@ export default function ProvisionTenantPanel({
                 variant="contained"
                 onClick={handleSubmit}
                 disabled={Boolean(disabledReason) || isSubmitting}
+                sx={{ alignSelf: 'flex-start' }}
               >
                 Review and provision tenant
               </Button>

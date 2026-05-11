@@ -103,7 +103,7 @@ export default function SiteAdminPanel({
                 {overview
                   ? `Last updated ${formatGeneratedAt(overview.generatedAt)}`
                   : isLoading
-                    ? 'Loading site-admin metrics...'
+                    ? 'Loading site-admin metrics…'
                     : 'No site-admin metrics loaded yet.'}
               </Typography>
             </Box>
@@ -116,7 +116,7 @@ export default function SiteAdminPanel({
                 disabled={isLoading}
                 aria-label="Refresh admin metrics"
               >
-                {isLoading ? 'Refreshing...' : 'Refresh metrics'}
+                {isLoading ? 'Refreshing…' : 'Refresh metrics'}
               </Button>
             </Stack>
           </Stack>
