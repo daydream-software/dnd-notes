@@ -7121,3 +7121,30 @@ Option A chosen (embed on fleet cards, not new route). `FleetTenantStatus` exten
    - Sweep on fast path rejected (N admin calls per request). Explicit `/claim` rejected (auto-link is simpler). Tenant-API → control-plane round-trip rejected (auto-link makes it unnecessary).
    - Follow-up #201: persist role-sync pending state for auto-link sweep failures.
 
+---
+
+### 2026-05-11: Layout — operator-portal sign-in card centered → left-aligned
+**Decided by:** Stef (Frontend)
+**Date:** 2026-05-11
+**Type:** Design-system / Layout
+**PR:** #214 (`chore/206-ellipsis-alignself-sweep`)
+**Related issues:** #210
+
+#### Context
+
+`OperatorPortal.tsx` sign-in card (`!authToken` branch) had parent `Stack` with `alignItems: 'center'` and `textAlign: 'center'`. The "Continue" CTA had no `fullWidth` prop, so no literal design-system violation, but #210 audit flagged it for alignment consistency.
+
+#### Decision
+
+Dropped `alignItems: 'center'` and `textAlign: 'center'` from the parent Stack. Added `sx={{ alignSelf: 'flex-start' }}` to the "Continue" button. Keeping parent centered while adding `alignSelf: 'flex-start'` only to the button would have produced a broken visual mix (left-aligned button, centered title/text/icon).
+
+Result: sign-in card uses left-aligned layout consistent with the form-submit pattern elsewhere.
+
+#### Do not re-center this card
+
+If editing `OperatorPortal.tsx` sign-in card: do not add `alignItems: 'center'` back to the Stack. The left-aligned layout is intentional per design-system rules (#209/#210 audit). Restore centered layout only if an explicit design review approves it.
+
+#### Known follow-up (deferred, out of scope for #214)
+
+`SecurityRoundedIcon` on the sign-in card now hangs alone above the title. The sister access-denied card pairs the icon inline with the title. Icon alignment between the two cards is inconsistent — tracked as a deferred nit.
+
