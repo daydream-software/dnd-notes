@@ -7018,3 +7018,106 @@ The customer & tenant failures require a durable realm-sync mechanism plus dedic
 - `platform/customer-portal/base/configmap.yaml`, `platform/control-plane/overlays/k3d/*-patch.yaml`
 - `scripts/k3d/bootstrap.sh` (comment fix)
 
+---
+
+### 2026-05-09: Epic #139 implementation decisions (consolidated)
+**Decided by:** Data (Backend Dev) + Stef (Frontend) + Chunk (QA)
+**Date:** 2026-05-09
+**Type:** Auth & Provisioning — multiple PRs (#178, #179, #180, #182, #184, #190, #191, #192, #193)
+
+#### KeycloakAdminClient base (#178)
+
+1. **Soft failure on startup upsert** — control-plane still starts if Keycloak is unreachable; `CUSTOMER_PORTAL_AUTH_MODE=local` escape hatch remains functional.
+2. **Separate `KEYCLOAK_ADMIN_BASE_URL`** — admin REST uses in-cluster URL; JWT verification uses the public issuer URL. Never conflate.
+3. **PUT not PATCH** — `ensureClient` issues full PUT; merges existing spec before PUT to avoid losing unspecified fields.
+4. **`KeycloakAdminError` must re-throw through `getClient`** — explicit `instanceof` check before re-wrapping prevents statusCode=0 masking.
+5. **Portal auth middleware dispatch on `/portal/me`** — dispatches to local or Keycloak session middleware based on `portalAuthMode`; `/portal/logout` stays local-only (front-channel Keycloak logout).
+6. **Service-account user entry in realm.json** — roles `manage-clients`, `view-clients`, `view-realm` granted via `users[]` serviceAccountClientId entry (least-privilege, not realm-admin).
+
+#### ensureClient diff-skip (#178, commit 6aa6966)
+
+`ensureClient` diffs desired spec against live Keycloak representation before PUT. If all keys match, PUT is skipped. Prevents Keycloak 409 on identical re-upsert at fresh cluster startup.
+
+#### Bootstrap Job for existing-cluster circularity (#178)
+
+One-shot Kubernetes Job (`platform/k3d/keycloak-admin-bootstrap-job.yaml`) using `alpine:3.20` + `curl` + `jq`. Runs with bootstrap admin credentials from `platform-keycloak-bootstrap-env` Secret. Idempotent (GET before POST). `restartPolicy: OnFailure`, `backoffLimit: 6`, `activeDeadlineSeconds: 300`. `bootstrap.sh` deletes-before-apply on every run.
+
+Bootstrap creds scoped to Job only; control-plane always uses `client_credentials` against `dnd-notes-keycloak-admin`. Fails closed if Job does not complete before startup.
+
+#### Auto-link portal account on first Keycloak login (#178)
+
+On first Keycloak login, if a `portal_accounts` row exists with matching email but no `keycloak_sub`, the control-plane persists the sub link in-request. Subsequent logins resolve via `keycloak_sub` fast path.
+
+- Guard: if account already bound to sub A and sub B arrives claiming same email → 401 (no identity transfer).
+- `auth_provider` NOT flipped to `keycloak` on link — dual-auth grace period preserved.
+- Methods: `getPortalAccountByKeycloakSub`, `linkPortalAccountKeycloakSub` (conditional UPDATE with idempotency).
+
+#### Customer-portal auth mode is server-driven (#179)
+
+Auth mode read from `catalog.authMode` (`GET /portal/catalog`), not a frontend env var. `App.tsx` defaults to `'keycloak'` while catalog loads to avoid render-flicker. Keycloak tokens stored in **sessionStorage** (key: `dnd-notes:customer-portal:keycloak-tokens`), not localStorage.
+
+#### Auto-create portal_accounts on first Keycloak login (#182)
+
+Revises spike #148 §0: "auto-link only, no auto-create" → **Option A**: any user authenticated by the customer realm gets a `portal_accounts` row on first login. The Keycloak realm's own policies are the gate. Operator roles still admin-managed in Keycloak; 403 on `/internal/*` still enforced.
+
+`TenantRegistry.createPortalAccountFromKeycloak`: idempotent INSERT, 23505 recovery via re-read by `keycloakSub`.
+
+#### Per-tenant Keycloak client lifecycle (#180)
+
+- Client ID formula: `dnd-notes-tenant-{tenantId}` — not configurable externally.
+- `TENANT_KEYCLOAK_CLIENT_ID` env var removed (breaking).
+- `directAccessGrantsEnabled: false` for new clients — PKCE only.
+- KC step runs before `applyTenantResources` — client must exist before pod boots.
+- `deleteClient` non-blocking on deprovision — KC outage must not block teardown.
+- `dnd-notes-tenant-app` tombstoned in realm seed (not deleted — smaller blast radius).
+
+#### PKCE attribute dropped from per-tenant client (#180, commit after smoke fix)
+
+Per-tenant client spec must NOT include `attributes: { 'pkce.code.challenge.method': 'S256' }` when `directAccessGrantsEnabled: true`. Keycloak enforces PKCE on ALL token requests for a client, including direct-grant (no `code_challenge` present → 401). SPA negotiates PKCE via keycloak-js at runtime; server-side enforcement removed. Issue #183 tracks re-enabling once smoke switches to auth-code + PKCE.
+
+#### smoke.sh host-spawn env block must mirror cluster overlay (#180 fix, commit 822c229)
+
+Any env var present in `platform/control-plane/overlays/k3d/configmap-patch.yaml` or `secret-patch.yaml` must also appear in `scripts/k3d/smoke.sh` lines ~355-381. When either overlay file is modified, update the smoke host-spawn env block in lockstep. (Two prior bugs: `NODE_EXTRA_CA_CERTS` in commit 4262aa8; `KEYCLOAK_ADMIN_{BASE_URL,REALM,CLIENT_ID,CLIENT_SECRET}` in commit 822c229.)
+
+#### Operator-portal frontend role gate (#190, issue #189)
+
+Role gate in `apps/operator-portal/src/OperatorPortal.tsx` mirrors backend logic exactly. Pure role logic extracted to `apps/operator-portal/src/keycloak-roles.ts` (`extractEffectiveRoles`, `hasAnyRequiredRole`). Required roles and customer portal URL are runtime-configurable via `KEYCLOAK_REQUIRED_ROLES` / `CUSTOMER_PORTAL_URL` in env.js. Default: `['control-plane-admin', 'control-plane-workforce']`. Use `atob` (not `window.atob`) in keycloak-roles.ts — jsdom worker context issue.
+
+#### Payment provider labels (#185, PR #198)
+
+Payment provider field kept in signup/create-tenant forms. Labels changed from dev placeholders to `"Stripe (coming soon)"` / `"Square (coming soon)"` / `"Manual review (coming soon)"`. Field label: `"Payment provider"`. API contract shape unchanged.
+
+#### Fleet status embeds per-tenant resources (#186, PR #198)
+
+Option A chosen (embed on fleet cards, not new route). `FleetTenantStatus` extended with `resources?: TenantProvisioningResources`. `buildFleetStatusResponse` calls `getTenantResources` for each provisioned tenant. Additive change only; existing consumers unaffected. New `CopyField` component renders namespace/hostname/database with one-click copy.
+
+#### Worktree isolation for parallel agent spawns (#193)
+
+`isolation: "worktree"` adopted on the Agent tool whenever ≥2 agents mutate the filesystem in parallel. Replaces legacy `.worktrees/` pattern. Documented in CLAUDE.md + `.squad/routing.md`.
+
+---
+
+### 2026-05-10: Design-system + Keycloak copy + k3d persistence decisions (consolidated)
+**Decided by:** Coordinator + Stef (Frontend) — session ending 2026-05-10
+**Type:** Brand, Infrastructure, Design-system
+**PRs:** #203, #204, #205, #212, #213
+
+1. **Keycloak must never surface in UI copy** — treat as internal implementation detail. Neutral phrasing: "your account provider" or "sign in". Any `err.message` leaks must be caught at the render boundary and replaced before display. 13-site scrub enforced in #213.
+
+2. **Keycloak must use Postgres in any cluster deployment** — H2 is acceptable only for unit tests. Missing `KC_DB*` env vars cause silent H2 fallback, which destroys per-tenant clients on pod restart. Pattern committed in #204.
+
+3. **Brand marks are canonical** — `daydream-mark.svg` (corporate) and `dnd-notes-mark.svg` (product) from `docs/design-system/` are the only permitted marks. No d20, no improvised SVG. React wrapper at `apps/web/src/DndNotesMark.tsx`.
+
+4. **Design-system authority rule** — when CLAUDE.md or the design-system bundle is silent on a visual detail, ask rather than improvise.
+
+5. **`k3d image import --mode direct` is unreliable** — do not use. Use explicit containerd injection or omit `--mode` and verify with `crictl images` afterward.
+
+6. **Surface radii drift in apps/web** — custom values (24/32/20 px) differ from theme default (18). Unresolved. Options: codify as named tokens in `packages/theme` or roll back. Tracked in #206.
+
+7. **Per-tenant role gate three-trigger model** (#200, closed #196):
+   - Provision-time: `ensureClientRole` + `assignClientRoleToUser` — fatal if fails.
+   - `/portal/me` auto-link sweep: soft failure, KC admin errors logged but do not block.
+   - Tenant API: `resource_access[tenantClientId].roles` must include `tenant-member`; missing → 403.
+   - Sweep on fast path rejected (N admin calls per request). Explicit `/claim` rejected (auto-link is simpler). Tenant-API → control-plane round-trip rejected (auto-link makes it unnecessary).
+   - Follow-up #201: persist role-sync pending state for auto-link sweep failures.
+
