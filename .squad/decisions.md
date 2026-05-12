@@ -7186,3 +7186,36 @@ Base interval 60s, max 300s (5 min), doubling on all-fail ticks, reset to base o
 - Provisioning-time role assignment at `provisioning.ts:517` not covered by retry loop. Transient failures leave account `complete` and unretried.
 - HA: replicas would race on the retry loop. Operations are idempotent (KC 204 on re-assign) but leader election needed for true HA.
 
+---
+
+### 2026-05-12: Sentence-case enforcement + header tooltip consistency (PRs #220, #221)
+
+**Decided by:** Coordinator + Stef (Frontend, sonnet) + Mikey (Review, opus)
+**Date:** 2026-05-12
+**Type:** Design-system / UX
+**PRs:** #220 (`chore/theme-sentence-case`), #221 (`chore/web-tenant-onboarding-copy`)
+**Related issues:** #194, #195, #188 (sub-task of #174 items 15-16)
+
+#### Sentence-case enforcement via theme (PR #220)
+
+Theme package now owns sentence-case globally. `MuiButton.root.textTransform = 'none'` and `MuiTypography.overline = { textTransform: 'none', letterSpacing: 'normal' }` applied in `packages/theme/src/index.ts`.
+
+Result: Future copy work does not need per-component `sx={{ textTransform: 'none' }}` overrides. Brand-pill components with intentional `letterSpacing: '0.18em'` preserve their tracking (inline sx wins over theme `letterSpacing: 'normal'`).
+
+3 remaining uppercase hits confirmed intentional — all brand-pill `D&D Notes` captions with `letterSpacing: '0.08em'` per CLAUDE.md voice rules.
+
+#### Header IconButton tooltip consistency (PR #221)
+
+`CampaignWorkspaceHeader` now applies `Tooltip` + `aria-label` uniformly to all 4 header IconButtons. Previously only "New note" had explicit tooltip; scope expanded for visual and a11y consistency. Used `<span>` wrapper for disabled-state tooltip compatibility.
+
+Per-action individual tooltip render was replaced with loop application — reduces duplication, improves consistency.
+
+#### Merge order dependency
+
+**#220 must merge to main before #221.** #221's updated onboarding copy in `apps/web/src/App.tsx` (overline `Your D&D Notes workspace`) renders sentence-case only after #220 lands. Both intermediate states are acceptable, but this order is correct.
+
+#### Known follow-ups (out of scope for these PRs)
+
+- `apps/web/src/NoteBodyEditor.tsx:172` will carry redundant `textTransform: 'none'` after #220 lands — deferred cosmetic housekeeping.
+- `OperatorPortal` sign-in card icon alignment still inconsistent with access-denied card (per #214 follow-up) — no additional change needed for this batch.
+
