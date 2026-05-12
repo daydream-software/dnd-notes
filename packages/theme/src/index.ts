@@ -38,4 +38,19 @@ export const theme = createTheme({
     fontFamily:
       "'Geist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
   },
+  components: {
+    MuiButton: {
+      styleOverrides: {
+        root: { textTransform: 'none' },
+      },
+    },
+    MuiTypography: {
+      styleOverrides: {
+        overline: {
+          textTransform: 'none',
+          letterSpacing: 'normal',
+        },
+      },
+    },
+  },
 })
