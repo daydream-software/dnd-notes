@@ -6,6 +6,7 @@ import {
   MenuItem,
   Stack,
   TextField,
+  Tooltip,
   Typography,
   useMediaQuery,
 } from '@mui/material'
@@ -98,16 +99,19 @@ export default function CampaignWorkspaceHeader({
         }}
       >
         {actions.map((action) => (
-          <IconButton
-            key={action.ariaLabel}
-            aria-label={action.ariaLabel}
-            color={action.color ?? 'inherit'}
-            size="small"
-            onClick={action.onClick}
-            disabled={action.disabled}
-          >
-            {action.icon}
-          </IconButton>
+          <Tooltip key={action.ariaLabel} title={action.ariaLabel}>
+            <span>
+              <IconButton
+                aria-label={action.ariaLabel}
+                color={action.color ?? 'inherit'}
+                size="small"
+                onClick={action.onClick}
+                disabled={action.disabled}
+              >
+                {action.icon}
+              </IconButton>
+            </span>
+          </Tooltip>
         ))}
       </Box>
     </Stack>

@@ -2886,18 +2886,18 @@ function App() {
                       variant="overline"
                       sx={{ color: 'text.secondary', letterSpacing: '0.18em' }}
                     >
-                      Campaign owner access
+                      Your D&D Notes workspace
                     </Typography>
                     <Typography variant="h3" sx={{ mt: 1 }}>
                       {isKeycloakMode
-                        ? 'Sign in to your campaigns'
+                        ? 'Sign in to your workspace'
                         : isRegisterMode
                           ? 'Create your owner account'
-                          : 'Sign in to your campaigns'}
+                          : 'Sign in to your workspace'}
                     </Typography>
                     <Typography color="text.secondary" sx={{ mt: 2 }}>
                       {isKeycloakMode
-                        ? 'Use your tenant account to access campaigns. Campaign authorization stays local to this tenant.'
+                        ? 'Use your workspace account to access your campaigns and notes.'
                         : 'Finish setting up campaigns, manage campaign details, and keep note workflows scoped to the right table.'}
                     </Typography>
                   </Box>
