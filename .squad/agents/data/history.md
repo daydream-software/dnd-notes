@@ -38,6 +38,8 @@ Data is the Backend Dev responsible for control-plane, tenant orchestration, dat
 
 ## Recent Updates
 
+Team update (2026-05-11T22:00:00Z): #201 closed via PR #218 — `role_sync_status` column added to `portal_accounts`, `role-sync-retry.ts` background loop with 60s/300s backoff. Atomicity fix (b93c516) moves pending marker into `linkPortalAccountKeycloakSub` SET clause. 404 from KC treated as resolved. HA caveat documented. — decided by Data, merged.
+
 ### 2026-04-26: PR #120 Review Blocker — status.sh Output Contract
 **Context:** Chunk's review of Brand's f461fe8 commit found an inconsistency: `status.sh` used the env-override cluster for live checks but reported the persisted `clusterName` in JSON output.
 

@@ -39,6 +39,8 @@ Stef is the Frontend Dev responsible for user-facing UI, portal applications, an
 
 ## Recent Updates
 
+Team update (2026-05-11T22:00:00Z): #216 filed — codify `cardBorder`+`cardShadow` as named theme tokens in `packages/theme/src/index.ts`, remove hardcoded rgba from `WorkspaceSkeletons.tsx`, surface audit across all 3 apps (p2, stef). #217 filed — operator-portal sign-in card icon alignment fix, match access-denied card `Stack direction='row'` pattern (p2, stef). — decided by coordinator.
+
 
 
 

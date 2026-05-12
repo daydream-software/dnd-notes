@@ -7148,3 +7148,41 @@ If editing `OperatorPortal.tsx` sign-in card: do not add `alignItems: 'center'` 
 
 `SecurityRoundedIcon` on the sign-in card now hangs alone above the title. The sister access-denied card pairs the icon inline with the title. Icon alignment between the two cards is inconsistent — tracked as a deferred nit.
 
+---
+
+### 2026-05-11: role_sync_status schema and retry loop (#201)
+
+**Decided by:** Data
+**Date:** 2026-05-11
+**Type:** Schema & Architecture
+**PR:** #218
+
+#### Schema choice: Option A
+
+Per-account `role_sync_status TEXT NOT NULL DEFAULT 'complete' CHECK (role_sync_status IN ('pending', 'complete'))` column on `portal_accounts`. Option B (per-tenant junction table) was rejected — no UI consumer, unnecessary join. Default 'complete' means existing rows bypass the retry loop cleanly.
+
+#### Idempotency
+
+`assignClientRoleToUser` is naturally idempotent (Keycloak returns 204 for already-assigned mappings). No wrapper needed.
+
+#### 404-on-KC-client handling
+
+`KeycloakAdminError(404)` from `assignClientRoleToUser` treated as a resolved slot. Prevents permanent 'pending' from deprovisioned tenants. Risk: if `tenantMemberRoleName` is renamed, role-not-found 404s silently mark accounts complete.
+
+#### Backoff parameters
+
+Base interval 60s, max 300s (5 min), doubling on all-fail ticks, reset to base on any partial or full success.
+
+#### Timer isolation
+
+`startRoleSyncRetryLoop` started in `index.ts` after server binds. Never called by tests. `loop.stop()` called during `closeResources` in shutdown controller.
+
+#### Atomicity fix (commit b93c516)
+
+`role_sync_status = 'pending'` moved into the SET clause of `linkPortalAccountKeycloakSub`'s UPDATE. Link and pending marker land atomically. Separate `markRoleSyncPending` call removed from `app.ts`. The separate method remains for test fixtures only.
+
+#### Known limitations (out of scope for #201)
+
+- Provisioning-time role assignment at `provisioning.ts:517` not covered by retry loop. Transient failures leave account `complete` and unretried.
+- HA: replicas would race on the retry loop. Operations are idempotent (KC 204 on re-assign) but leader election needed for true HA.
+
