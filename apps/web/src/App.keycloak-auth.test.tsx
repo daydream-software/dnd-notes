@@ -115,7 +115,7 @@ describe('App Keycloak runtime auth', () => {
     const button = await screen.findByRole('button', {
       name: 'Continue',
     })
-    expect(screen.getByText('Sign in to your campaigns')).toBeTruthy()
+    expect(screen.getByText('Sign in to your workspace')).toBeTruthy()
 
     await user.click(button)
 
@@ -198,7 +198,7 @@ describe('App Keycloak runtime auth', () => {
     render(<App />)
 
     expect(await screen.findByText('Storm ledger updated')).toBeTruthy()
-    expect(screen.queryByText('Sign in to your campaigns')).toBeNull()
+    expect(screen.queryByText('Sign in to your workspace')).toBeNull()
   })
 
   it('shows an auth error instead of silently no-oping when the sign-in client is missing', async () => {
