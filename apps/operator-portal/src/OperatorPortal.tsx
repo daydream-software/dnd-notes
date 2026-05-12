@@ -557,9 +557,11 @@ export default function OperatorPortal({
           <Card sx={{ borderRadius: surfaceRadius }}>
             <CardContent sx={{ p: 4 }}>
               <Stack spacing={2.5}>
-                <SecurityRoundedIcon color="secondary" sx={{ fontSize: 40 }} />
                 <Box>
-                  <Typography variant="h5">Sign in to the operator portal</Typography>
+                  <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
+                    <SecurityRoundedIcon color="secondary" sx={{ fontSize: 40 }} />
+                    <Typography variant="h5">Sign in to the operator portal</Typography>
+                  </Stack>
                   <Typography color="text.secondary" sx={{ mt: 1 }}>
                     Sign in with your workforce or admin account before
                     inspecting fleet state.
