@@ -43,7 +43,7 @@ jobs:
         run: npm ci
 
       - name: Validate keycloak theme sync
-        run: node ./scripts/platform/validate-keycloak-theme-sync.mjs
+        run: bash ./scripts/platform/validate-keycloak-theme-sync.sh
 
       - name: Lint
         run: npm run lint
