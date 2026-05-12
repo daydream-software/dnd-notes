@@ -7278,3 +7278,101 @@ Source themes on-disk (`platform/keycloak/themes/`) vs embedded ConfigMap files 
 - Credential selector button padding inconsistency on mobile (out of scope, deferred).
 
 ---
+
+### 2026-05-12: Keycloak theme drift validation + TS strict across all frontends (consolidated)
+
+**Decided by:** Brand (CI scripts), Data (spike), Stef (frontend), Chunk (QA)
+**Date:** 2026-05-12
+**Type:** Feature, Tech debt, Test infrastructure
+**PRs:** #227, #228, #229, #230, #232, #233
+**Related issues:** #140, #141, #142, #148, #165, #225
+
+#### Keycloak theme sync-check CI script (PR #227, Brand)
+
+Issue #225 hazard resolved. Script `scripts/platform/validate-keycloak-theme-sync.mjs` parses `platform/k3d/keycloak.yaml` ConfigMap and validates every text key (op-*, cu-*) and binary (font) key against source files under `platform/k3d/keycloak-themes/`. Detects drift (byte mismatch), missing mappings, and per-portal divergence.
+
+Implementation note: YAML literal block regex required special handling for blank lines. Template files (FTL) contain bare newlines; naive pattern `^    .*\n?` fails on bare newlines, causing partial extraction. Solution uses `(?:^(?:    .*|)\n)*` to match completely empty lines.
+
+Step added to `.github/workflows/ci.yml` "validate" job after npm ci. Exit code 0 clean main, exit 1 on drift. Tests passed: clean main, artificial text drift detected, artificial binary drift detected with full divergence report.
+
+#### Keycloak portal auth flow spike complete (PR #228, Data)
+
+Spike #148 design doc finalized in `docs/spikes/2026-05-12-keycloak-portal-auth-flow.md`. Consolidates all auth decisions (2026-05-09 original + revisions from #176–#201) with file:line citations. 7 open questions initially surfaced:
+
+- OQ-1: Hard-cutover timeline for local portal auth
+- OQ-2: sessionStorage vs localStorage divergence (resolved: operator → sessionStorage to match customer)
+- OQ-3: Proactive vs reactive token refresh (resolved: 60s `setInterval` calling `updateToken(300)`, no iframe)
+- OQ-4: Production redirect URI registration process
+- OQ-5: Draft state loss on auth redirect mid-form
+- OQ-6: Refresh token rotation policy
+- OQ-7: Unintentional cross-portal SSO risk (shared realm)
+
+5 OQs remain (product asks). Implementation outline §8 added with 6 sequenced items. Commit 3f72cca.
+
+#### TypeScript strict mode across all 3 frontends (PRs #229, #232, #233, Stef + Mikey review)
+
+Design-system 2026-05-06 pass pre-paid the entire TS strict bill. Three flips of `"strict": true` in `tsconfig.app.json`, zero source changes required. Codebase was already strict-clean:
+
+- All catch blocks already narrowed via `instanceof Error` before accessing `.message`
+- All `useState` calls with null initial values already had explicit `<T | null>` type params
+- `api.ts` uses typed `readJson<T>` wrappers throughout — no untyped `.json()` calls
+
+**#140 (customer-portal):** 0 errors, 25/25 tests pass. Smallest frontend (~1.7k LOC, 9 source files).
+
+**#141 (operator-portal):** 0 errors, tests pass. Intermediate size.
+
+**#142 (web):** 0 errors, 62/62 tests pass, 1,075 kB bundle (pre-existing chunk warning unrelated). Closed Epic #136 (TS strict across all 3 frontends).
+
+**Local compile gotcha discovered:** `npx tsc --noEmit` at workspace root resolves references-only `tsconfig.json` and compiles zero files. Authoritative invocation is `tsc -p tsconfig.app.json --noEmit` or `tsc -b` (what CI uses). No local-vs-CI regression risk after verification.
+
+#### Test fixture cleanup (PR #230, Chunk — issue #165)
+
+Single test in `apps/control-plane/test/k3d-persistent-lane.test.ts` ("reads fields even when tokenSnippets contains escaped quotes") fixed. Previously built fixture under repo tree:
+
+```
+apps/control-plane/test/.k3d-status-token-snippets-test-<pid>/
+```
+
+Failed or unclean runs left the directory. Fix: switched to `mkdtempSync(join(tmpdir(), 'k3d-status-token-snippets-test-'))` + `try/finally` wrapper. Fixture now lives in OS temp space, auto-reaped on reboot, cleanup runs on exception.
+
+**Related leakage pattern (deferred to epic #164):** 15 sibling tests in the same file use identical `mkdirSync` + `rmSync` pattern without `finally` blocks. All enumerated in PR comment. Filed as follow-up #231.
+
+329 tests pass, git status clean.
+
+#### Worktree isolation incidents + recovery (Stef, Chunk, Mikey)
+
+Two agents wrote directly to main repo working tree instead of isolated worktrees (unacceptable for parallel work). Recovery:
+
+1. **Stef #224 (Keycloak themes) first cut:** Sequential session, leak acceptable but not ideal. Mikey caught the issue.
+2. **Chunk #165 fixture cleanup leak:** Cleanup landed `ccb77fd` on local `main` instead of feature branch. Mikey caught pre-push. Surgical recovery: `git branch -f tests/165-... ccb77fd` + `git reset --hard origin/main`.
+3. **Stef #140 (TS strict customer-portal) cascade fallout:** Caught in the #165 recovery, recovered via `git branch -f tech-debt/140-... 0256057`.
+
+**Pattern now documented in agent briefs:** "anti-leak protocol — verify `git branch --show-current` before AND after commit, must match feature branch name." Subsequent Stef #141 + #142 followed the protocol, no leaks.
+
+#### Visual-PR workflow upgrade
+
+Orphan-branch screenshot pattern (`previews/pr-keycloak-themes-171`) was deleted by mistake, breaking embedded PR body images. Recovered from local object store via `git branch <name> <sha>` + push. Then migrated to permanent catch-all:
+
+- Branch: `previews` (orphan, protected against force-push + deletion)
+- Structure: root README explaining convention + one subdir per PR: `pr-NNN/`
+- URL pattern: `https://raw.githubusercontent.com/daydream-software/dnd-notes/previews/pr-NNN/<file>.png`
+- Branch protection: `gh api PUT .../branches/previews/protection` with `allow_force_pushes=false`, `allow_deletions=false`, `enforce_admins=false`
+
+Memory updated: `feedback_preserve_preview_branches.md` reflects new pattern.
+
+#### Side effects documented
+
+- `gh pr create --body "$(cat <<'EOF' ... EOF)"` heredoc has bash history expansion gotcha. Mitigation: use `--body-file` only.
+- Playwright MCP HTTPS setup (memory: `project_playwright_mcp_https_setup.md`): `--browser chrome` override in project `.mcp.json` + full Chrome via `playwright install chrome` + mkcert CA in `~/.pki/nssdb`.
+- Project `.mcp.json` got `playwright: --browser chrome` override (part of PR #224). Contributors using MCP need `npx playwright install chrome` once.
+
+#### Issues closed in this round
+
+#140, #141, #142, #148, #165, #171, #188, #194, #195, #225, #222, #223, Epic #136.
+
+#### Issues filed during this session
+
+- #226 (hosted-reference Helm wiring — squad:data)
+- #231 (15 sibling test leaks in k3d-persistent-lane — squad:chunk, epic #164)
+
+---
