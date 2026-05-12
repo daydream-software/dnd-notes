@@ -3,7 +3,7 @@
 **Issue:** #148 (spike for epic #139)
 **Date:** 2026-05-12
 **Author:** Data (backend)
-**Status:** Complete — most decisions implemented across #176–#201. Open questions listed in §8.
+**Status:** Complete — most decisions implemented across #176–#201. Open questions listed in §9; two technical questions resolved in-spike (OQ-2, OQ-3).
 
 ---
 
@@ -72,13 +72,13 @@ Token storage diverges between portals:
 - **Customer portal** — `sessionStorage`, key `dnd-notes:customer-portal:keycloak-tokens` (`apps/customer-portal/src/keycloak-client.ts:26`, 41). Tokens are cleared on tab close.
 - **Operator portal** — `localStorage`, key `dnd-notes:operator-portal:keycloak-tokens` (`apps/operator-portal/src/keycloak-client.ts:18`, 33). Tokens persist across browser sessions.
 
-The divergence was implicit in implementation (decisions.md 2026-05-09 records "Keycloak tokens stored in sessionStorage" for the customer portal only). See open question OQ-2.
+The divergence was implicit in implementation (decisions.md 2026-05-09 records "Keycloak tokens stored in sessionStorage" for the customer portal only). See OQ-2 in §9 (decided in-spike).
 
 ### Silent refresh
 
 `checkLoginIframe: false` is set in both `keycloak-client.ts` implementations (customer-portal:95, operator-portal:82). Silent SSO via hidden iframe is therefore disabled. Refresh is driven entirely by the `updateToken` call at the moment a protected request is about to be issued. For the customer portal this happens in `freshToken()` (keycloak-client.ts:122-138), called at dashboard hydration and before each polling tick. For the operator portal, `refresh()` is called explicitly by the app before fleet API calls.
 
-The practical implication: if a tab is left open and the refresh token expires (Keycloak default is 30 minutes for offline sessions, check realm settings), the next API call will fail to refresh and the user will see an error. No background timer refreshes tokens proactively. See open question OQ-3.
+The practical implication: if a tab is left open and the refresh token expires (Keycloak default is 30 minutes for offline sessions, check realm settings), the next API call will fail to refresh and the user will see an error. No background timer refreshes tokens proactively. See OQ-3 in §9 (decided in-spike).
 
 ---
 
@@ -131,7 +131,7 @@ The `aud` / `azp` matching in `audienceMatches` (`platform/keycloak-jwt/src/inde
 
 `updateToken` in keycloak-js throws if the refresh token is expired or the session no longer exists in Keycloak. The customer portal catches this in `freshToken()` (keycloak-client.ts:125-127): it clears sessionStorage, sets `keycloakToken = null`, and surfaces the error to the user via the `error` state. The user must sign in again. The operator portal surfaces the same error via the app's error state.
 
-No proactive expiry warning exists today — the user discovers the session is expired at the next attempted action. See open question OQ-3.
+No proactive expiry warning exists today — the user discovers the session is expired at the next attempted action. See OQ-3 in §9 (decided in-spike).
 
 ### Role missing (403 from tenant API)
 
@@ -183,15 +183,47 @@ The control-plane runs in dual-auth mode — `local` or `keycloak` — controlle
 
 ---
 
-## 8. Open questions
+## 8. Implementation outline
 
-These require a product or architecture decision before implementation can proceed. They are not answered by decisions.md.
+Follow-up features required to complete the epic scope tied to #139. Items are sequenced by dependency; each maps to the code artifacts where the work lands.
+
+**Item 1 — Operator-portal PKCE server-side enforcement**
+Add `pkce.code.challenge.method: S256` to the `dnd-notes-control-plane` client in `platform/k3d/keycloak.yaml` (currently absent at lines 98–120). Extend `ensureClient` in `apps/control-plane/src/keycloak-admin-client.ts` to set the attribute for the operator-portal client on startup (currently only applied to the customer-portal client). No dependency on other items.
+Owner: data. Issue: TBD.
+
+**Item 2 — Operator-portal sessionStorage migration (implements OQ-2 decision)**
+Migrate `apps/operator-portal/src/keycloak-client.ts` storage adapter from `localStorage` (keys at lines 18, 33) to `sessionStorage`, matching the customer-portal pattern. Storage key remains `dnd-notes:operator-portal:keycloak-tokens`. No other files change; the read/write surface is encapsulated in that file. Can ship independently of item 1. Implements the OQ-2 decision (see §9).
+Owner: data + stef. Issue: TBD.
+
+**Item 3 — Background token-refresh timer (implements OQ-3 decision)**
+Add a `setInterval`-based proactive refresh to both `keycloak-client.ts` wrappers. Customer portal: extend the existing `freshToken()` wrapper (`apps/customer-portal/src/keycloak-client.ts:122-138`) to schedule a call to `client.updateToken(300)` roughly 60 seconds before the access token's `exp`. Operator portal: same pattern in `apps/operator-portal/src/keycloak-client.ts` using the existing `refresh()` call path. `checkLoginIframe` stays `false`; no iframe is introduced. Schedule item 2 first so both files are touched in a single pass. Implements the OQ-3 decision (see §9).
+Owner: data + stef. Issue: TBD.
+
+**Item 4 — Per-tenant PKCE re-enable and smoke harness migration**
+Switch `scripts/k3d/smoke.sh` from `grant_type=password` to auth-code + PKCE so the server-side `pkce.code.challenge.method: S256` attribute can be re-enabled on per-tenant clients in `apps/control-plane/src/provisioning.ts:463-468`. Tracked in issue #183. Depends on the smoke rewrite being validated in CI before the attribute is activated — sequence after items 1–3 to avoid blocking the other work.
+Owner: brand + data. Issue: #183.
+
+**Item 5 — Portal client role lifecycle hardening**
+Tighten the `KeycloakAdminError(404)` swallow in `apps/control-plane/src/role-sync-retry.ts:131-139`. A 404 on a tenant client currently silently marks the account as done; it should distinguish "client deleted" (log + skip) from "role renamed" (alert + do not mark complete). Related: audit `ensureClientRole` and `assignClientRoleToUser` in `apps/control-plane/src/provisioning.ts` and `apps/control-plane/src/keycloak-admin-client.ts` for idempotency under concurrent provisioning. No dependency on items 1–4.
+Owner: data. Issue: TBD.
+
+**Item 6 — Production redirect URI provisioning**
+Extend startup-time `ensureClient` (`apps/control-plane/src/keycloak-admin-client.ts`) to register production-hostname redirect URIs for the operator-portal client alongside the customer-portal client — currently only the customer-portal client is handled. Coordinate with the OQ-4 product decision on URI authority (Terraform vs realm seed override). Can be scoped independently of item 1 but is lower priority until production deployment is planned.
+Owner: data + brand. Issue: TBD (blocked on OQ-4 product input).
+
+**Dependency order:** Items 1 and 5 are independent and can ship in parallel. Item 2 before item 3 (avoid double-touching operator keycloak-client.ts). Item 4 separate track (#183). Item 6 after OQ-4 is answered.
+
+---
+
+## 9. Open questions
+
+These require a product or architecture decision before implementation can proceed. OQ-2 and OQ-3 were resolved in-spike and are marked decided below. The remaining five require stakeholder input.
 
 **OQ-1 — Hard-cutover timeline for local portal auth.** Local email/password auth (`/portal/login`, `/portal/signup`) is still active. When does the local path become unsupported? This determines whether `portal_accounts.password_hash` can be dropped from the schema and whether the dual-mode support code (`ensurePortalLocalAuthEnabled`) needs a sunset date baked in.
 
-**OQ-2 — Token storage divergence (sessionStorage vs localStorage).** The customer portal stores Keycloak tokens in `sessionStorage` (cleared on tab close); the operator portal uses `localStorage` (persistent). The customer-portal choice was documented as intentional (decisions.md 2026-05-09). The operator-portal choice is not documented. Is the localStorage choice for operator intentional? If yes, what is the rationale (resuming sessions across browser restarts is a trade-off: convenience vs. longer token exposure window in localStorage)?
+**OQ-2 — Token storage: decided.** Recommendation: the operator portal should migrate from `localStorage` to `sessionStorage`, matching the customer portal. The trade-off: `sessionStorage` limits the exposure window to the browser session (tokens evicted on tab close) at the cost of requiring re-authentication after a browser restart. For the operator surface, this is the right balance — operator sessions are short-lived by policy, and the workforce user cohort is disciplined enough to handle a daily login. Persisting tokens in `localStorage` across browser restarts is not worth the extended exposure window for a portal that controls tenant provisioning. Implementation: change the storage adapter in `apps/operator-portal/src/keycloak-client.ts` (lines 18, 33) from `localStorage` to `sessionStorage` and rename the storage key if the old key should be invalidated at rollout. See implementation outline item 2.
 
-**OQ-3 — Proactive token refresh vs reactive.** `checkLoginIframe: false` disables silent SSO. Token refresh is entirely reactive — it fires only when an API call is about to be issued. In a tab left idle for longer than the Keycloak refresh token lifetime, the next action will fail with no forewarning. Is a background timer (e.g., refresh 5 minutes before expiry) needed, or is the current reactive model acceptable for the portal's use pattern?
+**OQ-3 — Token refresh strategy: decided.** Recommendation: keep `checkLoginIframe: false` and add a background refresh timer to both portal SPAs. The timer should call `client.updateToken(300)` (i.e. refresh if the access token expires within 5 minutes) on a `setInterval` that fires roughly every 60 seconds — or equivalently hook into keycloak-js's `onTokenExpired` callback. This keeps the silent-iframe opt-out intact (avoiding the complexity and cross-origin iframe restrictions that caused `checkLoginIframe: false` in the first place) while preventing the "idle tab hits an expired session with no warning" failure mode described in §5. The customer portal reuses the existing `freshToken()` plumbing (`apps/customer-portal/src/keycloak-client.ts:122-138`); the operator portal uses its `refresh()` call path. See implementation outline item 3.
 
 **OQ-4 — Production redirect URI registration.** The realm seed covers k3d nip.io and localhost. For production deployments with real hostnames (`portal.dnd-notes.app`, `operator.daydream.software`) the redirect URIs must be registered either in a production realm seed or via the admin API. The `ensureClient` call at startup only handles the customer-portal client; there is no analogous code for the operator-portal client. Who is responsible for registering production redirect URIs and how (Terraform, manual, realm seed override)?
 
