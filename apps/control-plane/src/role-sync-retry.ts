@@ -58,6 +58,15 @@ export function startRoleSyncRetryLoop(options: RoleSyncRetryOptions): RoleSyncR
     maxIntervalMs = 300_000,
   } = options
 
+  if (!Number.isInteger(baseIntervalMs) || baseIntervalMs < 1) {
+    throw new Error(`Invalid baseIntervalMs: ${baseIntervalMs}. Expected a positive integer.`)
+  }
+  if (!Number.isInteger(maxIntervalMs) || maxIntervalMs < baseIntervalMs) {
+    throw new Error(
+      `Invalid maxIntervalMs: ${maxIntervalMs}. Expected an integer >= baseIntervalMs (${baseIntervalMs}).`,
+    )
+  }
+
   let stopped = false
   let currentIntervalMs = baseIntervalMs
   let timer: ReturnType<typeof setTimeout> | undefined

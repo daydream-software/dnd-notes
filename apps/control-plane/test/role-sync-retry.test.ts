@@ -354,6 +354,44 @@ describe('startRoleSyncRetryLoop', () => {
     }
   })
 
+  it('throws on invalid baseIntervalMs', () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      assert.throws(
+        () =>
+          startRoleSyncRetryLoop({
+            tenantRegistry,
+            keycloakAdminClient: makeAdminClient(),
+            baseIntervalMs: 0,
+            maxIntervalMs: 300_000,
+          }),
+        /Invalid baseIntervalMs/,
+      )
+    } finally {
+      void cleanup()
+    }
+  })
+
+  it('throws on invalid maxIntervalMs (less than baseIntervalMs)', () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      assert.throws(
+        () =>
+          startRoleSyncRetryLoop({
+            tenantRegistry,
+            keycloakAdminClient: makeAdminClient(),
+            baseIntervalMs: 60_000,
+            maxIntervalMs: 1_000,
+          }),
+        /Invalid maxIntervalMs/,
+      )
+    } finally {
+      void cleanup()
+    }
+  })
+
   it('treats a 404 KeycloakAdminError as a resolved slot and marks complete when no other failures remain', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
