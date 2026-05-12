@@ -1,6 +1,7 @@
 import assert from 'node:assert'
 import { spawnSync } from 'node:child_process'
-import { chmodSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, it } from 'node:test'
@@ -209,13 +210,8 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
   })
 
   it('reads fields even when tokenSnippets contains escaped quotes', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-status-token-snippets-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-status-token-snippets-test-'))
     const stateFile = join(tmpDir, 'state.json')
-
-    mkdirSync(tmpDir, { recursive: true })
 
     const state = {
       clusterName: 'quoted-cluster',
@@ -233,17 +229,20 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
     }
     writeFileSync(stateFile, JSON.stringify(state, null, 2))
 
-    const result = runBash(
-      `${readStateSnippet}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readStateSnippet}
 STATE_FILE="${stateFile}"
 read_state
 printf '%s|%s|%s' \
   "$state_clusterName" \
   "$state_tenantNamespace" \
   "$state_keycloakRealm"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(
