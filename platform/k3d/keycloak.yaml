@@ -103,7 +103,6 @@ data:
           "bearerOnly": false,
           "implicitFlowEnabled": false,
           "directAccessGrantsEnabled": true,
-          "loginTheme": "operator-login",
           "redirectUris": [
             "https://operator.127.0.0.1.nip.io/*",
             "http://operator.127.0.0.1.nip.io/*",
@@ -115,7 +114,10 @@ data:
             "http://operator.127.0.0.1.nip.io",
             "http://localhost:5173",
             "http://localhost:5174"
-          ]
+          ],
+          "attributes": {
+            "login_theme": "operator-login"
+          }
         },
         {
           "clientId": "dnd-notes-customer-portal",
@@ -125,7 +127,6 @@ data:
           "bearerOnly": false,
           "implicitFlowEnabled": false,
           "directAccessGrantsEnabled": false,
-          "loginTheme": "customer-login",
           "redirectUris": [
             "https://portal.127.0.0.1.nip.io/*",
             "http://portal.127.0.0.1.nip.io/*",
@@ -137,7 +138,8 @@ data:
             "http://localhost:5175"
           ],
           "attributes": {
-            "pkce.code.challenge.method": "S256"
+            "pkce.code.challenge.method": "S256",
+            "login_theme": "customer-login"
           }
         },
         {
@@ -179,6 +181,36 @@ metadata:
   annotations:
     dnd-notes.dev/purpose: Keycloak login theme text files — operator-login and customer-login
 data:
+  op-messages_en.properties: |
+    loginTitle=Sign in
+    username=Username
+    email=Email
+    usernameOrEmail=Username or email
+    password=Password
+    rememberMe=Remember me
+    doLogIn=Sign in
+    doForgotPassword=Forgot password?
+    noAccount=No account?
+    doRegister=Sign up
+    doSubmit=Submit
+    backToLogin=Back to sign in
+    emailInstruction=Enter your username or email and we will send you instructions to reset your password.
+    loginOtpOneTime=One-time code
+  cu-messages_en.properties: |
+    loginTitle=Sign in
+    username=Username
+    email=Email
+    usernameOrEmail=Username or email
+    password=Password
+    rememberMe=Remember me
+    doLogIn=Sign in
+    doForgotPassword=Forgot password?
+    noAccount=No account?
+    doRegister=Sign up
+    doSubmit=Submit
+    backToLogin=Back to sign in
+    emailInstruction=Enter your username or email and we will send you instructions to reset your password.
+    loginOtpOneTime=One-time code
   op-theme.properties: |
     parent=keycloak.v2
     import=common/keycloak
@@ -187,7 +219,7 @@ data:
   op-template.ftl: |
     <#macro registrationLayout bodyClass="" displayInfo=false displayMessage=true displayRequiredFields=false>
     <!DOCTYPE html>
-    <html class="${properties.kcHtmlClass!}" lang="${locale.currentLanguageTag}">
+    <html class="${properties.kcHtmlClass!}" lang="${(locale.currentLanguageTag)!'en'}">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -269,7 +301,7 @@ data:
               type="text"
               autocomplete="username"
               autofocus
-              value="${(login.username!'')?html}"
+              value="${(login.username!'')}"
               tabindex="1"
             >
             <#if messagesPerField.existsError('username','password')>
@@ -366,7 +398,7 @@ data:
               type="text"
               autocomplete="username"
               autofocus
-              value="${(auth.attemptedUsername!'')?html}"
+              value="${(auth.attemptedUsername!'')}"
             >
             <#if messagesPerField.existsError('username')>
               <div class="alert alert-error">
@@ -857,7 +889,7 @@ data:
   cu-template.ftl: |
     <#macro registrationLayout bodyClass="" displayInfo=false displayMessage=true displayRequiredFields=false>
     <!DOCTYPE html>
-    <html class="${properties.kcHtmlClass!}" lang="${locale.currentLanguageTag}">
+    <html class="${properties.kcHtmlClass!}" lang="${(locale.currentLanguageTag)!'en'}">
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -939,7 +971,7 @@ data:
               type="text"
               autocomplete="username"
               autofocus
-              value="${(login.username!'')?html}"
+              value="${(login.username!'')}"
               tabindex="1"
             >
             <#if messagesPerField.existsError('username','password')>
@@ -1036,7 +1068,7 @@ data:
               type="text"
               autocomplete="username"
               autofocus
-              value="${(auth.attemptedUsername!'')?html}"
+              value="${(auth.attemptedUsername!'')}"
             >
             <#if messagesPerField.existsError('username')>
               <div class="alert alert-error">
@@ -1621,6 +1653,9 @@ spec:
               mountPath: /opt/keycloak/themes/operator-login/theme.properties
               subPath: op-theme.properties
             - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/messages/messages_en.properties
+              subPath: op-messages_en.properties
+            - name: themes-text
               mountPath: /opt/keycloak/themes/operator-login/login/template.ftl
               subPath: op-template.ftl
             - name: themes-text
@@ -1649,6 +1684,9 @@ spec:
             - name: themes-text
               mountPath: /opt/keycloak/themes/customer-login/theme.properties
               subPath: cu-theme.properties
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/messages/messages_en.properties
+              subPath: cu-messages_en.properties
             - name: themes-text
               mountPath: /opt/keycloak/themes/customer-login/login/template.ftl
               subPath: cu-template.ftl

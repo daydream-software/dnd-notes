@@ -21,7 +21,7 @@
           type="text"
           autocomplete="username"
           autofocus
-          value="${(login.username!'')?html}"
+          value="${(login.username!'')}"
           tabindex="1"
         >
         <#if messagesPerField.existsError('username','password')>

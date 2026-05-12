@@ -20,7 +20,7 @@
           type="text"
           autocomplete="username"
           autofocus
-          value="${(auth.attemptedUsername!'')?html}"
+          value="${(auth.attemptedUsername!'')}"
         >
         <#if messagesPerField.existsError('username')>
           <div class="alert alert-error">
