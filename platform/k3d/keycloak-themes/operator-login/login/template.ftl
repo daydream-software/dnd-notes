@@ -28,7 +28,7 @@
     <div class="dnd-brand">
       <img
         src="${url.resourcesPath}/img/daydream-mark.svg"
-        alt="Daydream Software"
+        alt=""
         class="dnd-brand-mark"
         aria-hidden="true"
       >

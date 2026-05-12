@@ -6,7 +6,7 @@
 
       <#if otpLogin.userOtpCredentials?size gt 1>
         <div class="form-group">
-          <label for="selectedCredentialId">${msg("loginOtpOneTime")}</label>
+          <label for="selectedCredentialId">${msg("loginOtpDeviceSelect")}</label>
           <select id="selectedCredentialId" name="selectedCredentialId">
             <#list otpLogin.userOtpCredentials as otpCredential>
               <option

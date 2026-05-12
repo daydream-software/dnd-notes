@@ -28,7 +28,7 @@
     <div class="dnd-brand">
       <img
         src="${url.resourcesPath}/img/dnd-notes-mark.svg"
-        alt="D&D Notes"
+        alt=""
         class="dnd-brand-mark"
         aria-hidden="true"
       >

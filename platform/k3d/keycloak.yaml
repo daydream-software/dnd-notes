@@ -196,6 +196,7 @@ data:
     backToLogin=Back to sign in
     emailInstruction=Enter your username or email and we will send you instructions to reset your password.
     loginOtpOneTime=One-time code
+    loginOtpDeviceSelect=Authenticator device
   cu-messages_en.properties: |
     loginTitle=Sign in
     username=Username
@@ -211,6 +212,7 @@ data:
     backToLogin=Back to sign in
     emailInstruction=Enter your username or email and we will send you instructions to reset your password.
     loginOtpOneTime=One-time code
+    loginOtpDeviceSelect=Authenticator device
   op-theme.properties: |
     parent=keycloak.v2
     import=common/keycloak
@@ -247,7 +249,7 @@ data:
         <div class="dnd-brand">
           <img
             src="${url.resourcesPath}/img/daydream-mark.svg"
-            alt="Daydream Software"
+            alt=""
             class="dnd-brand-mark"
             aria-hidden="true"
           >
@@ -427,7 +429,7 @@ data:
     
           <#if otpLogin.userOtpCredentials?size gt 1>
             <div class="form-group">
-              <label for="selectedCredentialId">${msg("loginOtpOneTime")}</label>
+              <label for="selectedCredentialId">${msg("loginOtpDeviceSelect")}</label>
               <select id="selectedCredentialId" name="selectedCredentialId">
                 <#list otpLogin.userOtpCredentials as otpCredential>
                   <option
@@ -438,7 +440,7 @@ data:
               </select>
             </div>
           </#if>
-    
+
           <div class="form-group">
             <label for="otp">${msg("loginOtpOneTime")}</label>
             <input
@@ -456,13 +458,13 @@ data:
               </div>
             </#if>
           </div>
-    
+
           <div id="kc-form-buttons">
             <button type="submit">${msg("doLogIn")}</button>
           </div>
-    
+
         </form>
-    
+
       </#if>
     </@layout.registrationLayout>
   op-login.css: |
@@ -501,7 +503,7 @@ data:
       margin: 0;
       padding: 0;
       min-height: 100vh;
-      font-family: 'Geist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: Geist;
       font-size: 15px;
       line-height: 1.5;
       color: #f8fafc;
@@ -511,17 +513,17 @@ data:
         radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
         linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
     }
-    
+
     a {
       color: #a78bfa;
       text-decoration: none;
     }
-    
+
     a:hover {
       text-decoration: underline;
       opacity: 0.85;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Page layout                                                          */
     /* ------------------------------------------------------------------ */
@@ -531,13 +533,13 @@ data:
     .pf-c-page__header {
       display: none !important;
     }
-    
+
     body.login-pf {
       background:
         radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
         linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
     }
-    
+
     #kc-container,
     .login-pf-page {
       min-height: 100vh;
@@ -546,11 +548,11 @@ data:
       justify-content: center;
       padding: 24px 16px;
     }
-    
+
     .login-pf-page-header {
       display: none;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Card                                                                 */
     /* ------------------------------------------------------------------ */
@@ -567,7 +569,7 @@ data:
       max-width: 400px;
       padding: 40px 36px 32px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Brand header inside the card                                         */
     /* ------------------------------------------------------------------ */
@@ -578,13 +580,13 @@ data:
       gap: 14px;
       margin-bottom: 28px;
     }
-    
+
     .dnd-brand-mark {
       width: 48px;
       height: 48px;
       color: #a78bfa;
     }
-    
+
     .dnd-brand-pill {
       font-size: 10px;
       font-weight: 700;
@@ -592,10 +594,10 @@ data:
       color: #a78bfa;
       text-transform: uppercase;
       padding: 2px 10px;
-      border: 1px solid rgba(167, 139, 250, 0.35);
+      border: 1px solid rgba(167, 139, 250, 0.2);
       border-radius: 100px;
     }
-    
+
     .dnd-signin-heading {
       margin: 0;
       font-size: 15px;
@@ -603,7 +605,7 @@ data:
       color: rgba(248, 250, 252, 0.7);
       text-align: center;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Form groups                                                          */
     /* ------------------------------------------------------------------ */
@@ -611,7 +613,7 @@ data:
     .form-group {
       margin-bottom: 16px;
     }
-    
+
     label,
     .pf-c-form__label,
     .control-label {
@@ -621,7 +623,7 @@ data:
       color: rgba(248, 250, 252, 0.75);
       margin-bottom: 6px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Inputs                                                               */
     /* ------------------------------------------------------------------ */
@@ -632,7 +634,7 @@ data:
     .form-control {
       width: 100%;
       padding: 10px 14px;
-      font-family: 'Geist', system-ui, sans-serif;
+      font-family: Geist;
       font-size: 14px;
       color: #f8fafc;
       background: rgba(15, 23, 42, 0.6);
@@ -643,7 +645,7 @@ data:
       appearance: none;
       -webkit-appearance: none;
     }
-    
+
     input[type="text"]:focus,
     input[type="email"]:focus,
     input[type="password"]:focus,
@@ -652,13 +654,13 @@ data:
       border-color: #a78bfa;
       box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
     }
-    
+
     input[type="text"]::placeholder,
     input[type="email"]::placeholder,
     input[type="password"]::placeholder {
       color: rgba(248, 250, 252, 0.3);
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Password input wrapper + toggle                                      */
     /* ------------------------------------------------------------------ */
@@ -667,12 +669,12 @@ data:
       display: flex;
       align-items: center;
     }
-    
+
     .pf-c-input-group input {
       flex: 1;
       padding-right: 42px;
     }
-    
+
     .pf-c-button.pf-m-control {
       position: absolute;
       right: 10px;
@@ -683,11 +685,11 @@ data:
       padding: 4px;
       line-height: 1;
     }
-    
+
     .pf-c-button.pf-m-control:hover {
       color: #a78bfa;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Remember me + forgot password row                                    */
     /* ------------------------------------------------------------------ */
@@ -698,7 +700,7 @@ data:
       margin-bottom: 20px;
       font-size: 13px;
     }
-    
+
     #kc-form-options .checkbox label {
       color: rgba(248, 250, 252, 0.65);
       margin: 0;
@@ -707,14 +709,14 @@ data:
       gap: 6px;
       cursor: pointer;
     }
-    
+
     #kc-form-options input[type="checkbox"] {
       width: 15px;
       height: 15px;
       accent-color: #a78bfa;
       cursor: pointer;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Submit button                                                        */
     /* ------------------------------------------------------------------ */
@@ -726,7 +728,7 @@ data:
       align-items: center;
       justify-content: center;
       padding: 10px 24px;
-      font-family: 'Geist', system-ui, sans-serif;
+      font-family: Geist;
       font-size: 14px;
       font-weight: 600;
       color: #0f172a;
@@ -739,21 +741,21 @@ data:
       align-self: flex-start;
       width: auto;
     }
-    
+
     #kc-login:hover,
     .btn-primary:hover,
     input[type="submit"]:hover,
     button[type="submit"]:hover {
       opacity: 0.9;
     }
-    
+
     #kc-login:active,
     .btn-primary:active,
     input[type="submit"]:active,
     button[type="submit"]:active {
       transform: scale(0.98);
     }
-    
+
     /* button row */
     #kc-form-buttons,
     .pf-c-form__group.kc-form-buttons {
@@ -762,7 +764,7 @@ data:
       gap: 12px;
       margin-top: 4px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Register / social links area                                         */
     /* ------------------------------------------------------------------ */
@@ -774,12 +776,12 @@ data:
       font-size: 13px;
       color: rgba(248, 250, 252, 0.55);
     }
-    
+
     #kc-registration a,
     #kc-registration-container a {
       color: #a78bfa;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Alerts / flash messages                                              */
     /* ------------------------------------------------------------------ */
@@ -790,38 +792,38 @@ data:
       margin-bottom: 16px;
       font-size: 13px;
     }
-    
+
     .alert-error,
     .pf-m-danger {
       background: rgba(239, 68, 68, 0.12);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      border: 1px solid rgba(167, 139, 250, 0.2);
       color: #fca5a5;
     }
-    
+
     .alert-warning,
     .pf-m-warning {
       background: rgba(245, 158, 11, 0.12);
-      border: 1px solid rgba(245, 158, 11, 0.3);
+      border: 1px solid rgba(167, 139, 250, 0.2);
       color: #fcd34d;
     }
-    
+
     .alert-info,
     .pf-m-info {
       background: rgba(167, 139, 250, 0.1);
       border: 1px solid rgba(167, 139, 250, 0.22);
       color: #c4b5fd;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* OTP / verification inputs                                            */
     /* ------------------------------------------------------------------ */
     .otp-input {
-      font-family: 'Geist Mono', 'Geist', monospace;
+      font-family: "Geist Mono";
       letter-spacing: 0.2em;
       text-align: center;
       font-size: 20px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Dividers                                                             */
     /* ------------------------------------------------------------------ */
@@ -831,7 +833,7 @@ data:
       border-top: 1px solid rgba(167, 139, 250, 0.18);
       margin: 20px 0;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Footer                                                               */
     /* ------------------------------------------------------------------ */
@@ -839,22 +841,22 @@ data:
     .login-pf-page footer {
       display: none;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Keycloak v2 override tweaks                                          */
     /* ------------------------------------------------------------------ */
     .pf-c-page {
       background: transparent !important;
     }
-    
+
     .pf-c-page__main {
       background: transparent !important;
     }
-    
+
     #kc-content {
       background: transparent !important;
     }
-    
+
     .pf-c-page__main-section {
       background: transparent !important;
       display: flex;
@@ -917,7 +919,7 @@ data:
         <div class="dnd-brand">
           <img
             src="${url.resourcesPath}/img/dnd-notes-mark.svg"
-            alt="D&D Notes"
+            alt=""
             class="dnd-brand-mark"
             aria-hidden="true"
           >
@@ -1097,7 +1099,7 @@ data:
     
           <#if otpLogin.userOtpCredentials?size gt 1>
             <div class="form-group">
-              <label for="selectedCredentialId">${msg("loginOtpOneTime")}</label>
+              <label for="selectedCredentialId">${msg("loginOtpDeviceSelect")}</label>
               <select id="selectedCredentialId" name="selectedCredentialId">
                 <#list otpLogin.userOtpCredentials as otpCredential>
                   <option
@@ -1108,7 +1110,7 @@ data:
               </select>
             </div>
           </#if>
-    
+
           <div class="form-group">
             <label for="otp">${msg("loginOtpOneTime")}</label>
             <input
@@ -1126,13 +1128,13 @@ data:
               </div>
             </#if>
           </div>
-    
+
           <div id="kc-form-buttons">
             <button type="submit">${msg("doLogIn")}</button>
           </div>
-    
+
         </form>
-    
+
       </#if>
     </@layout.registrationLayout>
   cu-login.css: |
@@ -1171,7 +1173,7 @@ data:
       margin: 0;
       padding: 0;
       min-height: 100vh;
-      font-family: 'Geist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-family: Geist;
       font-size: 15px;
       line-height: 1.5;
       color: #f8fafc;
@@ -1181,17 +1183,17 @@ data:
         radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
         linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
     }
-    
+
     a {
       color: #a78bfa;
       text-decoration: none;
     }
-    
+
     a:hover {
       text-decoration: underline;
       opacity: 0.85;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Page layout                                                          */
     /* ------------------------------------------------------------------ */
@@ -1201,13 +1203,13 @@ data:
     .pf-c-page__header {
       display: none !important;
     }
-    
+
     body.login-pf {
       background:
         radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
         linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
     }
-    
+
     #kc-container,
     .login-pf-page {
       min-height: 100vh;
@@ -1216,11 +1218,11 @@ data:
       justify-content: center;
       padding: 24px 16px;
     }
-    
+
     .login-pf-page-header {
       display: none;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Card                                                                 */
     /* ------------------------------------------------------------------ */
@@ -1237,7 +1239,7 @@ data:
       max-width: 400px;
       padding: 40px 36px 32px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Brand header inside the card                                         */
     /* ------------------------------------------------------------------ */
@@ -1248,13 +1250,13 @@ data:
       gap: 14px;
       margin-bottom: 28px;
     }
-    
+
     .dnd-brand-mark {
       width: 48px;
       height: 48px;
       color: #a78bfa;
     }
-    
+
     .dnd-brand-pill {
       font-size: 10px;
       font-weight: 700;
@@ -1262,10 +1264,10 @@ data:
       color: #a78bfa;
       text-transform: uppercase;
       padding: 2px 10px;
-      border: 1px solid rgba(167, 139, 250, 0.35);
+      border: 1px solid rgba(167, 139, 250, 0.2);
       border-radius: 100px;
     }
-    
+
     .dnd-signin-heading {
       margin: 0;
       font-size: 15px;
@@ -1273,7 +1275,7 @@ data:
       color: rgba(248, 250, 252, 0.7);
       text-align: center;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Form groups                                                          */
     /* ------------------------------------------------------------------ */
@@ -1281,7 +1283,7 @@ data:
     .form-group {
       margin-bottom: 16px;
     }
-    
+
     label,
     .pf-c-form__label,
     .control-label {
@@ -1291,7 +1293,7 @@ data:
       color: rgba(248, 250, 252, 0.75);
       margin-bottom: 6px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Inputs                                                               */
     /* ------------------------------------------------------------------ */
@@ -1302,7 +1304,7 @@ data:
     .form-control {
       width: 100%;
       padding: 10px 14px;
-      font-family: 'Geist', system-ui, sans-serif;
+      font-family: Geist;
       font-size: 14px;
       color: #f8fafc;
       background: rgba(15, 23, 42, 0.6);
@@ -1313,7 +1315,7 @@ data:
       appearance: none;
       -webkit-appearance: none;
     }
-    
+
     input[type="text"]:focus,
     input[type="email"]:focus,
     input[type="password"]:focus,
@@ -1322,13 +1324,13 @@ data:
       border-color: #a78bfa;
       box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
     }
-    
+
     input[type="text"]::placeholder,
     input[type="email"]::placeholder,
     input[type="password"]::placeholder {
       color: rgba(248, 250, 252, 0.3);
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Password input wrapper + toggle                                      */
     /* ------------------------------------------------------------------ */
@@ -1337,12 +1339,12 @@ data:
       display: flex;
       align-items: center;
     }
-    
+
     .pf-c-input-group input {
       flex: 1;
       padding-right: 42px;
     }
-    
+
     .pf-c-button.pf-m-control {
       position: absolute;
       right: 10px;
@@ -1353,11 +1355,11 @@ data:
       padding: 4px;
       line-height: 1;
     }
-    
+
     .pf-c-button.pf-m-control:hover {
       color: #a78bfa;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Remember me + forgot password row                                    */
     /* ------------------------------------------------------------------ */
@@ -1368,7 +1370,7 @@ data:
       margin-bottom: 20px;
       font-size: 13px;
     }
-    
+
     #kc-form-options .checkbox label {
       color: rgba(248, 250, 252, 0.65);
       margin: 0;
@@ -1377,14 +1379,14 @@ data:
       gap: 6px;
       cursor: pointer;
     }
-    
+
     #kc-form-options input[type="checkbox"] {
       width: 15px;
       height: 15px;
       accent-color: #a78bfa;
       cursor: pointer;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Submit button                                                        */
     /* ------------------------------------------------------------------ */
@@ -1396,7 +1398,7 @@ data:
       align-items: center;
       justify-content: center;
       padding: 10px 24px;
-      font-family: 'Geist', system-ui, sans-serif;
+      font-family: Geist;
       font-size: 14px;
       font-weight: 600;
       color: #0f172a;
@@ -1409,21 +1411,21 @@ data:
       align-self: flex-start;
       width: auto;
     }
-    
+
     #kc-login:hover,
     .btn-primary:hover,
     input[type="submit"]:hover,
     button[type="submit"]:hover {
       opacity: 0.9;
     }
-    
+
     #kc-login:active,
     .btn-primary:active,
     input[type="submit"]:active,
     button[type="submit"]:active {
       transform: scale(0.98);
     }
-    
+
     /* button row */
     #kc-form-buttons,
     .pf-c-form__group.kc-form-buttons {
@@ -1432,7 +1434,7 @@ data:
       gap: 12px;
       margin-top: 4px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Register / social links area                                         */
     /* ------------------------------------------------------------------ */
@@ -1444,12 +1446,12 @@ data:
       font-size: 13px;
       color: rgba(248, 250, 252, 0.55);
     }
-    
+
     #kc-registration a,
     #kc-registration-container a {
       color: #a78bfa;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Alerts / flash messages                                              */
     /* ------------------------------------------------------------------ */
@@ -1460,38 +1462,38 @@ data:
       margin-bottom: 16px;
       font-size: 13px;
     }
-    
+
     .alert-error,
     .pf-m-danger {
       background: rgba(239, 68, 68, 0.12);
-      border: 1px solid rgba(239, 68, 68, 0.3);
+      border: 1px solid rgba(167, 139, 250, 0.2);
       color: #fca5a5;
     }
-    
+
     .alert-warning,
     .pf-m-warning {
       background: rgba(245, 158, 11, 0.12);
-      border: 1px solid rgba(245, 158, 11, 0.3);
+      border: 1px solid rgba(167, 139, 250, 0.2);
       color: #fcd34d;
     }
-    
+
     .alert-info,
     .pf-m-info {
       background: rgba(167, 139, 250, 0.1);
       border: 1px solid rgba(167, 139, 250, 0.22);
       color: #c4b5fd;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* OTP / verification inputs                                            */
     /* ------------------------------------------------------------------ */
     .otp-input {
-      font-family: 'Geist Mono', 'Geist', monospace;
+      font-family: "Geist Mono";
       letter-spacing: 0.2em;
       text-align: center;
       font-size: 20px;
     }
-    
+
     /* ------------------------------------------------------------------ */
     /* Dividers                                                             */
     /* ------------------------------------------------------------------ */
