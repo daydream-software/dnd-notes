@@ -1,0 +1,397 @@
+/* ------------------------------------------------------------------ */
+/* Geist fonts — self-hosted                                           */
+/* ------------------------------------------------------------------ */
+@font-face {
+  font-family: 'Geist';
+  src: url('../fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reset + base                                                         */
+/* ------------------------------------------------------------------ */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  font-family: Geist;
+  font-size: 15px;
+  line-height: 1.5;
+  color: #f8fafc;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background:
+    radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
+    linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
+}
+
+a {
+  color: #a78bfa;
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  opacity: 0.85;
+}
+
+/* ------------------------------------------------------------------ */
+/* Page layout                                                          */
+/* ------------------------------------------------------------------ */
+#kc-header,
+.login-pf-header,
+.kc-logo-text,
+.pf-c-page__header {
+  display: none !important;
+}
+
+body.login-pf {
+  background:
+    radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
+    linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
+}
+
+#kc-container,
+.login-pf-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+}
+
+.login-pf-page-header {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Card                                                                 */
+/* ------------------------------------------------------------------ */
+#kc-form-wrapper,
+.card-pf,
+.login-pf-card {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 18px;
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.26);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  width: 100%;
+  max-width: 400px;
+  padding: 40px 36px 32px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Brand header inside the card                                         */
+/* ------------------------------------------------------------------ */
+.dnd-brand {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 28px;
+}
+
+.dnd-brand-mark {
+  width: 48px;
+  height: 48px;
+  color: #a78bfa;
+}
+
+.dnd-brand-pill {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #a78bfa;
+  text-transform: uppercase;
+  padding: 2px 10px;
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  border-radius: 100px;
+}
+
+.dnd-signin-heading {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 400;
+  color: rgba(248, 250, 252, 0.7);
+  text-align: center;
+}
+
+/* ------------------------------------------------------------------ */
+/* Form groups                                                          */
+/* ------------------------------------------------------------------ */
+.pf-c-form__group,
+.form-group {
+  margin-bottom: 16px;
+}
+
+label,
+.pf-c-form__label,
+.control-label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: rgba(248, 250, 252, 0.75);
+  margin-bottom: 6px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Inputs                                                               */
+/* ------------------------------------------------------------------ */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+.pf-c-form-control,
+.form-control {
+  width: 100%;
+  padding: 10px 14px;
+  font-family: Geist;
+  font-size: 14px;
+  color: #f8fafc;
+  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid rgba(167, 139, 250, 0.22);
+  border-radius: 10px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+.pf-c-form-control:focus,
+.form-control:focus {
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18);
+}
+
+input[type="text"]::placeholder,
+input[type="email"]::placeholder,
+input[type="password"]::placeholder {
+  color: rgba(248, 250, 252, 0.3);
+}
+
+/* ------------------------------------------------------------------ */
+/* Password input wrapper + toggle                                      */
+/* ------------------------------------------------------------------ */
+.pf-c-input-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.pf-c-input-group input {
+  flex: 1;
+  padding-right: 42px;
+}
+
+.pf-c-button.pf-m-control {
+  position: absolute;
+  right: 10px;
+  background: none;
+  border: none;
+  color: rgba(167, 139, 250, 0.6);
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+.pf-c-button.pf-m-control:hover {
+  color: #a78bfa;
+}
+
+/* ------------------------------------------------------------------ */
+/* Remember me + forgot password row                                    */
+/* ------------------------------------------------------------------ */
+#kc-form-options {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+  font-size: 13px;
+}
+
+#kc-form-options .checkbox label {
+  color: rgba(248, 250, 252, 0.65);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+#kc-form-options input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  accent-color: #a78bfa;
+  cursor: pointer;
+}
+
+/* ------------------------------------------------------------------ */
+/* Submit button                                                        */
+/* ------------------------------------------------------------------ */
+#kc-login,
+.btn-primary,
+input[type="submit"],
+button[type="submit"] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 24px;
+  font-family: Geist;
+  font-size: 14px;
+  font-weight: 600;
+  color: #0f172a;
+  background: #a78bfa;
+  border: none;
+  border-radius: 10px;
+  cursor: pointer;
+  text-transform: none;
+  transition: opacity 0.15s, transform 0.1s;
+  align-self: flex-start;
+  width: auto;
+}
+
+#kc-login:hover,
+.btn-primary:hover,
+input[type="submit"]:hover,
+button[type="submit"]:hover {
+  opacity: 0.9;
+}
+
+#kc-login:active,
+.btn-primary:active,
+input[type="submit"]:active,
+button[type="submit"]:active {
+  transform: scale(0.98);
+}
+
+/* button row */
+#kc-form-buttons,
+.pf-c-form__group.kc-form-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Register / social links area                                         */
+/* ------------------------------------------------------------------ */
+#kc-registration,
+#kc-registration-container,
+.login-pf-signup {
+  text-align: center;
+  margin-top: 20px;
+  font-size: 13px;
+  color: rgba(248, 250, 252, 0.55);
+}
+
+#kc-registration a,
+#kc-registration-container a {
+  color: #a78bfa;
+}
+
+/* ------------------------------------------------------------------ */
+/* Alerts / flash messages                                              */
+/* ------------------------------------------------------------------ */
+.alert,
+.pf-c-alert {
+  border-radius: 10px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.alert-error,
+.pf-m-danger {
+  background: rgba(239, 68, 68, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  color: #fca5a5;
+}
+
+.alert-warning,
+.pf-m-warning {
+  background: rgba(245, 158, 11, 0.12);
+  border: 1px solid rgba(167, 139, 250, 0.2);
+  color: #fcd34d;
+}
+
+.alert-info,
+.pf-m-info {
+  background: rgba(167, 139, 250, 0.1);
+  border: 1px solid rgba(167, 139, 250, 0.22);
+  color: #c4b5fd;
+}
+
+/* ------------------------------------------------------------------ */
+/* OTP / verification inputs                                            */
+/* ------------------------------------------------------------------ */
+.otp-input {
+  font-family: "Geist Mono";
+  letter-spacing: 0.2em;
+  text-align: center;
+  font-size: 20px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Dividers                                                             */
+/* ------------------------------------------------------------------ */
+hr,
+.pf-c-divider {
+  border: none;
+  border-top: 1px solid rgba(167, 139, 250, 0.18);
+  margin: 20px 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Footer                                                               */
+/* ------------------------------------------------------------------ */
+#kc-content-wrapper footer,
+.login-pf-page footer {
+  display: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Keycloak v2 override tweaks                                          */
+/* ------------------------------------------------------------------ */
+.pf-c-page {
+  background: transparent !important;
+}
+
+.pf-c-page__main {
+  background: transparent !important;
+}
+
+#kc-content {
+  background: transparent !important;
+}
+
+.pf-c-page__main-section {
+  background: transparent !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 24px;
+}
