@@ -183,6 +183,7 @@ data:
     parent=keycloak.v2
     import=common/keycloak
     locales=en
+    styles=css/login.css
   op-template.ftl: |
     <#macro registrationLayout bodyClass="" displayInfo=false displayMessage=true displayRequiredFields=false>
     <!DOCTYPE html>
@@ -852,6 +853,7 @@ data:
     parent=keycloak.v2
     import=common/keycloak
     locales=en
+    styles=css/login.css
   cu-template.ftl: |
     <#macro registrationLayout bodyClass="" displayInfo=false displayMessage=true displayRequiredFields=false>
     <!DOCTYPE html>
