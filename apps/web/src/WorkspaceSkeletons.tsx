@@ -1,11 +1,6 @@
 import { Box, Skeleton, Stack } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
 
-// Design-system tokens — CLAUDE.md: borders are 1px purple-tinted-translucent,
-// cards carry a slate-tinted shadow. No named theme tokens exist yet for these.
-const SURFACE_BORDER_COLOR = 'rgba(167, 139, 250, 0.2)'
-const SURFACE_BOX_SHADOW = '0 12px 30px rgba(2, 6, 23, 0.26)'
-
 /**
  * Shared border + background style derived from design-system tokens.
  * Consuming components spread this onto their wrapper `sx`.
@@ -14,11 +9,11 @@ function useSkeletonSurfaceSx() {
   const theme = useTheme()
   return {
     border: '1px solid',
-    borderColor: SURFACE_BORDER_COLOR,
+    borderColor: theme.shape.cardBorder,
     borderRadius: `${theme.shape.borderRadius}px`,
     bgcolor: theme.palette.background.paper,
     backdropFilter: 'blur(12px)',
-    boxShadow: SURFACE_BOX_SHADOW,
+    boxShadow: theme.shape.cardShadow,
     overflow: 'hidden',
   } as const
 }

@@ -128,7 +128,7 @@ export default function CampaignWorkspaceHeader({
         border: '1px solid',
         borderColor: compactDesktop
           ? 'rgba(167, 139, 250, 0.14)'
-          : 'rgba(167, 139, 250, 0.2)',
+          : theme.shape.cardBorder,
         bgcolor: compactDesktop
           ? 'rgba(15, 23, 42, 0.44)'
           : 'rgba(15, 23, 42, 0.88)',
