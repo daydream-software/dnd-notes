@@ -7219,3 +7219,62 @@ Per-action individual tooltip render was replaced with loop application — redu
 - `apps/web/src/NoteBodyEditor.tsx:172` will carry redundant `textTransform: 'none'` after #220 lands — deferred cosmetic housekeeping.
 - `OperatorPortal` sign-in card icon alignment still inconsistent with access-denied card (per #214 follow-up) — no additional change needed for this batch.
 
+
+---
+
+### 2026-05-12: Keycloak login themes — per-portal branding (PR #224)
+
+**Decided by:** Stef (Frontend, React + themes), Mikey (Review, opus)
+**Date:** 2026-05-12
+**Type:** Feature / Platform configuration
+**PR:** #224 (`feat/keycloak-login-themes-171`)
+**Related issue:** #171
+
+#### Overview
+
+Operator-portal and customer-portal users see distinct login screens with portal-specific brand marks, pill labels, and copy. Two Keycloak theme jars built and deployed via ConfigMaps.
+
+#### Theme design
+
+- **operator-login:** Daydream Software corporate mark (sun + nested moon), pill label "DAYDREAM SOFTWARE", copy "Sign in to the operator portal"
+- **customer-login:** D&D Notes product mark (quill in inkwell), pill label "D&D NOTES", copy "Sign in to D&D Notes"
+
+Both themes follow the shared design-system palette (purple, amber accents), typography (Geist/Geist Mono), and voice (sentence case, calm tone).
+
+#### Deployment architecture
+
+Two ConfigMaps in `platform/k3d/keycloak.yaml` (themes-text + themes-fonts via binaryData). 20 subPath volumeMounts in the Keycloak Deployment expose theme files at the correct Keycloak path structure. Client attribute `attributes.login_theme` points each portal client to its theme (operator-login for operator-portal client, customer-login for customer-portal client).
+
+#### Five Keycloak-26 integration gotchas (discovered post-agent, commit 8627eb4)
+
+1. **loginTheme field location:** Not a top-level `ClientRepresentation` field. Moved to `attributes.login_theme`.
+2. **HTML escaping legacy filter:** `?html` escape forbidden when auto-escape is ON in keycloak.v2 parent. Removed; FreeMarker auto-escapes by default.
+3. **Locale fallback:** `locale` is null when realm i18n disabled. Added Freemarker coalesce: `(locale.currentLanguageTag)\!'en'`.
+4. **Message bundle inheritance:** Parent theme `keycloak.v2` messages don't propagate automatically. Added per-theme `messages_en.properties` file.
+5. **Mount path:** OTP and login messages live at `<theme>/login/messages/`, not `<theme>/messages/`. Corrected volumeMounts and ConfigMap paths.
+
+#### Screenshot workflow breakthrough
+
+Playwright (MCP) can now capture full, real Keycloak login screens via k3d Ingress HTTPS. Project `.mcp.json` override adds `--browser chrome` so full Chrome reads mkcert CA from `~/.pki/nssdb` — trust k3d HTTPS ingress locally without SSL warnings.
+
+Screenshots delivered via **orphan branch** (`previews/pr-keycloak-themes-171`, root commit `99e3c2d`) + raw.githubusercontent embed in PR body. Pattern repeatable for future UI PRs. Documented as a **contributor contract change** in PR body.
+
+#### CodeRabbit feedback (commit 4943d2b, all fixed)
+
+6 inline comments, all resolved:
+- Font fallbacks dropped to Geist/Geist Mono only (no system fonts)
+- Border tints normalized to purple range (`rgba(167, 139, 250, ...`)`)
+- OTP credential-selector label distinguished from input field
+- Brand mark `alt` + `aria-hidden` conflict resolved
+
+#### Known side-effect: Keycloak theme drift hazard
+
+Source themes on-disk (`platform/keycloak/themes/`) vs embedded ConfigMap files can diverge if one is edited but not the other. Manual sync error risk. Sibling issue to be filed for CI guard (kustomize or build-time validation) to catch drift before deploy.
+
+#### Known follow-ups (out of scope for #224)
+
+- Provisioning-time role assignment at `provisioning.ts` not covered by `role_sync_status` retry loop (sibling of #201).
+- HA multi-replica Keycloak would race on role-sync retry loop (operations are idempotent but leader election needed).
+- Credential selector button padding inconsistency on mobile (out of scope, deferred).
+
+---
