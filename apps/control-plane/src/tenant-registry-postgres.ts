@@ -18,6 +18,7 @@ import {
   type PortalBillingProvider,
   type PortalSession,
   type RestoreRun,
+  type RoleSyncStatus,
   type StateTransition,
   type Tenant,
   type TenantBackupSummary,
@@ -39,7 +40,8 @@ const tenantStorageSelectColumns = `id, desired_state, current_state, storage_re
   storage_mode, storage_migration_status,
   storage_migration_failure_reason, storage_migration_updated_at`
 const portalAccountSelectColumns = `id, email, display_name, billing_email,
-  billing_provider, password_hash, auth_provider, keycloak_sub, created_at, updated_at`
+  billing_provider, password_hash, auth_provider, keycloak_sub, role_sync_status,
+  created_at, updated_at`
 const portalSessionSelectColumns = `id, account_id, token_hash, expires_at, created_at`
 const stateTransitionSelectColumns = `id, tenant_id, from_state, to_state,
   triggered_by, reason, created_at`
@@ -115,6 +117,7 @@ interface PortalAccountRow {
   password_hash: string | null
   auth_provider: 'local' | 'keycloak'
   keycloak_sub: string | null
+  role_sync_status: RoleSyncStatus
   created_at: Date | string
   updated_at: Date | string
 }
@@ -991,6 +994,11 @@ export class TenantRegistry {
    * binding. Uses a conditional UPDATE (`WHERE COALESCE(keycloak_sub, '') = ''`)
    * so concurrent first-login requests for the same account converge atomically.
    *
+   * The UPDATE also sets `role_sync_status = 'pending'` in the same statement.
+   * This is intentional: the link and the pending marker land atomically, so the
+   * background retry loop can always recover from a process crash that occurs
+   * between the link write and the in-request role-assignment sweep.
+   *
    * Note: the condition uses COALESCE rather than `keycloak_sub IS NULL` because
    * pg-mem (the in-memory Postgres used in tests) does not evaluate `IS NULL` in
    * UPDATE WHERE clauses correctly. `COALESCE(col, '') = ''` is semantically
@@ -1008,7 +1016,7 @@ export class TenantRegistry {
   ): Promise<PortalAccount | null> {
     const updateResult = await this.run<PortalAccountRow>(
       `UPDATE portal_accounts
-       SET keycloak_sub = $1, updated_at = CURRENT_TIMESTAMP
+       SET keycloak_sub = $1, role_sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
        WHERE id = $2 AND COALESCE(keycloak_sub, '') = ''
        RETURNING ${portalAccountSelectColumns}`,
       [keycloakSub, accountId],
@@ -1034,6 +1042,64 @@ export class TenantRegistry {
 
     // Bound to a different identity — do not overwrite.
     return null
+  }
+
+  /**
+   * Marks a portal account's role-sync state as 'pending', indicating that
+   * the per-tenant Keycloak role sweep ran but at least one assignment may
+   * not have completed. The background retry loop picks up 'pending' rows
+   * and re-attempts role assignment until all succeed.
+   *
+   * No-op if the account does not exist (returns false). Returns true on
+   * a successful update.
+   */
+  async markRoleSyncPending(accountId: string): Promise<boolean> {
+    const result = await this.run(
+      `UPDATE portal_accounts
+       SET role_sync_status = 'pending', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [accountId],
+    )
+
+    return (result.rowCount ?? 0) > 0
+  }
+
+  /**
+   * Marks a portal account's role-sync state as 'complete'. Called by the
+   * background retry loop after all per-tenant role assignments succeed, and
+   * by the in-request sweep when every assignment in the loop succeeds at the
+   * auto-link moment.
+   *
+   * No-op if the account does not exist (returns false). Returns true on
+   * a successful update.
+   */
+  async markRoleSyncComplete(accountId: string): Promise<boolean> {
+    const result = await this.run(
+      `UPDATE portal_accounts
+       SET role_sync_status = 'complete', updated_at = CURRENT_TIMESTAMP
+       WHERE id = $1`,
+      [accountId],
+    )
+
+    return (result.rowCount ?? 0) > 0
+  }
+
+  /**
+   * Returns all portal accounts whose role-sync state is 'pending'. Used by
+   * the background retry loop to find accounts that need another attempt.
+   *
+   * Only accounts with a non-null keycloak_sub are returned — an account
+   * without a sub cannot have Keycloak roles assigned.
+   */
+  async getPortalAccountsPendingRoleSync(): Promise<PortalAccount[]> {
+    const result = await this.run<PortalAccountRow>(
+      `SELECT ${portalAccountSelectColumns}
+       FROM portal_accounts
+       WHERE role_sync_status = 'pending'
+         AND keycloak_sub IS NOT NULL`,
+    )
+
+    return result.rows.map((row) => this.mapRowToPortalAccount(row))
   }
 
   async getPortalAccountAuthByEmail(email: string): Promise<{
@@ -1917,6 +1983,7 @@ export class TenantRegistry {
       billingProvider: row.billing_provider ?? null,
       authProvider: row.auth_provider,
       keycloakSub: row.keycloak_sub ?? null,
+      roleSyncStatus: row.role_sync_status ?? 'complete',
       createdAt: normalizeTimestamp(row.created_at),
       updatedAt: normalizeTimestamp(row.updated_at),
     }

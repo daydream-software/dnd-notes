@@ -1184,7 +1184,18 @@ export function createApp({
           // re-provisioning the tenant remains the canonical fallback path.
           // We do not block the portal request because the customer has no
           // way to recover from a KC outage on their own.
+          //
+          // Persistence (#201): linkPortalAccountKeycloakSub atomically sets
+          // role_sync_status = 'pending' in the same UPDATE as the sub link.
+          // If this process crashes before the sweep completes, the background
+          // retry loop in index.ts picks up the 'pending' row and retries.
+          // If the sweep fully succeeds, markRoleSyncComplete resets it below.
+          // Note: when keycloakAdminClient is not configured the account
+          // stays 'pending' indefinitely — harmless because the retry loop
+          // is also not started.
           if (keycloakAdminClient) {
+            let sweepAllSucceeded = true
+
             try {
               const ownedTenants = await tenantRegistry.listTenantsByOwnerId(
                 portalAccount.id,
@@ -1200,6 +1211,7 @@ export function createApp({
                     tenantMemberRoleName,
                   )
                 } catch (assignError) {
+                  sweepAllSucceeded = false
                   console.warn(
                     `Per-tenant role assignment failed for tenant "${ownedTenant.id}" during auto-link of account "${portalAccount.id}" — continuing:`,
                     assignError,
@@ -1207,10 +1219,22 @@ export function createApp({
                 }
               }
             } catch (sweepError) {
+              sweepAllSucceeded = false
               console.warn(
                 `Per-tenant role-assignment sweep failed for account "${portalAccount.id}" during auto-link — continuing:`,
                 sweepError,
               )
+            }
+
+            if (sweepAllSucceeded) {
+              try {
+                await tenantRegistry.markRoleSyncComplete(portalAccount.id)
+              } catch (markError) {
+                console.warn(
+                  `Failed to mark role-sync complete for account "${portalAccount.id}" after successful sweep:`,
+                  markError,
+                )
+              }
             }
           }
         } else {
