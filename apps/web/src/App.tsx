@@ -44,7 +44,6 @@ import {
   claimSharedMembership,
   consolidateCampaignMemberships,
   createCampaign,
-  createCampaignShareLink,
   createNote,
   fetchAuthConfig,
   fetchAdminAccounts,
@@ -67,9 +66,7 @@ import {
   joinSharedCampaign,
   loginOwner,
   logoutOwner,
-  revealCampaignShareLink,
   registerOwner,
-  revokeCampaignShareLink,
   updateCampaign,
   updateNote,
   updateSharedNote,
@@ -106,7 +103,6 @@ import type {
   CampaignMembership,
   MembershipConsolidationSummary,
   CampaignShareLink,
-  CampaignShareLinkInput,
   CampaignSummary,
   GuestJoinInput,
   Note,
@@ -123,6 +119,7 @@ import SiteAdminPanel from './SiteAdminPanel'
 import WorkspacePane from './WorkspacePane'
 import NoteEditorActions from './NoteEditorActions'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
+import { useShareLinks, createShareLinkDraft as createShareLinkDraftFn } from './hooks/useShareLinks'
 
 interface NoteDraft {
   title: string
@@ -152,21 +149,10 @@ interface OwnerLoginDraft {
   password: string
 }
 
-interface ShareLinkDraft {
-  label: string
-  accessLevel: ShareAccessLevel
-  frameAncestors: string
-}
-
 interface MembershipConsolidationDraft {
   sourceMembershipId: string
   targetMembershipId: string
   confirmRoleMismatch: boolean
-}
-
-interface RevealedShareLink {
-  url: string
-  isVisible: boolean
 }
 
 interface TagFacet {
@@ -346,22 +332,6 @@ function createCampaignPayload(draft: CampaignDraft): CampaignInput {
   }
 }
 
-function createShareLinkDraft(): ShareLinkDraft {
-  return {
-    label: '',
-    accessLevel: 'editor',
-    frameAncestors: '',
-  }
-}
-
-function createShareLinkPayload(draft: ShareLinkDraft): CampaignShareLinkInput {
-  return {
-    label: trimToNull(draft.label),
-    accessLevel: draft.accessLevel,
-    frameAncestors: trimToNull(draft.frameAncestors),
-  }
-}
-
 function createMembershipConsolidationDraft(): MembershipConsolidationDraft {
   return {
     sourceMembershipId: '',
@@ -377,39 +347,6 @@ function describeCampaignMembership(membership: CampaignMembership) {
       : membership.role
 
   return `${membership.displayName} (${roleLabel})`
-}
-
-function deleteRecordKey<Value>(record: Record<string, Value>, key: string) {
-  const nextRecord = { ...record }
-  delete nextRecord[key]
-  return nextRecord
-}
-
-async function copyTextToClipboard(value: string) {
-  if (typeof window !== 'undefined' && window.navigator.clipboard?.writeText) {
-    await window.navigator.clipboard.writeText(value)
-    return
-  }
-
-  if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
-    const textarea = document.createElement('textarea')
-    textarea.value = value
-    textarea.setAttribute('readonly', '')
-    textarea.style.position = 'absolute'
-    textarea.style.left = '-9999px'
-    document.body.append(textarea)
-    textarea.select()
-
-    try {
-      if (document.execCommand('copy')) {
-        return
-      }
-    } finally {
-      document.body.removeChild(textarea)
-    }
-  }
-
-  throw new Error('Clipboard access is unavailable. Reveal the link and copy it manually.')
 }
 
 function excerpt(body: string) {
@@ -672,12 +609,35 @@ function App() {
   )
   const isSharedMode = shareToken !== null
   const guestStorageKey = shareToken ? `${guestTokenStoragePrefix}${shareToken}` : null
+  const {
+    shareLinks,
+    shareLinkDraft,
+    shareLinkNotice,
+    revealedShareLinks,
+    shareLinkActionErrors,
+    revealingShareLinkId,
+    copiedShareLinkId,
+    isCreatingShareLink,
+    setShareLinks,
+    setShareLinkDraft,
+    setShareLinkNotice,
+    setRevealedShareLinks,
+    setShareLinkActionErrors,
+    setRevealingShareLinkId,
+    setCopiedShareLinkId,
+    resetShareLinkInteractionState,
+    handleShareLinkDraftChange,
+    handleRevealShareLink,
+    handleToggleShareLinkVisibility,
+    handleCopyShareLink: handleCopyShareLinkFromHook,
+    handleRevokeShareLink: handleRevokeShareLinkFromHook,
+    handleCreateShareLink: handleCreateShareLinkFromHook,
+  } = useShareLinks()
   const [authToken, setAuthToken] = useState<string | null>(null)
   const [owner, setOwner] = useState<OwnerAccount | null>(null)
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [memberships, setMemberships] = useState<CampaignMembership[]>([])
-  const [shareLinks, setShareLinks] = useState<CampaignShareLink[]>([])
   const [sharedCampaign, setSharedCampaign] = useState<CampaignSummary | null>(null)
   const [shareLink, setShareLink] = useState<CampaignShareLink | null>(null)
   const [sharedMembership, setSharedMembership] = useState<CampaignMembership | null>(null)
@@ -706,7 +666,6 @@ function App() {
   const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
     createCampaignDraft,
   )
-  const [shareLinkDraft, setShareLinkDraft] = useState<ShareLinkDraft>(createShareLinkDraft)
   const [membershipConsolidationDraft, setMembershipConsolidationDraft] = useState<
     MembershipConsolidationDraft
   >(createMembershipConsolidationDraft)
@@ -734,7 +693,6 @@ function App() {
   const [isJoining, setIsJoining] = useState(false)
   const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [isSavingCampaign, setIsSavingCampaign] = useState(false)
-  const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
   const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
   const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
     useState(false)
@@ -749,21 +707,10 @@ function App() {
   const [selectedNoteTemplateId, setSelectedNoteTemplateId] = useState(
     blankNoteTemplateId,
   )
-  const [shareLinkNotice, setShareLinkNotice] = useState<string | null>(null)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [adminError, setAdminError] = useState<string | null>(null)
-  const [revealedShareLinks, setRevealedShareLinks] = useState<
-    Record<string, RevealedShareLink>
-  >({})
-  const [shareLinkActionErrors, setShareLinkActionErrors] = useState<
-    Record<string, string>
-  >({})
-  const [revealingShareLinkId, setRevealingShareLinkId] = useState<string | null>(
-    null,
-  )
-  const [copiedShareLinkId, setCopiedShareLinkId] = useState<string | null>(null)
   const [membershipConsolidationPreview, setMembershipConsolidationPreview] =
     useState<MembershipConsolidationSummary | null>(null)
   const [membershipConsolidationNotice, setMembershipConsolidationNotice] = useState<
@@ -1110,14 +1057,6 @@ function App() {
                 } tagged ${selectedTagFacet.tag} in ${resolvedCampaign?.name ?? 'this campaign'}.`
               : defaultNotesPaneDescription
 
-  const resetShareLinkInteractionState = useCallback(() => {
-    setShareLinkNotice(null)
-    setRevealedShareLinks({})
-    setShareLinkActionErrors({})
-    setRevealingShareLinkId(null)
-    setCopiedShareLinkId(null)
-  }, [])
-
   const resetMembershipConsolidationState = useCallback(() => {
     setMembershipConsolidationDraft(createMembershipConsolidationDraft())
     setMembershipConsolidationPreview(null)
@@ -1225,7 +1164,7 @@ function App() {
     setSelectedNoteId(null)
     setDraft(createEmptyDraft())
     setCampaignDraft(createCampaignDraft())
-    setShareLinkDraft(createShareLinkDraft())
+    setShareLinkDraft(createShareLinkDraftFn())
     setMembershipConsolidationDraft(createMembershipConsolidationDraft())
     setCampaignFormMode('closed')
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
@@ -1787,16 +1726,6 @@ function App() {
     value: CampaignDraft[Field],
   ) => {
     setCampaignDraft((currentDraft) => ({
-      ...currentDraft,
-      [field]: value,
-    }))
-  }
-
-  const handleShareLinkDraftChange = <Field extends keyof ShareLinkDraft>(
-    field: Field,
-    value: ShareLinkDraft[Field],
-  ) => {
-    setShareLinkDraft((currentDraft) => ({
       ...currentDraft,
       [field]: value,
     }))
@@ -2425,7 +2354,7 @@ function App() {
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setMemberships([])
     setShareLinks([])
-    setShareLinkDraft(createShareLinkDraft())
+    setShareLinkDraft(createShareLinkDraftFn())
     resetShareLinkInteractionState()
     resetMembershipConsolidationState()
     setCampaignFormMode('create')
@@ -2440,7 +2369,7 @@ function App() {
 
     setCampaignDraft(createCampaignDraft(selectedCampaign))
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setShareLinkDraft(createShareLinkDraft())
+    setShareLinkDraft(createShareLinkDraftFn())
     resetShareLinkInteractionState()
     resetMembershipConsolidationState()
     setCampaignFormMode('edit')
@@ -2451,7 +2380,7 @@ function App() {
     setCampaignDraft(createCampaignDraft(selectedCampaign))
     setCampaignFormMode(campaigns.length === 0 ? 'create' : 'closed')
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setShareLinkDraft(createShareLinkDraft())
+    setShareLinkDraft(createShareLinkDraftFn())
     resetShareLinkInteractionState()
     resetMembershipConsolidationState()
     setError(null)
@@ -2519,30 +2448,7 @@ function App() {
     }
 
     setError(null)
-    setIsCreatingShareLink(true)
-
-    try {
-      const created = await createCampaignShareLink(
-        authToken,
-        selectedCampaignId,
-        createShareLinkPayload(shareLinkDraft),
-      )
-
-      setShareLinks((currentLinks) => [created.shareLink, ...currentLinks])
-      setShareLinkDraft(createShareLinkDraft())
-      resetShareLinkInteractionState()
-      setShareLinkNotice(
-        'Shared link created. Reveal it on the card when you need to copy it again.',
-      )
-    } catch (shareLinkError) {
-      setError(
-        shareLinkError instanceof Error
-          ? shareLinkError.message
-          : 'Could not create the share link.',
-      )
-    } finally {
-      setIsCreatingShareLink(false)
-    }
+    await handleCreateShareLinkFromHook(authToken, selectedCampaignId, setError)
   }
 
   const handlePreviewMembershipConsolidation = async () => {
@@ -2646,87 +2552,12 @@ function App() {
     }
 
     setError(null)
-    setShareLinkNotice(null)
-    setCopiedShareLinkId((currentId) =>
-      currentId === shareLinkId ? null : currentId,
-    )
-    setShareLinkActionErrors((currentErrors) =>
-      deleteRecordKey(currentErrors, shareLinkId),
-    )
-    setRevealingShareLinkId(shareLinkId)
-
-    try {
-      const revealed = await revealCampaignShareLink(
-        authToken,
-        selectedCampaignId,
-        shareLinkId,
-      )
-
-      setRevealedShareLinks((currentLinks) => ({
-        ...currentLinks,
-        [shareLinkId]: {
-          url: revealed.url,
-          isVisible: false,
-        },
-      }))
-    } catch (shareLinkError) {
-      setShareLinkActionErrors((currentErrors) => ({
-        ...currentErrors,
-        [shareLinkId]:
-          shareLinkError instanceof Error
-            ? shareLinkError.message
-            : 'Could not reveal the shared link.',
-      }))
-    } finally {
-      setRevealingShareLinkId((currentId) =>
-        currentId === shareLinkId ? null : currentId,
-      )
-    }
-  }
-
-  const handleToggleShareLinkVisibility = (shareLinkId: string) => {
-    setRevealedShareLinks((currentLinks) => {
-      const revealedShareLink = currentLinks[shareLinkId]
-
-      if (!revealedShareLink) {
-        return currentLinks
-      }
-
-      return {
-        ...currentLinks,
-        [shareLinkId]: {
-          ...revealedShareLink,
-          isVisible: !revealedShareLink.isVisible,
-        },
-      }
-    })
+    await handleRevealShareLinkFromHook(shareLinkId, authToken, selectedCampaignId)
   }
 
   const handleCopyShareLink = async (shareLinkId: string) => {
-    const revealedShareLink = revealedShareLinks[shareLinkId]
-
-    if (!revealedShareLink) {
-      return
-    }
-
     setError(null)
-    setShareLinkNotice(null)
-
-    try {
-      await copyTextToClipboard(revealedShareLink.url)
-      setShareLinkActionErrors((currentErrors) =>
-        deleteRecordKey(currentErrors, shareLinkId),
-      )
-      setCopiedShareLinkId(shareLinkId)
-    } catch (shareLinkError) {
-      setShareLinkActionErrors((currentErrors) => ({
-        ...currentErrors,
-        [shareLinkId]:
-          shareLinkError instanceof Error
-            ? shareLinkError.message
-            : 'Could not copy the shared link.',
-      }))
-    }
+    await handleCopyShareLinkFromHook(shareLinkId, setError)
   }
 
   const handleRevokeShareLink = async (shareLinkId: string) => {
@@ -2735,29 +2566,7 @@ function App() {
     }
 
     setError(null)
-
-    try {
-      await revokeCampaignShareLink(authToken, selectedCampaignId, shareLinkId)
-      setShareLinks((currentLinks) =>
-        currentLinks.filter((shareLink) => shareLink.id !== shareLinkId),
-      )
-      setRevealedShareLinks((currentLinks) =>
-        deleteRecordKey(currentLinks, shareLinkId),
-      )
-      setShareLinkActionErrors((currentErrors) =>
-        deleteRecordKey(currentErrors, shareLinkId),
-      )
-      setCopiedShareLinkId((currentId) =>
-        currentId === shareLinkId ? null : currentId,
-      )
-      setShareLinkNotice(null)
-    } catch (shareLinkError) {
-      setError(
-        shareLinkError instanceof Error
-          ? shareLinkError.message
-          : 'Could not revoke the share link.',
-      )
-    }
+    await handleRevokeShareLinkFromHook(shareLinkId, authToken, selectedCampaignId, setError)
   }
 
   const handleSelectCampaign = async (campaignId: string) => {
