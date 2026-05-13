@@ -6,6 +6,7 @@ import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import DeleteForeverRoundedIcon from '@mui/icons-material/DeleteForeverRounded'
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
+import ManageAccountsRoundedIcon from '@mui/icons-material/ManageAccountsRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import SecurityRoundedIcon from '@mui/icons-material/SecurityRounded'
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
@@ -27,6 +28,7 @@ import {
 } from '@mui/material'
 import * as React from 'react'
 import {
+  buildAccountConsoleUrl,
   buildOperatorRedirectUri,
   customerPortalUrl,
   operatorKeycloakConfig,
@@ -503,6 +505,15 @@ export default function OperatorPortal({
                     disabled={isLoadingFleet}
                   >
                     {isLoadingFleet ? 'Refreshing…' : 'Refresh fleet'}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color="inherit"
+                    startIcon={<ManageAccountsRoundedIcon />}
+                    component="a"
+                    href={buildAccountConsoleUrl(operatorKeycloakConfig)}
+                  >
+                    Account settings
                   </Button>
                   <Button
                     variant="outlined"

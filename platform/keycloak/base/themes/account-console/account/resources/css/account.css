@@ -1,0 +1,211 @@
+/* Geist fonts — self-hosted */
+@font-face {
+  font-family: Geist;
+  src: url('../fonts/Geist-Variable.woff2') format('woff2-variations'),
+       url('../fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../fonts/GeistMono-Variable.woff2') format('woff2-variations'),
+       url('../fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+/* PatternFly 5 design token overrides */
+:root {
+  --pf-v5-global--FontFamily--text: 'Geist', sans-serif;
+  --pf-v5-global--FontFamily--heading: 'Geist', sans-serif;
+  --pf-v5-global--FontFamily--monospace: 'Geist Mono', monospace;
+  --pf-v5-global--FontFamily--redhat-text: 'Geist', sans-serif;
+  --pf-v5-global--FontFamily--redhat-display: 'Geist', sans-serif;
+  --pf-v5-global--FontFamily--redhat-mono: 'Geist Mono', monospace;
+  --pf-v5-global--primary-color--100: #a78bfa;
+  --pf-v5-global--primary-color--200: #c4b5fd;
+  --pf-v5-global--link--Color: #a78bfa;
+  --pf-v5-global--link--Color--hover: #c4b5fd;
+  --pf-v5-global--active-color--100: #a78bfa;
+  --pf-v5-global--active-color--300: rgba(167, 139, 250, 0.22);
+  --pf-v5-global--active-color--400: rgba(167, 139, 250, 0.10);
+  --pf-v5-global--BorderColor--200: rgba(167, 139, 250, 0.22);
+  --pf-v5-global--BorderColor--300: rgba(167, 139, 250, 0.22);
+  --pf-v5-global--BackgroundColor--100: #0f172a;
+  --pf-v5-global--BackgroundColor--200: rgba(15, 23, 42, 0.9);
+  --pf-v5-global--BackgroundColor--300: rgba(15, 23, 42, 0.7);
+  --pf-v5-global--Color--100: #f8fafc;
+  --pf-v5-global--Color--200: rgba(248, 250, 252, 0.75);
+  --pf-v5-global--Color--300: rgba(248, 250, 252, 0.55);
+  --pf-v5-global--BorderRadius--sm: 10px;
+  --pf-v5-global--BorderRadius--lg: 18px;
+}
+/* Page background gradient */
+html, body, #root, .pf-v5-c-page {
+  font-family: Geist, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  color: #f8fafc;
+}
+body {
+  background:
+    radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
+    linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%) !important;
+  min-height: 100vh;
+}
+.pf-v5-c-page { background: transparent !important; }
+.pf-v5-c-page__header {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-bottom: 1px solid rgba(167, 139, 250, 0.18) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.pf-v5-c-page__sidebar, .pf-v5-c-nav {
+  background: rgba(15, 23, 42, 0.85) !important;
+  border-right: 1px solid rgba(167, 139, 250, 0.18) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.pf-v5-c-page__main, .pf-v5-c-page__main-section { background: transparent !important; }
+/* Navigation */
+.pf-v5-c-nav__link { color: rgba(248, 250, 252, 0.75) !important; border-radius: 10px !important; }
+.pf-v5-c-nav__link:hover, .pf-v5-c-nav__link:focus {
+  color: #f8fafc !important; background: rgba(167, 139, 250, 0.10) !important;
+}
+.pf-v5-c-nav__item.pf-m-current > .pf-v5-c-nav__link, .pf-v5-c-nav__link.pf-m-current {
+  color: #a78bfa !important; background: rgba(167, 139, 250, 0.14) !important;
+}
+.pf-v5-c-nav__link::before { border-left-color: #a78bfa !important; }
+/* Cards */
+.pf-v5-c-card {
+  background: rgba(15, 23, 42, 0.9) !important;
+  border: 1px solid rgba(167, 139, 250, 0.18) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 8px 24px rgba(2, 6, 23, 0.26) !important;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: #f8fafc !important;
+}
+.pf-v5-c-card__title { color: #f8fafc !important; }
+.pf-v5-c-card__header { border-bottom: 1px solid rgba(167, 139, 250, 0.18) !important; }
+/* Form inputs */
+.pf-v5-c-form-control, .pf-v5-c-text-input-group__text-input, select.pf-v5-c-form-control {
+  background: rgba(15, 23, 42, 0.6) !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important;
+  border-radius: 10px !important;
+  color: #f8fafc !important;
+  font-family: Geist, sans-serif !important;
+}
+.pf-v5-c-form-control:focus-within, .pf-v5-c-form-control:focus {
+  border: 1px solid #a78bfa !important;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18) !important;
+  outline: none !important;
+}
+.pf-v5-c-form__label-text { color: rgba(248, 250, 252, 0.75) !important; }
+.pf-v5-c-form__helper-text { color: rgba(248, 250, 252, 0.55) !important; }
+/* Buttons */
+.pf-v5-c-button.pf-m-primary {
+  background: #a78bfa !important; border: 1px solid rgba(167, 139, 250, 0.22) !important;
+  color: #0f172a !important; font-family: Geist, sans-serif !important;
+  border-radius: 10px !important; font-weight: 600;
+}
+.pf-v5-c-button.pf-m-primary:hover { opacity: 0.9 !important; }
+.pf-v5-c-button.pf-m-secondary {
+  border: 1px solid rgba(167, 139, 250, 0.22) !important; color: #a78bfa !important;
+  font-family: Geist, sans-serif !important; border-radius: 10px !important;
+  background: transparent !important;
+}
+.pf-v5-c-button.pf-m-secondary:hover { background: rgba(167, 139, 250, 0.08) !important; }
+.pf-v5-c-button.pf-m-link { color: #a78bfa !important; }
+.pf-v5-c-button.pf-m-plain { color: rgba(248, 250, 252, 0.55) !important; }
+.pf-v5-c-button.pf-m-danger { border-radius: 10px !important; }
+/* Alerts */
+.pf-v5-c-alert { border-radius: 10px !important; }
+.pf-v5-c-alert.pf-m-info {
+  background: rgba(167, 139, 250, 0.10) !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important; color: #c4b5fd !important;
+}
+.pf-v5-c-alert.pf-m-success {
+  background: rgba(52, 211, 153, 0.10) !important;
+  border-color: rgba(52, 211, 153, 0.22) !important;
+}
+.pf-v5-c-alert.pf-m-danger {
+  background: rgba(239, 68, 68, 0.12) !important;
+  border-color: rgba(239, 68, 68, 0.22) !important;
+}
+.pf-v5-c-alert.pf-m-warning {
+  background: rgba(245, 158, 11, 0.12) !important;
+  border-color: rgba(245, 158, 11, 0.22) !important;
+}
+/* Typography */
+h1, h2, h3, h4, h5, h6, .pf-v5-c-title {
+  font-family: Geist, sans-serif !important; color: #f8fafc !important;
+}
+p, span, li, .pf-v5-c-content {
+  font-family: Geist, sans-serif !important; color: rgba(248, 250, 252, 0.75) !important;
+}
+code, pre, .pf-v5-c-code-block {
+  font-family: 'Geist Mono', monospace !important;
+  background: rgba(15, 23, 42, 0.6) !important;
+  border: 1px solid rgba(167, 139, 250, 0.18) !important;
+  border-radius: 10px !important; color: #c4b5fd !important;
+}
+a { color: #a78bfa !important; }
+a:hover { color: #c4b5fd !important; }
+/* Masthead */
+.pf-v5-c-masthead {
+  background: rgba(15, 23, 42, 0.92) !important;
+  border-bottom: 1px solid rgba(167, 139, 250, 0.18) !important;
+}
+.pf-v5-c-masthead__brand {
+  color: #a78bfa !important; font-family: Geist, sans-serif !important;
+  font-weight: 700; letter-spacing: 0.08em;
+}
+/* Dropdown / menus */
+.pf-v5-c-menu, .pf-v5-c-dropdown__menu {
+  background: rgba(15, 23, 42, 0.95) !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important;
+  border-radius: 12px !important;
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+.pf-v5-c-menu__item-text, .pf-v5-c-dropdown__menu-item {
+  color: rgba(248, 250, 252, 0.85) !important; font-family: Geist, sans-serif !important;
+}
+.pf-v5-c-menu__item:hover, .pf-v5-c-dropdown__menu-item:hover {
+  background: rgba(167, 139, 250, 0.10) !important; color: #f8fafc !important;
+}
+/* Modal */
+.pf-v5-c-modal-box {
+  background: rgba(15, 23, 42, 0.96) !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 20px 60px rgba(2, 6, 23, 0.5) !important;
+}
+.pf-v5-c-modal-box__header { border-bottom: 1px solid rgba(167, 139, 250, 0.18) !important; }
+.pf-v5-c-modal-box__title { color: #f8fafc !important; }
+.pf-v5-c-backdrop { background: rgba(2, 6, 23, 0.65) !important; }
+/* Tabs */
+.pf-v5-c-tabs__link { color: rgba(248, 250, 252, 0.65) !important; background: transparent !important; }
+.pf-v5-c-tabs__link.pf-m-current,
+.pf-v5-c-tabs__item.pf-m-current .pf-v5-c-tabs__link { color: #a78bfa !important; }
+.pf-v5-c-tabs__link::after { background-color: #a78bfa !important; }
+/* Dividers */
+.pf-v5-c-divider { background: rgba(167, 139, 250, 0.18) !important; }
+hr { border-top-color: rgba(167, 139, 250, 0.18) !important; }
+/* Labels */
+.pf-v5-c-label { border-radius: 100px !important; }
+.pf-v5-c-label.pf-m-purple, .pf-v5-c-label.pf-m-blue {
+  background: rgba(167, 139, 250, 0.14) !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important; color: #c4b5fd !important;
+}
+/* Spinner */
+.pf-v5-c-spinner__path { stroke: #a78bfa !important; }
+/* Breadcrumb */
+.pf-v5-c-breadcrumb__link { color: #a78bfa !important; }
+.pf-v5-c-breadcrumb__item::before { color: rgba(248, 250, 252, 0.35) !important; }
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.5); }
+::-webkit-scrollbar-thumb { background: rgba(167, 139, 250, 0.35); border-radius: 100px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(167, 139, 250, 0.55); }

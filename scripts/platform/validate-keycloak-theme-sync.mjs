@@ -75,7 +75,7 @@ function extractConfigMapBlock(name) {
  */
 function findPrefixedKeys(text) {
   const found = [];
-  const pattern = /^  ((?:op|cu)-[^\s:]+):\s+\|/gm;
+  const pattern = /^  ((?:op|cu|ac)-[^\s:]+):\s+\|/gm;
   let match;
   while ((match = pattern.exec(text)) !== null) {
     found.push(match[1]);
@@ -106,10 +106,15 @@ const TEXT_KEYS = [
   ['cu-login.css',                'login/resources/css/login.css'],
   ['cu-dnd-notes-mark.svg',       'login/resources/img/dnd-notes-mark.svg'],
   ['cu-messages_en.properties',   'login/messages/messages_en.properties'],
+  // [configmap-key, relative-path-under-account-console/]
+  ['ac-theme.properties',         'account/theme.properties'],
+  ['ac-account.css',              'account/resources/css/account.css'],
 ];
 
 function themeDir(key) {
-  return key.startsWith('op-') ? 'operator-login' : 'customer-login';
+  if (key.startsWith('op-')) return 'operator-login';
+  if (key.startsWith('ac-')) return 'account-console';
+  return 'customer-login';
 }
 
 // ---------------------------------------------------------------------------
