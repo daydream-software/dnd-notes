@@ -34,9 +34,17 @@ spec:
         app.kubernetes.io/name: platform-keycloak
         app.kubernetes.io/part-of: dnd-notes
     spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: keycloak
           image: quay.io/keycloak/keycloak:26.2.4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           imagePullPolicy: IfNotPresent
           args:
             - start

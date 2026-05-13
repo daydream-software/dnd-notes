@@ -20,7 +20,6 @@ configMapGenerator:
   - name: keycloak-themes-text
     namespace: dnd-notes-platform
     options:
-      disableNameSuffixHash: true
       annotations:
         dnd-notes.dev/purpose: Keycloak login theme text files — operator-login and customer-login
     files:
@@ -44,7 +43,6 @@ configMapGenerator:
   - name: keycloak-themes-fonts
     namespace: dnd-notes-platform
     options:
-      disableNameSuffixHash: true
       annotations:
         dnd-notes.dev/purpose: Self-hosted Geist variable fonts for Keycloak login themes
     files:
