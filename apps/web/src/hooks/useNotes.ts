@@ -21,7 +21,6 @@ import {
 } from '../templates'
 import { extractInlineNoteReferences } from '../note-references'
 import { markdownToPlainText } from '../note-excerpts'
-import { formatTimestamp as _formatTimestamp } from '../formatTimestamp'
 import type {
   ActivityCollaborator,
   Note,
@@ -98,7 +97,8 @@ export function createDraftFromNote(note: Note): NoteDraft {
 }
 
 export function getNoteDisplayTitle(note: Pick<Note, 'title' | 'id'>): string {
-  return note.title.trim() || note.id
+  const trimmed = note.title.trim()
+  return trimmed === '' ? note.id : trimmed
 }
 
 interface ResolvedNoteLink {
@@ -493,10 +493,6 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     selectedActivityMembershipIdRef.current = selectedActivityMembershipId
   }, [selectedActivityMembershipId])
 
-  // Reset tag input when tagsText changes
-  useEffect(() => {
-    setTagInputValue('')
-  }, [draft.tagsText])
 
   // Cleanup: abort any in-flight requests on unmount
   useEffect(
@@ -815,11 +811,13 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
           setIsCreating(false)
           setSelectedNoteTemplateId(blankNoteTemplateId)
           setDraft(createDraftFromNote(resolvedActiveNote))
+          setTagInputValue('')
         } else {
           setSelectedNoteId(null)
           setIsCreating(true)
           setSelectedNoteTemplateId(blankNoteTemplateId)
           setDraft(createEmptyDraft())
+          setTagInputValue('')
         }
 
         return true
@@ -881,11 +879,13 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
           setIsCreating(false)
           setSelectedNoteTemplateId(blankNoteTemplateId)
           setDraft(createDraftFromNote(activeNote))
+          setTagInputValue('')
         } else {
           setSelectedNoteId(null)
           setIsCreating((accessLevel ?? shareLink?.accessLevel) === 'editor')
           setSelectedNoteTemplateId(blankNoteTemplateId)
           setDraft(createEmptyDraft())
+          setTagInputValue('')
         }
 
         return true
@@ -919,6 +919,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         ...currentDraft,
         tagsText: createTagsText(nextTags),
       }))
+      setTagInputValue('')
     },
     [],
   )
@@ -933,6 +934,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       ...currentDraft,
       tagsText: createTagsText(nextTags),
     }))
+    setTagInputValue('')
   }, [draftTags, tagInputValue])
 
   const handleSelectNote = useCallback(
@@ -942,6 +944,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       setIsCreating(false)
       setSelectedNoteTemplateId(blankNoteTemplateId)
       setDraft(createDraftFromNote(note))
+      setTagInputValue('')
       onError?.()
     },
     [],
@@ -958,6 +961,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       setIsCreating(true)
       setSelectedNoteTemplateId(blankNoteTemplateId)
       setDraft(createEmptyDraft())
+      setTagInputValue('')
       onError?.()
     },
     [],
@@ -970,6 +974,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
       if (templateId === blankNoteTemplateId) {
         setDraft(createEmptyDraft())
+        setTagInputValue('')
         return
       }
 
@@ -985,6 +990,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
           sessionName: starterNote.sessionName ?? '',
           linkedNoteIds: [],
         })
+        setTagInputValue('')
       }
     },
     [],
