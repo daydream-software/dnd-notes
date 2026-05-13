@@ -1,6 +1,23 @@
 #!/usr/bin/env bash
 set -o pipefail
 
+# Block newly-added staged files that match .gitignore patterns (force-added).
+# git check-ignore by default treats tracked files as non-ignored, so we pass
+# --no-index to consult the patterns only. We only flag files at status A
+# (newly added) so legitimate edits to already-tracked files don't trip the hook.
+ignored_violations=()
+while IFS= read -r -d '' file; do
+  if git check-ignore --no-index -q -- "$file" 2>/dev/null; then
+    ignored_violations+=("$file")
+  fi
+done < <(git diff --cached --name-only --diff-filter=A -z)
+if (( ${#ignored_violations[@]} > 0 )); then
+  echo "pre-commit: the following newly-added files match .gitignore patterns (force-added?):" >&2
+  printf '  %s\n' "${ignored_violations[@]}" >&2
+  echo "If this is intentional, remove the matching pattern from .gitignore. Otherwise unstage these files." >&2
+  exit 1
+fi
+
 # Block staged files that contain absolute paths pointing to local home dirs.
 # This catches accidental /home/<user>/ or /Users/<user>/ references before they land in history.
 if git diff --cached --name-only --diff-filter=AM -z | xargs -0 grep -Pl '/home/[a-zA-Z0-9_.-]+/' -- 2>/dev/null | grep -q .; then
