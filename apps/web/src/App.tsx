@@ -1155,6 +1155,10 @@ function App() {
   }
 
   const handleStartNote = () => {
+    if (!canEditWorkspace) {
+      return
+    }
+
     setShowSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
     setSelectedTagFilter(null)
