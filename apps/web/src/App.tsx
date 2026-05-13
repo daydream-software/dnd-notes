@@ -583,8 +583,7 @@ function App() {
       preferredNoteId?: string | null,
       suppressError = false,
     ): Promise<boolean> => {
-      localStorage.setItem(selectedCampaignStorageKey, campaignId)
-      return loadWorkspaceFromHook(
+      const ok = await loadWorkspaceFromHook(
         sessionToken,
         campaignId,
         preferredNoteId,
@@ -593,6 +592,10 @@ function App() {
         (campaign) => setCampaignDraft(createCampaignDraft(campaign)),
         (message) => setError(message),
       )
+      if (ok) {
+        localStorage.setItem(selectedCampaignStorageKey, campaignId)
+      }
+      return ok
     },
     [loadWorkspaceFromHook, setCampaignDraft, setSelectedCampaignId],
   )
