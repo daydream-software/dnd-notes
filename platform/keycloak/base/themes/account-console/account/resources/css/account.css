@@ -17,11 +17,11 @@
 }
 /* PatternFly 5 design token overrides */
 :root {
-  --pf-v5-global--FontFamily--text: Geist, sans-serif;
-  --pf-v5-global--FontFamily--heading: Geist, sans-serif;
+  --pf-v5-global--FontFamily--text: 'Geist', sans-serif;
+  --pf-v5-global--FontFamily--heading: 'Geist', sans-serif;
   --pf-v5-global--FontFamily--monospace: 'Geist Mono', monospace;
-  --pf-v5-global--FontFamily--redhat-text: Geist, sans-serif;
-  --pf-v5-global--FontFamily--redhat-display: Geist, sans-serif;
+  --pf-v5-global--FontFamily--redhat-text: 'Geist', sans-serif;
+  --pf-v5-global--FontFamily--redhat-display: 'Geist', sans-serif;
   --pf-v5-global--FontFamily--redhat-mono: 'Geist Mono', monospace;
   --pf-v5-global--primary-color--100: #a78bfa;
   --pf-v5-global--primary-color--200: #c4b5fd;
@@ -104,13 +104,13 @@ body {
 .pf-v5-c-form__helper-text { color: rgba(248, 250, 252, 0.55) !important; }
 /* Buttons */
 .pf-v5-c-button.pf-m-primary {
-  background: #a78bfa !important; border-color: #a78bfa !important;
+  background: #a78bfa !important; border: 1px solid rgba(167, 139, 250, 0.22) !important;
   color: #0f172a !important; font-family: Geist, sans-serif !important;
   border-radius: 10px !important; font-weight: 600;
 }
 .pf-v5-c-button.pf-m-primary:hover { opacity: 0.9 !important; }
 .pf-v5-c-button.pf-m-secondary {
-  border-color: rgba(167, 139, 250, 0.22) !important; color: #a78bfa !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important; color: #a78bfa !important;
   font-family: Geist, sans-serif !important; border-radius: 10px !important;
   background: transparent !important;
 }
