@@ -34,61 +34,33 @@ import {
 import { useTheme } from '@mui/material/styles'
 import {
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
-  useRef,
   useState,
 } from 'react'
 import {
   claimSharedMembership,
-  consolidateCampaignMemberships,
-  createCampaign,
-  createCampaignShareLink,
-  createNote,
   fetchAuthConfig,
   fetchAdminAccounts,
-  createSharedNote,
-  deleteNote,
-  deleteSharedNote,
   fetchAdminOverview,
   fetchCampaignShareLinks,
   fetchCampaignMemberships,
   fetchCampaigns,
-  fetchNoteActivity,
-  fetchNotes,
-  fetchOverview,
   fetchOwnerSession,
   fetchSessionNotes,
-  fetchSessions,
-  fetchSharedNotes,
-  fetchSharedOverview,
   fetchSharedSession,
   joinSharedCampaign,
   loginOwner,
-  logoutOwner,
-  revealCampaignShareLink,
   registerOwner,
-  revokeCampaignShareLink,
-  updateCampaign,
-  updateNote,
-  updateSharedNote,
 } from './api'
 import {
   createRuntimeKeycloakClient,
   isKeycloakAuthConfig,
-  type RuntimeKeycloakClient,
-  type StoredKeycloakTokens,
 } from './keycloak-client'
 import {
-  blankCampaignTemplateId,
-  blankNoteTemplateId,
   campaignStarterTemplates,
-  createStarterNoteInput,
-  getCampaignStarterTemplate,
   getNoteStarterTemplate,
   noteStarterTemplates,
-  type StarterNoteSeed,
 } from './templates'
 import CampaignWorkspaceHeader from './CampaignWorkspaceHeader'
 import { formatTimestamp } from './formatTimestamp'
@@ -96,26 +68,16 @@ import { markdownToPlainText } from './note-excerpts'
 import NoteBodyEditor from './NoteBodyEditor'
 import NotesBrowsePane from './NotesBrowsePane'
 import { NoteBodyPreview } from './note-formatting'
-import { extractInlineNoteReferences } from './note-references'
 import type {
-  ActivityCollaborator,
   AdminAccountSummary,
-  AuthConfigResponse,
   AdminOverview,
-  CampaignInput,
   CampaignMembership,
-  MembershipConsolidationSummary,
   CampaignShareLink,
-  CampaignShareLinkInput,
   CampaignSummary,
   GuestJoinInput,
   Note,
   NoteActivityEntry,
-  NoteInput,
   NoteStatus,
-  NotesOverview,
-  OwnerAccount,
-  SessionSummary,
   ShareAccessLevel,
 } from './types'
 import { noteStatuses } from './types'
@@ -123,173 +85,44 @@ import SiteAdminPanel from './SiteAdminPanel'
 import WorkspacePane from './WorkspacePane'
 import NoteEditorActions from './NoteEditorActions'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
+import { useShareLinks, createShareLinkDraft as createShareLinkDraftFn } from './hooks/useShareLinks'
+import {
+  useSession,
+  authTokenStorageKey,
+  missingKeycloakClientErrorMessage,
+  readStoredKeycloakTokens,
+  persistKeycloakTokens,
+  clearStoredKeycloakTokens,
+} from './hooks/useSession'
+import {
+  useCampaign,
+  createCampaignDraft,
+  createMembershipConsolidationDraft,
+  describeCampaignMembership,
+  selectedCampaignStorageKey,
+  blankCampaignTemplateId,
+  blankNoteTemplateId,
+  getCampaignStarterTemplate,
+  type MembershipConsolidationDraft,
+} from './hooks/useCampaign'
+import {
+  useNotes,
+  createEmptyDraft as createEmptyDraftFn,
+  createDraftFromNote,
+  createTagsText,
+  getNoteDisplayTitle,
+  formatResolvedRelationshipText,
+} from './hooks/useNotes'
 
-interface NoteDraft {
-  title: string
-  body: string
-  tagsText: string
-  status: NoteStatus
-  sessionName: string
-  linkedNoteIds: string[]
-}
-
-interface CampaignDraft {
-  name: string
-  tagline: string
-  system: string
-  setting: string
-  nextSession: string
-}
-
-interface OwnerRegistrationDraft {
-  displayName: string
-  email: string
-  password: string
-}
-
-interface OwnerLoginDraft {
-  email: string
-  password: string
-}
-
-interface ShareLinkDraft {
-  label: string
-  accessLevel: ShareAccessLevel
-  frameAncestors: string
-}
-
-interface MembershipConsolidationDraft {
-  sourceMembershipId: string
-  targetMembershipId: string
-  confirmRoleMismatch: boolean
-}
-
-interface RevealedShareLink {
-  url: string
-  isVisible: boolean
-}
-
-interface TagFacet {
-  tag: string
-  count: number
-}
-
-interface ResolvedNoteLink {
-  targetNoteId: string
-  qualifiers: string[]
-}
-
-interface NoteLinkPanelItem {
-  note: Note
-  qualifiers: string[]
-}
-
-type CampaignFormMode = 'closed' | 'create' | 'edit'
-type NoteBrowseMode = 'notes' | 'sessions' | 'activity'
 type NarrowWorkspacePanel = 'browse' | 'editor'
 
-const authTokenStorageKey = 'dnd-notes:owner-auth-token'
-const keycloakTokensStorageKey = 'dnd-notes:keycloak-auth-tokens'
-const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
-const missingKeycloakClientErrorMessage =
-  'Sign-in is not ready yet. Reload and try again.'
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
-const recentActivityLimit = 20
 const defaultNotesPaneDescription =
   'The note workflow now runs inside the selected campaign.'
 
 function getShareTokenFromPath(pathname: string) {
   const match = pathname.match(/^\/share\/([^/]+)\/?$/)
   return match ? decodeURIComponent(match[1]) : null
-}
-
-function readStoredKeycloakTokens(): StoredKeycloakTokens | null {
-  const rawTokens = localStorage.getItem(keycloakTokensStorageKey)
-
-  if (!rawTokens) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(rawTokens) as Partial<StoredKeycloakTokens>
-
-    if (
-      typeof parsed.accessToken !== 'string' ||
-      typeof parsed.refreshToken !== 'string'
-    ) {
-      return null
-    }
-
-    return {
-      accessToken: parsed.accessToken,
-      refreshToken: parsed.refreshToken,
-      ...(typeof parsed.idToken === 'string' ? { idToken: parsed.idToken } : {}),
-    }
-  } catch {
-    return null
-  }
-}
-
-function persistKeycloakTokens(tokens: StoredKeycloakTokens) {
-  localStorage.setItem(keycloakTokensStorageKey, JSON.stringify(tokens))
-  localStorage.setItem(authTokenStorageKey, tokens.accessToken)
-}
-
-function clearStoredKeycloakTokens() {
-  localStorage.removeItem(keycloakTokensStorageKey)
-}
-
-function createEmptyDraft(): NoteDraft {
-  return {
-    title: '',
-    body: '',
-    tagsText: '',
-    status: 'draft',
-    sessionName: '',
-    linkedNoteIds: [],
-  }
-}
-
-function normalizeTags(rawTags: readonly string[]) {
-  const seen = new Set<string>()
-
-  return rawTags
-    .flatMap((tag) => tag.split(','))
-    .map((tag) => tag.trim())
-    .filter((tag) => {
-      if (!tag || seen.has(tag)) {
-        return false
-      }
-
-      seen.add(tag)
-      return true
-    })
-}
-
-function createTagsText(tags: readonly string[]) {
-  return normalizeTags(tags).join(', ')
-}
-
-function createDraftFromNote(note: Note): NoteDraft {
-  return {
-    title: note.title,
-    body: note.body,
-    tagsText: createTagsText(note.tags),
-    status: note.status,
-    sessionName: note.sessionName ?? '',
-    linkedNoteIds: note.linkedNoteIds ?? [],
-  }
-}
-
-function createDraftFromStarterNote(starterNote: StarterNoteSeed): NoteDraft {
-  return {
-    title: starterNote.title,
-    body: starterNote.body,
-    tagsText: createTagsText(starterNote.tags),
-    status: starterNote.status,
-    sessionName: starterNote.sessionName ?? '',
-    linkedNoteIds: [],
-  }
 }
 
 function trimToNull(value: string): string | null {
@@ -299,117 +132,6 @@ function trimToNull(value: string): string | null {
 
 function formatFallbackText(value: string | null, fallback: string) {
   return trimToNull(value ?? '') ?? fallback
-}
-
-function createNotePayload(
-  draft: NoteDraft,
-  campaignId: string | null,
-): NoteInput {
-  return {
-    title: draft.title,
-    body: draft.body,
-    status: draft.status,
-    tags: normalizeTags([draft.tagsText]),
-    sessionName: trimToNull(draft.sessionName),
-    linkedNoteIds: draft.linkedNoteIds,
-    campaignId,
-  }
-}
-
-function createCampaignDraft(campaign?: CampaignSummary | null): CampaignDraft {
-  if (!campaign) {
-    return {
-      name: '',
-      tagline: '',
-      system: '',
-      setting: '',
-      nextSession: '',
-    }
-  }
-
-  return {
-    name: campaign.name,
-    tagline: campaign.tagline,
-    system: campaign.system,
-    setting: campaign.setting,
-    nextSession: campaign.nextSession ?? '',
-  }
-}
-
-function createCampaignPayload(draft: CampaignDraft): CampaignInput {
-  return {
-    name: draft.name,
-    tagline: draft.tagline,
-    system: draft.system,
-    setting: draft.setting,
-    nextSession: trimToNull(draft.nextSession),
-  }
-}
-
-function createShareLinkDraft(): ShareLinkDraft {
-  return {
-    label: '',
-    accessLevel: 'editor',
-    frameAncestors: '',
-  }
-}
-
-function createShareLinkPayload(draft: ShareLinkDraft): CampaignShareLinkInput {
-  return {
-    label: trimToNull(draft.label),
-    accessLevel: draft.accessLevel,
-    frameAncestors: trimToNull(draft.frameAncestors),
-  }
-}
-
-function createMembershipConsolidationDraft(): MembershipConsolidationDraft {
-  return {
-    sourceMembershipId: '',
-    targetMembershipId: '',
-    confirmRoleMismatch: false,
-  }
-}
-
-function describeCampaignMembership(membership: CampaignMembership) {
-  const roleLabel =
-    membership.role === 'guest' && membership.userId !== null
-      ? 'linked collaborator'
-      : membership.role
-
-  return `${membership.displayName} (${roleLabel})`
-}
-
-function deleteRecordKey<Value>(record: Record<string, Value>, key: string) {
-  const nextRecord = { ...record }
-  delete nextRecord[key]
-  return nextRecord
-}
-
-async function copyTextToClipboard(value: string) {
-  if (typeof window !== 'undefined' && window.navigator.clipboard?.writeText) {
-    await window.navigator.clipboard.writeText(value)
-    return
-  }
-
-  if (typeof document !== 'undefined' && typeof document.execCommand === 'function') {
-    const textarea = document.createElement('textarea')
-    textarea.value = value
-    textarea.setAttribute('readonly', '')
-    textarea.style.position = 'absolute'
-    textarea.style.left = '-9999px'
-    document.body.append(textarea)
-    textarea.select()
-
-    try {
-      if (document.execCommand('copy')) {
-        return
-      }
-    } finally {
-      document.body.removeChild(textarea)
-    }
-  }
-
-  throw new Error('Clipboard access is unavailable. Reveal the link and copy it manually.')
 }
 
 function excerpt(body: string) {
@@ -424,104 +146,6 @@ function excerpt(body: string) {
   }
 
   return `${normalizedBody.slice(0, 111)}…`
-}
-
-function getResolvedNoteLinks(note: Note): ResolvedNoteLink[] {
-  const qualifiersByTargetId = new Map<string, Set<string>>()
-
-  const ensureTarget = (targetNoteId: string) => {
-    const existingQualifiers = qualifiersByTargetId.get(targetNoteId)
-
-    if (existingQualifiers) {
-      return existingQualifiers
-    }
-
-    const nextQualifiers = new Set<string>()
-    qualifiersByTargetId.set(targetNoteId, nextQualifiers)
-    return nextQualifiers
-  }
-
-  for (const linkedNoteId of note.linkedNoteIds ?? []) {
-    ensureTarget(linkedNoteId)
-  }
-
-  const structuredReferences = Array.isArray(note.references) ? note.references : null
-
-  if (structuredReferences && structuredReferences.length > 0) {
-    for (const reference of structuredReferences) {
-      const qualifiers = ensureTarget(reference.targetNoteId)
-
-      if (reference.qualifier) {
-        qualifiers.add(reference.qualifier)
-      }
-    }
-  } else {
-    for (const reference of extractInlineNoteReferences(note.body)) {
-      const qualifiers = ensureTarget(reference.noteId)
-
-      if (reference.qualifier) {
-        qualifiers.add(reference.qualifier)
-      }
-    }
-  }
-
-  return Array.from(qualifiersByTargetId, ([targetNoteId, qualifiers]) => ({
-    targetNoteId,
-    qualifiers: Array.from(qualifiers).sort((left, right) => left.localeCompare(right)),
-  }))
-}
-
-function getNoteDisplayTitle(note: Pick<Note, 'title' | 'id'>) {
-  return note.title.trim() || note.id
-}
-
-function formatResolvedRelationshipText(
-  originTitle: string,
-  qualifiers: readonly string[],
-  targetTitle: string,
-) {
-  if (qualifiers.length === 0) {
-    return null
-  }
-
-  return `${originTitle} ${qualifiers.join(' / ')} ${targetTitle}`
-}
-
-function getNoteRelationshipSearchText(
-  note: Note,
-  noteTitleById: ReadonlyMap<string, string>,
-) {
-  const originTitle = getNoteDisplayTitle(note)
-
-  return getResolvedNoteLinks(note)
-    .flatMap((reference) => {
-      const targetTitle = noteTitleById.get(reference.targetNoteId) ?? reference.targetNoteId
-      const relationshipText = formatResolvedRelationshipText(
-        originTitle,
-        reference.qualifiers,
-        targetTitle,
-      )
-
-      return relationshipText ? [relationshipText] : []
-    })
-    .join(' ')
-}
-
-function createNoteSearchText(
-  note: Note,
-  noteTitleById: ReadonlyMap<string, string>,
-) {
-  return [
-    getNoteDisplayTitle(note),
-    markdownToPlainText(note.body),
-    getNoteRelationshipSearchText(note, noteTitleById),
-    note.tags.join(' '),
-    note.sessionName ?? '',
-    note.createdBy?.displayName ?? '',
-    note.lastEditedBy?.displayName ?? '',
-  ]
-    .join('\n')
-    .toLowerCase()
 }
 
 function sortActivityEntries(entries: NoteActivityEntry[]) {
@@ -540,120 +164,10 @@ const singleLineTextSx = {
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
 } as const
-const sessionNameCollator = new Intl.Collator(undefined, {
-  numeric: true,
-  sensitivity: 'base',
-})
-const tagFacetCollator = new Intl.Collator(undefined, {
-  sensitivity: 'base',
-})
-
-function sortSessionSummaries(sessions: SessionSummary[]) {
-  return [...sessions].sort((leftSession, rightSession) =>
-    sessionNameCollator.compare(
-      rightSession.sessionName,
-      leftSession.sessionName,
-    ),
-  )
-}
-
-function createTagFacets(notes: Note[]): TagFacet[] {
-  const tagCounts = new Map<string, number>()
-
-  for (const note of notes) {
-    for (const tag of note.tags) {
-      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1)
-    }
-  }
-
-  return [...tagCounts.entries()]
-    .map(([tag, count]) => ({ tag, count }))
-    .sort((leftFacet, rightFacet) =>
-      rightFacet.count !== leftFacet.count
-        ? rightFacet.count - leftFacet.count
-        : tagFacetCollator.compare(leftFacet.tag, rightFacet.tag),
-    )
-}
-
-function createSessionSummariesFromNotes(notes: readonly Note[]): SessionSummary[] {
-  const sessionMap = new Map<string, SessionSummary>()
-
-  for (const note of notes) {
-    const sessionName = note.sessionName?.trim()
-    if (!sessionName) {
-      continue
-    }
-
-    const existingSummary = sessionMap.get(sessionName)
-    if (!existingSummary) {
-      sessionMap.set(sessionName, {
-        sessionName,
-        noteCount: 1,
-        latestActivity: note.updatedAt,
-      })
-      continue
-    }
-
-    sessionMap.set(sessionName, {
-      sessionName,
-      noteCount: existingSummary.noteCount + 1,
-      latestActivity:
-        existingSummary.latestActivity > note.updatedAt
-          ? existingSummary.latestActivity
-          : note.updatedAt,
-    })
-  }
-
-  return sortSessionSummaries([...sessionMap.values()])
-}
-
-function toSharedActivityEntry(note: Note): NoteActivityEntry {
-  return {
-    ...note,
-    action:
-      note.lastEditedBy !== null && note.updatedAt !== note.createdAt ? 'edited' : 'created',
-  }
-}
-
 function getActivityAttribution(entry: NoteActivityEntry) {
   return entry.action === 'created'
     ? (entry.createdBy ?? entry.lastEditedBy)
     : (entry.lastEditedBy ?? entry.createdBy)
-}
-
-function createActivityCollaboratorsFromEntries(
-  entries: readonly NoteActivityEntry[],
-): ActivityCollaborator[] {
-  const collaboratorMap = new Map<string, ActivityCollaborator>()
-
-  for (const entry of entries) {
-    const attribution = getActivityAttribution(entry)
-    if (!attribution) {
-      continue
-    }
-
-    const existingCollaborator = collaboratorMap.get(attribution.membershipId)
-    if (!existingCollaborator) {
-      collaboratorMap.set(attribution.membershipId, {
-        membershipId: attribution.membershipId,
-        displayName: attribution.displayName,
-        role: attribution.role,
-        noteCount: 1,
-      })
-      continue
-    }
-
-    collaboratorMap.set(attribution.membershipId, {
-      ...existingCollaborator,
-      noteCount: existingCollaborator.noteCount + 1,
-    })
-  }
-
-  return [...collaboratorMap.values()].sort((leftCollaborator, rightCollaborator) =>
-    rightCollaborator.noteCount !== leftCollaborator.noteCount
-      ? rightCollaborator.noteCount - leftCollaborator.noteCount
-      : leftCollaborator.displayName.localeCompare(rightCollaborator.displayName),
-  )
 }
 
 function formatSessionLine(sessionName: string | null) {
@@ -672,156 +186,166 @@ function App() {
   )
   const isSharedMode = shareToken !== null
   const guestStorageKey = shareToken ? `${guestTokenStoragePrefix}${shareToken}` : null
-  const [authToken, setAuthToken] = useState<string | null>(null)
-  const [owner, setOwner] = useState<OwnerAccount | null>(null)
-  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
-  const [memberships, setMemberships] = useState<CampaignMembership[]>([])
-  const [shareLinks, setShareLinks] = useState<CampaignShareLink[]>([])
+  const {
+    shareLinks,
+    shareLinkDraft,
+    shareLinkNotice,
+    revealedShareLinks,
+    shareLinkActionErrors,
+    revealingShareLinkId,
+    copiedShareLinkId,
+    isCreatingShareLink,
+    setShareLinks,
+    setShareLinkDraft,
+    resetShareLinkInteractionState,
+    handleShareLinkDraftChange,
+    handleRevealShareLink: handleRevealShareLinkFromHook,
+    handleToggleShareLinkVisibility,
+    handleCopyShareLink: handleCopyShareLinkFromHook,
+    handleRevokeShareLink: handleRevokeShareLinkFromHook,
+    handleCreateShareLink: handleCreateShareLinkFromHook,
+  } = useShareLinks()
+  const {
+    authToken,
+    owner,
+    authConfig,
+    isAuthReady,
+    isRegisterMode,
+    registerDraft,
+    loginDraft,
+    isSubmittingAuth,
+    isLinkingAccount,
+    accountNotice,
+    keycloakClientRef,
+    setAuthToken,
+    setOwner,
+    setAuthConfig,
+    setIsAuthReady,
+    setIsRegisterMode,
+    setRegisterDraft,
+    setLoginDraft,
+    setIsLinkingAccount,
+    setAccountNotice,
+    handleSubmitAuth: handleSubmitAuthFromHook,
+    handleLogout: handleLogoutFromHook,
+  } = useSession()
+  const {
+    campaigns,
+    selectedCampaignId,
+    memberships,
+    campaignDraft,
+    campaignFormMode,
+    selectedCampaignTemplateId,
+    isSavingCampaign,
+    membershipConsolidationDraft,
+    membershipConsolidationPreview,
+    membershipConsolidationNotice,
+    isPreviewingMembershipConsolidation,
+    isApplyingMembershipConsolidation,
+    setCampaigns,
+    setSelectedCampaignId,
+    setMemberships,
+    setCampaignDraft,
+    setCampaignFormMode,
+    setSelectedCampaignTemplateId,
+    setMembershipConsolidationDraft,
+    resetMembershipConsolidationState,
+    handleCampaignDraftChange,
+    handleMembershipConsolidationDraftChange: handleMembershipConsolidationDraftChangeFromHook,
+    handleSaveCampaign: handleSaveCampaignFromHook,
+    handlePreviewMembershipConsolidation: handlePreviewMembershipConsolidationFromHook,
+    handleApplyMembershipConsolidation: handleApplyMembershipConsolidationFromHook,
+    handleOpenCampaignCreate: handleOpenCampaignCreateFromHook,
+    handleOpenCampaignSettings: handleOpenCampaignSettingsFromHook,
+    handleCancelCampaignForm: handleCancelCampaignFormFromHook,
+  } = useCampaign()
   const [sharedCampaign, setSharedCampaign] = useState<CampaignSummary | null>(null)
   const [shareLink, setShareLink] = useState<CampaignShareLink | null>(null)
   const [sharedMembership, setSharedMembership] = useState<CampaignMembership | null>(null)
   const [guestToken, setGuestToken] = useState<string | null>(null)
-  const [overview, setOverview] = useState<NotesOverview | null>(null)
-  const [notes, setNotes] = useState<Note[]>([])
-  const [noteBrowseMode, setNoteBrowseMode] = useState<NoteBrowseMode>('notes')
-  const [sessionSummaries, setSessionSummaries] = useState<SessionSummary[]>([])
-  const [selectedSessionName, setSelectedSessionName] = useState<string | null>(null)
-  const [sessionNotes, setSessionNotes] = useState<Note[]>([])
-  const [activityEntries, setActivityEntries] = useState<NoteActivityEntry[]>([])
-  const [activityCollaborators, setActivityCollaborators] = useState<ActivityCollaborator[]>(
-    [],
-  )
-  const [selectedActivityMembershipId, setSelectedActivityMembershipId] = useState<
-    string | null
-  >(null)
-  const [selectedTagFilter, setSelectedTagFilter] = useState<string | null>(null)
-  const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
-    useState<NarrowWorkspacePanel>('browse')
-  const [showSplitNoteWorkspace, setShowSplitNoteWorkspace] = useState(false)
-  const [searchText, setSearchText] = useState('')
-  const deferredSearchText = useDeferredValue(searchText)
-  const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
-  const [tagInputValue, setTagInputValue] = useState('')
-  const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
-    createCampaignDraft,
-  )
-  const [shareLinkDraft, setShareLinkDraft] = useState<ShareLinkDraft>(createShareLinkDraft)
-  const [membershipConsolidationDraft, setMembershipConsolidationDraft] = useState<
-    MembershipConsolidationDraft
-  >(createMembershipConsolidationDraft)
-  const [registerDraft, setRegisterDraft] = useState<OwnerRegistrationDraft>({
-    displayName: '',
-    email: '',
-    password: '',
-  })
-  const [loginDraft, setLoginDraft] = useState<OwnerLoginDraft>({
-    email: '',
-    password: '',
-  })
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
-  const [isCreating, setIsCreating] = useState(false)
-  const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null)
-  const [isAuthReady, setIsAuthReady] = useState(false)
+  const {
+    overview,
+    noteBrowseMode,
+    sessionSummaries,
+    selectedSessionName,
+    activityEntries,
+    activityCollaborators,
+    selectedActivityMembershipId,
+    selectedTagFilter,
+    searchText,
+    draft,
+    tagInputValue,
+    selectedNoteId,
+    isCreating,
+    isLoadingWorkspace,
+    isLoadingSessionNotes,
+    isLoadingActivity,
+    isQuickCapturing,
+    isSaving,
+    isDeleting,
+    selectedNoteTemplateId,
+    quickCaptureTitle,
+    isQuickCaptureOpen,
+    selectedNote,
+    filteredNotes,
+    displayedNotes,
+    tagFacets,
+    draftTags,
+    noteLinkOptions,
+    linkedNotes,
+    backlinks,
+    sharedSessionSummaries,
+    sharedActivityEntries,
+    sharedActivityCollaborators,
+    selectedNoteIdRef,
+    selectedActivityMembershipIdRef,
+    sessionRequestIdRef,
+    sessionAbortControllerRef,
+    setOverview,
+    setNotes,
+    setNoteBrowseMode,
+    setSessionSummaries,
+    setSelectedSessionName,
+    setSessionNotes,
+    setSelectedActivityMembershipId,
+    setSelectedTagFilter,
+    setSearchText,
+    setDraft,
+    setTagInputValue,
+    setSelectedNoteId,
+    setIsCreating,
+    setIsLoadingSessionNotes,
+    setSelectedNoteTemplateId,
+    setQuickCaptureTitle,
+    setIsQuickCaptureOpen,
+    resetSessionBrowserState,
+    resetActivityState,
+    loadActivity,
+    loadWorkspace: loadWorkspaceFromHook,
+    loadSharedWorkspace: loadSharedWorkspaceFromHook,
+    handleDraftChange,
+    handleDraftTagsChange,
+    commitPendingTagInput,
+    handleSelectNote: handleSelectNoteFromHook,
+    handleStartNote: handleStartNoteFromHook,
+    handleSelectNoteTemplate: handleSelectNoteTemplateFromHook,
+    handleSaveNote: handleSaveNoteFromHook,
+    handleDeleteNote: handleDeleteNoteFromHook,
+    handleQuickCapture: handleQuickCaptureFromHook,
+  } = useNotes(isSharedMode)
   const [isSharedReady, setIsSharedReady] = useState(!isSharedMode)
-  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false)
-  const [isLoadingSessionNotes, setIsLoadingSessionNotes] = useState(false)
-  const [isLoadingActivity, setIsLoadingActivity] = useState(false)
-  const [isQuickCapturing, setIsQuickCapturing] = useState(false)
-  const [isSaving, setIsSaving] = useState(false)
-  const [isDeleting, setIsDeleting] = useState(false)
-  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
-  const [isLinkingAccount, setIsLinkingAccount] = useState(false)
-  const [isSavingCampaign, setIsSavingCampaign] = useState(false)
-  const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
   const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
-  const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
-    useState(false)
-  const [isApplyingMembershipConsolidation, setIsApplyingMembershipConsolidation] =
-    useState(false)
-  const [isRegisterMode, setIsRegisterMode] = useState(true)
-  const [campaignFormMode, setCampaignFormMode] =
-    useState<CampaignFormMode>('closed')
-  const [selectedCampaignTemplateId, setSelectedCampaignTemplateId] = useState(
-    blankCampaignTemplateId,
-  )
-  const [selectedNoteTemplateId, setSelectedNoteTemplateId] = useState(
-    blankNoteTemplateId,
-  )
-  const [shareLinkNotice, setShareLinkNotice] = useState<string | null>(null)
-  const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [adminError, setAdminError] = useState<string | null>(null)
-  const [revealedShareLinks, setRevealedShareLinks] = useState<
-    Record<string, RevealedShareLink>
-  >({})
-  const [shareLinkActionErrors, setShareLinkActionErrors] = useState<
-    Record<string, string>
-  >({})
-  const [revealingShareLinkId, setRevealingShareLinkId] = useState<string | null>(
-    null,
-  )
-  const [copiedShareLinkId, setCopiedShareLinkId] = useState<string | null>(null)
-  const [membershipConsolidationPreview, setMembershipConsolidationPreview] =
-    useState<MembershipConsolidationSummary | null>(null)
-  const [membershipConsolidationNotice, setMembershipConsolidationNotice] = useState<
-    string | null
-  >(null)
   const [joinDraft, setJoinDraft] = useState<GuestJoinInput>({ displayName: '' })
-  const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
-  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const noteBrowseModeRef = useRef<NoteBrowseMode>('notes')
-  const selectedNoteIdRef = useRef<string | null>(null)
-  const selectedSessionNameRef = useRef<string | null>(null)
-  const selectedActivityMembershipIdRef = useRef<string | null>(null)
-  const activityRequestIdRef = useRef(0)
-  const sessionRequestIdRef = useRef(0)
-  const activityAbortControllerRef = useRef<AbortController | null>(null)
-  const sessionAbortControllerRef = useRef<AbortController | null>(null)
-  const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
+  const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
+    useState<NarrowWorkspacePanel>('browse')
+  const [wantsSplitNoteWorkspace, setWantsSplitNoteWorkspace] = useState(false)
+  const showSplitNoteWorkspace = canSplitNoteWorkspace && wantsSplitNoteWorkspace
   const isBootstrapping = !isAuthReady || !isSharedReady
-
-  useEffect(() => {
-    noteBrowseModeRef.current = noteBrowseMode
-  }, [noteBrowseMode])
-
-  useEffect(() => {
-    selectedNoteIdRef.current = selectedNoteId
-  }, [selectedNoteId])
-
-  useEffect(() => {
-    selectedSessionNameRef.current = selectedSessionName
-  }, [selectedSessionName])
-
-  useEffect(() => {
-    selectedActivityMembershipIdRef.current = selectedActivityMembershipId
-  }, [selectedActivityMembershipId])
-
-  useEffect(
-    () => () => {
-      activityAbortControllerRef.current?.abort()
-      sessionAbortControllerRef.current?.abort()
-    },
-    [],
-  )
-
-  useEffect(() => {
-    setTagInputValue('')
-  }, [draft.tagsText])
-
-  useEffect(() => {
-    if (!canSplitNoteWorkspace) {
-      setShowSplitNoteWorkspace(false)
-    }
-  }, [canSplitNoteWorkspace])
-
-  const selectedNote = useMemo(
-    () => notes.find((note) => note.id === selectedNoteId) ?? null,
-    [notes, selectedNoteId],
-  )
 
   const selectedCampaign = useMemo(
     () =>
@@ -851,22 +375,6 @@ function App() {
     selectedCampaignTemplateId,
   )
   const selectedNoteTemplate = getNoteStarterTemplate(selectedNoteTemplateId)
-  const sharedSessionSummaries = useMemo(() => createSessionSummariesFromNotes(notes), [notes])
-  const sharedSessionNotes = useMemo(
-    () =>
-      selectedSessionName
-        ? notes.filter((note) => note.sessionName?.trim() === selectedSessionName)
-        : [],
-    [notes, selectedSessionName],
-  )
-  const sharedActivityEntries = useMemo(
-    () => notes.map((note) => toSharedActivityEntry(note)),
-    [notes],
-  )
-  const sharedActivityCollaborators = useMemo(
-    () => createActivityCollaboratorsFromEntries(sharedActivityEntries),
-    [sharedActivityEntries],
-  )
   const resolvedSessionSummaries = isSharedMode ? sharedSessionSummaries : sessionSummaries
   const resolvedSelectedSessionSummary = useMemo(
     () =>
@@ -885,65 +393,6 @@ function App() {
       ) ?? null,
     [resolvedActivityCollaborators, selectedActivityMembershipId],
   )
-  const draftTags = useMemo(() => normalizeTags([draft.tagsText]), [draft.tagsText])
-  const noteLinkOptions = useMemo(
-    () =>
-      notes
-        .filter((note) => note.id !== selectedNoteId)
-        .map((note) => ({
-          id: note.id,
-          title: note.title || '(Untitled)',
-        })),
-    [notes, selectedNoteId],
-  )
-  const noteTitlesById = useMemo(
-    () => new Map(notes.map((note) => [note.id, getNoteDisplayTitle(note)])),
-    [notes],
-  )
-  const noteSearchEntries = useMemo(
-    () =>
-      notes.map((note) => ({
-        note,
-        searchText: createNoteSearchText(note, noteTitlesById),
-      })),
-    [noteTitlesById, notes],
-  )
-
-  const linkedNotes = useMemo<NoteLinkPanelItem[]>(() => {
-    if (!selectedNote) {
-      return []
-    }
-
-    const linkedNoteMap = new Map(
-      getResolvedNoteLinks(selectedNote).map((reference) => [
-        reference.targetNoteId,
-        reference.qualifiers,
-      ]),
-    )
-
-    return notes.flatMap((note) => {
-      const qualifiers = linkedNoteMap.get(note.id)
-
-      return qualifiers ? [{ note, qualifiers }] : []
-    })
-  }, [selectedNote, notes])
-
-  const backlinks = useMemo<NoteLinkPanelItem[]>(() => {
-    if (!selectedNoteId) {
-      return []
-    }
-
-    return notes.flatMap((note) => {
-      const matchingReference = getResolvedNoteLinks(note).find(
-        (reference) => reference.targetNoteId === selectedNoteId,
-      )
-
-      return matchingReference
-        ? [{ note, qualifiers: matchingReference.qualifiers }]
-        : []
-    })
-  }, [selectedNoteId, notes])
-  const tagFacets = useMemo(() => createTagFacets(notes), [notes])
   const selectedSourceMembership = useMemo(
     () =>
       currentCampaignMemberships.find(
@@ -979,34 +428,6 @@ function App() {
       membershipConsolidationDraft.targetMembershipId &&
     (!membershipConsolidationPreview.requiresRoleMismatchConfirmation ||
       membershipConsolidationDraft.confirmRoleMismatch)
-  const filteredNotes = useMemo(() => {
-    let entries = noteSearchEntries
-
-    if (selectedTagFilter) {
-      entries = entries.filter(({ note }) => note.tags.includes(selectedTagFilter))
-    }
-
-    const normalizedSearchText = deferredSearchText.trim().toLowerCase()
-
-    if (normalizedSearchText) {
-      entries = entries.filter(({ searchText }) =>
-        searchText.includes(normalizedSearchText),
-      )
-    }
-
-    return entries.map(({ note }) => note)
-  }, [deferredSearchText, noteSearchEntries, selectedTagFilter])
-  const displayedNotes = useMemo(
-    () =>
-      noteBrowseMode === 'sessions' && selectedSessionName
-        ? isSharedMode
-          ? sharedSessionNotes
-          : sessionNotes
-        : noteBrowseMode === 'notes'
-          ? filteredNotes
-          : notes,
-    [filteredNotes, isSharedMode, noteBrowseMode, notes, selectedSessionName, sessionNotes, sharedSessionNotes],
-  )
   const sortedActivityEntries = useMemo(
     () =>
       sortActivityEntries(
@@ -1110,95 +531,6 @@ function App() {
                 } tagged ${selectedTagFacet.tag} in ${resolvedCampaign?.name ?? 'this campaign'}.`
               : defaultNotesPaneDescription
 
-  const resetShareLinkInteractionState = useCallback(() => {
-    setShareLinkNotice(null)
-    setRevealedShareLinks({})
-    setShareLinkActionErrors({})
-    setRevealingShareLinkId(null)
-    setCopiedShareLinkId(null)
-  }, [])
-
-  const resetMembershipConsolidationState = useCallback(() => {
-    setMembershipConsolidationDraft(createMembershipConsolidationDraft())
-    setMembershipConsolidationPreview(null)
-    setMembershipConsolidationNotice(null)
-    setIsPreviewingMembershipConsolidation(false)
-    setIsApplyingMembershipConsolidation(false)
-  }, [])
-
-  const resetSessionBrowserState = useCallback(() => {
-    sessionAbortControllerRef.current?.abort()
-    setSelectedSessionName(null)
-    setSessionNotes([])
-    setIsLoadingSessionNotes(false)
-  }, [])
-
-  const resetActivityState = useCallback((preserveFilter = false) => {
-    activityAbortControllerRef.current?.abort()
-    setActivityEntries([])
-    setActivityCollaborators([])
-    setIsLoadingActivity(false)
-
-    if (!preserveFilter) {
-      setSelectedActivityMembershipId(null)
-    }
-  }, [])
-
-  const loadActivity = useCallback(
-    async (
-      sessionToken: string,
-      campaignId: string,
-      membershipId?: string | null,
-    ) => {
-      activityRequestIdRef.current += 1
-      const requestId = activityRequestIdRef.current
-
-      activityAbortControllerRef.current?.abort()
-      const abortController = new AbortController()
-      activityAbortControllerRef.current = abortController
-
-      setIsLoadingActivity(true)
-      setActivityEntries([])
-
-      try {
-        const response = await fetchNoteActivity(sessionToken, {
-          campaignId,
-          membershipId,
-          limit: recentActivityLimit,
-          signal: abortController.signal,
-        })
-
-        if (activityRequestIdRef.current !== requestId) {
-          return
-        }
-
-        setActivityCollaborators(response.collaborators)
-        setActivityEntries(response.activity)
-        setError(null)
-      } catch (loadError) {
-        if (
-          abortController.signal.aborted ||
-          activityRequestIdRef.current !== requestId
-        ) {
-          return
-        }
-
-        setActivityEntries([])
-        setActivityCollaborators([])
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : 'Could not load recent activity.',
-        )
-      } finally {
-        if (activityRequestIdRef.current === requestId) {
-          setIsLoadingActivity(false)
-        }
-      }
-    },
-    [],
-  )
-
   const clearSession = useCallback(() => {
     localStorage.removeItem(authTokenStorageKey)
     clearStoredKeycloakTokens()
@@ -1223,9 +555,9 @@ function App() {
     setSessionSummaries([])
     setQuickCaptureTitle('')
     setSelectedNoteId(null)
-    setDraft(createEmptyDraft())
+    setDraft(createEmptyDraftFn())
     setCampaignDraft(createCampaignDraft())
-    setShareLinkDraft(createShareLinkDraft())
+    setShareLinkDraft(createShareLinkDraftFn())
     setMembershipConsolidationDraft(createMembershipConsolidationDraft())
     setCampaignFormMode('closed')
     setSelectedCampaignTemplateId(blankCampaignTemplateId)
@@ -1245,103 +577,23 @@ function App() {
       campaignId: string,
       preferredNoteId?: string | null,
       suppressError = false,
-    ) => {
-      setIsLoadingWorkspace(true)
-
-      try {
-        const [nextOverview, notesResponse, sessionsResponse] = await Promise.all([
-          fetchOverview(sessionToken, campaignId),
-          fetchNotes(sessionToken, campaignId),
-          fetchSessions(sessionToken, campaignId),
-        ])
-        const nextSessionSummaries = sortSessionSummaries(sessionsResponse.sessions)
-        const currentSessionName = selectedSessionNameRef.current
-        const shouldRefreshSelectedSession =
-          currentSessionName !== null &&
-          nextSessionSummaries.some(
-            (sessionSummary) => sessionSummary.sessionName === currentSessionName,
-          )
-        const nextSessionNotes = shouldRefreshSelectedSession
-          ? (
-              await fetchSessionNotes(
-                sessionToken,
-                currentSessionName,
-                campaignId,
-              )
-            ).notes
-          : []
-
-        setSelectedCampaignId(campaignId)
+    ): Promise<boolean> => {
+      const ok = await loadWorkspaceFromHook(
+        sessionToken,
+        campaignId,
+        preferredNoteId,
+        suppressError,
+        (id) => setSelectedCampaignId(id),
+        (campaign) => setCampaignDraft(createCampaignDraft(campaign)),
+        (message) => setError(message),
+      )
+      if (ok) {
         localStorage.setItem(selectedCampaignStorageKey, campaignId)
-        setOverview(nextOverview)
-        setNotes(notesResponse.notes)
-        setSessionSummaries(nextSessionSummaries)
-        setSessionNotes(nextSessionNotes)
-        setSelectedSessionName(
-          shouldRefreshSelectedSession ? currentSessionName : null,
-        )
-        setCampaignDraft(createCampaignDraft(nextOverview.campaign))
-
-        const fallbackNoteId = notesResponse.notes[0]?.id ?? null
-        const currentSelection = selectedNoteIdRef.current
-        const currentBrowseMode = noteBrowseModeRef.current
-        const nextSelectedId =
-          preferredNoteId !== undefined
-            ? preferredNoteId
-            : currentSelection &&
-                notesResponse.notes.some((note) => note.id === currentSelection)
-              ? currentSelection
-              : fallbackNoteId
-
-        const activeNote =
-          nextSelectedId !== null
-            ? notesResponse.notes.find((note) => note.id === nextSelectedId) ?? null
-            : null
-        const nextDisplayedNotes =
-          currentBrowseMode === 'sessions' && shouldRefreshSelectedSession
-            ? nextSessionNotes
-            : notesResponse.notes
-        const sessionFallbackNote =
-          currentBrowseMode === 'sessions' && shouldRefreshSelectedSession
-            ? nextDisplayedNotes[0] ?? null
-            : null
-        const resolvedActiveNote =
-          activeNote &&
-          (currentBrowseMode !== 'sessions' ||
-            !shouldRefreshSelectedSession ||
-            nextDisplayedNotes.some((note) => note.id === activeNote.id))
-            ? activeNote
-            : sessionFallbackNote
-
-        if (resolvedActiveNote) {
-          setSelectedNoteId(resolvedActiveNote.id)
-          setIsCreating(false)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createDraftFromNote(resolvedActiveNote))
-        } else {
-          setSelectedNoteId(null)
-          setIsCreating(true)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createEmptyDraft())
-        }
-
         setError(null)
-        return true
-      } catch (loadError) {
-        if (!suppressError) {
-          setError(
-            loadError instanceof Error
-              ? loadError.message
-              : 'Could not load the campaign workspace.',
-          )
-        }
-
-        return false
-      } finally {
-        setIsLoadingWorkspace(false)
       }
+      return ok
     },
-    [],
+    [loadWorkspaceFromHook, setCampaignDraft, setSelectedCampaignId],
   )
 
   const loadSharedWorkspace = useCallback(
@@ -1349,61 +601,26 @@ function App() {
       activeGuestToken: string,
       preferredNoteId?: string | null,
       accessLevel?: CampaignShareLink['accessLevel'],
-    ) => {
-      setIsLoadingWorkspace(true)
-
-      try {
-        const [nextOverview, notesResponse] = await Promise.all([
-          fetchSharedOverview(shareToken as string, activeGuestToken),
-          fetchSharedNotes(shareToken as string, activeGuestToken),
-        ])
-
-        setOverview(nextOverview)
-        setSharedCampaign(nextOverview.campaign)
-        setSelectedCampaignId(nextOverview.campaign.id)
-        setCampaigns([nextOverview.campaign])
-        setNotes(notesResponse.notes)
-
-        const fallbackNoteId = notesResponse.notes[0]?.id ?? null
-        const currentSelection = selectedNoteIdRef.current
-        const nextSelectedId =
-          preferredNoteId !== undefined
-            ? preferredNoteId
-            : currentSelection && notesResponse.notes.some((note) => note.id === currentSelection)
-              ? currentSelection
-              : fallbackNoteId
-
-        const activeNote =
-          nextSelectedId !== null
-            ? notesResponse.notes.find((note) => note.id === nextSelectedId) ?? null
-            : null
-
-        if (activeNote) {
-          setSelectedNoteId(activeNote.id)
-          setIsCreating(false)
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createDraftFromNote(activeNote))
-        } else {
-          setSelectedNoteId(null)
-          setIsCreating((accessLevel ?? shareLink?.accessLevel) === 'editor')
-          setSelectedNoteTemplateId(blankNoteTemplateId)
-          setDraft(createEmptyDraft())
-        }
-
+    ): Promise<boolean> => {
+      const ok = await loadSharedWorkspaceFromHook(
+        shareToken as string,
+        activeGuestToken,
+        preferredNoteId,
+        accessLevel,
+        shareLink,
+        (campaign) => {
+          setSharedCampaign(campaign)
+          setSelectedCampaignId(campaign.id)
+          setCampaigns([campaign])
+        },
+        (message) => setError(message),
+      )
+      if (ok) {
         setError(null)
-        return true
-      } catch (loadError) {
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : 'Could not load the shared campaign workspace.',
-        )
-        return false
-      } finally {
-        setIsLoadingWorkspace(false)
       }
+      return ok
     },
-    [shareLink?.accessLevel, shareToken],
+    [loadSharedWorkspaceFromHook, setCampaigns, setSelectedCampaignId, shareLink, shareToken],
   )
 
   const loadCampaigns = useCallback(
@@ -1597,6 +814,9 @@ function App() {
 
   useEffect(() => {
     if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
+      // TODO(#250): move these resets to transition origins (clearSession, shared-mode entry,
+      // owner update path) to remove setState-in-effect pattern.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAdminAccounts([])
       setAdminOverview(null)
       setAdminError(null)
@@ -1690,7 +910,7 @@ function App() {
           setNotes([])
           setSelectedNoteId(null)
           setIsCreating(false)
-          setDraft(createEmptyDraft())
+          setDraft(createEmptyDraftFn())
           setAccountNotice(null)
         }
       } catch (sessionError) {
@@ -1772,46 +992,12 @@ function App() {
     selectedCampaignId,
   ])
 
-  const handleDraftChange = <Field extends keyof NoteDraft>(
-    field: Field,
-    value: NoteDraft[Field],
-  ) => {
-    setDraft((currentDraft) => ({
-      ...currentDraft,
-      [field]: value,
-    }))
-  }
-
-  const handleCampaignDraftChange = <Field extends keyof CampaignDraft>(
-    field: Field,
-    value: CampaignDraft[Field],
-  ) => {
-    setCampaignDraft((currentDraft) => ({
-      ...currentDraft,
-      [field]: value,
-    }))
-  }
-
-  const handleShareLinkDraftChange = <Field extends keyof ShareLinkDraft>(
-    field: Field,
-    value: ShareLinkDraft[Field],
-  ) => {
-    setShareLinkDraft((currentDraft) => ({
-      ...currentDraft,
-      [field]: value,
-    }))
-  }
-
   const handleSelectNote = (note: Note) => {
-    if (!showSplitNoteWorkspace) {
-      setNarrowWorkspacePanel('editor')
-    }
-
-    setSelectedNoteId(note.id)
-    setIsCreating(false)
-    setSelectedNoteTemplateId(blankNoteTemplateId)
-    setDraft(createDraftFromNote(note))
-    setError(null)
+    handleSelectNoteFromHook(
+      note,
+      !showSplitNoteWorkspace ? () => setNarrowWorkspacePanel('editor') : undefined,
+      () => setError(null),
+    )
   }
 
   const handleMembershipConsolidationDraftChange = <
@@ -1820,19 +1006,7 @@ function App() {
     field: Field,
     value: MembershipConsolidationDraft[Field],
   ) => {
-    setMembershipConsolidationDraft((currentDraft) => ({
-      ...currentDraft,
-      [field]: value,
-      ...(field === 'confirmRoleMismatch'
-        ? {}
-        : { confirmRoleMismatch: false }),
-    }))
-
-    if (field !== 'confirmRoleMismatch') {
-      setMembershipConsolidationPreview(null)
-      setMembershipConsolidationNotice(null)
-    }
-
+    handleMembershipConsolidationDraftChangeFromHook(field, value)
     setError(null)
   }
 
@@ -1991,75 +1165,30 @@ function App() {
       return
     }
 
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
-    setNarrowWorkspacePanel('editor')
-    resetSessionBrowserState()
     setSelectedTagFilter(null)
     setSearchText('')
-    setSelectedNoteId(null)
-    setIsCreating(true)
-    setSelectedNoteTemplateId(blankNoteTemplateId)
-    setDraft(createEmptyDraft())
-    setError(null)
+    resetSessionBrowserState()
+    handleStartNoteFromHook(
+      canEditWorkspace,
+      () => setNarrowWorkspacePanel('editor'),
+      () => setError(null),
+    )
   }
 
   const handleQuickCapture = async () => {
-    const trimmedTitle = quickCaptureTitle.trim()
-
-    if (isSharedMode) {
-      if (!guestToken || !trimmedTitle || !canEditWorkspace) {
-        return
-      }
-
-      setError(null)
-      setIsQuickCapturing(true)
-
-      try {
-        const createdNote = await createSharedNote(shareToken as string, guestToken, {
-          title: trimmedTitle,
-        })
-        setQuickCaptureTitle('')
-        await loadSharedWorkspace(guestToken, createdNote.id)
-        setNarrowWorkspacePanel('editor')
-      } catch (captureError) {
-        setError(
-          captureError instanceof Error ? captureError.message : 'Could not capture the note.',
-        )
-      } finally {
-        setIsQuickCapturing(false)
-      }
-
-      return
-    }
-
-    if (!authToken || !selectedCampaignId || !trimmedTitle) {
-      return
-    }
-
     setError(null)
-    setIsQuickCapturing(true)
-
-    try {
-      const createdNote = await createNote(authToken, {
-        title: trimmedTitle,
-        campaignId: selectedCampaignId,
-      })
-
-      setQuickCaptureTitle('')
-      setIsQuickCaptureOpen(false)
-      setNoteBrowseMode('notes')
-      resetSessionBrowserState()
-      await loadWorkspace(authToken, selectedCampaignId, createdNote.id)
-    } catch (captureError) {
-      setError(
-        captureError instanceof Error
-          ? captureError.message
-          : 'Could not capture the note.',
-      )
-    } finally {
-      setIsQuickCapturing(false)
-    }
+    await handleQuickCaptureFromHook(
+      isSharedMode,
+      shareToken,
+      guestToken,
+      selectedCampaignId,
+      authToken,
+      canEditWorkspace,
+      isSharedMode ? () => setNarrowWorkspacePanel('editor') : undefined,
+      (message) => setError(message),
+    )
   }
 
   const handleJoinSharedCampaign = async () => {
@@ -2175,286 +1304,70 @@ function App() {
   }
 
   const handleSelectNoteTemplate = (templateId: string) => {
-    setSelectedNoteTemplateId(templateId)
-    setError(null)
-
-    if (templateId === blankNoteTemplateId) {
-      setDraft(createEmptyDraft())
-      return
-    }
-
-    const template = getNoteStarterTemplate(templateId)
-
-    if (template.starterNote) {
-      setDraft(createDraftFromStarterNote(template.starterNote))
-    }
-  }
-
-  const handleDraftTagsChange = (nextTags: readonly string[]) => {
-    handleDraftChange('tagsText', createTagsText(nextTags))
-  }
-
-  const commitPendingTagInput = () => {
-    if (!tagInputValue.trim()) {
-      return
-    }
-
-    handleDraftTagsChange([...draftTags, tagInputValue])
+    handleSelectNoteTemplateFromHook(templateId, () => setError(null))
   }
 
   const handleSaveNote = async () => {
-    if (isSharedMode) {
-      if (!guestToken || !selectedCampaignId || !canEditWorkspace) {
-        return
-      }
-
-      setError(null)
-      setIsSaving(true)
-
-      try {
-        const payload = createNotePayload(draft, null)
-
-        if (isCreating || !selectedNoteId) {
-          const createdNote = await createSharedNote(shareToken as string, guestToken, payload)
-          await loadSharedWorkspace(guestToken, createdNote.id)
-        } else {
-          const updatedNote = await updateSharedNote(
-            shareToken as string,
-            guestToken,
-            selectedNoteId,
-            payload,
-          )
-          await loadSharedWorkspace(guestToken, updatedNote.id)
-        }
-      } catch (saveError) {
-        setError(
-          saveError instanceof Error ? saveError.message : 'Could not save the shared note.',
-        )
-      } finally {
-        setIsSaving(false)
-      }
-
-      return
-    }
-
-    if (!authToken || !selectedCampaignId) {
-      return
-    }
-
     setError(null)
-    setIsSaving(true)
-
-    try {
-      const payload = createNotePayload(draft, selectedCampaignId)
-
-      if (isCreating || !selectedNoteId) {
-        const createdNote = await createNote(authToken, payload)
-        await loadWorkspace(authToken, selectedCampaignId, createdNote.id)
-      } else {
-        const updatedNote = await updateNote(authToken, selectedNoteId, payload)
-        await loadWorkspace(authToken, selectedCampaignId, updatedNote.id)
-      }
-
-      if (noteBrowseModeRef.current === 'activity') {
-        await loadActivity(
-          authToken,
-          selectedCampaignId,
-          selectedActivityMembershipIdRef.current,
-        )
-      }
-    } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : 'Could not save the note.',
-      )
-    } finally {
-      setIsSaving(false)
-    }
+    await handleSaveNoteFromHook(
+      isSharedMode,
+      shareToken,
+      guestToken,
+      selectedCampaignId,
+      authToken,
+      canEditWorkspace,
+      undefined,
+      (message) => setError(message),
+    )
   }
 
   const handleDeleteNote = async () => {
-    if (isSharedMode) {
-      if (!guestToken || !selectedNoteId || !canEditWorkspace) {
-        return
-      }
-
-      setError(null)
-      setIsDeleting(true)
-
-      try {
-        await deleteSharedNote(shareToken as string, guestToken, selectedNoteId)
-        await loadSharedWorkspace(guestToken, null)
-        setNarrowWorkspacePanel('browse')
-      } catch (deleteError) {
-        setError(
-          deleteError instanceof Error
-            ? deleteError.message
-            : 'Could not delete the shared note.',
-        )
-      } finally {
-        setIsDeleting(false)
-      }
-
-      return
-    }
-
-    if (!authToken || !selectedCampaignId || !selectedNoteId) {
-      return
-    }
-
     setError(null)
-    setIsDeleting(true)
-
-    try {
-      await deleteNote(authToken, selectedNoteId)
-      await loadWorkspace(authToken, selectedCampaignId, null)
-
-      if (noteBrowseModeRef.current === 'activity') {
-        await loadActivity(
-          authToken,
-          selectedCampaignId,
-          selectedActivityMembershipIdRef.current,
-        )
-      }
-    } catch (deleteError) {
-      setError(
-        deleteError instanceof Error
-          ? deleteError.message
-          : 'Could not delete the note.',
-      )
-    } finally {
-      setIsDeleting(false)
-    }
+    await handleDeleteNoteFromHook(
+      isSharedMode,
+      shareToken,
+      guestToken,
+      selectedCampaignId,
+      authToken,
+      canEditWorkspace,
+      isSharedMode ? () => setNarrowWorkspacePanel('browse') : undefined,
+      (message) => setError(message),
+    )
   }
-
-  const completeAuthentication = useCallback(
-    async (token: string, nextOwner: OwnerAccount) => {
-      localStorage.setItem(authTokenStorageKey, token)
-      setAuthToken(token)
-      setOwner(nextOwner)
-      await loadCampaigns(token)
-    },
-    [loadCampaigns],
-  )
 
   const handleSubmitAuth = async () => {
     setError(null)
-    setIsSubmittingAuth(true)
-
-    try {
-      if (isKeycloakAuthConfig(authConfig)) {
-        const keycloakClient = keycloakClientRef.current
-
-        if (!keycloakClient) {
-          throw new Error(missingKeycloakClientErrorMessage)
-        }
-
-        await keycloakClient.login(window.location.href)
-        return
-      }
-
-      if (isRegisterMode) {
-        const session = await registerOwner(registerDraft)
-        await completeAuthentication(session.token, session.owner)
-      } else {
-        const session = await loginOwner(loginDraft)
-        await completeAuthentication(session.token, session.owner)
-      }
-    } catch (authError) {
-      setError(
-        authError instanceof Error
-          ? authError.message
-          : 'Could not complete owner authentication.',
-      )
-    } finally {
-      setIsSubmittingAuth(false)
-      setIsAuthReady(true)
-    }
+    await handleSubmitAuthFromHook(loadCampaigns, setError)
   }
 
   const handleLogout = async () => {
-    const keycloakClient = keycloakClientRef.current
-
-    if (isKeycloakAuthConfig(authConfig) && keycloakClient) {
-      clearSession()
-      setShowSplitNoteWorkspace(false)
-      setIsQuickCaptureOpen(false)
-      setError(null)
-      await keycloakClient.logout(`${window.location.origin}/`)
-      return
-    }
-
-    if (isSharedMode) {
-      const storedAuthToken = localStorage.getItem(authTokenStorageKey)
-
-      if (storedAuthToken) {
-        try {
-          await logoutOwner(storedAuthToken)
-        } catch {
-          // Intentionally ignore logout failures because local sign-out should still work.
-        }
-      }
-
-      localStorage.removeItem(authTokenStorageKey)
-      localStorage.removeItem(selectedCampaignStorageKey)
-      if (guestStorageKey) {
-        localStorage.removeItem(guestStorageKey)
-      }
-      window.location.assign('/')
-      return
-    }
-
-    if (authToken) {
-      try {
-        await logoutOwner(authToken)
-      } catch {
-        // Intentionally ignore logout failures because local sign-out should still work.
-      }
-    }
-
-    clearSession()
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setIsQuickCaptureOpen(false)
     setError(null)
-    setIsRegisterMode(false)
+    await handleLogoutFromHook(isSharedMode, guestStorageKey, () => {
+      clearSession()
+    })
   }
 
   const handleOpenCampaignCreate = () => {
-    setCampaignDraft(createCampaignDraft())
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setMemberships([])
     setShareLinks([])
-    setShareLinkDraft(createShareLinkDraft())
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-    setCampaignFormMode('create')
-    setError(null)
+    setShareLinkDraft(createShareLinkDraftFn())
+    handleOpenCampaignCreateFromHook(selectedCampaign, resetShareLinkInteractionState, setError)
   }
 
   const handleOpenCampaignSettings = () => {
-    if (!canManageSelectedCampaign) {
-      setError('Campaign settings are only available to campaign owners.')
-      return
-    }
-
-    setCampaignDraft(createCampaignDraft(selectedCampaign))
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setShareLinkDraft(createShareLinkDraft())
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-    setCampaignFormMode('edit')
-    setError(null)
+    setShareLinkDraft(createShareLinkDraftFn())
+    handleOpenCampaignSettingsFromHook(
+      selectedCampaign,
+      canManageSelectedCampaign,
+      resetShareLinkInteractionState,
+      setError,
+    )
   }
 
   const handleCancelCampaignForm = () => {
-    setCampaignDraft(createCampaignDraft(selectedCampaign))
-    setCampaignFormMode(campaigns.length === 0 ? 'create' : 'closed')
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setShareLinkDraft(createShareLinkDraft())
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-    setError(null)
+    setShareLinkDraft(createShareLinkDraftFn())
+    handleCancelCampaignFormFromHook(selectedCampaign, resetShareLinkInteractionState, setError)
   }
 
   const handleSaveCampaign = async () => {
@@ -2462,55 +1375,7 @@ function App() {
       return
     }
 
-    setError(null)
-    setIsSavingCampaign(true)
-
-    try {
-      const payload = createCampaignPayload(campaignDraft)
-      let starterTemplateError: string | null = null
-
-      if (campaignFormMode === 'create') {
-        const createdCampaign = await createCampaign(authToken, payload)
-
-        if (selectedCampaignTemplateId !== blankCampaignTemplateId) {
-          try {
-            for (const starterNote of selectedCampaignTemplate.starterNotes) {
-              await createNote(
-                authToken,
-                createStarterNoteInput(starterNote, createdCampaign.id),
-              )
-            }
-          } catch {
-            starterTemplateError =
-              'Campaign created, but the starter notes could not be added. You can still add notes manually.'
-          }
-        }
-
-        await loadCampaigns(authToken, createdCampaign.id)
-      } else if (campaignFormMode === 'edit' && selectedCampaignId) {
-        const updatedCampaign = await updateCampaign(
-          authToken,
-          selectedCampaignId,
-          payload,
-        )
-        await loadCampaigns(authToken, updatedCampaign.id)
-      }
-
-      setCampaignFormMode('closed')
-      setSelectedCampaignTemplateId(blankCampaignTemplateId)
-
-      if (starterTemplateError) {
-        setError(starterTemplateError)
-      }
-    } catch (campaignError) {
-      setError(
-        campaignError instanceof Error
-          ? campaignError.message
-          : 'Could not save the campaign.',
-      )
-    } finally {
-      setIsSavingCampaign(false)
-    }
+    await handleSaveCampaignFromHook(authToken, loadCampaigns, setError)
   }
 
   const handleCreateShareLink = async () => {
@@ -2519,125 +1384,29 @@ function App() {
     }
 
     setError(null)
-    setIsCreatingShareLink(true)
-
-    try {
-      const created = await createCampaignShareLink(
-        authToken,
-        selectedCampaignId,
-        createShareLinkPayload(shareLinkDraft),
-      )
-
-      setShareLinks((currentLinks) => [created.shareLink, ...currentLinks])
-      setShareLinkDraft(createShareLinkDraft())
-      resetShareLinkInteractionState()
-      setShareLinkNotice(
-        'Shared link created. Reveal it on the card when you need to copy it again.',
-      )
-    } catch (shareLinkError) {
-      setError(
-        shareLinkError instanceof Error
-          ? shareLinkError.message
-          : 'Could not create the share link.',
-      )
-    } finally {
-      setIsCreatingShareLink(false)
-    }
+    await handleCreateShareLinkFromHook(authToken, selectedCampaignId, setError)
   }
 
   const handlePreviewMembershipConsolidation = async () => {
-    if (
-      !authToken ||
-      !selectedCampaignId ||
-      !membershipConsolidationDraft.sourceMembershipId ||
-      !membershipConsolidationDraft.targetMembershipId ||
-      membershipConsolidationDraft.sourceMembershipId ===
-        membershipConsolidationDraft.targetMembershipId
-    ) {
+    if (!authToken || !selectedCampaignId) {
       return
     }
 
-    setError(null)
-    setMembershipConsolidationNotice(null)
-    setIsPreviewingMembershipConsolidation(true)
-
-    try {
-      const response = await consolidateCampaignMemberships(authToken, selectedCampaignId, {
-        sourceMembershipId: membershipConsolidationDraft.sourceMembershipId,
-        targetMembershipId: membershipConsolidationDraft.targetMembershipId,
-      })
-
-      setMembershipConsolidationPreview(response.consolidation)
-    } catch (consolidationError) {
-      setError(
-        consolidationError instanceof Error
-          ? consolidationError.message
-          : 'Could not preview the consolidation.',
-      )
-    } finally {
-      setIsPreviewingMembershipConsolidation(false)
-    }
+    await handlePreviewMembershipConsolidationFromHook(authToken, selectedCampaignId, setError)
   }
 
   const handleApplyMembershipConsolidation = async () => {
-    if (
-      !authToken ||
-      !selectedCampaignId ||
-      !membershipConsolidationPreview ||
-      membershipConsolidationPreview.applied
-    ) {
+    if (!authToken || !selectedCampaignId) {
       return
     }
 
-    setError(null)
-    setMembershipConsolidationNotice(null)
-    setIsApplyingMembershipConsolidation(true)
-
-    let response: Awaited<
-      ReturnType<typeof consolidateCampaignMemberships>
-    >
-
-    try {
-      response = await consolidateCampaignMemberships(authToken, selectedCampaignId, {
-        sourceMembershipId: membershipConsolidationDraft.sourceMembershipId,
-        targetMembershipId: membershipConsolidationDraft.targetMembershipId,
-        confirm: true,
-        confirmRoleMismatch: membershipConsolidationDraft.confirmRoleMismatch,
-      })
-
-      setMembershipConsolidationPreview(response.consolidation)
-      setMembershipConsolidationNotice(
-        `Moved note attribution from ${response.consolidation.sourceMembership.displayName} to ${response.consolidation.targetMembership.displayName}.`,
-      )
-    } catch (consolidationError) {
-      setError(
-        consolidationError instanceof Error
-          ? consolidationError.message
-          : 'Could not apply the consolidation.',
-      )
-      setIsApplyingMembershipConsolidation(false)
-      return
-    }
-
-    setMembershipConsolidationPreview(response.consolidation)
-    setMembershipConsolidationNotice(
-      `Moved note attribution from ${response.consolidation.sourceMembership.displayName} to ${response.consolidation.targetMembership.displayName}.`,
-    )
-
-    const refreshed = await loadWorkspace(
+    await handleApplyMembershipConsolidationFromHook(
       authToken,
       selectedCampaignId,
+      loadWorkspace,
       selectedNoteIdRef.current,
-      true,
+      setError,
     )
-
-    if (!refreshed) {
-      setError(
-        'Consolidation succeeded, but the workspace could not refresh. Reload the page to see the latest note attribution.',
-      )
-    }
-
-    setIsApplyingMembershipConsolidation(false)
   }
 
   const handleRevealShareLink = async (shareLinkId: string) => {
@@ -2646,87 +1415,12 @@ function App() {
     }
 
     setError(null)
-    setShareLinkNotice(null)
-    setCopiedShareLinkId((currentId) =>
-      currentId === shareLinkId ? null : currentId,
-    )
-    setShareLinkActionErrors((currentErrors) =>
-      deleteRecordKey(currentErrors, shareLinkId),
-    )
-    setRevealingShareLinkId(shareLinkId)
-
-    try {
-      const revealed = await revealCampaignShareLink(
-        authToken,
-        selectedCampaignId,
-        shareLinkId,
-      )
-
-      setRevealedShareLinks((currentLinks) => ({
-        ...currentLinks,
-        [shareLinkId]: {
-          url: revealed.url,
-          isVisible: false,
-        },
-      }))
-    } catch (shareLinkError) {
-      setShareLinkActionErrors((currentErrors) => ({
-        ...currentErrors,
-        [shareLinkId]:
-          shareLinkError instanceof Error
-            ? shareLinkError.message
-            : 'Could not reveal the shared link.',
-      }))
-    } finally {
-      setRevealingShareLinkId((currentId) =>
-        currentId === shareLinkId ? null : currentId,
-      )
-    }
-  }
-
-  const handleToggleShareLinkVisibility = (shareLinkId: string) => {
-    setRevealedShareLinks((currentLinks) => {
-      const revealedShareLink = currentLinks[shareLinkId]
-
-      if (!revealedShareLink) {
-        return currentLinks
-      }
-
-      return {
-        ...currentLinks,
-        [shareLinkId]: {
-          ...revealedShareLink,
-          isVisible: !revealedShareLink.isVisible,
-        },
-      }
-    })
+    await handleRevealShareLinkFromHook(shareLinkId, authToken, selectedCampaignId)
   }
 
   const handleCopyShareLink = async (shareLinkId: string) => {
-    const revealedShareLink = revealedShareLinks[shareLinkId]
-
-    if (!revealedShareLink) {
-      return
-    }
-
     setError(null)
-    setShareLinkNotice(null)
-
-    try {
-      await copyTextToClipboard(revealedShareLink.url)
-      setShareLinkActionErrors((currentErrors) =>
-        deleteRecordKey(currentErrors, shareLinkId),
-      )
-      setCopiedShareLinkId(shareLinkId)
-    } catch (shareLinkError) {
-      setShareLinkActionErrors((currentErrors) => ({
-        ...currentErrors,
-        [shareLinkId]:
-          shareLinkError instanceof Error
-            ? shareLinkError.message
-            : 'Could not copy the shared link.',
-      }))
-    }
+    await handleCopyShareLinkFromHook(shareLinkId, setError)
   }
 
   const handleRevokeShareLink = async (shareLinkId: string) => {
@@ -2735,29 +1429,7 @@ function App() {
     }
 
     setError(null)
-
-    try {
-      await revokeCampaignShareLink(authToken, selectedCampaignId, shareLinkId)
-      setShareLinks((currentLinks) =>
-        currentLinks.filter((shareLink) => shareLink.id !== shareLinkId),
-      )
-      setRevealedShareLinks((currentLinks) =>
-        deleteRecordKey(currentLinks, shareLinkId),
-      )
-      setShareLinkActionErrors((currentErrors) =>
-        deleteRecordKey(currentErrors, shareLinkId),
-      )
-      setCopiedShareLinkId((currentId) =>
-        currentId === shareLinkId ? null : currentId,
-      )
-      setShareLinkNotice(null)
-    } catch (shareLinkError) {
-      setError(
-        shareLinkError instanceof Error
-          ? shareLinkError.message
-          : 'Could not revoke the share link.',
-      )
-    }
+    await handleRevokeShareLinkFromHook(shareLinkId, authToken, selectedCampaignId, setError)
   }
 
   const handleSelectCampaign = async (campaignId: string) => {
@@ -2766,7 +1438,7 @@ function App() {
     }
 
     setCampaignFormMode('closed')
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
@@ -2779,12 +1451,12 @@ function App() {
   }
 
   const handleShowBrowsePane = () => {
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNarrowWorkspacePanel('browse')
   }
 
   const handleShowEditorPane = () => {
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNarrowWorkspacePanel('editor')
   }
 
@@ -2793,7 +1465,7 @@ function App() {
       return
     }
 
-    setShowSplitNoteWorkspace((currentValue) => {
+    setWantsSplitNoteWorkspace((currentValue) => {
       if (currentValue) {
         setNarrowWorkspacePanel(selectedNoteIdRef.current || isCreating ? 'editor' : 'browse')
       }
