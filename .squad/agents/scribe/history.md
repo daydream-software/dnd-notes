@@ -12,7 +12,7 @@ Scribe initialized 2026-04-11 as team's memory and decision merger. Historical w
 
 ## Recent Updates
 
-
+- **2026-05-13:** Scribe boundary clarified in PR #243. Coordinator never writes session logs or `.squad/` commits inline; always spawn scribe agent. Pre-commit hook added to `.husky/pre-commit` using `git check-ignore --no-index` to refuse staged-A files matching `.gitignore`. Critical flag: `--no-index` prevents false negatives on tracked files.
 
 ## Learnings
 
