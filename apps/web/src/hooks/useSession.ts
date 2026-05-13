@@ -129,10 +129,10 @@ export function useSession(): UseSessionResult {
       nextOwner: OwnerAccount,
       onCampaignsReady: (token: string) => Promise<void>,
     ): Promise<void> => {
+      await onCampaignsReady(token)
       localStorage.setItem(authTokenStorageKey, token)
       setAuthToken(token)
       setOwner(nextOwner)
-      await onCampaignsReady(token)
     },
     [],
   )
