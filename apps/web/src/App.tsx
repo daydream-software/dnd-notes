@@ -549,6 +549,7 @@ function App() {
     setAdminAccounts([])
     setAdminOverview(null)
     setAdminError(null)
+    setIsLoadingAdminOverview(false)
     setNotes([])
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('browse')
@@ -577,7 +578,7 @@ function App() {
       campaignId: string,
       preferredNoteId?: string | null,
       suppressError = false,
-    ): Promise<boolean> => {
+    ): Promise<boolean | 'stale'> => {
       const ok = await loadWorkspaceFromHook(
         sessionToken,
         campaignId,
@@ -587,7 +588,7 @@ function App() {
         (campaign) => setCampaignDraft(createCampaignDraft(campaign)),
         (message) => setError(message),
       )
-      if (ok) {
+      if (ok === true) {
         localStorage.setItem(selectedCampaignStorageKey, campaignId)
         setError(null)
       }
@@ -601,7 +602,7 @@ function App() {
       activeGuestToken: string,
       preferredNoteId?: string | null,
       accessLevel?: CampaignShareLink['accessLevel'],
-    ): Promise<boolean> => {
+    ): Promise<boolean | 'stale'> => {
       const ok = await loadSharedWorkspaceFromHook(
         shareToken as string,
         activeGuestToken,
@@ -615,7 +616,7 @@ function App() {
         },
         (message) => setError(message),
       )
-      if (ok) {
+      if (ok === true) {
         setError(null)
       }
       return ok
@@ -814,13 +815,6 @@ function App() {
 
   useEffect(() => {
     if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
-      // TODO(#250): move these resets to transition origins (clearSession, shared-mode entry,
-      // owner update path) to remove setState-in-effect pattern.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAdminAccounts([])
-      setAdminOverview(null)
-      setAdminError(null)
-      setIsLoadingAdminOverview(false)
       return
     }
 

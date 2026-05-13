@@ -158,7 +158,7 @@ export interface UseCampaignResult {
   handleApplyMembershipConsolidation: (
     authToken: string,
     selectedCampaignId: string,
-    onLoadWorkspace: (token: string, campaignId: string, preferredNoteId: string | null, suppressError?: boolean) => Promise<boolean>,
+    onLoadWorkspace: (token: string, campaignId: string, preferredNoteId: string | null, suppressError?: boolean) => Promise<boolean | 'stale'>,
     selectedNoteId: string | null,
     onError: (message: string | null) => void,
   ) => Promise<void>
@@ -381,7 +381,7 @@ export function useCampaign(): UseCampaignResult {
     async (
       authToken: string,
       campaignId: string,
-      onLoadWorkspace: (token: string, campaignId: string, preferredNoteId: string | null, suppressError?: boolean) => Promise<boolean>,
+      onLoadWorkspace: (token: string, campaignId: string, preferredNoteId: string | null, suppressError?: boolean) => Promise<boolean | 'stale'>,
       selectedNoteId: string | null,
       onError: (message: string | null) => void,
     ): Promise<void> => {
@@ -419,7 +419,9 @@ export function useCampaign(): UseCampaignResult {
 
       const refreshed = await onLoadWorkspace(authToken, campaignId, selectedNoteId, true)
 
-      if (!refreshed) {
+      if (refreshed === 'stale') {
+        // a newer load is in flight; stay silent, it will resolve the UI
+      } else if (refreshed === false) {
         onError(
           'Consolidation succeeded, but the workspace could not refresh. Reload the page to see the latest note attribution.',
         )

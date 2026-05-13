@@ -344,6 +344,7 @@ export interface UseNotesResult {
   noteBrowseModeRef: React.RefObject<NoteBrowseMode>
   selectedSessionNameRef: React.RefObject<string | null>
   selectedActivityMembershipIdRef: React.RefObject<string | null>
+  workspaceRequestIdRef: React.RefObject<number>
   activityRequestIdRef: React.RefObject<number>
   sessionRequestIdRef: React.RefObject<number>
   activityAbortControllerRef: React.RefObject<AbortController | null>
@@ -390,7 +391,7 @@ export interface UseNotesResult {
     onSetCampaignId?: (id: string) => void,
     onSetCampaignDraft?: (campaign: import('../types').CampaignSummary) => void,
     onError?: (message: string) => void,
-  ) => Promise<boolean>
+  ) => Promise<boolean | 'stale'>
   loadSharedWorkspace: (
     shareToken: string,
     activeGuestToken: string,
@@ -399,7 +400,7 @@ export interface UseNotesResult {
     shareLink?: import('../types').CampaignShareLink | null,
     onSetCampaigns?: (campaign: import('../types').CampaignSummary) => void,
     onError?: (message: string) => void,
-  ) => Promise<boolean>
+  ) => Promise<boolean | 'stale'>
   handleDraftChange: <Field extends keyof NoteDraft>(field: Field, value: NoteDraft[Field]) => void
   handleDraftTagsChange: (nextTags: readonly string[]) => void
   commitPendingTagInput: () => void
@@ -471,6 +472,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
   const selectedNoteIdRef = useRef<string | null>(null)
   const selectedSessionNameRef = useRef<string | null>(null)
   const selectedActivityMembershipIdRef = useRef<string | null>(null)
+  const workspaceRequestIdRef = useRef(0)
   const activityRequestIdRef = useRef(0)
   const sessionRequestIdRef = useRef(0)
   const activityAbortControllerRef = useRef<AbortController | null>(null)
@@ -739,7 +741,10 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       onSetCampaignId?: (id: string) => void,
       onSetCampaignDraft?: (campaign: import('../types').CampaignSummary) => void,
       onError?: (message: string) => void,
-    ): Promise<boolean> => {
+    ): Promise<boolean | 'stale'> => {
+      workspaceRequestIdRef.current += 1
+      const requestId = workspaceRequestIdRef.current
+
       setIsLoadingWorkspace(true)
 
       try {
@@ -748,6 +753,11 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
           fetchNotes(sessionToken, campaignId),
           fetchSessions(sessionToken, campaignId),
         ])
+
+        if (workspaceRequestIdRef.current !== requestId) {
+          return 'stale'
+        }
+
         const nextSessionSummaries = sortSessionSummaries(sessionsResponse.sessions)
         const currentSessionName = selectedSessionNameRef.current
         const shouldRefreshSelectedSession =
@@ -764,6 +774,10 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
               )
             ).notes
           : []
+
+        if (workspaceRequestIdRef.current !== requestId) {
+          return 'stale'
+        }
 
         onSetCampaignId?.(campaignId)
         onSetCampaignDraft?.(nextOverview.campaign)
@@ -822,6 +836,10 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
         return true
       } catch (loadError) {
+        if (workspaceRequestIdRef.current !== requestId) {
+          return 'stale'
+        }
+
         if (!suppressError) {
           onError?.(
             loadError instanceof Error
@@ -832,7 +850,9 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
         return false
       } finally {
-        setIsLoadingWorkspace(false)
+        if (workspaceRequestIdRef.current === requestId) {
+          setIsLoadingWorkspace(false)
+        }
       }
     },
     [],
@@ -847,7 +867,10 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       shareLink?: import('../types').CampaignShareLink | null,
       onSetCampaigns?: (campaign: import('../types').CampaignSummary) => void,
       onError?: (message: string) => void,
-    ): Promise<boolean> => {
+    ): Promise<boolean | 'stale'> => {
+      workspaceRequestIdRef.current += 1
+      const requestId = workspaceRequestIdRef.current
+
       setIsLoadingWorkspace(true)
 
       try {
@@ -855,6 +878,10 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
           fetchSharedOverview(shareToken, activeGuestToken),
           fetchSharedNotes(shareToken, activeGuestToken),
         ])
+
+        if (workspaceRequestIdRef.current !== requestId) {
+          return 'stale'
+        }
 
         setOverview(nextOverview)
         onSetCampaigns?.(nextOverview.campaign)
@@ -890,6 +917,10 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
         return true
       } catch (loadError) {
+        if (workspaceRequestIdRef.current !== requestId) {
+          return 'stale'
+        }
+
         onError?.(
           loadError instanceof Error
             ? loadError.message
@@ -897,7 +928,9 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         )
         return false
       } finally {
-        setIsLoadingWorkspace(false)
+        if (workspaceRequestIdRef.current === requestId) {
+          setIsLoadingWorkspace(false)
+        }
       }
     },
     [],
@@ -1019,7 +1052,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
           if (isCreating || !selectedNoteId) {
             const createdNote = await createSharedNote(shareToken as string, guestToken, payload)
-            await loadSharedWorkspace(
+            const refreshOk = await loadSharedWorkspace(
               shareToken as string,
               guestToken,
               createdNote.id,
@@ -1028,6 +1061,14 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
               undefined,
               onError,
             )
+            if (refreshOk === 'stale') {
+              // a newer load is in flight; stay silent, it will resolve the UI
+              return
+            }
+            if (refreshOk === false) {
+              // loader already called onError with the actual error; do not double-toast
+              return
+            }
           } else {
             const updatedNote = await updateSharedNote(
               shareToken as string,
@@ -1035,7 +1076,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
               selectedNoteId,
               payload,
             )
-            await loadSharedWorkspace(
+            const refreshOk = await loadSharedWorkspace(
               shareToken as string,
               guestToken,
               updatedNote.id,
@@ -1044,6 +1085,14 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
               undefined,
               onError,
             )
+            if (refreshOk === 'stale') {
+              // a newer load is in flight; stay silent, it will resolve the UI
+              return
+            }
+            if (refreshOk === false) {
+              // loader already called onError with the actual error; do not double-toast
+              return
+            }
           }
 
           onNarrowPanel?.()
@@ -1069,10 +1118,26 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
         if (isCreating || !selectedNoteId) {
           const createdNote = await createNote(authToken, payload)
-          await loadWorkspace(authToken, selectedCampaignId, createdNote.id, false, undefined, undefined, onError)
+          const refreshOk = await loadWorkspace(authToken, selectedCampaignId, createdNote.id, false, undefined, undefined, onError)
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
+            return
+          }
         } else {
           const updatedNote = await updateNote(authToken, selectedNoteId, payload)
-          await loadWorkspace(authToken, selectedCampaignId, updatedNote.id, false, undefined, undefined, onError)
+          const refreshOk = await loadWorkspace(authToken, selectedCampaignId, updatedNote.id, false, undefined, undefined, onError)
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
+            return
+          }
         }
 
         if (noteBrowseModeRef.current === 'activity') {
@@ -1111,7 +1176,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
         try {
           await deleteSharedNote(shareToken as string, guestToken, selectedNoteId)
-          await loadSharedWorkspace(
+          const refreshOk = await loadSharedWorkspace(
             shareToken as string,
             guestToken,
             null,
@@ -1120,6 +1185,14 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
             undefined,
             onError,
           )
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
+            return
+          }
           onNarrowPanel?.()
         } catch (deleteError) {
           onError?.(
@@ -1142,7 +1215,15 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
       try {
         await deleteNote(authToken, selectedNoteId)
-        await loadWorkspace(authToken, selectedCampaignId, null, false, undefined, undefined, onError)
+        const refreshOk = await loadWorkspace(authToken, selectedCampaignId, null, false, undefined, undefined, onError)
+        if (refreshOk === 'stale') {
+          // a newer load is in flight; stay silent, it will resolve the UI
+          return
+        }
+        if (refreshOk === false) {
+          // loader already called onError with the actual error; do not double-toast
+          return
+        }
 
         if (noteBrowseModeRef.current === 'activity') {
           await loadActivity(authToken, selectedCampaignId, selectedActivityMembershipIdRef.current, onError)
@@ -1185,7 +1266,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
             title: trimmedTitle,
           })
           setQuickCaptureTitle('')
-          await loadSharedWorkspace(
+          const refreshOk = await loadSharedWorkspace(
             shareToken as string,
             guestToken,
             createdNote.id,
@@ -1194,6 +1275,14 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
             undefined,
             onError,
           )
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
+            return
+          }
           onNarrowPanel?.()
         } catch (captureError) {
           onError?.(
@@ -1222,7 +1311,15 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         setIsQuickCaptureOpen(false)
         setNoteBrowseMode('notes')
         resetSessionBrowserState()
-        await loadWorkspace(authToken, selectedCampaignId, createdNote.id, false, undefined, undefined, onError)
+        const refreshOk = await loadWorkspace(authToken, selectedCampaignId, createdNote.id, false, undefined, undefined, onError)
+        if (refreshOk === 'stale') {
+          // a newer load is in flight; stay silent, it will resolve the UI
+          return
+        }
+        if (refreshOk === false) {
+          // loader already called onError with the actual error; do not double-toast
+          return
+        }
       } catch (captureError) {
         onError?.(
           captureError instanceof Error
@@ -1279,6 +1376,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     noteBrowseModeRef,
     selectedSessionNameRef,
     selectedActivityMembershipIdRef,
+    workspaceRequestIdRef,
     activityRequestIdRef,
     sessionRequestIdRef,
     activityAbortControllerRef,
