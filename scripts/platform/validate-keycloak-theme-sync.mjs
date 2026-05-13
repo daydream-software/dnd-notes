@@ -89,7 +89,7 @@ function findPrefixedKeys(text) {
 
 const TEXT_KEYS = [
   // [configmap-key, relative-path-under-operator-login/]
-  ['op-theme.properties',         'theme.properties'],
+  ['op-theme.properties',         'login/theme.properties'],
   ['op-template.ftl',             'login/template.ftl'],
   ['op-login.ftl',                'login/login.ftl'],
   ['op-login-reset-password.ftl', 'login/login-reset-password.ftl'],
@@ -98,7 +98,7 @@ const TEXT_KEYS = [
   ['op-daydream-mark.svg',        'login/resources/img/daydream-mark.svg'],
   ['op-messages_en.properties',   'login/messages/messages_en.properties'],
   // [configmap-key, relative-path-under-customer-login/]
-  ['cu-theme.properties',         'theme.properties'],
+  ['cu-theme.properties',         'login/theme.properties'],
   ['cu-template.ftl',             'login/template.ftl'],
   ['cu-login.ftl',                'login/login.ftl'],
   ['cu-login-reset-password.ftl', 'login/login-reset-password.ftl'],

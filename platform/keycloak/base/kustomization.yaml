@@ -24,7 +24,7 @@ configMapGenerator:
       annotations:
         dnd-notes.dev/purpose: Keycloak login theme text files — operator-login, customer-login, and account-console
     files:
-      - op-theme.properties=themes/operator-login/theme.properties
+      - op-theme.properties=themes/operator-login/login/theme.properties
       - op-messages_en.properties=themes/operator-login/login/messages/messages_en.properties
       - op-template.ftl=themes/operator-login/login/template.ftl
       - op-login.ftl=themes/operator-login/login/login.ftl
@@ -32,7 +32,7 @@ configMapGenerator:
       - op-login-otp.ftl=themes/operator-login/login/login-otp.ftl
       - op-login.css=themes/operator-login/login/resources/css/login.css
       - op-daydream-mark.svg=themes/operator-login/login/resources/img/daydream-mark.svg
-      - cu-theme.properties=themes/customer-login/theme.properties
+      - cu-theme.properties=themes/customer-login/login/theme.properties
       - cu-messages_en.properties=themes/customer-login/login/messages/messages_en.properties
       - cu-template.ftl=themes/customer-login/login/template.ftl
       - cu-login.ftl=themes/customer-login/login/login.ftl
