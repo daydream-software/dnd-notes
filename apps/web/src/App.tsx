@@ -74,8 +74,6 @@ import {
 import {
   createRuntimeKeycloakClient,
   isKeycloakAuthConfig,
-  type RuntimeKeycloakClient,
-  type StoredKeycloakTokens,
 } from './keycloak-client'
 import {
   blankCampaignTemplateId,
@@ -97,7 +95,6 @@ import { extractInlineNoteReferences } from './note-references'
 import type {
   ActivityCollaborator,
   AdminAccountSummary,
-  AuthConfigResponse,
   AdminOverview,
   CampaignInput,
   CampaignMembership,
@@ -120,6 +117,15 @@ import WorkspacePane from './WorkspacePane'
 import NoteEditorActions from './NoteEditorActions'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
 import { useShareLinks, createShareLinkDraft as createShareLinkDraftFn } from './hooks/useShareLinks'
+import {
+  useSession,
+  authTokenStorageKey,
+  keycloakTokensStorageKey,
+  missingKeycloakClientErrorMessage,
+  readStoredKeycloakTokens,
+  persistKeycloakTokens,
+  clearStoredKeycloakTokens,
+} from './hooks/useSession'
 
 interface NoteDraft {
   title: string
@@ -136,17 +142,6 @@ interface CampaignDraft {
   system: string
   setting: string
   nextSession: string
-}
-
-interface OwnerRegistrationDraft {
-  displayName: string
-  email: string
-  password: string
-}
-
-interface OwnerLoginDraft {
-  email: string
-  password: string
 }
 
 interface MembershipConsolidationDraft {
@@ -174,11 +169,7 @@ type CampaignFormMode = 'closed' | 'create' | 'edit'
 type NoteBrowseMode = 'notes' | 'sessions' | 'activity'
 type NarrowWorkspacePanel = 'browse' | 'editor'
 
-const authTokenStorageKey = 'dnd-notes:owner-auth-token'
-const keycloakTokensStorageKey = 'dnd-notes:keycloak-auth-tokens'
 const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
-const missingKeycloakClientErrorMessage =
-  'Sign-in is not ready yet. Reload and try again.'
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
 const recentActivityLimit = 20
 const defaultNotesPaneDescription =
@@ -187,42 +178,6 @@ const defaultNotesPaneDescription =
 function getShareTokenFromPath(pathname: string) {
   const match = pathname.match(/^\/share\/([^/]+)\/?$/)
   return match ? decodeURIComponent(match[1]) : null
-}
-
-function readStoredKeycloakTokens(): StoredKeycloakTokens | null {
-  const rawTokens = localStorage.getItem(keycloakTokensStorageKey)
-
-  if (!rawTokens) {
-    return null
-  }
-
-  try {
-    const parsed = JSON.parse(rawTokens) as Partial<StoredKeycloakTokens>
-
-    if (
-      typeof parsed.accessToken !== 'string' ||
-      typeof parsed.refreshToken !== 'string'
-    ) {
-      return null
-    }
-
-    return {
-      accessToken: parsed.accessToken,
-      refreshToken: parsed.refreshToken,
-      ...(typeof parsed.idToken === 'string' ? { idToken: parsed.idToken } : {}),
-    }
-  } catch {
-    return null
-  }
-}
-
-function persistKeycloakTokens(tokens: StoredKeycloakTokens) {
-  localStorage.setItem(keycloakTokensStorageKey, JSON.stringify(tokens))
-  localStorage.setItem(authTokenStorageKey, tokens.accessToken)
-}
-
-function clearStoredKeycloakTokens() {
-  localStorage.removeItem(keycloakTokensStorageKey)
 }
 
 function createEmptyDraft(): NoteDraft {
@@ -633,8 +588,33 @@ function App() {
     handleRevokeShareLink: handleRevokeShareLinkFromHook,
     handleCreateShareLink: handleCreateShareLinkFromHook,
   } = useShareLinks()
-  const [authToken, setAuthToken] = useState<string | null>(null)
-  const [owner, setOwner] = useState<OwnerAccount | null>(null)
+  const {
+    authToken,
+    owner,
+    authConfig,
+    isAuthReady,
+    isRegisterMode,
+    registerDraft,
+    loginDraft,
+    isSubmittingAuth,
+    isLinkingAccount,
+    accountNotice,
+    keycloakClientRef,
+    setAuthToken,
+    setOwner,
+    setAuthConfig,
+    setIsAuthReady,
+    setIsRegisterMode,
+    setRegisterDraft,
+    setLoginDraft,
+    setIsSubmittingAuth,
+    setIsLinkingAccount,
+    setAccountNotice,
+    completeAuthentication,
+    handleSubmitAuth: handleSubmitAuthFromHook,
+    handleLogout: handleLogoutFromHook,
+  } = useSession()
+  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
   const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
   const [memberships, setMemberships] = useState<CampaignMembership[]>([])
@@ -669,19 +649,8 @@ function App() {
   const [membershipConsolidationDraft, setMembershipConsolidationDraft] = useState<
     MembershipConsolidationDraft
   >(createMembershipConsolidationDraft)
-  const [registerDraft, setRegisterDraft] = useState<OwnerRegistrationDraft>({
-    displayName: '',
-    email: '',
-    password: '',
-  })
-  const [loginDraft, setLoginDraft] = useState<OwnerLoginDraft>({
-    email: '',
-    password: '',
-  })
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
-  const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null)
-  const [isAuthReady, setIsAuthReady] = useState(false)
   const [isSharedReady, setIsSharedReady] = useState(!isSharedMode)
   const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false)
   const [isLoadingSessionNotes, setIsLoadingSessionNotes] = useState(false)
@@ -689,16 +658,13 @@ function App() {
   const [isQuickCapturing, setIsQuickCapturing] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
-  const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
-  const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [isSavingCampaign, setIsSavingCampaign] = useState(false)
   const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
   const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
     useState(false)
   const [isApplyingMembershipConsolidation, setIsApplyingMembershipConsolidation] =
     useState(false)
-  const [isRegisterMode, setIsRegisterMode] = useState(true)
   const [campaignFormMode, setCampaignFormMode] =
     useState<CampaignFormMode>('closed')
   const [selectedCampaignTemplateId, setSelectedCampaignTemplateId] = useState(
@@ -707,7 +673,6 @@ function App() {
   const [selectedNoteTemplateId, setSelectedNoteTemplateId] = useState(
     blankNoteTemplateId,
   )
-  const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [adminError, setAdminError] = useState<string | null>(null)
@@ -728,7 +693,6 @@ function App() {
   const sessionRequestIdRef = useRef(0)
   const activityAbortControllerRef = useRef<AbortController | null>(null)
   const sessionAbortControllerRef = useRef<AbortController | null>(null)
-  const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
   const isBootstrapping = !isAuthReady || !isSharedReady
 
   useEffect(() => {
@@ -2257,96 +2221,18 @@ function App() {
     }
   }
 
-  const completeAuthentication = useCallback(
-    async (token: string, nextOwner: OwnerAccount) => {
-      localStorage.setItem(authTokenStorageKey, token)
-      setAuthToken(token)
-      setOwner(nextOwner)
-      await loadCampaigns(token)
-    },
-    [loadCampaigns],
-  )
-
   const handleSubmitAuth = async () => {
     setError(null)
-    setIsSubmittingAuth(true)
-
-    try {
-      if (isKeycloakAuthConfig(authConfig)) {
-        const keycloakClient = keycloakClientRef.current
-
-        if (!keycloakClient) {
-          throw new Error(missingKeycloakClientErrorMessage)
-        }
-
-        await keycloakClient.login(window.location.href)
-        return
-      }
-
-      if (isRegisterMode) {
-        const session = await registerOwner(registerDraft)
-        await completeAuthentication(session.token, session.owner)
-      } else {
-        const session = await loginOwner(loginDraft)
-        await completeAuthentication(session.token, session.owner)
-      }
-    } catch (authError) {
-      setError(
-        authError instanceof Error
-          ? authError.message
-          : 'Could not complete owner authentication.',
-      )
-    } finally {
-      setIsSubmittingAuth(false)
-      setIsAuthReady(true)
-    }
+    await handleSubmitAuthFromHook(loadCampaigns, setError)
   }
 
   const handleLogout = async () => {
-    const keycloakClient = keycloakClientRef.current
-
-    if (isKeycloakAuthConfig(authConfig) && keycloakClient) {
-      clearSession()
-      setShowSplitNoteWorkspace(false)
-      setIsQuickCaptureOpen(false)
-      setError(null)
-      await keycloakClient.logout(`${window.location.origin}/`)
-      return
-    }
-
-    if (isSharedMode) {
-      const storedAuthToken = localStorage.getItem(authTokenStorageKey)
-
-      if (storedAuthToken) {
-        try {
-          await logoutOwner(storedAuthToken)
-        } catch {
-          // Intentionally ignore logout failures because local sign-out should still work.
-        }
-      }
-
-      localStorage.removeItem(authTokenStorageKey)
-      localStorage.removeItem(selectedCampaignStorageKey)
-      if (guestStorageKey) {
-        localStorage.removeItem(guestStorageKey)
-      }
-      window.location.assign('/')
-      return
-    }
-
-    if (authToken) {
-      try {
-        await logoutOwner(authToken)
-      } catch {
-        // Intentionally ignore logout failures because local sign-out should still work.
-      }
-    }
-
-    clearSession()
     setShowSplitNoteWorkspace(false)
     setIsQuickCaptureOpen(false)
     setError(null)
-    setIsRegisterMode(false)
+    await handleLogoutFromHook(isSharedMode, guestStorageKey, () => {
+      clearSession()
+    })
   }
 
   const handleOpenCampaignCreate = () => {
