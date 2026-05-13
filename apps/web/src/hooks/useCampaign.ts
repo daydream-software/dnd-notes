@@ -73,6 +73,14 @@ function createCampaignPayload(draft: CampaignDraft): CampaignInput {
   }
 }
 
+export function createMembershipConsolidationDraft(): MembershipConsolidationDraft {
+  return {
+    sourceMembershipId: '',
+    targetMembershipId: '',
+    confirmRoleMismatch: false,
+  }
+}
+
 function createMembershipConsolidationDraftDefault(): MembershipConsolidationDraft {
   return {
     sourceMembershipId: '',
