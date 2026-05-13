@@ -1171,6 +1171,7 @@ function App() {
     setNoteBrowseMode('notes')
     setSelectedTagFilter(null)
     setSearchText('')
+    resetSessionBrowserState()
     handleStartNoteFromHook(
       canEditWorkspace,
       () => setNarrowWorkspacePanel('editor'),
