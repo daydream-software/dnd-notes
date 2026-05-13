@@ -7376,3 +7376,118 @@ Memory updated: `feedback_preserve_preview_branches.md` reflects new pattern.
 - #231 (15 sibling test leaks in k3d-persistent-lane — squad:chunk, epic #164)
 
 ---
+
+### 2026-05-12: mkdtempSync + try/finally pattern for k3d test fixtures (Chunk, PR #234)
+
+All shell-script integration tests in `apps/control-plane/test/` that create temporary
+directories must use `mkdtempSync(join(tmpdir(), 'descriptive-prefix-'))` + `try/finally`
+with `rmSync(tmpDir, { recursive: true, force: true })` in the finally block. Never use
+in-repo paths under `apps/control-plane/test/` for fixture dirs. Never use `mkdirSync`
+for the root tmpDir. Never put `rmSync` outside a finally block.
+
+**Tricky case:** Tests that read files or stat dirs from tmpDir must do so inside the try
+block, capturing values in outer-scope variables before finally runs. Pattern applied
+consistently across 15 sibling tests in `k3d-persistent-lane.test.ts` in PR #234.
+
+---
+
+### 2026-05-12: hosted-reference Keycloak uses two separate realms (Data, PR #236)
+
+The hosted-reference Keycloak overlay ships two realm seed files:
+- `workforce-realm-configmap.yaml` — `dnd-notes-workforce` realm, `operator-login` theme,
+  `dnd-notes-control-plane` client, control-plane roles
+- `tenant-realm-configmap.yaml` — `dnd-notes` realm, `customer-login` theme at realm level,
+  `dnd-notes-customer-portal` client, `dnd-notes-keycloak-admin` service account
+
+Realm-level `loginTheme` on the tenant realm covers all present and future tenant clients
+provisioned dynamically by the control-plane (issue #170). `validate-manifests.sh` updated:
+`validate_keycloak_hosted_realm` split into `validate_keycloak_hosted_workforce_realm` and
+`validate_keycloak_hosted_tenant_realm`.
+
+---
+
+### 2026-05-12: keycloak theme source canonical path is platform/keycloak/base/themes/ (Data, PR #236)
+
+Theme source moved from `platform/k3d/keycloak-themes/` to `platform/keycloak/base/themes/`.
+Kustomize's configMapGenerator enforces file sources within the kustomization root; this
+eliminates duplication and out-of-tree references. Any agent or script referencing
+`platform/k3d/keycloak-themes/` must update to `platform/keycloak/base/themes/`.
+
+`disableNameSuffixHash: true` must NOT be set on theme ConfigMaps — hashing enables
+rollout-on-content-change via Kustomize name transformer propagation to subPath volumeMounts.
+
+---
+
+### 2026-05-12: account-console theme.properties must be at type-dir level (Brand, PR #238)
+
+Keycloak's account-type template resolver requires `theme.properties` at
+`<theme-name>/account/theme.properties`, NOT at `<theme-name>/theme.properties`.
+
+Login themes work at theme root; the account resolver only traverses the type-dir path.
+Placing `theme.properties` at the theme root causes `TemplateNotFoundException` for
+`index.ftl` (HTTP 500 on Account Console load).
+
+Fix commit: `527e722` — `git mv account-console/theme.properties account-console/account/theme.properties`,
+volumeMount mountPath updated, validator path updated.
+
+Rule: any custom Keycloak account theme must follow the type-dir layout.
+
+---
+
+### 2026-05-12: account-console brand mark asset removed, pending live DOM inspection (Brand, PR #238)
+
+`dnd-notes-mark.svg` was removed from the account-console theme assets (commit `f80ef05`)
+rather than shipped with unverifiable CSS targeting.
+
+Account Console v3 is a React SPA on PatternFly v5. The correct CSS selector for
+`.pf-v5-c-masthead__brand` cannot be confirmed without live DOM inspection of a running
+Keycloak 26.x instance. An unused asset appearing wired (ConfigMap key, volumeMount,
+file on disk) with no effective CSS reference is harder to diagnose than no asset at all.
+
+**Removed:** SVG file, ConfigMap key `ac-dnd-notes-mark.svg`, volumeMount, TEXT_KEYS
+entry in `validate-keycloak-theme-sync.mjs`.
+
+**Follow-up when k3d is available:** inspect Account Console masthead DOM, identify exact
+PatternFly brand slot selector, add back asset + CSS wiring as a small PR.
+
+---
+
+### 2026-05-12: hosted-reference Keycloak login themes — CodeRabbit triage (Data, PR #236)
+
+Three CodeRabbit findings triaged. Two fixed in `c90e6a4`, one deferred:
+
+- `disableNameSuffixHash` on theme ConfigMaps: **fix** — removed; hashing required for
+  rollout-on-content-change with subPath volumeMounts.
+- Missing pod/container securityContext: **fix** — `runAsNonRoot`, `seccompProfile.type:
+  RuntimeDefault`, `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]` added.
+- `${VAR}` client secret substitution: **deferred** — entire overlay uses uniform
+  "replace-before-apply" placeholder pattern; applying env-var substitution to only one
+  field creates inconsistency. Resolve all credential placeholders together when secrets
+  management strategy (external secrets operator, sealed-secrets, etc.) is decided.
+
+---
+
+### 2026-05-12: account-console CSS — semantic alert borders exempt from purple-translucent rule (Stef, PR #238)
+
+The design-system rule "no solid neutral borders, use purple-tinted-translucent" applies
+to surface/container borders. It does NOT apply to semantic state-indicator borders on
+alert variants (success, danger, warning). Those retain green/red/amber at `rgba(*,0.22)`
+for state legibility. Scrollbar thumb and breadcrumb separator at opacity `0.35` are also
+exempt (neither is a border declaration). CodeRabbit acknowledged the rationale.
+
+---
+
+### 2026-05-12: account-console hosted-reference wiring deferred to issue #240 (Stef, PR #238)
+
+The hosted-reference Kustomize wiring for the account-console theme was not included in
+PR #238. Merging account-console files into `platform/keycloak/base/` before #236 landed
+would have required coupling the PRs or landing a partial kustomization that breaks
+`platform:validate`. Filed as issue #240 after #236 merged.
+
+The deferred items are now resolved by #240:
+- `platform/keycloak/base/themes/account-console/theme.properties`
+- `platform/keycloak/base/themes/account-console/account/resources/css/account.css`
+- `ac-*` entries in `platform/keycloak/base/kustomization.yaml` configMapGenerator
+- `"accountTheme": "account-console"` in tenant and workforce realm ConfigMaps
+
+---
