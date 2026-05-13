@@ -30,5 +30,6 @@ export function buildPortalRedirectUri() {
 }
 
 export function buildAccountConsoleUrl(config: CustomerKeycloakConfig) {
-  return `${config.url}/realms/${config.realm}/account`
+  const baseUrl = config.url.replace(/\/+$/, '')
+  return `${baseUrl}/realms/${config.realm}/account`
 }
