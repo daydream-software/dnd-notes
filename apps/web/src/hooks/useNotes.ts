@@ -391,7 +391,7 @@ export interface UseNotesResult {
     onSetCampaignId?: (id: string) => void,
     onSetCampaignDraft?: (campaign: import('../types').CampaignSummary) => void,
     onError?: (message: string) => void,
-  ) => Promise<boolean>
+  ) => Promise<boolean | 'stale'>
   loadSharedWorkspace: (
     shareToken: string,
     activeGuestToken: string,
@@ -400,7 +400,7 @@ export interface UseNotesResult {
     shareLink?: import('../types').CampaignShareLink | null,
     onSetCampaigns?: (campaign: import('../types').CampaignSummary) => void,
     onError?: (message: string) => void,
-  ) => Promise<boolean>
+  ) => Promise<boolean | 'stale'>
   handleDraftChange: <Field extends keyof NoteDraft>(field: Field, value: NoteDraft[Field]) => void
   handleDraftTagsChange: (nextTags: readonly string[]) => void
   commitPendingTagInput: () => void
@@ -741,7 +741,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       onSetCampaignId?: (id: string) => void,
       onSetCampaignDraft?: (campaign: import('../types').CampaignSummary) => void,
       onError?: (message: string) => void,
-    ): Promise<boolean> => {
+    ): Promise<boolean | 'stale'> => {
       workspaceRequestIdRef.current += 1
       const requestId = workspaceRequestIdRef.current
 
@@ -755,7 +755,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         ])
 
         if (workspaceRequestIdRef.current !== requestId) {
-          return false
+          return 'stale'
         }
 
         const nextSessionSummaries = sortSessionSummaries(sessionsResponse.sessions)
@@ -776,7 +776,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
           : []
 
         if (workspaceRequestIdRef.current !== requestId) {
-          return false
+          return 'stale'
         }
 
         onSetCampaignId?.(campaignId)
@@ -837,7 +837,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         return true
       } catch (loadError) {
         if (workspaceRequestIdRef.current !== requestId) {
-          return false
+          return 'stale'
         }
 
         if (!suppressError) {
@@ -867,7 +867,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       shareLink?: import('../types').CampaignShareLink | null,
       onSetCampaigns?: (campaign: import('../types').CampaignSummary) => void,
       onError?: (message: string) => void,
-    ): Promise<boolean> => {
+    ): Promise<boolean | 'stale'> => {
       workspaceRequestIdRef.current += 1
       const requestId = workspaceRequestIdRef.current
 
@@ -880,7 +880,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         ])
 
         if (workspaceRequestIdRef.current !== requestId) {
-          return false
+          return 'stale'
         }
 
         setOverview(nextOverview)
@@ -918,7 +918,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         return true
       } catch (loadError) {
         if (workspaceRequestIdRef.current !== requestId) {
-          return false
+          return 'stale'
         }
 
         onError?.(
@@ -1061,8 +1061,12 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
               undefined,
               onError,
             )
-            if (!refreshOk) {
-              onError?.('Note saved, but the workspace could not refresh. Please reload.')
+            if (refreshOk === 'stale') {
+              // a newer load is in flight; stay silent, it will resolve the UI
+              return
+            }
+            if (refreshOk === false) {
+              // loader already called onError with the actual error; do not double-toast
               return
             }
           } else {
@@ -1081,8 +1085,12 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
               undefined,
               onError,
             )
-            if (!refreshOk) {
-              onError?.('Note saved, but the workspace could not refresh. Please reload.')
+            if (refreshOk === 'stale') {
+              // a newer load is in flight; stay silent, it will resolve the UI
+              return
+            }
+            if (refreshOk === false) {
+              // loader already called onError with the actual error; do not double-toast
               return
             }
           }
@@ -1111,15 +1119,23 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         if (isCreating || !selectedNoteId) {
           const createdNote = await createNote(authToken, payload)
           const refreshOk = await loadWorkspace(authToken, selectedCampaignId, createdNote.id, false, undefined, undefined, onError)
-          if (!refreshOk) {
-            onError?.('Note saved, but the workspace could not refresh. Please reload.')
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
             return
           }
         } else {
           const updatedNote = await updateNote(authToken, selectedNoteId, payload)
           const refreshOk = await loadWorkspace(authToken, selectedCampaignId, updatedNote.id, false, undefined, undefined, onError)
-          if (!refreshOk) {
-            onError?.('Note saved, but the workspace could not refresh. Please reload.')
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
             return
           }
         }
@@ -1169,8 +1185,12 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
             undefined,
             onError,
           )
-          if (!refreshOk) {
-            onError?.('Note deleted, but the workspace could not refresh. Please reload.')
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
             return
           }
           onNarrowPanel?.()
@@ -1196,8 +1216,12 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       try {
         await deleteNote(authToken, selectedNoteId)
         const refreshOk = await loadWorkspace(authToken, selectedCampaignId, null, false, undefined, undefined, onError)
-        if (!refreshOk) {
-          onError?.('Note deleted, but the workspace could not refresh. Please reload.')
+        if (refreshOk === 'stale') {
+          // a newer load is in flight; stay silent, it will resolve the UI
+          return
+        }
+        if (refreshOk === false) {
+          // loader already called onError with the actual error; do not double-toast
           return
         }
 
@@ -1251,8 +1275,12 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
             undefined,
             onError,
           )
-          if (!refreshOk) {
-            onError?.('Note captured, but the workspace could not refresh. Please reload.')
+          if (refreshOk === 'stale') {
+            // a newer load is in flight; stay silent, it will resolve the UI
+            return
+          }
+          if (refreshOk === false) {
+            // loader already called onError with the actual error; do not double-toast
             return
           }
           onNarrowPanel?.()
@@ -1284,8 +1312,12 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         setNoteBrowseMode('notes')
         resetSessionBrowserState()
         const refreshOk = await loadWorkspace(authToken, selectedCampaignId, createdNote.id, false, undefined, undefined, onError)
-        if (!refreshOk) {
-          onError?.('Note captured, but the workspace could not refresh. Please reload.')
+        if (refreshOk === 'stale') {
+          // a newer load is in flight; stay silent, it will resolve the UI
+          return
+        }
+        if (refreshOk === false) {
+          // loader already called onError with the actual error; do not double-toast
           return
         }
       } catch (captureError) {
