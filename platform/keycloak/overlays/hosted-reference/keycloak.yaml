@@ -81,8 +81,12 @@ spec:
             periodSeconds: 20
             timeoutSeconds: 5
           volumeMounts:
-            - name: realm-import
-              mountPath: /opt/keycloak/data/import
+            - name: realm-import-workforce
+              mountPath: /opt/keycloak/data/import/dnd-notes-workforce-realm.json
+              subPath: dnd-notes-workforce-realm.json
+            - name: realm-import-tenant
+              mountPath: /opt/keycloak/data/import/dnd-notes-realm.json
+              subPath: dnd-notes-realm.json
             # operator-login theme text files
             - name: themes-text
               mountPath: /opt/keycloak/themes/operator-login/theme.properties
@@ -148,9 +152,12 @@ spec:
               mountPath: /opt/keycloak/themes/customer-login/login/resources/fonts/GeistMono-Variable.woff2
               subPath: GeistMono-Variable.woff2
       volumes:
-        - name: realm-import
+        - name: realm-import-workforce
           configMap:
-            name: keycloak-realm
+            name: keycloak-workforce-realm
+        - name: realm-import-tenant
+          configMap:
+            name: keycloak-tenant-realm
         - name: themes-text
           configMap:
             name: keycloak-themes-text

@@ -15,5 +15,6 @@ kind: Kustomization
 
 resources:
   - ../../base
-  - realm-configmap.yaml
+  - workforce-realm-configmap.yaml
+  - tenant-realm-configmap.yaml
   - keycloak.yaml

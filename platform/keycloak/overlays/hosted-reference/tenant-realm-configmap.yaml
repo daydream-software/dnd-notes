@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-tenant-realm
+  namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/note: >
+      Tenant realm seed for hosted-reference. Covers customer-portal users and
+      per-tenant OIDC clients. Per-tenant clients are provisioned dynamically by
+      the control-plane at tenant-creation time (issue #170) — this seed only
+      establishes the realm skeleton and the admin service-account client.
+      RedirectURIs and webOrigins use placeholder values — replace with actual
+      managed-cluster URLs before apply.
+data:
+  dnd-notes-realm.json: |
+    {
+      "realm": "dnd-notes",
+      "enabled": true,
+      "displayName": "D&D Notes",
+      "loginTheme": "customer-login",
+      "registrationAllowed": false,
+      "rememberMe": true,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "clients": [
+        {
+          "clientId": "dnd-notes-customer-portal",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "redirectUris": [
+            "https://portal.example.com/*"
+          ],
+          "webOrigins": [
+            "https://portal.example.com"
+          ],
+          "attributes": {
+            "pkce.code.challenge.method": "S256"
+          }
+        },
+        {
+          "clientId": "dnd-notes-keycloak-admin",
+          "enabled": true,
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "replace-with-managed-secret"
+        }
+      ]
+    }
