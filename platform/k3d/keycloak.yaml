@@ -31,7 +31,8 @@ data:
               "value": "password",
               "temporary": false
             }
-          ]
+          ],
+          "realmRoles": ["default-roles-dnd-notes-dev"]
         },
         {
           "username": "ops@example.com",
@@ -47,6 +48,7 @@ data:
               "temporary": false
             }
           ],
+          "realmRoles": ["default-roles-dnd-notes-dev"],
           "clientRoles": {
             "dnd-notes-control-plane": ["control-plane-workforce"]
           }
@@ -65,6 +67,7 @@ data:
               "temporary": false
             }
           ],
+          "realmRoles": ["default-roles-dnd-notes-dev"],
           "clientRoles": {
             "dnd-notes-control-plane": ["control-plane-admin", "control-plane-workforce"]
           }
