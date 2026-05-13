@@ -158,6 +158,24 @@ const adminClient = clients.find((c) => c.clientId === 'dnd-notes-keycloak-admin
 if (!adminClient) {
   throw new Error('Keycloak hosted-reference tenant realm is missing dnd-notes-keycloak-admin service account client.');
 }
+
+const users = Array.isArray(realm.users) ? realm.users : [];
+const svcAccount = users.find((u) => u.username === 'service-account-dnd-notes-keycloak-admin');
+if (!svcAccount) {
+  throw new Error(
+    'Keycloak hosted-reference tenant realm is missing service-account-dnd-notes-keycloak-admin user entry (required for realm-management role grants).',
+  );
+}
+const rmRoles = Array.isArray(svcAccount.clientRoles?.['realm-management'])
+  ? svcAccount.clientRoles['realm-management']
+  : [];
+for (const requiredRole of ['manage-clients', 'view-clients']) {
+  if (!rmRoles.includes(requiredRole)) {
+    throw new Error(
+      `service-account-dnd-notes-keycloak-admin must have realm-management role "${requiredRole}" (got: [${rmRoles.join(', ')}])`,
+    );
+  }
+}
 EOF
 
   echo "Validated ${display_path}"

@@ -23,6 +23,22 @@ data:
       "loginWithEmailAllowed": true,
       "duplicateEmailsAllowed": false,
       "resetPasswordAllowed": true,
+      "users": [
+        {
+          "username": "service-account-dnd-notes-keycloak-admin",
+          "enabled": true,
+          "serviceAccountClientId": "dnd-notes-keycloak-admin",
+          "clientRoles": {
+            "realm-management": [
+              "manage-clients",
+              "view-clients",
+              "view-realm",
+              "view-users",
+              "manage-users"
+            ]
+          }
+        }
+      ],
       "clients": [
         {
           "clientId": "dnd-notes-customer-portal",
