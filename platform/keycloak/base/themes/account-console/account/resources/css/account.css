@@ -90,13 +90,13 @@ body {
 /* Form inputs */
 .pf-v5-c-form-control, .pf-v5-c-text-input-group__text-input, select.pf-v5-c-form-control {
   background: rgba(15, 23, 42, 0.6) !important;
-  border-color: rgba(167, 139, 250, 0.22) !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important;
   border-radius: 10px !important;
   color: #f8fafc !important;
   font-family: Geist, sans-serif !important;
 }
 .pf-v5-c-form-control:focus-within, .pf-v5-c-form-control:focus {
-  border-color: #a78bfa !important;
+  border: 1px solid #a78bfa !important;
   box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.18) !important;
   outline: none !important;
 }
@@ -122,7 +122,7 @@ body {
 .pf-v5-c-alert { border-radius: 10px !important; }
 .pf-v5-c-alert.pf-m-info {
   background: rgba(167, 139, 250, 0.10) !important;
-  border-color: rgba(167, 139, 250, 0.22) !important; color: #c4b5fd !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important; color: #c4b5fd !important;
 }
 .pf-v5-c-alert.pf-m-success {
   background: rgba(52, 211, 153, 0.10) !important;
@@ -195,7 +195,7 @@ hr { border-top-color: rgba(167, 139, 250, 0.18) !important; }
 .pf-v5-c-label { border-radius: 100px !important; }
 .pf-v5-c-label.pf-m-purple, .pf-v5-c-label.pf-m-blue {
   background: rgba(167, 139, 250, 0.14) !important;
-  border-color: rgba(167, 139, 250, 0.22) !important; color: #c4b5fd !important;
+  border: 1px solid rgba(167, 139, 250, 0.22) !important; color: #c4b5fd !important;
 }
 /* Spinner */
 .pf-v5-c-spinner__path { stroke: #a78bfa !important; }
