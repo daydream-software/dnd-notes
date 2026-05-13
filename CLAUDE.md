@@ -130,6 +130,12 @@ Reasonable rules of thumb:
 2. Read `.squad/routing.md` — routing rules
 3. If the issue has a `squad:{member}` label, spawn that member via the `Agent` tool
 
+### Scribe boundary — the coordinator does not log sessions
+
+The main coordinator (this agent) must **never** write to `.squad/sessions/`, merge the decision inbox, or commit `.squad/` changes inline. That work belongs exclusively to the `scribe` agent — spawn it via the `Agent` tool with `subagent_type: "scribe"` and `run_in_background: true`.
+
+Symptoms of this rule being violated: a `chore(squad): log ...` commit co-authored by `Claude Opus` or `Claude Sonnet` instead of `Scribe`, or a session log file (`.squad/sessions/*.md`) staged in a commit (those paths are gitignored and must never enter history). A pre-commit hook now catches the second case; the first one is on you to avoid.
+
 ---
 
 ## Memory

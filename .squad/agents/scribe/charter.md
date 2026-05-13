@@ -11,9 +11,9 @@
 
 ## What I Own
 
-- `.squad/log/` — session logs (what happened, who worked, what was decided)
-- `.squad/decisions.md` — the shared decision log all agents read (canonical, merged)
-- `.squad/decisions/inbox/` — decision drop-box (agents write here, I merge)
+- `.squad/sessions/` — session logs, what happened, who worked, what was decided (gitignored runtime state)
+- `.squad/decisions.md` — the shared decision log all agents read (canonical, merged, tracked)
+- `.squad/decisions/inbox/` — decision drop-box (gitignored; agents write here, I merge)
 - Cross-agent context propagation — when one agent's decision affects another
 
 ## How I Work
@@ -22,12 +22,13 @@
 
 After every substantial work session:
 
-1. **Log the session** to `.squad/log/{timestamp}-{topic}.md`:
+1. **Log the session** to `.squad/sessions/{YYYY-MM-DD}-{topic}.md`:
    - Who worked
    - What was done
    - Decisions made
    - Key outcomes
    - Brief. Facts only.
+   - This path is gitignored on purpose; the file stays local.
 
 2. **Merge the decision inbox:**
    - Read all files in `.squad/decisions/inbox/`
@@ -57,7 +58,8 @@ After every substantial work session:
    Do NOT embed newlines in `git commit -m` (backtick-n fails silently in PowerShell).
    Instead:
    - `cd` into the team root first.
-   - Stage all `.squad/` files: `git add .squad/`
+   - Stage with the directory only: `git add .squad/` — this respects `.gitignore`, so the session log written in step 1 stays out of the commit.
+   - **Never use `git add -f`** and never pass explicit paths that match `.gitignore` (e.g. `git add .squad/sessions/...`). If a file you want to commit is being ignored, that's the signal to fix `.gitignore`, not to bypass it.
    - Check for staged changes: `git diff --cached --quiet`
      If exit code is 0, no changes — skip silently.
    - Write the commit message to a temp file, then commit with `-F`.
