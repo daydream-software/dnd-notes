@@ -594,6 +594,7 @@ function App() {
       )
       if (ok) {
         localStorage.setItem(selectedCampaignStorageKey, campaignId)
+        setError(null)
       }
       return ok
     },
@@ -606,7 +607,7 @@ function App() {
       preferredNoteId?: string | null,
       accessLevel?: CampaignShareLink['accessLevel'],
     ): Promise<boolean> => {
-      return loadSharedWorkspaceFromHook(
+      const ok = await loadSharedWorkspaceFromHook(
         shareToken as string,
         activeGuestToken,
         preferredNoteId,
@@ -619,6 +620,10 @@ function App() {
         },
         (message) => setError(message),
       )
+      if (ok) {
+        setError(null)
+      }
+      return ok
     },
     [loadSharedWorkspaceFromHook, setCampaigns, setSelectedCampaignId, shareLink, shareToken],
   )
