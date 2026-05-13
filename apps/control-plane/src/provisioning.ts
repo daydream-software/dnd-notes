@@ -458,14 +458,12 @@ export class TenantProvisioningService implements TenantProvisioningPort {
             publicClient: true,
             standardFlowEnabled: true,
             implicitFlowEnabled: false,
-            // Direct-access grants (password flow) are enabled so that k3d smoke
-            // tests can fetch a tenant token without a browser redirect. The SPA
-            // itself negotiates PKCE via keycloak-js at runtime (auth-code flow).
-            // The pkce.code.challenge.method attribute is intentionally omitted:
-            // Keycloak enforces the attribute on ALL token requests for the client,
-            // including direct-grant, causing a 401 when no code_challenge is
-            // present. Server-side PKCE enforcement is tracked in #183 — it will
-            // be re-enabled once the smoke switches to the auth-code + PKCE flow.
+            // Direct-access grants stay enabled for local dev tooling (e.g.
+            // manual token inspection) but are not used by the smoke test or the
+            // SPA. The smoke fetches tenant tokens via the auth-code + PKCE flow;
+            // the SPA negotiates PKCE via keycloak-js at runtime. Server-side
+            // PKCE enforcement (pkce.code.challenge.method) is now active — any
+            // token request without a valid code_verifier will be rejected.
             directAccessGrantsEnabled: true,
             redirectUris: [
               `https://${hostname}/*`,
@@ -475,9 +473,12 @@ export class TenantProvisioningService implements TenantProvisioningPort {
               `https://${hostname}`,
               `http://${hostname}`,
             ],
-            ...(refreshedTenant.displayName !== null
-              ? { attributes: { tenant_display_name: refreshedTenant.displayName } }
-              : {}),
+            attributes: {
+              'pkce.code.challenge.method': 'S256',
+              ...(refreshedTenant.displayName !== null
+                ? { tenant_display_name: refreshedTenant.displayName }
+                : {}),
+            },
           })
 
           // Create the per-tenant member role on the per-tenant client. The

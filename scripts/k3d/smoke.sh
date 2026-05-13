@@ -262,6 +262,105 @@ get_keycloak_access_token() {
     | json_get access_token
 }
 
+# Fetch an access token for a Keycloak client that enforces PKCE (S256) by
+# running the auth-code + PKCE flow headlessly with curl.
+#
+# Steps:
+#   1. Generate a code_verifier (random base64url, 43 chars) and derive
+#      code_challenge = base64url(sha256(code_verifier)).
+#   2. GET the authorization endpoint with a cookie jar to capture
+#      Keycloak's login form action URL and session cookies.
+#   3. POST credentials to the form action — Keycloak redirects (302) to
+#      redirect_uri with ?code=<auth_code>.
+#   4. POST to the token endpoint with grant_type=authorization_code,
+#      code, code_verifier, client_id, redirect_uri to exchange for tokens.
+#
+# The redirect_uri is a synthetic callback URL registered on the client
+# (https://<hostname>/*). curl never actually follows the redirect — we
+# just extract the code from the Location header.
+get_tenant_keycloak_access_token_pkce() {
+  local base_url="$1"
+  local realm="$2"
+  local client_id="$3"
+  local username="$4"
+  local password="$5"
+  local redirect_uri="$6"
+
+  local work_subdir="${WORK_DIR}/pkce-${client_id}"
+  mkdir -p "${work_subdir}"
+
+  local cookie_jar="${work_subdir}/cookies.txt"
+  local auth_html="${work_subdir}/auth.html"
+  local token_json="${work_subdir}/token.json"
+  local headers_file="${work_subdir}/headers.txt"
+
+  # Generate code_verifier (43 raw random bytes → base64url, trimmed to 43 chars)
+  local code_verifier
+  code_verifier="$(openssl rand 32 | base64 | tr -d '=' | tr '/+' '_-' | head -c 43)"
+
+  # Derive code_challenge = base64url(sha256(code_verifier))
+  local code_challenge
+  code_challenge="$(printf '%s' "${code_verifier}" | openssl dgst -binary -sha256 | base64 | tr -d '=' | tr '/+' '_-')"
+
+  # URL-encode the redirect_uri for use as a query parameter
+  local encoded_redirect_uri
+  encoded_redirect_uri="$(node -e 'process.stdout.write(encodeURIComponent(process.argv[1]))' "${redirect_uri}")"
+
+  # Step 1: GET the Keycloak login page — capture cookies and form action URL
+  curl_with_mkcert_tls -fsS \
+    -c "${cookie_jar}" \
+    -o "${auth_html}" \
+    "${base_url}/realms/${realm}/protocol/openid-connect/auth?response_type=code&client_id=${client_id}&redirect_uri=${encoded_redirect_uri}&code_challenge=${code_challenge}&code_challenge_method=S256"
+
+  # Extract the form action URL (contains session_code, execution, etc.)
+  # Decode HTML entities (&amp; → &) after extraction
+  local form_action
+  form_action="$(grep -oE 'action="[^"]*"' "${auth_html}" | head -1 | sed 's/^action="//;s/"$//' | sed 's/&amp;/\&/g')"
+
+  if [[ -z "${form_action}" ]]; then
+    echo "Failed to extract Keycloak login form action from auth page" >&2
+    return 1
+  fi
+
+  # Step 2: POST credentials to the form action — capture the Location redirect
+  curl_with_mkcert_tls -sS \
+    -c "${cookie_jar}" \
+    -b "${cookie_jar}" \
+    -X POST \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode "username=${username}" \
+    --data-urlencode "password=${password}" \
+    --data-urlencode "credentialId=" \
+    -D "${headers_file}" \
+    -o /dev/null \
+    --max-redirs 0 \
+    "${form_action}" || true
+
+  # Extract auth code from Location header redirect
+  local auth_code
+  auth_code="$(grep -i '^[Ll]ocation:' "${headers_file}" | grep -oE 'code=[^&[:space:]]+' | head -1 | sed 's/^code=//' | tr -d '\r\n')"
+
+  if [[ -z "${auth_code}" ]]; then
+    echo "Failed to extract auth code from Keycloak redirect. Headers:" >&2
+    cat "${headers_file}" >&2
+    return 1
+  fi
+
+  # Step 3: Exchange auth code for access token
+  curl_with_mkcert_tls -fsS \
+    -X POST \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode "grant_type=authorization_code" \
+    --data-urlencode "client_id=${client_id}" \
+    --data-urlencode "code=${auth_code}" \
+    --data-urlencode "redirect_uri=${redirect_uri}" \
+    --data-urlencode "code_verifier=${code_verifier}" \
+    -o "${token_json}" \
+    "${base_url}/realms/${realm}/protocol/openid-connect/token"
+
+  json_get access_token <"${token_json}"
+}
+
 cleanup() {
   local exit_code=$?
   set +e
@@ -334,7 +433,7 @@ if [[ "${1:-}" == "--help" ]]; then
   exit 0
 fi
 
-for tool in docker k3d kubectl curl node; do
+for tool in docker k3d kubectl curl node openssl; do
   require_tool "$tool"
 done
 
@@ -430,12 +529,16 @@ kubectl -n "${tenant_namespace}" port-forward \
 tenant_forward_pid=$!
 
 wait_for_http "http://127.0.0.1:${TENANT_LOCAL_PORT}/ready" 60
-tenant_bearer_token="$(get_keycloak_access_token \
+# The per-tenant Keycloak client enforces PKCE (pkce.code.challenge.method=S256).
+# Fetch the tenant token via the auth-code + PKCE flow instead of direct-grant.
+tenant_redirect_uri="${TENANT_PUBLIC_SCHEME}://${tenant_subdomain}.${TENANT_BASE_DOMAIN}/auth-callback"
+tenant_bearer_token="$(get_tenant_keycloak_access_token_pkce \
   "${TENANT_KEYCLOAK_URL}" \
   "${TENANT_KEYCLOAK_REALM}" \
   "${tenant_keycloak_client_id}" \
   "${TENANT_KEYCLOAK_USERNAME}" \
-  "${TENANT_KEYCLOAK_PASSWORD}")"
+  "${TENANT_KEYCLOAK_PASSWORD}" \
+  "${tenant_redirect_uri}")"
 
 curl -fsS \
   -H "Authorization: Bearer ${tenant_bearer_token}" \
