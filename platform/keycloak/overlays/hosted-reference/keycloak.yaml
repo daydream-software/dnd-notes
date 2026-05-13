@@ -97,7 +97,7 @@ spec:
               subPath: dnd-notes-realm.json
             # operator-login theme text files
             - name: themes-text
-              mountPath: /opt/keycloak/themes/operator-login/theme.properties
+              mountPath: /opt/keycloak/themes/operator-login/login/theme.properties
               subPath: op-theme.properties
             - name: themes-text
               mountPath: /opt/keycloak/themes/operator-login/login/messages/messages_en.properties
@@ -129,7 +129,7 @@ spec:
               subPath: GeistMono-Variable.woff2
             # customer-login theme text files
             - name: themes-text
-              mountPath: /opt/keycloak/themes/customer-login/theme.properties
+              mountPath: /opt/keycloak/themes/customer-login/login/theme.properties
               subPath: cu-theme.properties
             - name: themes-text
               mountPath: /opt/keycloak/themes/customer-login/login/messages/messages_en.properties
