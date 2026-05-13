@@ -1462,6 +1462,87 @@ describe('TenantProvisioningService', () => {
     }
   })
 
+  it('sets tenant_display_name attribute on ensureClient when tenant has a displayName', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        displayName: 'Acme Notes',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(keycloakAdminClient.ensureCalls.length, 1)
+      const ensureCall = keycloakAdminClient.ensureCalls[0]
+      const attrs = ensureCall.attributes as Record<string, string> | undefined
+      assert.equal(attrs?.['tenant_display_name'], 'Acme Notes')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('omits tenant_display_name attribute on ensureClient when tenant has no displayName', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      // No displayName set — null by default
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(keycloakAdminClient.ensureCalls.length, 1)
+      const ensureCall = keycloakAdminClient.ensureCalls[0]
+      const attrs = ensureCall.attributes as Record<string, string> | undefined
+      // No displayName means no tenant_display_name attribute — template falls back to 'Sign in to D&D Notes'
+      assert.equal(attrs?.['tenant_display_name'], undefined)
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
   it('is idempotent when provisioning the same tenant twice (ensureClient called each time)', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
