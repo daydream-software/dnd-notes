@@ -42,8 +42,6 @@ import {
 } from 'react'
 import {
   claimSharedMembership,
-  consolidateCampaignMemberships,
-  createCampaign,
   createNote,
   fetchAuthConfig,
   fetchAdminAccounts,
@@ -67,7 +65,6 @@ import {
   loginOwner,
   logoutOwner,
   registerOwner,
-  updateCampaign,
   updateNote,
   updateSharedNote,
 } from './api'
@@ -76,11 +73,7 @@ import {
   isKeycloakAuthConfig,
 } from './keycloak-client'
 import {
-  blankCampaignTemplateId,
-  blankNoteTemplateId,
   campaignStarterTemplates,
-  createStarterNoteInput,
-  getCampaignStarterTemplate,
   getNoteStarterTemplate,
   noteStarterTemplates,
   type StarterNoteSeed,
@@ -96,9 +89,7 @@ import type {
   ActivityCollaborator,
   AdminAccountSummary,
   AdminOverview,
-  CampaignInput,
   CampaignMembership,
-  MembershipConsolidationSummary,
   CampaignShareLink,
   CampaignSummary,
   GuestJoinInput,
@@ -126,6 +117,15 @@ import {
   persistKeycloakTokens,
   clearStoredKeycloakTokens,
 } from './hooks/useSession'
+import {
+  useCampaign,
+  createCampaignDraft,
+  describeCampaignMembership,
+  selectedCampaignStorageKey,
+  blankCampaignTemplateId,
+  blankNoteTemplateId,
+  getCampaignStarterTemplate,
+} from './hooks/useCampaign'
 
 interface NoteDraft {
   title: string
@@ -134,20 +134,6 @@ interface NoteDraft {
   status: NoteStatus
   sessionName: string
   linkedNoteIds: string[]
-}
-
-interface CampaignDraft {
-  name: string
-  tagline: string
-  system: string
-  setting: string
-  nextSession: string
-}
-
-interface MembershipConsolidationDraft {
-  sourceMembershipId: string
-  targetMembershipId: string
-  confirmRoleMismatch: boolean
 }
 
 interface TagFacet {
@@ -165,11 +151,9 @@ interface NoteLinkPanelItem {
   qualifiers: string[]
 }
 
-type CampaignFormMode = 'closed' | 'create' | 'edit'
 type NoteBrowseMode = 'notes' | 'sessions' | 'activity'
 type NarrowWorkspacePanel = 'browse' | 'editor'
 
-const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
 const recentActivityLimit = 20
 const defaultNotesPaneDescription =
@@ -255,53 +239,6 @@ function createNotePayload(
     linkedNoteIds: draft.linkedNoteIds,
     campaignId,
   }
-}
-
-function createCampaignDraft(campaign?: CampaignSummary | null): CampaignDraft {
-  if (!campaign) {
-    return {
-      name: '',
-      tagline: '',
-      system: '',
-      setting: '',
-      nextSession: '',
-    }
-  }
-
-  return {
-    name: campaign.name,
-    tagline: campaign.tagline,
-    system: campaign.system,
-    setting: campaign.setting,
-    nextSession: campaign.nextSession ?? '',
-  }
-}
-
-function createCampaignPayload(draft: CampaignDraft): CampaignInput {
-  return {
-    name: draft.name,
-    tagline: draft.tagline,
-    system: draft.system,
-    setting: draft.setting,
-    nextSession: trimToNull(draft.nextSession),
-  }
-}
-
-function createMembershipConsolidationDraft(): MembershipConsolidationDraft {
-  return {
-    sourceMembershipId: '',
-    targetMembershipId: '',
-    confirmRoleMismatch: false,
-  }
-}
-
-function describeCampaignMembership(membership: CampaignMembership) {
-  const roleLabel =
-    membership.role === 'guest' && membership.userId !== null
-      ? 'linked collaborator'
-      : membership.role
-
-  return `${membership.displayName} (${roleLabel})`
 }
 
 function excerpt(body: string) {
@@ -614,10 +551,38 @@ function App() {
     handleSubmitAuth: handleSubmitAuthFromHook,
     handleLogout: handleLogoutFromHook,
   } = useSession()
-  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
-  const [campaigns, setCampaigns] = useState<CampaignSummary[]>([])
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
-  const [memberships, setMemberships] = useState<CampaignMembership[]>([])
+  const {
+    campaigns,
+    selectedCampaignId,
+    memberships,
+    campaignDraft,
+    campaignFormMode,
+    selectedCampaignTemplateId,
+    isSavingCampaign,
+    membershipConsolidationDraft,
+    membershipConsolidationPreview,
+    membershipConsolidationNotice,
+    isPreviewingMembershipConsolidation,
+    isApplyingMembershipConsolidation,
+    setCampaigns,
+    setSelectedCampaignId,
+    setMemberships,
+    setCampaignDraft,
+    setCampaignFormMode,
+    setSelectedCampaignTemplateId,
+    setMembershipConsolidationDraft,
+    setMembershipConsolidationPreview,
+    setMembershipConsolidationNotice,
+    resetMembershipConsolidationState,
+    handleCampaignDraftChange,
+    handleMembershipConsolidationDraftChange: handleMembershipConsolidationDraftChangeFromHook,
+    handleSaveCampaign: handleSaveCampaignFromHook,
+    handlePreviewMembershipConsolidation: handlePreviewMembershipConsolidationFromHook,
+    handleApplyMembershipConsolidation: handleApplyMembershipConsolidationFromHook,
+    handleOpenCampaignCreate: handleOpenCampaignCreateFromHook,
+    handleOpenCampaignSettings: handleOpenCampaignSettingsFromHook,
+    handleCancelCampaignForm: handleCancelCampaignFormFromHook,
+  } = useCampaign()
   const [sharedCampaign, setSharedCampaign] = useState<CampaignSummary | null>(null)
   const [shareLink, setShareLink] = useState<CampaignShareLink | null>(null)
   const [sharedMembership, setSharedMembership] = useState<CampaignMembership | null>(null)
@@ -643,12 +608,6 @@ function App() {
   const deferredSearchText = useDeferredValue(searchText)
   const [draft, setDraft] = useState<NoteDraft>(createEmptyDraft)
   const [tagInputValue, setTagInputValue] = useState('')
-  const [campaignDraft, setCampaignDraft] = useState<CampaignDraft>(
-    createCampaignDraft,
-  )
-  const [membershipConsolidationDraft, setMembershipConsolidationDraft] = useState<
-    MembershipConsolidationDraft
-  >(createMembershipConsolidationDraft)
   const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null)
   const [isCreating, setIsCreating] = useState(false)
   const [isSharedReady, setIsSharedReady] = useState(!isSharedMode)
@@ -659,28 +618,13 @@ function App() {
   const [isSaving, setIsSaving] = useState(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isJoining, setIsJoining] = useState(false)
-  const [isSavingCampaign, setIsSavingCampaign] = useState(false)
   const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
-  const [isPreviewingMembershipConsolidation, setIsPreviewingMembershipConsolidation] =
-    useState(false)
-  const [isApplyingMembershipConsolidation, setIsApplyingMembershipConsolidation] =
-    useState(false)
-  const [campaignFormMode, setCampaignFormMode] =
-    useState<CampaignFormMode>('closed')
-  const [selectedCampaignTemplateId, setSelectedCampaignTemplateId] = useState(
-    blankCampaignTemplateId,
-  )
   const [selectedNoteTemplateId, setSelectedNoteTemplateId] = useState(
     blankNoteTemplateId,
   )
   const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([])
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
   const [adminError, setAdminError] = useState<string | null>(null)
-  const [membershipConsolidationPreview, setMembershipConsolidationPreview] =
-    useState<MembershipConsolidationSummary | null>(null)
-  const [membershipConsolidationNotice, setMembershipConsolidationNotice] = useState<
-    string | null
-  >(null)
   const [joinDraft, setJoinDraft] = useState<GuestJoinInput>({ displayName: '' })
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false)
@@ -1020,14 +964,6 @@ function App() {
                   selectedTagFacet.count === 1 ? 'note' : 'notes'
                 } tagged ${selectedTagFacet.tag} in ${resolvedCampaign?.name ?? 'this campaign'}.`
               : defaultNotesPaneDescription
-
-  const resetMembershipConsolidationState = useCallback(() => {
-    setMembershipConsolidationDraft(createMembershipConsolidationDraft())
-    setMembershipConsolidationPreview(null)
-    setMembershipConsolidationNotice(null)
-    setIsPreviewingMembershipConsolidation(false)
-    setIsApplyingMembershipConsolidation(false)
-  }, [])
 
   const resetSessionBrowserState = useCallback(() => {
     sessionAbortControllerRef.current?.abort()
@@ -1685,16 +1621,6 @@ function App() {
     }))
   }
 
-  const handleCampaignDraftChange = <Field extends keyof CampaignDraft>(
-    field: Field,
-    value: CampaignDraft[Field],
-  ) => {
-    setCampaignDraft((currentDraft) => ({
-      ...currentDraft,
-      [field]: value,
-    }))
-  }
-
   const handleSelectNote = (note: Note) => {
     if (!showSplitNoteWorkspace) {
       setNarrowWorkspacePanel('editor')
@@ -1713,19 +1639,7 @@ function App() {
     field: Field,
     value: MembershipConsolidationDraft[Field],
   ) => {
-    setMembershipConsolidationDraft((currentDraft) => ({
-      ...currentDraft,
-      [field]: value,
-      ...(field === 'confirmRoleMismatch'
-        ? {}
-        : { confirmRoleMismatch: false }),
-    }))
-
-    if (field !== 'confirmRoleMismatch') {
-      setMembershipConsolidationPreview(null)
-      setMembershipConsolidationNotice(null)
-    }
-
+    handleMembershipConsolidationDraftChangeFromHook(field, value)
     setError(null)
   }
 
@@ -2236,40 +2150,24 @@ function App() {
   }
 
   const handleOpenCampaignCreate = () => {
-    setCampaignDraft(createCampaignDraft())
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setMemberships([])
     setShareLinks([])
     setShareLinkDraft(createShareLinkDraftFn())
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-    setCampaignFormMode('create')
-    setError(null)
+    handleOpenCampaignCreateFromHook(selectedCampaign, resetShareLinkInteractionState, setError)
   }
 
   const handleOpenCampaignSettings = () => {
-    if (!canManageSelectedCampaign) {
-      setError('Campaign settings are only available to campaign owners.')
-      return
-    }
-
-    setCampaignDraft(createCampaignDraft(selectedCampaign))
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setShareLinkDraft(createShareLinkDraftFn())
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-    setCampaignFormMode('edit')
-    setError(null)
+    handleOpenCampaignSettingsFromHook(
+      selectedCampaign,
+      canManageSelectedCampaign,
+      resetShareLinkInteractionState,
+      setError,
+    )
   }
 
   const handleCancelCampaignForm = () => {
-    setCampaignDraft(createCampaignDraft(selectedCampaign))
-    setCampaignFormMode(campaigns.length === 0 ? 'create' : 'closed')
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
     setShareLinkDraft(createShareLinkDraftFn())
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-    setError(null)
+    handleCancelCampaignFormFromHook(selectedCampaign, resetShareLinkInteractionState, setError)
   }
 
   const handleSaveCampaign = async () => {
@@ -2277,55 +2175,7 @@ function App() {
       return
     }
 
-    setError(null)
-    setIsSavingCampaign(true)
-
-    try {
-      const payload = createCampaignPayload(campaignDraft)
-      let starterTemplateError: string | null = null
-
-      if (campaignFormMode === 'create') {
-        const createdCampaign = await createCampaign(authToken, payload)
-
-        if (selectedCampaignTemplateId !== blankCampaignTemplateId) {
-          try {
-            for (const starterNote of selectedCampaignTemplate.starterNotes) {
-              await createNote(
-                authToken,
-                createStarterNoteInput(starterNote, createdCampaign.id),
-              )
-            }
-          } catch {
-            starterTemplateError =
-              'Campaign created, but the starter notes could not be added. You can still add notes manually.'
-          }
-        }
-
-        await loadCampaigns(authToken, createdCampaign.id)
-      } else if (campaignFormMode === 'edit' && selectedCampaignId) {
-        const updatedCampaign = await updateCampaign(
-          authToken,
-          selectedCampaignId,
-          payload,
-        )
-        await loadCampaigns(authToken, updatedCampaign.id)
-      }
-
-      setCampaignFormMode('closed')
-      setSelectedCampaignTemplateId(blankCampaignTemplateId)
-
-      if (starterTemplateError) {
-        setError(starterTemplateError)
-      }
-    } catch (campaignError) {
-      setError(
-        campaignError instanceof Error
-          ? campaignError.message
-          : 'Could not save the campaign.',
-      )
-    } finally {
-      setIsSavingCampaign(false)
-    }
+    await handleSaveCampaignFromHook(authToken, loadCampaigns, setError)
   }
 
   const handleCreateShareLink = async () => {
@@ -2338,98 +2188,25 @@ function App() {
   }
 
   const handlePreviewMembershipConsolidation = async () => {
-    if (
-      !authToken ||
-      !selectedCampaignId ||
-      !membershipConsolidationDraft.sourceMembershipId ||
-      !membershipConsolidationDraft.targetMembershipId ||
-      membershipConsolidationDraft.sourceMembershipId ===
-        membershipConsolidationDraft.targetMembershipId
-    ) {
+    if (!authToken || !selectedCampaignId) {
       return
     }
 
-    setError(null)
-    setMembershipConsolidationNotice(null)
-    setIsPreviewingMembershipConsolidation(true)
-
-    try {
-      const response = await consolidateCampaignMemberships(authToken, selectedCampaignId, {
-        sourceMembershipId: membershipConsolidationDraft.sourceMembershipId,
-        targetMembershipId: membershipConsolidationDraft.targetMembershipId,
-      })
-
-      setMembershipConsolidationPreview(response.consolidation)
-    } catch (consolidationError) {
-      setError(
-        consolidationError instanceof Error
-          ? consolidationError.message
-          : 'Could not preview the consolidation.',
-      )
-    } finally {
-      setIsPreviewingMembershipConsolidation(false)
-    }
+    await handlePreviewMembershipConsolidationFromHook(authToken, selectedCampaignId, setError)
   }
 
   const handleApplyMembershipConsolidation = async () => {
-    if (
-      !authToken ||
-      !selectedCampaignId ||
-      !membershipConsolidationPreview ||
-      membershipConsolidationPreview.applied
-    ) {
+    if (!authToken || !selectedCampaignId) {
       return
     }
 
-    setError(null)
-    setMembershipConsolidationNotice(null)
-    setIsApplyingMembershipConsolidation(true)
-
-    let response: Awaited<
-      ReturnType<typeof consolidateCampaignMemberships>
-    >
-
-    try {
-      response = await consolidateCampaignMemberships(authToken, selectedCampaignId, {
-        sourceMembershipId: membershipConsolidationDraft.sourceMembershipId,
-        targetMembershipId: membershipConsolidationDraft.targetMembershipId,
-        confirm: true,
-        confirmRoleMismatch: membershipConsolidationDraft.confirmRoleMismatch,
-      })
-
-      setMembershipConsolidationPreview(response.consolidation)
-      setMembershipConsolidationNotice(
-        `Moved note attribution from ${response.consolidation.sourceMembership.displayName} to ${response.consolidation.targetMembership.displayName}.`,
-      )
-    } catch (consolidationError) {
-      setError(
-        consolidationError instanceof Error
-          ? consolidationError.message
-          : 'Could not apply the consolidation.',
-      )
-      setIsApplyingMembershipConsolidation(false)
-      return
-    }
-
-    setMembershipConsolidationPreview(response.consolidation)
-    setMembershipConsolidationNotice(
-      `Moved note attribution from ${response.consolidation.sourceMembership.displayName} to ${response.consolidation.targetMembership.displayName}.`,
-    )
-
-    const refreshed = await loadWorkspace(
+    await handleApplyMembershipConsolidationFromHook(
       authToken,
       selectedCampaignId,
+      loadWorkspace,
       selectedNoteIdRef.current,
-      true,
+      setError,
     )
-
-    if (!refreshed) {
-      setError(
-        'Consolidation succeeded, but the workspace could not refresh. Reload the page to see the latest note attribution.',
-      )
-    }
-
-    setIsApplyingMembershipConsolidation(false)
   }
 
   const handleRevealShareLink = async (shareLinkId: string) => {
