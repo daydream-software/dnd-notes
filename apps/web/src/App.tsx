@@ -343,7 +343,7 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
     useState<NarrowWorkspacePanel>('browse')
-  const [wantsSplitNoteWorkspace, setShowSplitNoteWorkspace] = useState(false)
+  const [wantsSplitNoteWorkspace, setWantsSplitNoteWorkspace] = useState(false)
   const showSplitNoteWorkspace = canSplitNoteWorkspace && wantsSplitNoteWorkspace
   const isBootstrapping = !isAuthReady || !isSharedReady
 
@@ -1165,7 +1165,7 @@ function App() {
       return
     }
 
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
     setSelectedTagFilter(null)
     setSearchText('')
@@ -1341,7 +1341,7 @@ function App() {
   }
 
   const handleLogout = async () => {
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setIsQuickCaptureOpen(false)
     setError(null)
     await handleLogoutFromHook(isSharedMode, guestStorageKey, () => {
@@ -1438,7 +1438,7 @@ function App() {
     }
 
     setCampaignFormMode('closed')
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('browse')
     resetSessionBrowserState()
@@ -1451,12 +1451,12 @@ function App() {
   }
 
   const handleShowBrowsePane = () => {
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNarrowWorkspacePanel('browse')
   }
 
   const handleShowEditorPane = () => {
-    setShowSplitNoteWorkspace(false)
+    setWantsSplitNoteWorkspace(false)
     setNarrowWorkspacePanel('editor')
   }
 
@@ -1465,7 +1465,7 @@ function App() {
       return
     }
 
-    setShowSplitNoteWorkspace((currentValue) => {
+    setWantsSplitNoteWorkspace((currentValue) => {
       if (currentValue) {
         setNarrowWorkspacePanel(selectedNoteIdRef.current || isCreating ? 'editor' : 'browse')
       }
