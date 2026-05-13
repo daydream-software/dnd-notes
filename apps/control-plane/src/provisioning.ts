@@ -475,6 +475,9 @@ export class TenantProvisioningService implements TenantProvisioningPort {
               `https://${hostname}`,
               `http://${hostname}`,
             ],
+            ...(refreshedTenant.displayName !== null
+              ? { attributes: { tenant_display_name: refreshedTenant.displayName } }
+              : {}),
           })
 
           // Create the per-tenant member role on the per-tenant client. The
