@@ -35,7 +35,7 @@
       <span class="dnd-brand-pill">D&amp;D NOTES</span>
       <#assign tenantName = (client.attributes['tenant_display_name']!'')>
       <#if tenantName?has_content>
-      <p class="dnd-signin-heading">Sign in to ${tenantName?html}</p>
+      <p class="dnd-signin-heading">Sign in to ${tenantName}</p>
       <#else>
       <p class="dnd-signin-heading">Sign in to D&amp;D Notes</p>
       </#if>
