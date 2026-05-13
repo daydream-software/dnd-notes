@@ -475,6 +475,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
   const workspaceRequestIdRef = useRef(0)
   const activityRequestIdRef = useRef(0)
   const sessionRequestIdRef = useRef(0)
+  const workspaceAbortControllerRef = useRef<AbortController | null>(null)
   const activityAbortControllerRef = useRef<AbortController | null>(null)
   const sessionAbortControllerRef = useRef<AbortController | null>(null)
 
@@ -499,6 +500,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
   // Cleanup: abort any in-flight requests on unmount
   useEffect(
     () => () => {
+      workspaceAbortControllerRef.current?.abort()
       activityAbortControllerRef.current?.abort()
       sessionAbortControllerRef.current?.abort()
     },
@@ -745,13 +747,18 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       workspaceRequestIdRef.current += 1
       const requestId = workspaceRequestIdRef.current
 
+      workspaceAbortControllerRef.current?.abort()
+      const abortController = new AbortController()
+      workspaceAbortControllerRef.current = abortController
+      const { signal } = abortController
+
       setIsLoadingWorkspace(true)
 
       try {
         const [nextOverview, notesResponse, sessionsResponse] = await Promise.all([
-          fetchOverview(sessionToken, campaignId),
-          fetchNotes(sessionToken, campaignId),
-          fetchSessions(sessionToken, campaignId),
+          fetchOverview(sessionToken, campaignId, signal),
+          fetchNotes(sessionToken, campaignId, signal),
+          fetchSessions(sessionToken, campaignId, signal),
         ])
 
         if (workspaceRequestIdRef.current !== requestId) {
@@ -771,6 +778,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
                 sessionToken,
                 currentSessionName,
                 campaignId,
+                signal,
               )
             ).notes
           : []
@@ -836,7 +844,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
         return true
       } catch (loadError) {
-        if (workspaceRequestIdRef.current !== requestId) {
+        if (signal.aborted || workspaceRequestIdRef.current !== requestId) {
           return 'stale'
         }
 
@@ -871,12 +879,17 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       workspaceRequestIdRef.current += 1
       const requestId = workspaceRequestIdRef.current
 
+      workspaceAbortControllerRef.current?.abort()
+      const abortController = new AbortController()
+      workspaceAbortControllerRef.current = abortController
+      const { signal } = abortController
+
       setIsLoadingWorkspace(true)
 
       try {
         const [nextOverview, notesResponse] = await Promise.all([
-          fetchSharedOverview(shareToken, activeGuestToken),
-          fetchSharedNotes(shareToken, activeGuestToken),
+          fetchSharedOverview(shareToken, activeGuestToken, signal),
+          fetchSharedNotes(shareToken, activeGuestToken, signal),
         ])
 
         if (workspaceRequestIdRef.current !== requestId) {
@@ -917,7 +930,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
 
         return true
       } catch (loadError) {
-        if (workspaceRequestIdRef.current !== requestId) {
+        if (signal.aborted || workspaceRequestIdRef.current !== requestId) {
           return 'stale'
         }
 
