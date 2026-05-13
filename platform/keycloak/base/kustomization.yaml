@@ -11,6 +11,7 @@ kind: Kustomization
 # Key naming convention:
 #   op-* = operator-login theme files
 #   cu-* = customer-login theme files
+#   ac-* = account-console theme files
 #
 # Overlays reference these ConfigMaps by name and mount them into the Keycloak
 # Deployment via subPath volumeMounts to reconstruct the full theme tree under
@@ -21,7 +22,7 @@ configMapGenerator:
     namespace: dnd-notes-platform
     options:
       annotations:
-        dnd-notes.dev/purpose: Keycloak login theme text files — operator-login and customer-login
+        dnd-notes.dev/purpose: Keycloak login theme text files — operator-login, customer-login, and account-console
     files:
       - op-theme.properties=themes/operator-login/theme.properties
       - op-messages_en.properties=themes/operator-login/login/messages/messages_en.properties
@@ -39,12 +40,14 @@ configMapGenerator:
       - cu-login-otp.ftl=themes/customer-login/login/login-otp.ftl
       - cu-login.css=themes/customer-login/login/resources/css/login.css
       - cu-dnd-notes-mark.svg=themes/customer-login/login/resources/img/dnd-notes-mark.svg
+      - ac-theme.properties=themes/account-console/account/theme.properties
+      - ac-account.css=themes/account-console/account/resources/css/account.css
 
   - name: keycloak-themes-fonts
     namespace: dnd-notes-platform
     options:
       annotations:
-        dnd-notes.dev/purpose: Self-hosted Geist variable fonts for Keycloak login themes
+        dnd-notes.dev/purpose: Self-hosted Geist variable fonts for Keycloak login themes and account-console
     files:
       - Geist-Variable.woff2=themes/operator-login/login/resources/fonts/Geist-Variable.woff2
       - GeistMono-Variable.woff2=themes/operator-login/login/resources/fonts/GeistMono-Variable.woff2

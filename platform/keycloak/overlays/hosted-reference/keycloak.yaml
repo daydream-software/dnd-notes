@@ -159,6 +159,20 @@ spec:
             - name: themes-fonts
               mountPath: /opt/keycloak/themes/customer-login/login/resources/fonts/GeistMono-Variable.woff2
               subPath: GeistMono-Variable.woff2
+            # account-console theme text files
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/account-console/account/theme.properties
+              subPath: ac-theme.properties
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/account-console/account/resources/css/account.css
+              subPath: ac-account.css
+            # account-console fonts (shared with login themes)
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/account-console/account/resources/fonts/Geist-Variable.woff2
+              subPath: Geist-Variable.woff2
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/account-console/account/resources/fonts/GeistMono-Variable.woff2
+              subPath: GeistMono-Variable.woff2
       volumes:
         - name: realm-import-workforce
           configMap:

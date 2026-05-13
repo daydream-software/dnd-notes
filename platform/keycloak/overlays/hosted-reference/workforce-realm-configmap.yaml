@@ -20,6 +20,7 @@ data:
       "loginWithEmailAllowed": true,
       "duplicateEmailsAllowed": false,
       "resetPasswordAllowed": true,
+      "accountTheme": "account-console",
       "clients": [
         {
           "clientId": "dnd-notes-control-plane",

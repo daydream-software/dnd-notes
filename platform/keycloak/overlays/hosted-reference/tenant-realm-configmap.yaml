@@ -18,6 +18,7 @@ data:
       "enabled": true,
       "displayName": "D&D Notes",
       "loginTheme": "customer-login",
+      "accountTheme": "account-console",
       "registrationAllowed": false,
       "rememberMe": true,
       "loginWithEmailAllowed": true,
