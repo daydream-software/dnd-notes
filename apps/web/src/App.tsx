@@ -549,6 +549,7 @@ function App() {
     setAdminAccounts([])
     setAdminOverview(null)
     setAdminError(null)
+    setIsLoadingAdminOverview(false)
     setNotes([])
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('browse')
@@ -814,13 +815,6 @@ function App() {
 
   useEffect(() => {
     if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
-      // TODO(#250): move these resets to transition origins (clearSession, shared-mode entry,
-      // owner update path) to remove setState-in-effect pattern.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setAdminAccounts([])
-      setAdminOverview(null)
-      setAdminError(null)
-      setIsLoadingAdminOverview(false)
       return
     }
 
