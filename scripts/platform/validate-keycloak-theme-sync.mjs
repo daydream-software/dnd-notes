@@ -109,7 +109,6 @@ const TEXT_KEYS = [
   // [configmap-key, relative-path-under-account-console/]
   ['ac-theme.properties',         'theme.properties'],
   ['ac-account.css',              'account/resources/css/account.css'],
-  ['ac-dnd-notes-mark.svg',       'account/resources/img/dnd-notes-mark.svg'],
 ];
 
 function themeDir(key) {
