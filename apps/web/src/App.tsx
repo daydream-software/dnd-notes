@@ -343,14 +343,9 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
     useState<NarrowWorkspacePanel>('browse')
-  const [showSplitNoteWorkspace, setShowSplitNoteWorkspace] = useState(false)
+  const [wantsSplitNoteWorkspace, setShowSplitNoteWorkspace] = useState(false)
+  const showSplitNoteWorkspace = canSplitNoteWorkspace && wantsSplitNoteWorkspace
   const isBootstrapping = !isAuthReady || !isSharedReady
-
-  useEffect(() => {
-    if (!canSplitNoteWorkspace) {
-      setShowSplitNoteWorkspace(false)
-    }
-  }, [canSplitNoteWorkspace])
 
   const selectedCampaign = useMemo(
     () =>
@@ -819,6 +814,9 @@ function App() {
 
   useEffect(() => {
     if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
+      // TODO(#250): move these resets to transition origins (clearSession, shared-mode entry,
+      // owner update path) to remove setState-in-effect pattern.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setAdminAccounts([])
       setAdminOverview(null)
       setAdminError(null)
