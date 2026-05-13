@@ -2,7 +2,8 @@
 /**
  * Validates that every text/font key in the platform-keycloak-themes-* ConfigMaps
  * inside platform/k3d/keycloak.yaml matches the corresponding source file under
- * platform/k3d/keycloak-themes/.
+ * platform/keycloak/base/themes/ (the canonical on-disk location, moved from
+ * platform/k3d/keycloak-themes/ in issue #226).
  *
  * Exits 0 on clean sync, 1 on any drift.
  */
@@ -136,7 +137,7 @@ if (!textBlock) {
       continue;
     }
 
-    const srcPath = join(root, 'platform/k3d/keycloak-themes', themeDir(cmKey), relPath);
+    const srcPath = join(root, 'platform/keycloak/base/themes', themeDir(cmKey), relPath);
     if (!existsSync(srcPath)) {
       drift.push(`Source file missing: ${relative(root, srcPath)} (referenced by ConfigMap key ${cmKey})`);
       continue;
@@ -177,8 +178,8 @@ if (!fontsBlock) {
     const cmBytes = Buffer.from(b64, 'base64');
 
     const fontPaths = [
-      join(root, 'platform/k3d/keycloak-themes/operator-login/login/resources/fonts', fontKey),
-      join(root, 'platform/k3d/keycloak-themes/customer-login/login/resources/fonts', fontKey),
+      join(root, 'platform/keycloak/base/themes/operator-login/login/resources/fonts', fontKey),
+      join(root, 'platform/keycloak/base/themes/customer-login/login/resources/fonts', fontKey),
     ];
 
     for (const fontPath of fontPaths) {
@@ -214,7 +215,7 @@ if (!fontsBlock) {
 // ---------------------------------------------------------------------------
 
 if (drift.length === 0) {
-  console.log('keycloak-themes sync check passed -- ConfigMap and source files are in sync');
+  console.log('keycloak-themes sync check passed -- k3d ConfigMap and on-disk source files are in sync');
   process.exit(0);
 } else {
   process.stderr.write(
@@ -225,7 +226,7 @@ if (drift.length === 0) {
   }
   process.stderr.write(
     '\nFix: update platform/k3d/keycloak.yaml ConfigMap data to match the source files\n' +
-    'under platform/k3d/keycloak-themes/\n',
+    'under platform/keycloak/base/themes/\n',
   );
   process.exit(1);
 }

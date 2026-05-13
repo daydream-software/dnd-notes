@@ -68,6 +68,64 @@ validate_overlay() {
   echo "Validated ${display_path}"
 }
 
+validate_keycloak_hosted_realm() {
+  local manifest_path="$1"
+  local display_path="${manifest_path#"${ROOT}/"}"
+
+  node - "$manifest_path" <<'EOF'
+const fs = require('node:fs');
+
+const manifestPath = process.argv[2];
+const manifest = fs.readFileSync(manifestPath, 'utf8');
+const realmMatch = manifest.match(
+  /^\s{2}dnd-notes-realm\.json: \|\n((?:^\s{4}.*\n?)*)/m,
+);
+
+if (!realmMatch) {
+  throw new Error(`Could not find dnd-notes-realm.json block in ${manifestPath}`);
+}
+
+const realmJson = realmMatch[1].replace(/^ {4}/gm, '');
+const realm = JSON.parse(realmJson);
+const clients = Array.isArray(realm.clients) ? realm.clients : [];
+
+if (clients.some((client) => Object.hasOwn(client, 'roles'))) {
+  throw new Error(
+    'Keycloak realm seed defines client roles under clients[].roles; use top-level roles.client.<clientId> instead.',
+  );
+}
+
+const controlPlaneRoles = realm.roles?.client?.['dnd-notes-control-plane'];
+if (!Array.isArray(controlPlaneRoles) || controlPlaneRoles.length === 0) {
+  throw new Error(
+    'Keycloak hosted-reference realm must define control-plane client roles under roles.client["dnd-notes-control-plane"].',
+  );
+}
+
+const cpClient = clients.find((c) => c.clientId === 'dnd-notes-control-plane');
+if (!cpClient) {
+  throw new Error('Keycloak hosted-reference realm is missing dnd-notes-control-plane client.');
+}
+if (cpClient.attributes?.login_theme !== 'operator-login') {
+  throw new Error(
+    `dnd-notes-control-plane client must have attributes.login_theme = "operator-login" (got: ${cpClient.attributes?.login_theme})`,
+  );
+}
+
+const portalClient = clients.find((c) => c.clientId === 'dnd-notes-customer-portal');
+if (!portalClient) {
+  throw new Error('Keycloak hosted-reference realm is missing dnd-notes-customer-portal client.');
+}
+if (portalClient.attributes?.login_theme !== 'customer-login') {
+  throw new Error(
+    `dnd-notes-customer-portal client must have attributes.login_theme = "customer-login" (got: ${portalClient.attributes?.login_theme})`,
+  );
+}
+EOF
+
+  echo "Validated ${display_path}"
+}
+
 require_tool kubectl
 require_tool node
 
@@ -75,4 +133,6 @@ validate_overlay "${ROOT}/platform/control-plane/overlays/k3d"
 validate_overlay "${ROOT}/platform/control-plane/overlays/hosted-reference"
 validate_overlay "${ROOT}/platform/operator-portal/overlays/k3d"
 validate_overlay "${ROOT}/platform/customer-portal/overlays/k3d"
+validate_overlay "${ROOT}/platform/keycloak/overlays/hosted-reference"
 validate_keycloak_realm_seed "${ROOT}/platform/k3d/keycloak.yaml"
+validate_keycloak_hosted_realm "${ROOT}/platform/keycloak/overlays/hosted-reference/realm-configmap.yaml"
