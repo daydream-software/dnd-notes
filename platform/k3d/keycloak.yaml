@@ -1629,6 +1629,8 @@ data:
     .pf-v5-c-page__sidebar, .pf-v5-c-nav {
       background: rgba(15, 23, 42, 0.85) !important;
       border-right: 1px solid rgba(167, 139, 250, 0.18) !important;
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
     }
     .pf-v5-c-page__main, .pf-v5-c-page__main-section { background: transparent !important; }
     /* Navigation */

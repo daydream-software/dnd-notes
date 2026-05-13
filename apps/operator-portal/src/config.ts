@@ -94,5 +94,6 @@ export function buildOperatorRedirectUri() {
 }
 
 export function buildAccountConsoleUrl(config: OperatorKeycloakConfig) {
-  return `${config.url}/realms/${config.realm}/account`
+  const baseUrl = config.url.replace(/\/+$/, '')
+  return `${baseUrl}/realms/${config.realm}/account`
 }
