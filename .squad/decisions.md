@@ -7530,3 +7530,76 @@ This eliminates password-grant dependency and re-enables PKCE on all Keycloak cl
 **Applied:** PR #245 — both smoke scripts updated; control-plane provisioner re-enabled PKCE with tenant-display-name conditional from #241.
 
 ---
+
+### 2026-05-13: 3-state loader return pattern for race-guarded fetches (Stef, PRs #249 #251 #253)
+
+**Issue:** Apps/web hook extraction (#146 PR1) exposed a race condition pattern where stale
+results (from aborted prior requests) could be confused with real errors. Mutating state
+on both paths caused double-toasts and incorrect UX.
+
+**Decision:** Canonical return shape for race-guarded fetch operations in `apps/web/src/hooks/`
+is `Promise<boolean | 'stale'>`:
+
+- `=== true` → success; caller runs side effects.
+- `=== 'stale'` → silent return; newer request in flight will resolve UI.
+- `=== false` → silent return; loader already called `onError(...)` — caller must NOT double-toast.
+
+Applies to all loaders doing concurrent-request guarding. Do not invent additional states.
+
+**Example:** useCampaign.handleLoadCampaigns, useNotes.loadWorkspace, useNotes.loadSharedWorkspace.
+
+---
+
+### 2026-05-13: Race guard implementation pattern — requestIdRef + AbortController (Stef, PRs #249 #251 #253)
+
+**Pairing:** `requestIdRef: useRef<number>(0)` + `AbortController` together. This pattern
+replaces ad-hoc sequence counters or timestamp checks.
+
+**Implementation:**
+1. Increment `requestIdRef.current` at loader entry; capture the new value.
+2. Create new `AbortController`; abort any prior controller.
+3. Thread `signal` through all fetches in the load sequence.
+4. After each `await`, check both `signal.aborted` and `requestIdRef.current === captured`
+   before any state mutation. If either is true, return `'stale'`.
+
+**Canonical example:** loadActivity hook in `apps/web/src/hooks/`.
+
+Applied to `apps/web/src/hooks/useNotes.ts` (both workspace loaders) and mirrored as pattern
+for future hooks.
+
+---
+
+### 2026-05-13: Test + review gates are complementary, not hierarchical (FFMikha, PR #251)
+
+**Manifestation:** PR #249 extracted 4 domain hooks from App.tsx. The 62-test suite passed
+all hooks; Mikey's review found 4 real behavior regressions (missing resetSessionBrowserState,
+localStorage.setItem ordering, missing setError(null), implicit state leak on race). Tests
+cover happy paths; review covers behavior preservation under extraction.
+
+PR #251 landed with Mikey's APPROVE; CodeRabbit later flagged a subtle 2-state-collapse defect
+(stale vs real error indistinguishable, causing double-toast on race). Coordinator initially
+framed CodeRabbit as secondary or "also checking" — user pushed back.
+
+**Decision:** Both Mikey (behavior, architecture, semantics) and CodeRabbit (style, patterns,
+common pitfalls) are required gates. Neither is secondary. Surface both lenses for pre-merge
+sign-off. When both APPROVE clean, confidence is high; when one finds a defect the other
+missed (as in PR #251), escalate and fix rather than downweight.
+
+**Note:** This does not override Mikey's final authority on merge-readiness — it clarifies that
+CodeRabbit findings are not "nice to have" but are part of the required review surface.
+
+---
+
+### 2026-05-13: Deferred regression test item justified — App.tsx clearSession test (Stef, PR #253 item 3c)
+
+**Context:** PR #253 added 6 regression tests for race-guarded loaders + AbortController.
+Remaining item 3c: App.tsx `clearSession` state mutation test was deferred.
+
+**Justification:** `clearSession` has 30+ inline state mutations, Keycloak client ref, and
+localStorage access. Isolated unit testing today would require either full-render fixture
+surgery or hoisting `clearSession` into its own hook. The latter is exactly what #146 PR2+
+(page extraction) will do. Testing after extraction is cleaner.
+
+**Decision:** Defer App.tsx `clearSession` test to #146 PR2+ (page extraction). No regression
+risk in the interim — the function is not changing in PR #249–#253.
+
