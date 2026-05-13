@@ -6,6 +6,7 @@ COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
 COPY packages/portal-utils ./packages/portal-utils
 COPY packages/postgres-migrations ./packages/postgres-migrations
+COPY packages/theme ./packages/theme
 COPY platform/keycloak-jwt ./platform/keycloak-jwt
 COPY apps/api/package*.json ./apps/api/
 COPY apps/web/package*.json ./apps/web/
@@ -23,6 +24,7 @@ ARG PORTAL_NAME
 COPY tsconfig.json commitlint.config.cjs ./
 COPY . ./
 RUN node ./scripts/build-portal-utils.mjs
+RUN npm run build --workspace packages/theme
 RUN npm run build --workspace apps/${PORTAL_NAME}
 
 # Stage 4: Runtime image
