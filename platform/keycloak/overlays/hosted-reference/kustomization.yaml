@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Hosted-reference Keycloak overlay.
+# Assembles: base theme ConfigMaps (generated from platform/keycloak/base/themes/)
+# + production realm ConfigMap + Deployment + Service.
+#
+# All placeholder values (hostname, DB credentials, admin password) must be
+# replaced with real managed-cluster values before applying to a live environment.
+#
+# References:
+#   - platform/k3d/keycloak.yaml         — k3d wiring (model; do not modify)
+#   - platform/keycloak/base/themes/**   — canonical theme source files (single source of truth)
+#   - issue #226
+
+resources:
+  - ../../base
+  - workforce-realm-configmap.yaml
+  - tenant-realm-configmap.yaml
+  - keycloak.yaml
