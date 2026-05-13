@@ -7491,3 +7491,42 @@ The deferred items are now resolved by #240:
 - `"accountTheme": "account-console"` in tenant and workforce realm ConfigMaps
 
 ---
+
+### 2026-05-13: Keycloak theme.properties path rule — type-subdir only (Coordinator, PRs #245 #247)
+
+**Issue:** Keycloak FreeMarker template resolver reads theme configuration from type-subdir path (`<theme>/<type>/theme.properties`), NOT from theme root. Templates shipped directly at the type-subdir level resolve (e.g., `login/login.ftl`); unshipped templates (logout-confirm, error, MFA, password reset, frontchannel logout) fail to resolve through parent chain because the root-level `parent=keycloak.v2` declaration is silently ignored.
+
+**Manifestation:** operator-portal Sign out returned HTTP 500 with `TemplateNotFoundException: logout-confirm.ftl` in logs (PR #247).
+
+**Decision:** All Keycloak theme configuration must live in the type subdirectory:
+- Login themes: `<theme>/login/theme.properties`
+- Account-console themes: `<theme>/account/theme.properties`
+- Email themes (future): `<theme>/email/theme.properties`
+- Broker themes (future): `<theme>/broker/theme.properties`
+
+Theme root is silently ignored by Keycloak's FreeMarker resolver; placing configuration at the root will not cause an error, but parent chain fallbacks (for unshipped templates) will not work.
+
+**Applied:** PR #247 — `git mv` on `operator-login/theme.properties` → `operator-login/login/theme.properties` and `customer-login/theme.properties` → `customer-login/login/theme.properties`. Volume mount paths and ConfigMap refs updated in `platform/k3d/keycloak.yaml`, `platform/keycloak/overlays/hosted-reference/keycloak.yaml`, `platform/keycloak/base/kustomization.yaml`, and `scripts/platform/validate-keycloak-theme-sync.mjs`.
+
+**Note on PR #238:** Account-console theme already applied this rule correctly (account-console/account/theme.properties); commit message misextrapolated "login themes work at theme root" — this was only true because login.ftl was shipped directly. Bug was latent until logout-confirm (an unshipped template) was exercised.
+
+---
+
+### 2026-05-13: PKCE smoke scripts — headless auth-code flow via openssl code_verifier (Data, PR #245)
+
+**Context:** Issue #183. Smoke scripts (`scripts/k3d/smoke.sh`, `scripts/k3d/full-stack-smoke.sh`) were using legacy Resource Owner Password Credentials grant (`grant_type=password`) to obtain tokens for internal cluster e2e testing. PKCE was disabled on Keycloak clients as a workaround to avoid the auth-code flow.
+
+**Decision:** Replace password-grant with standards-compliant headless PKCE auth-code flow:
+
+1. Generate `code_verifier` via openssl: `openssl rand -base64 32 | tr -d '\n' | cut -c1-128`
+2. Compute SHA256 hash: `echo -n "$code_verifier" | openssl dgst -sha256 -binary | base64 | tr -d '=' | tr '+/' '-_'`
+3. GET `/auth` endpoint with `code_challenge`, `code_challenge_method=S256`, store response cookie jar
+4. POST login form (credentials + cookie jar, `--max-redirs 0`)
+5. Extract authorization code from `Location` header
+6. POST `/token` with `code`, `code_verifier`, receive access token
+
+This eliminates password-grant dependency and re-enables PKCE on all Keycloak clients (per-tenant clients now use `pkce.code.challenge.method: 'S256'` in provisioner).
+
+**Applied:** PR #245 — both smoke scripts updated; control-plane provisioner re-enabled PKCE with tenant-display-name conditional from #241.
+
+---
