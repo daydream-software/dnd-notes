@@ -1,5 +1,6 @@
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
+import ManageAccountsRoundedIcon from '@mui/icons-material/ManageAccountsRounded'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
@@ -20,7 +21,7 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
-import { buildPortalRedirectUri, portalKeycloakConfig } from './config'
+import { buildAccountConsoleUrl, buildPortalRedirectUri, portalKeycloakConfig } from './config'
 import {
   createPortalTenant,
   fetchPortalCatalog,
@@ -687,6 +688,16 @@ export default function App({
               color={activeCatalog?.provisioningConfigured ? 'success' : 'warning'}
               variant="outlined"
             />
+            {isAuthenticated && authMode === 'keycloak' ? (
+              <Button
+                color="inherit"
+                startIcon={<ManageAccountsRoundedIcon />}
+                component="a"
+                href={buildAccountConsoleUrl(portalKeycloakConfig)}
+              >
+                Account settings
+              </Button>
+            ) : null}
             {isAuthenticated ? (
               <Button
                 color="inherit"

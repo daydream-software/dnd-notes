@@ -28,3 +28,7 @@ export const portalKeycloakConfig: CustomerKeycloakConfig = {
 export function buildPortalRedirectUri() {
   return `${window.location.origin}/`
 }
+
+export function buildAccountConsoleUrl(config: CustomerKeycloakConfig) {
+  return `${config.url}/realms/${config.realm}/account`
+}
