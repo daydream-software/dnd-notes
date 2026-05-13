@@ -108,13 +108,8 @@ function runBash(script: string, env?: NodeJS.ProcessEnv) {
 
 describe('k3d status read_state — namespace preservation', () => {
   it('reads tenantNamespace verbatim from state.json without re-deriving it', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-status-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-status-test-'))
     const stateFile = join(tmpDir, 'state.json')
-
-    mkdirSync(tmpDir, { recursive: true })
 
     // Use a non-default namespace to prove no re-derivation occurs
     const customNamespace = 'tenant-platform-dev'
@@ -137,8 +132,10 @@ describe('k3d status read_state — namespace preservation', () => {
     }
     writeFileSync(stateFile, JSON.stringify(state, null, 2))
 
-    const result = runBash(
-      `${readStateSnippet}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readStateSnippet}
 STATE_FILE="${stateFile}"
 if read_state; then
   printf '%s' "$state_tenantNamespace"
@@ -146,9 +143,10 @@ else
   echo "read_state failed"
   exit 1
 fi`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(
@@ -159,13 +157,8 @@ fi`,
   })
 
   it('correctly reads all stored fields, not just namespace', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-status-fields-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-status-fields-test-'))
     const stateFile = join(tmpDir, 'state.json')
-
-    mkdirSync(tmpDir, { recursive: true })
 
     const state = {
       clusterName: 'my-cluster',
@@ -179,8 +172,10 @@ fi`,
     }
     writeFileSync(stateFile, JSON.stringify(state, null, 2))
 
-    const result = runBash(
-      `${readStateSnippet}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readStateSnippet}
 STATE_FILE="${stateFile}"
 read_state
 printf '%s|%s|%s|%s|%s|%s|%s|%s' \
@@ -192,9 +187,10 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
   "$state_tenantOrigin" \
   "$state_keycloakUrl" \
   "$state_keycloakRealm"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     const fields = result.stdout.split('|')
@@ -280,17 +276,15 @@ fi`,
   })
 
   it('returns non-zero for truncated (invalid) JSON', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-corrupt-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-corrupt-test-'))
     const stateFile = join(tmpDir, 'state.json')
 
-    mkdirSync(tmpDir, { recursive: true })
     writeFileSync(stateFile, '{"tenantNamespace": "tenant-dev"')  // truncated
 
-    const result = runBash(
-      `${readStateSnippet}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readStateSnippet}
 STATE_FILE="${stateFile}"
 if read_state; then
   echo "should-not-reach"
@@ -298,19 +292,17 @@ if read_state; then
 else
   echo "correctly-failed"
 fi`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.match(result.stdout, /correctly-failed/)
   })
 
   it('clears all state variables when the parser emits only a partial payload', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-partial-state-payload-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-partial-state-payload-'))
     const stateFile = join(tmpDir, 'state.json')
     const fakeBinDir = join(tmpDir, 'bin')
     const fakeNodePath = join(fakeBinDir, 'node')
@@ -326,8 +318,10 @@ exit 1
     )
     chmodSync(fakeNodePath, 0o755)
 
-    const result = runBash(
-      `${readStateSnippet}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readStateSnippet}
 state_clusterName="stale-cluster"
 state_keycloakUrl="http://stale.example.com"
 state_keycloakRealm="stale-realm"
@@ -351,9 +345,10 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
   "$state_tenantNamespace" \
   "$state_tenantHostname" \
   "$state_tenantOrigin"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, '|||||||')
@@ -398,24 +393,24 @@ printf '%s|%s|%s|%s|%s|%s|%s|%s' \
 
 describe('k3d status probe_tenant_url', () => {
   it('skips the HTTP reachability probe when curl is unavailable', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-status-probe-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-status-probe-test-'))
     const fakeBinDir = join(tmpDir, 'bin')
 
     mkdirSync(fakeBinDir, { recursive: true })
 
-    const result = runBash(
-      `${probeTenantUrlFnMatch[0]}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${probeTenantUrlFnMatch[0]}
 tenant_url_reachable=true
 tenant_url_probe_skipped=false
 PATH="${fakeBinDir}"
 probe_tenant_url "http://dev.127.0.0.1.nip.io:8080"
 printf '%s|%s' "$tenant_url_reachable" "$tenant_url_probe_skipped"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'false|true')
@@ -431,13 +426,8 @@ printf '%s|%s' "$tenant_url_reachable" "$tenant_url_probe_skipped"`,
 
 describe('k3d down read_state_field — namespace preservation', () => {
   it('reads tenantNamespace from v1 tenants[] array without re-deriving it', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-down-ns-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-down-ns-test-'))
     const stateFile = join(tmpDir, 'state.json')
-
-    mkdirSync(tmpDir, { recursive: true })
 
     // v1 schema: namespace is in tenants[0].namespace; subdomain is different
     // to prove no re-derivation occurs
@@ -447,27 +437,25 @@ describe('k3d down read_state_field — namespace preservation', () => {
     }
     writeFileSync(stateFile, JSON.stringify(state))
 
-    const result = runBash(
-      `${readTenantNamespaceFnMatch![0]}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${stateFile}"
 ns="$(read_tenant_namespace)"
 printf '%s' "$ns"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'tenant-platform-dev')
   })
 
   it('reads tenantNamespace from v0 flat field for back-compat', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-down-ns-v0-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-down-ns-v0-test-'))
     const stateFile = join(tmpDir, 'state.json')
-
-    mkdirSync(tmpDir, { recursive: true })
 
     // v0 schema: flat tenantNamespace field
     const state = {
@@ -476,14 +464,17 @@ printf '%s' "$ns"`,
     }
     writeFileSync(stateFile, JSON.stringify(state))
 
-    const result = runBash(
-      `${readTenantNamespaceFnMatch![0]}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${stateFile}"
 ns="$(read_tenant_namespace)"
 printf '%s' "$ns"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'tenant-platform-dev')
@@ -507,48 +498,47 @@ printf 'got:[%s]' "$ns"`,
   })
 
   it('returns empty string for corrupt JSON without error', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-down-corrupt-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-down-corrupt-test-'))
     const stateFile = join(tmpDir, 'state.json')
 
-    mkdirSync(tmpDir, { recursive: true })
     writeFileSync(stateFile, '{bad json}')
 
-    const result = runBash(
-      `${readTenantNamespaceFnMatch![0]}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${stateFile}"
 ns="$(read_tenant_namespace)"
 printf 'got:[%s]' "$ns"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'got:[]')
   })
 
   it('returns empty string without error when node is unavailable', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-down-no-node-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-down-no-node-test-'))
     const stateFile = join(tmpDir, 'state.json')
     const fakeBinDir = join(tmpDir, 'bin')
 
     mkdirSync(fakeBinDir, { recursive: true })
     writeFileSync(stateFile, JSON.stringify({ tenants: [{ namespace: 'tenant-platform-dev' }] }))
 
-    const result = runBash(
-      `${readTenantNamespaceFnMatch![0]}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${readTenantNamespaceFnMatch![0]}
 STATE_FILE="${stateFile}"
 PATH="${fakeBinDir}"
 ns="$(read_tenant_namespace)"
 printf 'got:[%s]' "$ns"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'got:[]')
@@ -557,10 +547,7 @@ printf 'got:[%s]' "$ns"`,
 
 describe('k3d down remove_state_artifacts', () => {
   it('removes only the configured state file when K3D_STATE_FILE points outside the default state dir', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-down-remove-state-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-down-remove-state-test-'))
     const rootDir = join(tmpDir, 'repo-root')
     const customStateDir = join(tmpDir, 'custom-state')
     const stateFile = join(customStateDir, 'state.json')
@@ -571,8 +558,10 @@ describe('k3d down remove_state_artifacts', () => {
     writeFileSync(stateFile, '{"clusterName":"dnd-notes"}')
     writeFileSync(keepFile, 'keep')
 
-    const result = runBash(
-      `${removeStateArtifactsFnMatch[0]}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${removeStateArtifactsFnMatch[0]}
 ROOT="${rootDir}"
 STATE_FILE="${stateFile}"
 STATE_DIR="$(dirname "\${STATE_FILE}")"
@@ -581,19 +570,17 @@ printf '%s|%s|%s' \
   "$(test -f "\${STATE_FILE}" && echo file || echo missing)" \
   "$(test -d "\${STATE_DIR}" && echo dir || echo nodir)" \
   "$(test -f "\${STATE_DIR}/keep.txt" && echo keep || echo lost)"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'missing|dir|keep')
   })
 
   it('removes the empty default .k3d-state directory after deleting the state file', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-down-default-state-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-down-default-state-test-'))
     const rootDir = join(tmpDir, 'repo-root')
     const stateDir = join(rootDir, '.k3d-state')
     const stateFile = join(stateDir, 'state.json')
@@ -601,8 +588,10 @@ printf '%s|%s|%s' \
     mkdirSync(stateDir, { recursive: true })
     writeFileSync(stateFile, '{"clusterName":"dnd-notes"}')
 
-    const result = runBash(
-      `${removeStateArtifactsFnMatch[0]}
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(
+        `${removeStateArtifactsFnMatch[0]}
 ROOT="${rootDir}"
 STATE_FILE="${stateFile}"
 STATE_DIR="$(dirname "\${STATE_FILE}")"
@@ -610,9 +599,10 @@ remove_state_artifacts
 printf '%s|%s' \
   "$(test -f "\${STATE_FILE}" && echo file || echo missing)" \
   "$(test -d "\${STATE_DIR}" && echo dir || echo nodir)"`,
-    )
-
-    rmSync(tmpDir, { recursive: true, force: true })
+      )
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'missing|nodir')
@@ -665,10 +655,7 @@ localize_postgres_url \
 
 describe('k3d up ensure_image_ready', () => {
   it('re-imports cached local images into the active cluster when --no-rebuild skips docker builds', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-image-ready-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-image-ready-test-'))
     const fakeBinDir = join(tmpDir, 'bin')
     const logFile = join(tmpDir, 'invocations.log')
 
@@ -691,8 +678,11 @@ printf 'k3d:%s\n' "$*" >> "$LOG_FILE"
     )
     chmodSync(join(fakeBinDir, 'k3d'), 0o755)
 
-    const result = runBash(
-      `${runK3dImageImportFnMatch[0]}
+    let result: ReturnType<typeof runBash>
+    let invocations: string
+    try {
+      result = runBash(
+        `${runK3dImageImportFnMatch[0]}
 ${ensureImageImportedFnMatch[0]}
 ${ensureImageReadyFnMatch[0]}
 log() { :; }
@@ -704,15 +694,15 @@ IMAGE_IMPORT_FALLBACK_MODE="tools"
 IMAGE_IMPORT_TIMEOUT_SECONDS="180"
 NO_REBUILD=true
 ensure_image_ready "Tenant" "ghcr.io/daydream-software/dnd-notes:k3d" "/fake/build.sh"`,
-      {
-        LOG_FILE: logFile,
-        PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
-      },
-    )
-
-    const invocations = readFileSync(logFile, 'utf8')
-
-    rmSync(tmpDir, { recursive: true, force: true })
+        {
+          LOG_FILE: logFile,
+          PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
+        },
+      )
+      invocations = readFileSync(logFile, 'utf8')
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.doesNotMatch(invocations, /^build:/m)
@@ -757,10 +747,7 @@ describe('k3d up script guards', () => {
 
 describe('k3d up write_state — stable JSON contract', () => {
   it('shell-quotes token snippet argv before persisting them in state.json', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-build-token-snippet-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-build-token-snippet-test-'))
     const fakeBinDir = join(tmpDir, 'bin')
     const argsFile = join(tmpDir, 'curl-args.txt')
 
@@ -774,21 +761,24 @@ printf '{"access_token":"stub-token"}'
     )
     chmodSync(join(fakeBinDir, 'curl'), 0o755)
 
-    const result = runBash(
-      `ROOT="${repoRoot}"
+    let result: ReturnType<typeof runBash>
+    let curlArgs: string[]
+    try {
+      result = runBash(
+        `ROOT="${repoRoot}"
 ${stateModuleFnMatch![0]}
 ${buildTokenSnippetFnMatch![0]}
 snippet="$(build_token_snippet "http://keycloak.example.com:8080" "dnd-notes-dev" "client'id" "user\\"name" "pass'both\\"")"
 bash -c "$snippet"`,
-      {
-        ARGS_FILE: argsFile,
-        PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
-      },
-    )
-
-    const curlArgs = readFileSync(argsFile, 'utf8').trim().split('\n')
-
-    rmSync(tmpDir, { recursive: true, force: true })
+        {
+          ARGS_FILE: argsFile,
+          PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
+        },
+      )
+      curlArgs = readFileSync(argsFile, 'utf8').trim().split('\n')
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
     assert.strictEqual(result.stdout, 'stub-token')
@@ -811,16 +801,15 @@ bash -c "$snippet"`,
   })
 
   it('writes a valid state.json with all required v1 fields including explicit tenantNamespace', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-write-state-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-write-state-test-'))
     const stateFile = join(tmpDir, 'state.json')
 
-    mkdirSync(tmpDir, { recursive: true })
-
-    const result = runBash(
-      `ROOT="${repoRoot}"
+    let result: ReturnType<typeof runBash>
+    let stateDirMode: number
+    let stateFileMode: number
+    try {
+      result = runBash(
+        `ROOT="${repoRoot}"
 ${stateModuleFnMatch![0]}
 ${buildTokenSnippetFnMatch![0]}
 ${writeStateFnMatch![0]}
@@ -836,13 +825,17 @@ TENANT_KEYCLOAK_USERNAME="owner@example.com"
 TENANT_KEYCLOAK_PASSWORD="password"
 TENANT_PUBLIC_SCHEME="http"
 CLUSTER_NAME="dnd-notes"
-mkdir -p "${tmpDir}"
 write_state "k3d-dev" "dev" "tenant-platform-dev" "dev.127.0.0.1.nip.io" "ready" >/dev/null
 cat "${stateFile}"`,
-      {
-        STATE_DIR: tmpDir,
-      },
-    )
+        {
+          STATE_DIR: tmpDir,
+        },
+      )
+      stateDirMode = statSync(tmpDir).mode & 0o777
+      stateFileMode = statSync(stateFile).mode & 0o777
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     let state: Record<string, unknown>
     try {
@@ -888,10 +881,8 @@ cat "${stateFile}"`,
     assert.ok(typeof snippets.tenant === 'string', 'tokenSnippets.tenant')
 
     // permissions
-    assert.strictEqual(statSync(tmpDir).mode & 0o777, 0o700, 'state dir permissions')
-    assert.strictEqual(statSync(stateFile).mode & 0o777, 0o600, 'state file permissions')
-
-    rmSync(tmpDir, { recursive: true, force: true })
+    assert.strictEqual(stateDirMode, 0o700, 'state dir permissions')
+    assert.strictEqual(stateFileMode, 0o600, 'state file permissions')
   })
 })
 
@@ -927,13 +918,9 @@ describe('k3d status --json schema', () => {
   })
 
   it('reports the effective cluster name when K3D_CLUSTER_NAME env override is set', () => {
-    const tmpDir = join(
-      fileURLToPath(new URL('.', import.meta.url)),
-      `.k3d-status-cluster-name-test-${process.pid}`,
-    )
+    const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-status-cluster-name-test-'))
     const stateFile = join(tmpDir, 'state.json')
 
-    mkdirSync(tmpDir, { recursive: true })
     writeFileSync(
       stateFile,
       JSON.stringify(
@@ -948,12 +935,15 @@ describe('k3d status --json schema', () => {
       ),
     )
 
-    const result = runBash(`bash "${statusScriptPath}" --json`, {
-      K3D_CLUSTER_NAME: 'custom-cluster',
-      K3D_STATE_FILE: stateFile,
-    })
-
-    rmSync(tmpDir, { recursive: true, force: true })
+    let result: ReturnType<typeof runBash>
+    try {
+      result = runBash(`bash "${statusScriptPath}" --json`, {
+        K3D_CLUSTER_NAME: 'custom-cluster',
+        K3D_STATE_FILE: stateFile,
+      })
+    } finally {
+      rmSync(tmpDir, { recursive: true, force: true })
+    }
 
     assert.strictEqual(result.status, 0, result.stderr)
 
