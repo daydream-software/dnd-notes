@@ -1932,7 +1932,7 @@ spec:
               subPath: GeistMono-Variable.woff2
             # account-console theme text files
             - name: themes-text
-              mountPath: /opt/keycloak/themes/account-console/theme.properties
+              mountPath: /opt/keycloak/themes/account-console/account/theme.properties
               subPath: ac-theme.properties
             - name: themes-text
               mountPath: /opt/keycloak/themes/account-console/account/resources/css/account.css

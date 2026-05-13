@@ -107,7 +107,7 @@ const TEXT_KEYS = [
   ['cu-dnd-notes-mark.svg',       'login/resources/img/dnd-notes-mark.svg'],
   ['cu-messages_en.properties',   'login/messages/messages_en.properties'],
   // [configmap-key, relative-path-under-account-console/]
-  ['ac-theme.properties',         'theme.properties'],
+  ['ac-theme.properties',         'account/theme.properties'],
   ['ac-account.css',              'account/resources/css/account.css'],
 ];
 
