@@ -85,7 +85,7 @@
     "ajv@~8.13.0": "^8.18.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "^20.5.0",
+    "@commitlint/cli": "^21.0.1",
     "@commitlint/config-conventional": "^20.5.0",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^24.12.4",
