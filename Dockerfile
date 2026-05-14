@@ -15,8 +15,7 @@ COPY apps/web/package*.json ./apps/web/
 
 FROM base AS deps
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm ci --workspace apps/api --include-workspace-root && \
-    npm prune --omit=dev
+    npm ci --workspace apps/api --include-workspace-root --omit=dev --ignore-scripts
 
 FROM base AS build-deps
 RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci

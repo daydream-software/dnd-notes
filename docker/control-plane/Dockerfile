@@ -13,8 +13,7 @@ COPY apps/control-plane/package*.json ./apps/control-plane/
 
 FROM base AS deps
 RUN --mount=type=cache,target=/root/.npm,sharing=locked \
-    npm ci --workspace apps/control-plane --include-workspace-root && \
-    npm prune --omit=dev
+    npm ci --workspace apps/control-plane --include-workspace-root --omit=dev --ignore-scripts
 
 FROM base AS build-deps
 RUN --mount=type=cache,target=/root/.npm,sharing=locked npm ci
