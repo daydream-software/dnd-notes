@@ -7791,3 +7791,84 @@ Coordinator took over inside the same worktree and successfully wrote the same f
 
 **Conclusion:** The original 7-PR estimate was aspirational. The actual line-count work maps to ~6 effective PRs, with the "SearchPage" entry repurposed mid-stream to CampaignListPage (same extraction size, real route boundary). The plan is sound; the naming was off.
 
+
+### 2026-05-14: @types/node pinned to ^24 by k8s peer dependency (Brand)
+
+**Context:** Dependabot PR #264 proposed aligning `@types/node` across all workspaces to `^22.x` to match `.nvmrc` (v22.21.1) and the Node 22 runtime.
+
+**Blocker:** `npm ls @types/node --workspaces` reported 6 `invalid` entries. Root cause investigation:
+- `@kubernetes/client-node@1.x` declares `@types/node@^24` as a peer dependency
+- npm workspace deduplication propagates that peer pin to every workspace's node_modules
+- `tsc -p apps/api --listFiles` confirmed tsc was already resolving against nested `@types/node@24.12.2` copies
+
+**Fighting the peer with overrides was not viable:** Forcing `^22.x` via a root `overrides` entry would create fragility (types would not match actual Node APIs available to code importing k8s client).
+
+**Decision:** Embrace the k8s peer pin and move the entire runtime to Node 24:
+- `.nvmrc`: 22.21.1 → 24.15.0 (Krypton LTS)
+- `engines` field: `>=22.21.1 <23` → `>=24.15.0 <25`
+- All `@types/node` pins: `^24.12.4`
+- CI workflows + Dockerfiles: Updated to Node 24
+
+**Validation:** `tsc` clean across all workspaces, `npm run build` passes, tests pass. No Node 23+ API usage surfaced from the alignment.
+
+**Ignore directive (PR #272):** Added `update-types: [version-update:semver-major]` to dependabot config so future @types/node 25+ bumps are rejected. Patch/minor within 24.x flow normally.
+
+**Rationale:** Node 22 → 24 is a minor bump in the 22.x LTS family; no API breakage. Keeping types aligned with actual runtime is more important than matching an arbitrary version number. The k8s peer is non-negotiable in production code.
+
+**Related PRs:** #261 (superseded), #264 (main), #272 (ignore directive), #281 (full Node 24 migration).
+
+---
+
+### 2026-05-14: npm 11 lifecycle behavior change on workspace scoped ci (Brand)
+
+**Context:** Node 24 + npm 11 introduced a behavioral change to the workspace prepare lifecycle.
+
+**Symptom:** `npm ci --workspace X --include-workspace-root` now fires `prepare` scripts on **all sibling workspaces**, not just the dep chain. In the Docker deps stage, `packages/theme`'s prepare script (`npm run build` → `tsc`) was failing because theme's devDeps are not installed under a scoped workspace ci.
+
+**Fix:** Add `--ignore-scripts` to the deps-stage npm ci invocations in both `Dockerfile` and `docker/control-plane/Dockerfile`. Lifecycle scripts in the deps stage are wasted work anyway — the actual `dist/` comes from the build stage, which runs with full devDeps installed.
+
+**Related PRs:** #281 (Node 24 migration + Docker fix folded in).
+
+---
+
+### 2026-05-14: git reset --soft HEAD~1 after amend rewrites the wrong commit (FFMikha)
+
+**Context:** During Node 24 migration (#281), coordinator amended the commit to fold in an ESLint preserve-caught-error lint fix (live-smoke.tsx). Then used `git reset --soft HEAD~1` to soft-reset and re-stage, intending to fold changes into the node-24 commit.
+
+**Gotcha:** `reset --soft HEAD~1` from an amended commit returns to the parent of the **amended** commit. Since amending replaces (doesn't stack), the amended commit's parent IS the previous commit's parent. So `reset HEAD~1` from amended state goes back two logical commits.
+
+**Result:** The reset unintentionally rewrote the previous commit (dependabot commitlint group #279) with the node-24 changes folded in.
+
+**Diagnosis:** Inspected `git log --pretty="%H %P %s"` and noticed the parent hash didn't match. Rebase onto `9777663` fixed it.
+
+**Lesson:** After `git commit --amend`, do not use `reset --soft HEAD~1` to stage changes into it. Instead:
+1. `git commit --amend --no-edit` if adding to the amended commit.
+2. Or do a full `git reset --hard HEAD` + start fresh if changes are unrelated.
+3. Or use `git rebase -i` if you need to fold changes across multiple commits.
+
+**Impact:** 5 minutes lost to diagnosis. Low severity (both commits were correct, just mis-parented for 1 rebase cycle). Worth remembering for future amend workflows.
+
+---
+
+### 2026-05-14: Dependabot group config is high-leverage infrastructure (Brand)
+
+**Context:** Session included triage of 14 dependabot PRs + adding 8 new group directives + 1 ignore directive to `.dependabot.yml`.
+
+**Groups added:**
+- `vitest` (vitest + @vitest/coverage-v8)
+- `eslint` (eslint, @eslint/*, eslint-plugin-*, typescript-eslint, @typescript-eslint/*)
+- `@types/express` + `express`
+- `@types/cors` + `cors`
+- `@types/pg` + `pg`
+- `@types/supertest` + `supertest`
+- `@types/jsdom` + `jsdom`
+- `commitlint` (@commitlint/cli, @commitlint/config-conventional)
+
+**Impact:** Future dependabot batches will come pre-bundled by semantic dependency, eliminating the "combine #X + #Y manually" workflow that recurs every 1–2 weeks. Each group is 3–7 lines of YAML.
+
+**Estimate:** ~4–6 hours of manual triage saved per recurring dependabot cycle.
+
+**Recommendation:** Document this in a new memory entry (`feedback_dependabot_groups_payoff.md`) so the coordinator doesn't regress to manual bundling if the original `.dependabot.yml` comments are lost.
+
+**Related PRs:** #263 (vitest), #271 (eslint), #276 (types), #279 (commitlint), #272 (@types/node ignore).
+
