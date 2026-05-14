@@ -12,13 +12,13 @@ import {
 } from '../keycloak-client'
 import type { AuthConfigResponse, OwnerAccount } from '../types'
 
-interface OwnerRegistrationDraft {
+export interface OwnerRegistrationDraft {
   displayName: string
   email: string
   password: string
 }
 
-interface OwnerLoginDraft {
+export interface OwnerLoginDraft {
   email: string
   password: string
 }
