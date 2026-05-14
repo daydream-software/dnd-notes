@@ -169,6 +169,7 @@ export default function CampaignListPage({
                     variant="contained"
                     onClick={onSaveCampaign}
                     disabled={isSavingCampaign}
+                    sx={{ alignSelf: { xs: 'flex-start', sm: 'auto' } }}
                   >
                     {isSavingCampaign ? 'Creating campaign…' : 'Create campaign'}
                   </Button>
