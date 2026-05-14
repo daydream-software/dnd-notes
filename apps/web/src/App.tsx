@@ -1,6 +1,5 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
 import AddCircleOutlineRoundedIcon from '@mui/icons-material/AddCircleOutlineRounded'
-import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded'
 import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import EventRoundedIcon from '@mui/icons-material/EventRounded'
@@ -12,7 +11,6 @@ import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
 import { DndNotesMark } from './DndNotesMark'
 import {
   Alert,
-  Autocomplete,
   Box,
   Button,
   Card,
@@ -58,14 +56,11 @@ import {
 import {
   campaignStarterTemplates,
   getNoteStarterTemplate,
-  noteStarterTemplates,
 } from './templates'
 import CampaignWorkspaceHeader from './CampaignWorkspaceHeader'
 import { formatTimestamp } from './formatTimestamp'
 import { markdownToPlainText } from './note-excerpts'
-import NoteBodyEditor from './NoteBodyEditor'
 import NotesBrowsePane from './NotesBrowsePane'
-import { NoteBodyPreview } from './note-formatting'
 import type {
   CampaignMembership,
   CampaignShareLink,
@@ -73,15 +68,13 @@ import type {
   GuestJoinInput,
   Note,
   NoteActivityEntry,
-  NoteStatus,
   ShareAccessLevel,
 } from './types'
-import { noteStatuses } from './types'
 import AdminPage from './pages/AdminPage'
 import CampaignListPage from './pages/CampaignListPage'
 import LoginPage from './pages/LoginPage'
+import NoteEditPage from './pages/NoteEditPage'
 import WorkspacePane from './WorkspacePane'
-import NoteEditorActions from './NoteEditorActions'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
 import { useShareLinks, createShareLinkDraft as createShareLinkDraftFn } from './hooks/useShareLinks'
 import {
@@ -107,9 +100,6 @@ import {
   useNotes,
   createEmptyDraft as createEmptyDraftFn,
   createDraftFromNote,
-  createTagsText,
-  getNoteDisplayTitle,
-  formatResolvedRelationshipText,
 } from './hooks/useNotes'
 
 type NarrowWorkspacePanel = 'browse' | 'editor'
@@ -2863,275 +2853,37 @@ function App() {
             ) : null}
 
             {showEditorPane ? (
-              <Stack spacing={3} sx={{ width: '100%', maxWidth: '100%', minWidth: 0 }}>
-                <Card sx={{ borderRadius: surfaceRadius, minWidth: 0, width: '100%', maxWidth: '100%' }}>
-                  <CardContent sx={{ p: 3, minWidth: 0 }}>
-                    <Stack spacing={2.5} sx={{ minWidth: 0 }}>
-                      {isSinglePaneNoteWorkspace ? (
-                        <Button
-                          variant="text"
-                          size="small"
-                          startIcon={<ArrowBackRoundedIcon />}
-                          onClick={() => setNarrowWorkspacePanel('browse')}
-                          sx={{ alignSelf: 'flex-start' }}
-                        >
-                          Browse notes
-                        </Button>
-                      ) : null}
-
-                      <Box>
-                        <Typography variant="h5">
-                          {!canEditWorkspace
-                            ? 'Note details'
-                            : isCreating
-                              ? 'Create note'
-                              : 'Edit note'}
-                        </Typography>
-                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                          {!canEditWorkspace
-                            ? 'Viewer links can read shared notes but cannot change them.'
-                            : noteBrowseMode === 'sessions' && selectedSessionName
-                              ? `Every save is scoped to ${resolvedCampaign?.name ?? overview.campaign.name}. You are currently reviewing ${selectedSessionName}.`
-                              : `Every save is scoped to ${resolvedCampaign?.name ?? overview.campaign.name}, so each campaign can keep its own note trail.`}
-                        </Typography>
-                      </Box>
-
-                    {isCreating && canEditWorkspace ? (
-                      <Stack spacing={1.5}>
-                        <TextField
-                          select
-                          label="Note template"
-                          value={selectedNoteTemplateId}
-                          onChange={(event) =>
-                            handleSelectNoteTemplate(event.target.value)
-                          }
-                          helperText="Optional. Load a starter structure, then edit anything you want."
-                        >
-                          {noteStarterTemplates.map((template) => (
-                            <MenuItem key={template.id} value={template.id}>
-                              {template.name}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-
-                        {selectedNoteTemplate.starterNote ? (
-                          <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                            {selectedNoteTemplate.description}
-                          </Alert>
-                        ) : null}
-                      </Stack>
-                    ) : null}
-
-                    <TextField
-                      label="Title"
-                      value={draft.title}
-                      onChange={(event) =>
-                        handleDraftChange('title', event.target.value)
-                      }
-                      slotProps={{ input: { readOnly: !canEditWorkspace } }}
-                    />
-
-                    <TextField
-                      label="Session name"
-                      value={draft.sessionName}
-                      onChange={(event) =>
-                        handleDraftChange('sessionName', event.target.value)
-                      }
-                      helperText="Optional. Use this when a note belongs to a specific session."
-                      slotProps={{ input: { readOnly: !canEditWorkspace } }}
-                    />
-
-                    {canEditWorkspace ? (
-                      <Autocomplete
-                        multiple
-                        freeSolo
-                        disablePortal
-                        filterSelectedOptions
-                        options={tagFacets.map((tagFacet) => tagFacet.tag)}
-                        value={draftTags}
-                        inputValue={tagInputValue}
-                        onInputChange={(_, value, reason) => {
-                          if (reason === 'reset') {
-                            return
-                          }
-
-                          setTagInputValue(value)
-                        }}
-                        onChange={(_, value) => {
-                          handleDraftTagsChange(value)
-                          setTagInputValue('')
-                        }}
-                        renderInput={(params) => (
-                          <TextField
-                            {...params}
-                            label="Tags"
-                            helperText="Reuse existing tags or type new ones. Press Enter, comma, or blur to commit."
-                            onBlur={commitPendingTagInput}
-                            onKeyDown={(event) => {
-                              if (
-                                (event.key === 'Enter' || event.key === ',') &&
-                                tagInputValue.trim()
-                              ) {
-                                event.preventDefault()
-                                commitPendingTagInput()
-                              }
-                            }}
-                          />
-                        )}
-                      />
-                    ) : (
-                      <TextField label="Tags" value={createTagsText(draftTags)} slotProps={{ input: { readOnly: true } }} />
-                    )}
-
-                    <TextField
-                      select
-                      label="Status"
-                      value={draft.status}
-                      onChange={(event) =>
-                        handleDraftChange('status', event.target.value as NoteStatus)
-                      }
-                      disabled={!canEditWorkspace}
-                    >
-                      {noteStatuses.map((status) => (
-                        <MenuItem key={status} value={status}>
-                          {status}
-                        </MenuItem>
-                      ))}
-                    </TextField>
-
-                    {canEditWorkspace ? (
-                      <NoteBodyEditor
-                        body={draft.body}
-                        onChange={(value) => handleDraftChange('body', value)}
-                        surfaceRadius={surfaceRadius}
-                        noteOptions={noteLinkOptions}
-                      />
-                    ) : (
-                      <Stack spacing={1}>
-                        <Typography variant="subtitle1">Body</Typography>
-                        <Box sx={{ border: '1px solid', borderColor: 'divider', borderRadius: surfaceRadius, p: { xs: 2, sm: 2.5 } }}>
-                          <NoteBodyPreview ariaLabel="Note body preview" body={draft.body} emptyMessage="Nothing to preview yet." />
-                        </Box>
-                      </Stack>
-                    )}
-
-                    <NoteEditorActions
-                      canEditWorkspace={canEditWorkspace}
-                      isCreating={isCreating}
-                      isSaving={isSaving}
-                      isDeleting={isDeleting}
-                      selectedNoteUpdatedAt={selectedNote?.updatedAt}
-                      onSave={handleSaveNote}
-                      onDelete={handleDeleteNote}
-                    />
-                  </Stack>
-                </CardContent>
-              </Card>
-
-                {!isCreating && (linkedNotes.length > 0 || backlinks.length > 0) ? (
-                  <Card sx={{ borderRadius: surfaceRadius }}>
-                    <CardContent sx={{ p: 3 }}>
-                      <Stack spacing={2}>
-                        {linkedNotes.length > 0 ? (
-                          <Box>
-                            <Typography variant="h6" sx={{ mb: 1 }}>
-                              Linked notes ({linkedNotes.length})
-                            </Typography>
-                            <Stack spacing={1}>
-                              {linkedNotes.map(({ note, qualifiers }) => (
-                                <Card
-                                  key={note.id}
-                                  variant="outlined"
-                                  sx={{
-                                    cursor: 'pointer',
-                                    '&:hover': { borderColor: 'primary.main' },
-                                  }}
-                                  onClick={() => handleSelectNote(note)}
-                                >
-                                  <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                                    <Typography variant="body1">{getNoteDisplayTitle(note)}</Typography>
-                                    {selectedNote &&
-                                    formatResolvedRelationshipText(
-                                      getNoteDisplayTitle(selectedNote),
-                                      qualifiers,
-                                      getNoteDisplayTitle(note),
-                                    ) ? (
-                                      <Typography
-                                        variant="caption"
-                                        color="text.secondary"
-                                        sx={{ display: 'block', mb: 0.5 }}
-                                      >
-                                        {formatResolvedRelationshipText(
-                                          getNoteDisplayTitle(selectedNote),
-                                          qualifiers,
-                                          getNoteDisplayTitle(note),
-                                        )}
-                                      </Typography>
-                                    ) : null}
-                                    <Typography variant="body2" color="text.secondary">
-                                      {excerpt(note.body)}
-                                    </Typography>
-                                  </CardContent>
-                                </Card>
-                              ))}
-                            </Stack>
-                          </Box>
-                        ) : null}
-
-                        {backlinks.length > 0 ? (
-                          <Box>
-                            <Typography variant="h6" sx={{ mb: 1 }}>
-                              Referenced by ({backlinks.length})
-                            </Typography>
-                            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                              These notes link to this one.
-                            </Typography>
-                            <Stack spacing={1}>
-                              {backlinks.map(({ note, qualifiers }) => (
-                                <Card
-                                  key={note.id}
-                                  variant="outlined"
-                                  sx={{
-                                    cursor: 'pointer',
-                                    '&:hover': { borderColor: 'primary.main' },
-                                  }}
-                                  onClick={() => handleSelectNote(note)}
-                                >
-                                  <CardContent sx={{ p: 1.5, '&:last-child': { pb: 1.5 } }}>
-                                    <Typography variant="body1">{getNoteDisplayTitle(note)}</Typography>
-                                    {selectedNote &&
-                                    formatResolvedRelationshipText(
-                                      getNoteDisplayTitle(note),
-                                      qualifiers,
-                                      getNoteDisplayTitle(selectedNote),
-                                    ) ? (
-                                      <Typography
-                                        variant="caption"
-                                        color="text.secondary"
-                                        sx={{ display: 'block', mb: 0.5 }}
-                                      >
-                                        {formatResolvedRelationshipText(
-                                          getNoteDisplayTitle(note),
-                                          qualifiers,
-                                          getNoteDisplayTitle(selectedNote),
-                                        )}
-                                      </Typography>
-                                    ) : null}
-                                    <Typography variant="body2" color="text.secondary">
-                                      {excerpt(note.body)}
-                                    </Typography>
-                                  </CardContent>
-                                </Card>
-                              ))}
-                            </Stack>
-                          </Box>
-                        ) : null}
-                      </Stack>
-                    </CardContent>
-                  </Card>
-                ) : null}
-
-              </Stack>
+              <NoteEditPage
+                surfaceRadius={surfaceRadius}
+                isSinglePaneNoteWorkspace={isSinglePaneNoteWorkspace}
+                canEditWorkspace={canEditWorkspace}
+                isCreating={isCreating}
+                noteBrowseMode={noteBrowseMode}
+                selectedSessionName={selectedSessionName}
+                campaignName={resolvedCampaign?.name ?? overview.campaign.name}
+                selectedNoteTemplateId={selectedNoteTemplateId}
+                selectedNoteTemplate={selectedNoteTemplate}
+                draft={draft}
+                tagFacets={tagFacets}
+                draftTags={draftTags}
+                tagInputValue={tagInputValue}
+                noteLinkOptions={noteLinkOptions}
+                isSaving={isSaving}
+                isDeleting={isDeleting}
+                selectedNote={selectedNote}
+                linkedNotes={linkedNotes}
+                backlinks={backlinks}
+                onBack={() => setNarrowWorkspacePanel('browse')}
+                onSelectNoteTemplate={handleSelectNoteTemplate}
+                onDraftChange={handleDraftChange}
+                onTagInputChange={setTagInputValue}
+                onDraftTagsChange={handleDraftTagsChange}
+                onCommitPendingTagInput={commitPendingTagInput}
+                onSave={handleSaveNote}
+                onDelete={handleDeleteNote}
+                onSelectNote={handleSelectNote}
+                onExcerpt={excerpt}
+              />
             ) : null}
 
             <Box
