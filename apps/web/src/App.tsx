@@ -41,8 +41,6 @@ import {
 import {
   claimSharedMembership,
   fetchAuthConfig,
-  fetchAdminAccounts,
-  fetchAdminOverview,
   fetchCampaignShareLinks,
   fetchCampaignMemberships,
   fetchCampaigns,
@@ -69,8 +67,6 @@ import NoteBodyEditor from './NoteBodyEditor'
 import NotesBrowsePane from './NotesBrowsePane'
 import { NoteBodyPreview } from './note-formatting'
 import type {
-  AdminAccountSummary,
-  AdminOverview,
   CampaignMembership,
   CampaignShareLink,
   CampaignSummary,
@@ -81,7 +77,7 @@ import type {
   ShareAccessLevel,
 } from './types'
 import { noteStatuses } from './types'
-import SiteAdminPanel from './SiteAdminPanel'
+import AdminPage from './pages/AdminPage'
 import WorkspacePane from './WorkspacePane'
 import NoteEditorActions from './NoteEditorActions'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
@@ -335,10 +331,6 @@ function App() {
   } = useNotes(isSharedMode)
   const [isSharedReady, setIsSharedReady] = useState(!isSharedMode)
   const [isJoining, setIsJoining] = useState(false)
-  const [isLoadingAdminOverview, setIsLoadingAdminOverview] = useState(false)
-  const [adminAccounts, setAdminAccounts] = useState<AdminAccountSummary[]>([])
-  const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null)
-  const [adminError, setAdminError] = useState<string | null>(null)
   const [joinDraft, setJoinDraft] = useState<GuestJoinInput>({ displayName: '' })
   const [error, setError] = useState<string | null>(null)
   const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
@@ -546,10 +538,6 @@ function App() {
     setMemberships([])
     setShareLinks([])
     setOverview(null)
-    setAdminAccounts([])
-    setAdminOverview(null)
-    setAdminError(null)
-    setIsLoadingAdminOverview(false)
     setNotes([])
     setNoteBrowseMode('notes')
     setNarrowWorkspacePanel('browse')
@@ -665,32 +653,6 @@ function App() {
     },
     [loadWorkspace, resetActivityState, resetSessionBrowserState],
   )
-
-  const handleRefreshAdminOverview = useCallback(async () => {
-    if (!authToken) {
-      return
-    }
-
-    setIsLoadingAdminOverview(true)
-
-    try {
-      const [nextOverview, nextAccounts] = await Promise.all([
-        fetchAdminOverview(authToken),
-        fetchAdminAccounts(authToken),
-      ])
-      setAdminOverview(nextOverview)
-      setAdminAccounts(nextAccounts)
-      setAdminError(null)
-    } catch (loadError) {
-      setAdminError(
-        loadError instanceof Error
-          ? loadError.message
-          : 'Could not load site-admin data.',
-      )
-    } finally {
-      setIsLoadingAdminOverview(false)
-    }
-  }, [authToken])
 
   useEffect(() => {
     let cancelled = false
@@ -812,55 +774,6 @@ function App() {
       window.clearInterval(refreshInterval)
     }
   }, [authConfig, authToken, clearSession])
-
-  useEffect(() => {
-    if (isSharedMode || !authToken || !owner?.isSiteAdmin) {
-      return
-    }
-
-    let cancelled = false
-
-    const loadSiteAdminOverview = async () => {
-      setIsLoadingAdminOverview(true)
-
-      try {
-        const [nextOverview, nextAccounts] = await Promise.all([
-          fetchAdminOverview(authToken),
-          fetchAdminAccounts(authToken),
-        ])
-
-        if (cancelled) {
-          return
-        }
-
-        setAdminAccounts(nextAccounts)
-        setAdminOverview(nextOverview)
-        setAdminError(null)
-      } catch (loadError) {
-        if (cancelled) {
-          return
-        }
-
-        setAdminAccounts([])
-        setAdminOverview(null)
-        setAdminError(
-          loadError instanceof Error
-            ? loadError.message
-            : 'Could not load site-admin data.',
-        )
-      } finally {
-        if (!cancelled) {
-          setIsLoadingAdminOverview(false)
-        }
-      }
-    }
-
-    void loadSiteAdminOverview()
-
-    return () => {
-      cancelled = true
-    }
-  }, [authToken, isSharedMode, owner?.isSiteAdmin])
 
   useEffect(() => {
     if (!isSharedMode || !shareToken || !guestStorageKey) {
@@ -1677,15 +1590,8 @@ function App() {
       <Box component="main" sx={{ minHeight: '100vh', py: { xs: 4, md: 6 } }}>
         <Container maxWidth="md">
           <Stack spacing={3}>
-            {owner?.isSiteAdmin ? (
-              <SiteAdminPanel
-                accounts={adminAccounts}
-                overview={adminOverview}
-                isLoading={isLoadingAdminOverview}
-                error={adminError}
-                onRefresh={() => void handleRefreshAdminOverview()}
-                surfaceRadius={surfaceRadius}
-              />
+            {owner?.isSiteAdmin && authToken ? (
+              <AdminPage authToken={authToken} surfaceRadius={surfaceRadius} />
             ) : null}
             <Card sx={{ borderRadius: heroCardRadius }}>
               <CardContent sx={{ p: { xs: 3, md: 4 } }}>
@@ -1933,15 +1839,8 @@ function App() {
             </Alert>
           ) : null}
 
-          {!isSharedMode && owner?.isSiteAdmin ? (
-            <SiteAdminPanel
-              accounts={adminAccounts}
-              overview={adminOverview}
-              isLoading={isLoadingAdminOverview}
-              error={adminError}
-              onRefresh={() => void handleRefreshAdminOverview()}
-              surfaceRadius={surfaceRadius}
-            />
+          {!isSharedMode && owner?.isSiteAdmin && authToken ? (
+            <AdminPage authToken={authToken} surfaceRadius={surfaceRadius} />
           ) : null}
 
           {isSharedMode && resolvedMembership?.userId === null ? (
