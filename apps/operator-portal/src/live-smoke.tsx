@@ -222,6 +222,7 @@ export async function provisionTenantThroughOperatorPortal(
         alertSummary.length > 0
           ? `Provisioning did not reach a successful outcome within ${provisionTimeoutMs}ms. ${alertSummary}`
           : `Provisioning did not reach a successful outcome within ${provisionTimeoutMs}ms.`,
+        { cause: error },
       )
     }
   } finally {
