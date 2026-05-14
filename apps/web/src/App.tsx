@@ -1,29 +1,10 @@
-import AddRoundedIcon from '@mui/icons-material/AddRounded'
-import AddCircleOutlineRoundedIcon from '@mui/icons-material/AddCircleOutlineRounded'
-import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
-import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
-import EventRoundedIcon from '@mui/icons-material/EventRounded'
-import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
-import PlaylistAddCheckCircleRoundedIcon from '@mui/icons-material/PlaylistAddCheckCircleRounded'
-import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
-import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded'
-import StickyNote2RoundedIcon from '@mui/icons-material/StickyNote2Rounded'
-import { DndNotesMark } from './DndNotesMark'
 import {
   Alert,
   Box,
   Button,
   Card,
   CardContent,
-  Checkbox,
-  Chip,
-  CircularProgress,
   Container,
-  FormControlLabel,
-  List,
-  ListItemButton,
-  ListItemText,
-  MenuItem,
   Stack,
   TextField,
   Typography,
@@ -53,14 +34,7 @@ import {
   createRuntimeKeycloakClient,
   isKeycloakAuthConfig,
 } from './keycloak-client'
-import {
-  campaignStarterTemplates,
-  getNoteStarterTemplate,
-} from './templates'
-import CampaignWorkspaceHeader from './CampaignWorkspaceHeader'
-import { formatTimestamp } from './formatTimestamp'
-import { markdownToPlainText } from './note-excerpts'
-import NotesBrowsePane from './NotesBrowsePane'
+import { getNoteStarterTemplate } from './templates'
 import type {
   CampaignMembership,
   CampaignShareLink,
@@ -68,13 +42,10 @@ import type {
   GuestJoinInput,
   Note,
   NoteActivityEntry,
-  ShareAccessLevel,
 } from './types'
-import AdminPage from './pages/AdminPage'
+import CampaignDetailPage from './pages/CampaignDetailPage'
 import CampaignListPage from './pages/CampaignListPage'
 import LoginPage from './pages/LoginPage'
-import NoteEditPage from './pages/NoteEditPage'
-import WorkspacePane from './WorkspacePane'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
 import { useShareLinks, createShareLinkDraft as createShareLinkDraftFn } from './hooks/useShareLinks'
 import {
@@ -89,13 +60,12 @@ import {
   useCampaign,
   createCampaignDraft,
   createMembershipConsolidationDraft,
-  describeCampaignMembership,
   selectedCampaignStorageKey,
   blankCampaignTemplateId,
   blankNoteTemplateId,
-  getCampaignStarterTemplate,
   type MembershipConsolidationDraft,
 } from './hooks/useCampaign'
+
 import {
   useNotes,
   createEmptyDraft as createEmptyDraftFn,
@@ -105,35 +75,10 @@ import {
 type NarrowWorkspacePanel = 'browse' | 'editor'
 
 const guestTokenStoragePrefix = 'dnd-notes:guest-token:'
-const defaultNotesPaneDescription =
-  'The note workflow now runs inside the selected campaign.'
 
 function getShareTokenFromPath(pathname: string) {
   const match = pathname.match(/^\/share\/([^/]+)\/?$/)
   return match ? decodeURIComponent(match[1]) : null
-}
-
-function trimToNull(value: string): string | null {
-  const trimmedValue = value.trim()
-  return trimmedValue === '' ? null : trimmedValue
-}
-
-function formatFallbackText(value: string | null, fallback: string) {
-  return trimToNull(value ?? '') ?? fallback
-}
-
-function excerpt(body: string) {
-  const normalizedBody = markdownToPlainText(body)
-
-  if (normalizedBody.length === 0) {
-    return 'No details yet. Flesh this out when you have a minute.'
-  }
-
-  if (normalizedBody.length <= 112) {
-    return normalizedBody
-  }
-
-  return `${normalizedBody.slice(0, 111)}…`
 }
 
 function sortActivityEntries(entries: NoteActivityEntry[]) {
@@ -144,22 +89,11 @@ function sortActivityEntries(entries: NoteActivityEntry[]) {
 
 const heroCardRadius = '32px'
 const surfaceRadius = '24px'
-const noteItemRadius = '20px'
-const statPillRadius = '999px'
-const singleLineTextSx = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-} as const
+
 function getActivityAttribution(entry: NoteActivityEntry) {
   return entry.action === 'created'
     ? (entry.createdBy ?? entry.lastEditedBy)
     : (entry.lastEditedBy ?? entry.createdBy)
-}
-
-function formatSessionLine(sessionName: string | null) {
-  return formatFallbackText(sessionName, 'No session')
 }
 
 function App() {
@@ -355,9 +289,6 @@ function App() {
   )
   const activeMembership = overview?.membership ?? null
   const canManageSelectedCampaign = activeMembership?.role === 'owner'
-  const selectedCampaignTemplate = getCampaignStarterTemplate(
-    selectedCampaignTemplateId,
-  )
   const selectedNoteTemplate = getNoteStarterTemplate(selectedNoteTemplateId)
   const resolvedSessionSummaries = isSharedMode ? sharedSessionSummaries : sessionSummaries
   const resolvedSelectedSessionSummary = useMemo(
@@ -426,7 +357,6 @@ function App() {
       ),
     [activityEntries, isSharedMode, selectedActivityMembershipId, sharedActivityEntries],
   )
-  const isSinglePaneNoteWorkspace = !showSplitNoteWorkspace
   const showBrowsePane = showSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
   const showEditorPane = showSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
   const workspaceEditorLabel =
@@ -457,63 +387,6 @@ function App() {
       setSelectedTagFilter(null)
     }
   }, [selectedTagFilter, tagFacets])
-
-  const statCards = useMemo(() => {
-    if (!overview) {
-      return []
-    }
-
-    return [
-      {
-        label: 'Total notes',
-        value: overview.stats.totalNotes,
-        icon: <StickyNote2RoundedIcon color="primary" />,
-      },
-      {
-        label: 'Draft notes',
-        value: overview.stats.draftNotes,
-        icon: <EditNoteRoundedIcon color="primary" />,
-      },
-      {
-        label: 'Active notes',
-        value: overview.stats.activeNotes,
-        icon: <PlaylistAddCheckCircleRoundedIcon color="primary" />,
-      },
-      {
-        label: 'Session-linked notes',
-        value: overview.stats.sessionLinkedNotes,
-        icon: <EventRoundedIcon color="primary" />,
-      },
-    ]
-  }, [overview])
-  const notePaneHeading =
-    noteBrowseMode === 'activity'
-      ? 'Recent activity'
-      : noteBrowseMode === 'sessions'
-        ? selectedSessionName
-          ? `${selectedSessionName} notes`
-          : 'Sessions'
-        : selectedTagFilter
-          ? `Notes tagged “${selectedTagFilter}”`
-          : 'Notes'
-  const notePaneDescription =
-    noteBrowseMode === 'activity'
-      ? resolvedSelectedActivityCollaborator
-        ? `See the latest notes created or edited by ${resolvedSelectedActivityCollaborator.displayName} without digging through the full archive.`
-        : 'See which notes changed recently and who touched them, without turning the workspace into a full audit log.'
-      : noteBrowseMode === 'sessions'
-        ? selectedSessionName
-          ? `Browse the notes captured during ${selectedSessionName} without leaving the note detail view.`
-          : 'Jump into a session to answer “what happened in this session?” without digging through the whole campaign.'
-        : searchText.trim() && selectedTagFacet
-          ? `Showing ${filteredNotes.length} ${filteredNotes.length === 1 ? 'note' : 'notes'} matching "${searchText}" in ${selectedTagFacet.tag}.`
-          : searchText.trim()
-            ? `Showing ${filteredNotes.length} ${filteredNotes.length === 1 ? 'note' : 'notes'} matching "${searchText}" across titles, body, link relationships, tags, sessions, and collaborators.`
-            : selectedTagFacet
-              ? `Showing ${selectedTagFacet.count} ${
-                  selectedTagFacet.count === 1 ? 'note' : 'notes'
-                } tagged ${selectedTagFacet.tag} in ${resolvedCampaign?.name ?? 'this campaign'}.`
-              : defaultNotesPaneDescription
 
   const clearSession = useCallback(() => {
     localStorage.removeItem(authTokenStorageKey)
@@ -1522,1405 +1395,140 @@ function App() {
   }
 
   return (
-    <Box
-      component="main"
-      sx={{ minHeight: '100vh', py: { xs: 2.5, md: 4 }, width: '100%' }}
-    >
-      <Container maxWidth="xl" sx={{ minWidth: 0, position: 'relative' }}>
-        <Stack spacing={2.5}>
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: { xs: 'center', lg: 'space-between' },
-              alignItems: 'flex-start',
-              gap: 2,
-              width: '100%',
-              position: { xs: 'static', lg: 'sticky' },
-              top: { lg: 12 },
-              zIndex: { lg: 3 },
-            }}
-          >
-            <Box
-              aria-label="Application brand"
-              sx={{
-                display: { xs: 'none', lg: 'inline-flex' },
-                alignItems: 'center',
-                flexShrink: 0,
-                gap: 0.75,
-                px: 1.25,
-                py: 0.75,
-                borderRadius: '999px',
-                border: '1px solid',
-                borderColor: 'rgba(167, 139, 250, 0.2)',
-                bgcolor: 'rgba(15, 23, 42, 0.72)',
-                color: 'rgba(255, 255, 255, 0.78)',
-                backdropFilter: 'blur(12px)',
-                boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
-                maxWidth: '100%',
-              }}
-            >
-              <DndNotesMark fontSize="small" />
-              <Typography
-                variant="caption"
-                sx={{
-                  ...singleLineTextSx,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                D&amp;D Notes
-              </Typography>
-            </Box>
-            <CampaignWorkspaceHeader
-              campaignName={resolvedCampaign?.name ?? overview.campaign.name}
-              mobileSubtitle={`${resolvedCampaign?.setting ?? overview.campaign.setting} • ${resolvedCampaign?.system ?? overview.campaign.system}`}
-              desktopSubtitle={resolvedDesktopSubtitle}
-              selectedCampaignId={resolvedSelectedCampaignId ?? overview.campaign.id}
-              campaignOptions={resolvedCampaignOptions}
-              onSelectCampaign={(campaignId) => {
-                if (!isSharedMode) {
-                  void handleSelectCampaign(campaignId)
-                }
-              }}
-              actions={[
-                {
-                  ariaLabel: 'New campaign',
-                  color: 'inherit',
-                  icon: <AddCircleOutlineRoundedIcon fontSize="small" />,
-                  onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate,
-                },
-                {
-                  ariaLabel: 'Campaign settings',
-                  color: 'inherit',
-                  icon: <SettingsRoundedIcon fontSize="small" />,
-                  onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings,
-                  disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign,
-                },
-                {
-                  ariaLabel: 'New note',
-                  color: 'secondary',
-                  icon: <AddRoundedIcon fontSize="small" />,
-                  onClick: handleStartNote,
-                  disabled: !canEditWorkspace,
-                },
-                {
-                  ariaLabel: 'Sign out',
-                  color: 'inherit',
-                  icon: <LogoutRoundedIcon fontSize="small" />,
-                  onClick: handleLogout,
-                },
-              ]}
-              surfaceRadius={surfaceRadius}
-              compactDesktop={useCompactDesktopHeader}
-              stickyDesktop={false}
-            />
-          </Box>
-
-          {error ? (
-            <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
-              {error}
-            </Alert>
-          ) : null}
-
-          {!isSharedMode && owner?.isSiteAdmin && authToken ? (
-            <AdminPage authToken={authToken} surfaceRadius={surfaceRadius} />
-          ) : null}
-
-          {isSharedMode && resolvedMembership?.userId === null ? (
-            <Card sx={{ borderRadius: surfaceRadius }}>
-              <CardContent sx={{ p: 3 }}>
-                <Stack spacing={2.5}>
-                  <Box>
-                    <Typography variant="h5">Link this guest membership</Typography>
-                    <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                      {isKeycloakMode
-                        ? 'Sign in with your tenant account to attach this guest history to a real account. The claim still has to happen from the same browser session that joined the campaign.'
-                        : 'Create or connect a real account without changing the membership that already owns your shared note history. For this first release, the claim must happen from the same browser that joined the campaign.'}
-                    </Typography>
-                  </Box>
-
-                  {accountNotice ? (
-                    <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
-                      {accountNotice}
-                    </Alert>
-                  ) : null}
-
-                  {!isKeycloakMode && isRegisterMode ? (
-                    <TextField
-                      label="Account display name"
-                      value={registerDraft.displayName}
-                      onChange={(event) =>
-                        setRegisterDraft((currentDraft) => ({
-                          ...currentDraft,
-                          displayName: event.target.value,
-                        }))
-                      }
-                    />
-                  ) : null}
-
-                  {!isKeycloakMode ? (
-                    <>
-                      <TextField
-                        label="Email"
-                        type="email"
-                        value={isRegisterMode ? registerDraft.email : loginDraft.email}
-                        onChange={(event) => {
-                          const value = event.target.value
-                          if (isRegisterMode) {
-                            setRegisterDraft((currentDraft) => ({
-                              ...currentDraft,
-                              email: value,
-                            }))
-                          } else {
-                            setLoginDraft((currentDraft) => ({ ...currentDraft, email: value }))
-                          }
-                        }}
-                      />
-
-                      <TextField
-                        label="Password"
-                        type="password"
-                        value={isRegisterMode ? registerDraft.password : loginDraft.password}
-                        onChange={(event) => {
-                          const value = event.target.value
-                          if (isRegisterMode) {
-                            setRegisterDraft((currentDraft) => ({
-                              ...currentDraft,
-                              password: value,
-                            }))
-                          } else {
-                            setLoginDraft((currentDraft) => ({
-                              ...currentDraft,
-                              password: value,
-                            }))
-                          }
-                        }}
-                      />
-                    </>
-                  ) : null}
-
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                    <Button variant="contained" onClick={handleLinkSharedMembership} disabled={isLinkingAccount}>
-                      {isLinkingAccount
-                        ? isKeycloakMode
-                          ? 'Signing in…'
-                          : isRegisterMode
-                            ? 'Creating and linking…'
-                            : 'Linking account…'
-                        : isKeycloakMode
-                          ? authToken
-                            ? 'Link this guest membership'
-                            : 'Sign in to link'
-                          : isRegisterMode
-                            ? 'Create and link account'
-                            : 'Sign in and link account'}
-                    </Button>
-                    {!isKeycloakMode ? (
-                      <Button
-                        variant="text"
-                        onClick={() => {
-                          setAccountNotice(null)
-                          setError(null)
-                          setIsRegisterMode((current) => !current)
-                        }}
-                      >
-                        {isRegisterMode
-                          ? 'Already have an account? Sign in'
-                          : 'Need an account? Create one'}
-                      </Button>
-                    ) : null}
-                  </Stack>
-                </Stack>
-              </CardContent>
-            </Card>
-          ) : !isSharedMode && campaignFormMode !== 'closed' ? (
-            <Card sx={{ borderRadius: surfaceRadius }}>
-              <CardContent sx={{ p: 3 }}>
-                <Stack spacing={2.5}>
-                  <Box>
-                    <Typography variant="h5">
-                      {campaignFormMode === 'create'
-                        ? 'Create campaign'
-                        : 'Edit campaign settings'}
-                    </Typography>
-                    <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                      {campaignFormMode === 'create'
-                        ? 'Set up a campaign shell before you invite anyone else in.'
-                        : 'Update campaign metadata and review the owner-side membership list.'}
-                    </Typography>
-                  </Box>
-
-                  {campaignFormMode === 'create' ? (
-                    <Stack spacing={1.5}>
-                      <TextField
-                        select
-                        label="Campaign starter"
-                        value={selectedCampaignTemplateId}
-                        onChange={(event) =>
-                          setSelectedCampaignTemplateId(event.target.value)
-                        }
-                        helperText="Optional. Seed flexible starter notes or leave the campaign blank."
-                      >
-                        {campaignStarterTemplates.map((template) => (
-                          <MenuItem key={template.id} value={template.id}>
-                            {template.name}
-                          </MenuItem>
-                        ))}
-                      </TextField>
-
-                      {selectedCampaignTemplate.starterNotes.length > 0 ? (
-                        <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                          <Stack spacing={1}>
-                            <Typography variant="body2">
-                              {selectedCampaignTemplate.description}
-                            </Typography>
-                            <Stack
-                              direction="row"
-                              spacing={1}
-                              useFlexGap
-                              sx={{ flexWrap: 'wrap' }}
-                            >
-                              {selectedCampaignTemplate.starterNotes.map((starterNote) => (
-                                <Chip
-                                  key={starterNote.title}
-                                  label={starterNote.title}
-                                  size="small"
-                                />
-                              ))}
-                            </Stack>
-                          </Stack>
-                        </Alert>
-                      ) : null}
-                    </Stack>
-                  ) : null}
-
-                  <TextField
-                    label="Campaign name"
-                    value={campaignDraft.name}
-                    onChange={(event) =>
-                      handleCampaignDraftChange('name', event.target.value)
-                    }
-                  />
-                  <TextField
-                    label="Tagline"
-                    value={campaignDraft.tagline}
-                    onChange={(event) =>
-                      handleCampaignDraftChange('tagline', event.target.value)
-                    }
-                  />
-                  <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                    <TextField
-                      fullWidth
-                      label="System"
-                      value={campaignDraft.system}
-                      onChange={(event) =>
-                        handleCampaignDraftChange('system', event.target.value)
-                      }
-                    />
-                    <TextField
-                      fullWidth
-                      label="Setting"
-                      value={campaignDraft.setting}
-                      onChange={(event) =>
-                        handleCampaignDraftChange('setting', event.target.value)
-                      }
-                    />
-                  </Stack>
-                  <TextField
-                    label="Next session"
-                    value={campaignDraft.nextSession}
-                    onChange={(event) =>
-                      handleCampaignDraftChange('nextSession', event.target.value)
-                    }
-                    helperText="Optional. Use an ISO timestamp or plain text date."
-                  />
-
-                  {campaignFormMode === 'edit' ? (
-                    <Stack spacing={2.5}>
-                      <Box>
-                        <Typography variant="subtitle1">Current memberships</Typography>
-                        <Stack
-                          direction="row"
-                          spacing={1}
-                          useFlexGap
-                          sx={{ mt: 1, flexWrap: 'wrap' }}
-                        >
-                          {currentCampaignMemberships.map((membership) => (
-                            <Chip
-                              key={membership.id}
-                              label={`${membership.displayName} (${membership.role === 'guest' && membership.userId !== null ? 'linked collaborator' : membership.role})`}
-                              color={membership.role === 'owner' ? 'secondary' : membership.userId !== null ? 'primary' : 'default'}
-                            />
-                          ))}
-                        </Stack>
-                      </Box>
-
-                      <Box>
-                        <Typography variant="subtitle1">
-                          Consolidate note authorship
-                        </Typography>
-                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                          Reassign note authorship and edit attribution from one
-                          membership onto another without changing note text or
-                          deleting memberships.
-                        </Typography>
-                      </Box>
-
-                      {currentCampaignMemberships.length < 2 ? (
-                        <Typography color="text.secondary">
-                          Add or link another membership before consolidating note
-                          attribution.
-                        </Typography>
-                      ) : (
-                        <Stack spacing={2}>
-                          <Stack
-                            direction={{ xs: 'column', md: 'row' }}
-                            spacing={2}
-                          >
-                            <TextField
-                              select
-                              fullWidth
-                              label="Source membership"
-                              value={membershipConsolidationDraft.sourceMembershipId}
-                              onChange={(event) =>
-                                handleMembershipConsolidationDraftChange(
-                                  'sourceMembershipId',
-                                  event.target.value,
-                                )
-                              }
-                              helperText="Move note attribution away from this membership."
-                            >
-                              {currentCampaignMemberships.map((membership) => (
-                                <MenuItem key={membership.id} value={membership.id}>
-                                  {describeCampaignMembership(membership)}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                            <TextField
-                              select
-                              fullWidth
-                              label="Target membership"
-                              value={membershipConsolidationDraft.targetMembershipId}
-                              onChange={(event) =>
-                                handleMembershipConsolidationDraftChange(
-                                  'targetMembershipId',
-                                  event.target.value,
-                                )
-                              }
-                              helperText="This membership keeps the note attribution."
-                            >
-                              {currentCampaignMemberships.map((membership) => (
-                                <MenuItem
-                                  key={membership.id}
-                                  value={membership.id}
-                                  disabled={
-                                    membership.id ===
-                                    membershipConsolidationDraft.sourceMembershipId
-                                  }
-                                >
-                                  {describeCampaignMembership(membership)}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                          </Stack>
-
-                          {selectedSourceMembership && selectedTargetMembership ? (
-                            <Typography color="text.secondary" variant="body2">
-                              Previewing moves note attribution from{' '}
-                              {selectedSourceMembership.displayName} to{' '}
-                              {selectedTargetMembership.displayName}.
-                            </Typography>
-                          ) : null}
-
-                          <Stack
-                            direction={{ xs: 'column', sm: 'row' }}
-                            spacing={1.5}
-                          >
-                            <Button
-                              variant="outlined"
-                              onClick={handlePreviewMembershipConsolidation}
-                              disabled={
-                                !hasValidMembershipConsolidationSelection ||
-                                isPreviewingMembershipConsolidation ||
-                                isApplyingMembershipConsolidation
-                              }
-                            >
-                              {isPreviewingMembershipConsolidation
-                                ? 'Previewing consolidation…'
-                                : 'Preview consolidation'}
-                            </Button>
-                            <Button
-                              variant="contained"
-                              onClick={handleApplyMembershipConsolidation}
-                              disabled={
-                                !canApplyMembershipConsolidation ||
-                                isPreviewingMembershipConsolidation ||
-                                isApplyingMembershipConsolidation
-                              }
-                            >
-                              {isApplyingMembershipConsolidation
-                                ? 'Applying consolidation…'
-                                : 'Apply consolidation'}
-                            </Button>
-                          </Stack>
-
-                          {membershipConsolidationPreview ? (
-                            <Alert
-                              severity={
-                                membershipConsolidationPreview.applied
-                                  ? 'success'
-                                  : membershipConsolidationPreview.requiresRoleMismatchConfirmation
-                                    ? 'warning'
-                                    : 'info'
-                              }
-                              sx={{ borderRadius: surfaceRadius }}
-                            >
-                              <Stack spacing={1}>
-                                <Typography variant="subtitle2">
-                                  {membershipConsolidationPreview.applied
-                                    ? 'Consolidation applied'
-                                    : 'Consolidation preview'}
-                                </Typography>
-                                <Typography variant="body2">
-                                  {describeCampaignMembership(
-                                    membershipConsolidationPreview.sourceMembership,
-                                  )}{' '}
-                                  {'->'}{' '}
-                                  {describeCampaignMembership(
-                                    membershipConsolidationPreview.targetMembership,
-                                  )}
-                                </Typography>
-                                <Typography variant="body2">
-                                  Affected notes:{' '}
-                                  {
-                                    membershipConsolidationPreview.noteChanges
-                                      .affectedNoteCount
-                                  }
-                                  . Authored:{' '}
-                                  {
-                                    membershipConsolidationPreview.noteChanges
-                                      .authoredNoteCount
-                                  }
-                                  . Edited:{' '}
-                                  {
-                                    membershipConsolidationPreview.noteChanges
-                                      .editedNoteCount
-                                  }
-                                  . Authored and edited:{' '}
-                                  {
-                                    membershipConsolidationPreview.noteChanges
-                                      .authoredAndEditedNoteCount
-                                  }
-                                  .
-                                </Typography>
-                                {membershipConsolidationPreview.warnings.length > 0 ? (
-                                  <Box component="ul" sx={{ m: 0, pl: 2.5 }}>
-                                    {membershipConsolidationPreview.warnings.map(
-                                      (warning) => (
-                                        <Typography
-                                          component="li"
-                                          key={warning}
-                                          variant="body2"
-                                        >
-                                          {warning}
-                                        </Typography>
-                                      ),
-                                    )}
-                                  </Box>
-                                ) : null}
-                                {membershipConsolidationPreview.requiresRoleMismatchConfirmation ? (
-                                  <FormControlLabel
-                                    control={
-                                      <Checkbox
-                                        checked={
-                                          membershipConsolidationDraft.confirmRoleMismatch
-                                        }
-                                        onChange={(event) =>
-                                          handleMembershipConsolidationDraftChange(
-                                            'confirmRoleMismatch',
-                                            event.target.checked,
-                                          )
-                                        }
-                                      />
-                                    }
-                                    label={`I understand this moves ${membershipConsolidationPreview.sourceMembership.role} note attribution onto ${membershipConsolidationPreview.targetMembership.role}.`}
-                                  />
-                                ) : null}
-                              </Stack>
-                            </Alert>
-                          ) : null}
-
-                          {membershipConsolidationNotice ? (
-                            <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
-                              {membershipConsolidationNotice}
-                            </Alert>
-                          ) : null}
-                        </Stack>
-                      )}
-
-                      <Box>
-                        <Typography variant="subtitle1">Shared links</Typography>
-                        <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                          Only the shared route can be embedded. Use frame ancestors to allow
-                          specific VTT hosts or leave it blank to block embedding.
-                        </Typography>
-                      </Box>
-
-                      <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                        <TextField
-                          fullWidth
-                          label="Link label"
-                          value={shareLinkDraft.label}
-                          onChange={(event) =>
-                            handleShareLinkDraftChange('label', event.target.value)
-                          }
-                          helperText="Optional. Use this to remember where the link is shared."
-                        />
-                        <TextField
-                          select
-                          label="Access"
-                          value={shareLinkDraft.accessLevel}
-                          onChange={(event) =>
-                            handleShareLinkDraftChange(
-                              'accessLevel',
-                              event.target.value as ShareAccessLevel,
-                            )
-                          }
-                          sx={{ minWidth: { md: 180 } }}
-                        >
-                          <MenuItem value="editor">Editor</MenuItem>
-                          <MenuItem value="viewer">Viewer</MenuItem>
-                        </TextField>
-                      </Stack>
-
-                      <TextField
-                        label="Allowed frame ancestors"
-                        value={shareLinkDraft.frameAncestors}
-                        onChange={(event) =>
-                          handleShareLinkDraftChange('frameAncestors', event.target.value)
-                        }
-                        helperText="Optional. Use 'self', 'none', or space-separated origins such as https://app.roll20.net."
-                      />
-
-                      <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                        <Button
-                          variant="outlined"
-                          onClick={handleCreateShareLink}
-                          disabled={isCreatingShareLink}
-                        >
-                          {isCreatingShareLink ? 'Creating link…' : 'Create shared link'}
-                        </Button>
-                      </Stack>
-
-                      {shareLinkNotice ? (
-                        <Alert severity="success" sx={{ borderRadius: surfaceRadius }}>
-                          {shareLinkNotice}
-                        </Alert>
-                      ) : null}
-
-                      {shareLinks.length === 0 ? (
-                        <Typography color="text.secondary">
-                          No active shared links yet.
-                        </Typography>
-                      ) : (
-                        <Stack spacing={1.5}>
-                          {shareLinks.map((shareLink) => {
-                            const revealedShareLink = revealedShareLinks[shareLink.id]
-                            const shareLinkError = shareLinkActionErrors[shareLink.id]
-                            const isRevealingShareLink =
-                              revealingShareLinkId === shareLink.id
-                            const shareLinkLabel = formatFallbackText(
-                              shareLink.label,
-                              'Untitled shared link',
-                            )
-
-                            return (
-                              <Box
-                                component="section"
-                                key={shareLink.id}
-                                aria-label={`${shareLinkLabel} shared link`}
-                                sx={{
-                                  border: '1px solid',
-                                  borderColor: 'divider',
-                                  borderRadius: noteItemRadius,
-                                  px: 2,
-                                  py: 1.75,
-                                }}
-                              >
-                                <Stack
-                                  direction={{ xs: 'column', md: 'row' }}
-                                  spacing={2}
-                                  sx={{ justifyContent: 'space-between' }}
-                                >
-                                  <Stack spacing={1.25} sx={{ flexGrow: 1 }}>
-                                    <Box>
-                                      <Typography variant="subtitle1">{shareLinkLabel}</Typography>
-                                      <Typography color="text.secondary" variant="body2">
-                                        {shareLink.accessLevel === 'editor'
-                                          ? 'Editors can view and update notes.'
-                                          : 'Viewers can open the shared route without editing.'}
-                                      </Typography>
-                                      <Typography
-                                        color="text.secondary"
-                                        variant="body2"
-                                        sx={{ mt: 0.5 }}
-                                      >
-                                        Frame ancestors:{' '}
-                                        {shareLink.frameAncestors ?? 'Not embeddable'}
-                                      </Typography>
-                                    </Box>
-
-                                    {revealedShareLink ? (
-                                      <Box
-                                        sx={{
-                                          border: '1px solid',
-                                          borderColor: 'divider',
-                                          borderRadius: 2,
-                                          px: 1.5,
-                                          py: 1.25,
-                                          backgroundColor: 'background.default',
-                                        }}
-                                      >
-                                        <Typography color="text.secondary" variant="caption">
-                                          Reusable share URL
-                                        </Typography>
-                                        <Typography
-                                          component="p"
-                                          variant="body2"
-                                          sx={{
-                                            mt: 0.75,
-                                            fontFamily: "'Geist Mono', ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace",
-                                            wordBreak: 'break-all',
-                                            filter: revealedShareLink.isVisible
-                                              ? 'none'
-                                              : 'blur(6px)',
-                                            transition: 'filter 120ms ease',
-                                            userSelect: revealedShareLink.isVisible
-                                              ? 'text'
-                                              : 'none',
-                                          }}
-                                        >
-                                          {revealedShareLink.url}
-                                        </Typography>
-                                      </Box>
-                                    ) : (
-                                      <Typography color="text.secondary" variant="body2">
-                                        URL hidden until you reveal it on this card.
-                                      </Typography>
-                                    )}
-
-                                    {shareLinkError ? (
-                                      <Alert
-                                        severity="warning"
-                                        sx={{ borderRadius: surfaceRadius }}
-                                      >
-                                        {shareLinkError}
-                                      </Alert>
-                                    ) : null}
-                                  </Stack>
-
-                                  <Stack
-                                    direction={{ xs: 'column', sm: 'row', md: 'column' }}
-                                    spacing={1}
-                                    sx={{ alignItems: { md: 'flex-end' } }}
-                                  >
-                                    {revealedShareLink ? (
-                                      <>
-                                        <Button
-                                          variant="outlined"
-                                          onClick={() =>
-                                            handleToggleShareLinkVisibility(shareLink.id)
-                                          }
-                                        >
-                                          {revealedShareLink.isVisible
-                                            ? 'Hide link'
-                                            : 'Show link'}
-                                        </Button>
-                                        <Button
-                                          variant="outlined"
-                                          onClick={() =>
-                                            void handleCopyShareLink(shareLink.id)
-                                          }
-                                        >
-                                          {copiedShareLinkId === shareLink.id
-                                            ? 'Copied'
-                                            : 'Copy link'}
-                                        </Button>
-                                      </>
-                                    ) : (
-                                      <Button
-                                        variant="outlined"
-                                        onClick={() =>
-                                          void handleRevealShareLink(shareLink.id)
-                                        }
-                                        disabled={isRevealingShareLink}
-                                      >
-                                        {isRevealingShareLink
-                                          ? 'Revealing link…'
-                                          : 'Reveal link'}
-                                      </Button>
-                                    )}
-                                    <Button
-                                      color="error"
-                                      variant="text"
-                                      onClick={() => void handleRevokeShareLink(shareLink.id)}
-                                    >
-                                      Revoke link
-                                    </Button>
-                                  </Stack>
-                                </Stack>
-                              </Box>
-                            )
-                          })}
-                        </Stack>
-                      )}
-                    </Stack>
-                  ) : null}
-
-                  <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                    <Button
-                      variant="contained"
-                      startIcon={<SaveRoundedIcon />}
-                      onClick={handleSaveCampaign}
-                      disabled={isSavingCampaign}
-                    >
-                      {isSavingCampaign
-                        ? campaignFormMode === 'create'
-                          ? 'Creating campaign…'
-                          : 'Saving settings…'
-                        : campaignFormMode === 'create'
-                          ? 'Create campaign'
-                          : 'Save campaign settings'}
-                    </Button>
-                    <Button variant="text" onClick={handleCancelCampaignForm}>
-                      Cancel
-                    </Button>
-                  </Stack>
-                </Stack>
-              </CardContent>
-            </Card>
-          ) : null}
-
-          <Box
-            component="ul"
-            aria-label="Campaign stats"
-            sx={{
-              display: 'grid',
-              gap: 3,
-              listStyle: 'none',
-              p: 0,
-              m: 0,
-              gridTemplateColumns: {
-                xs: 'repeat(2, minmax(0, 1fr))',
-                md: 'repeat(4, minmax(0, 1fr))',
-              },
-            }}
-          >
-            {statCards.map((card) => (
-              <Box key={card.label} component="li">
-                <Box
-                  aria-label={`${card.label}: ${card.value}`}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 1.5,
-                    minWidth: 0,
-                    borderRadius: statPillRadius,
-                    px: { xs: 1.75, sm: 2.25 },
-                    py: { xs: 1.25, sm: 1.5 },
-                    bgcolor: 'rgba(15, 23, 42, 0.88)',
-                    border: '1px solid',
-                    borderColor: 'rgba(167, 139, 250, 0.18)',
-                    boxShadow: '0 20px 40px rgba(15, 23, 42, 0.24)',
-                  }}
-                >
-                  <Box
-                    sx={{
-                      display: 'grid',
-                      placeItems: 'center',
-                      width: 40,
-                      height: 40,
-                      flexShrink: 0,
-                      borderRadius: '50%',
-                      bgcolor: 'rgba(167, 139, 250, 0.16)',
-                    }}
-                  >
-                    {card.icon}
-                  </Box>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography
-                      color="text.secondary"
-                      variant="body2"
-                      sx={{ lineHeight: 1.2 }}
-                    >
-                      {card.label}
-                    </Typography>
-                    <Typography
-                      variant="h5"
-                      sx={{
-                        mt: 0.25,
-                        fontSize: { xs: '1.35rem', sm: '1.55rem' },
-                        lineHeight: 1.1,
-                      }}
-                    >
-                      {card.value}
-                    </Typography>
-                  </Box>
-                </Box>
-              </Box>
-            ))}
-          </Box>
-
-          <Box
-            sx={{
-              display: 'grid',
-              gap: 2,
-              minWidth: 0,
-              gridTemplateColumns: showSplitNoteWorkspace
-                ? {
-                    xs: '1fr',
-                    lg: 'minmax(0, 1.1fr) minmax(0, 1fr)',
-                  }
-                : '1fr',
-            }}
-          >
-            <WorkspacePane
-              showBrowsePane={showBrowsePane}
-              showEditorPane={showEditorPane}
-              showSplitNoteWorkspace={showSplitNoteWorkspace}
-              canSplitNoteWorkspace={canSplitNoteWorkspace}
-              onShowBrowsePane={handleShowBrowsePane}
-              onShowEditorPane={handleShowEditorPane}
-              onToggleSplitWorkspace={handleToggleSplitWorkspace}
-              workspaceEditorLabel={workspaceEditorLabel}
-              surfaceRadius={surfaceRadius}
-              cardSx={{ gridColumn: '1 / -1' }}
-            />
-
-            {showBrowsePane ? (
-              <NotesBrowsePane
-                heading={notePaneHeading}
-                description={notePaneDescription}
-                actions={
-                  <>
-                    <Button
-                      size="small"
-                      variant={noteBrowseMode === 'notes' ? 'contained' : 'outlined'}
-                      onClick={handleOpenAllNotes}
-                    >
-                      All notes
-                    </Button>
-                    <Button
-                      size="small"
-                      variant={noteBrowseMode === 'sessions' ? 'contained' : 'outlined'}
-                      onClick={handleOpenSessionBrowser}
-                    >
-                      Browse by session
-                    </Button>
-                    <Button
-                      size="small"
-                      variant={noteBrowseMode === 'activity' ? 'contained' : 'outlined'}
-                      onClick={() => void handleOpenRecentActivity()}
-                    >
-                      Recent activity
-                    </Button>
-                    <Button
-                      size="small"
-                      variant={isQuickCaptureOpen ? 'contained' : 'outlined'}
-                      startIcon={<BoltRoundedIcon />}
-                      onClick={() => setIsQuickCaptureOpen((currentValue) => !currentValue)}
-                      disabled={!canEditWorkspace}
-                    >
-                      Quick capture
-                    </Button>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<AddRoundedIcon />}
-                      onClick={handleStartNote}
-                      disabled={!canEditWorkspace}
-                    >
-                      New note
-                    </Button>
-                  </>
-                }
-                searchText={searchText}
-                onSearchTextChange={setSearchText}
-                onClearSearch={handleClearSearch}
-                selectedTagLabel={
-                  selectedTagFacet
-                    ? `Filtering by ${selectedTagFacet.tag} (${selectedTagFacet.count})`
-                    : null
-                }
-                onClearTagFilter={handleClearTagFilter}
-                quickCapture={{
-                  isOpen: isQuickCaptureOpen,
-                  value: quickCaptureTitle,
-                  onValueChange: setQuickCaptureTitle,
-                  onSubmit: () => void handleQuickCapture(),
-                  isSubmitting: isQuickCapturing || !canEditWorkspace,
-                }}
-                tagFilters={
-                  tagFacets.length === 0 ? (
-                    <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                      No tagged notes yet. Add tags to a note to browse the campaign this way.
-                    </Alert>
-                  ) : (
-                    <Stack
-                      direction="row"
-                      spacing={1}
-                      useFlexGap
-                      aria-label="Tag filter list"
-                      sx={{ flexWrap: 'wrap' }}
-                    >
-                      {tagFacets.map((tagFacet) => (
-                        <Button
-                          key={tagFacet.tag}
-                          size="small"
-                          variant={selectedTagFilter === tagFacet.tag ? 'contained' : 'outlined'}
-                          onClick={() => handleSelectTagFilter(tagFacet.tag)}
-                        >
-                          {tagFacet.tag} ({tagFacet.count})
-                        </Button>
-                      ))}
-                    </Stack>
-                  )
-                }
-                surfaceRadius={surfaceRadius}
-              >
-                {noteBrowseMode === 'activity' ? (
-                    <Stack spacing={2.5}>
-                      <Stack spacing={1.5}>
-                        <Typography variant="subtitle1">Filter by collaborator</Typography>
-                        <Stack
-                          direction="row"
-                          spacing={1}
-                          useFlexGap
-                          aria-label="Activity collaborator filter"
-                          sx={{ flexWrap: 'wrap' }}
-                        >
-                          <Button
-                            variant={
-                              selectedActivityMembershipId === null ? 'contained' : 'outlined'
-                            }
-                            size="small"
-                            onClick={() => void handleSelectActivityCollaborator(null)}
-                          >
-                            All collaborators
-                          </Button>
-                          {resolvedActivityCollaborators.map((collaborator) => (
-                            <Button
-                              key={collaborator.membershipId}
-                              variant={
-                                selectedActivityMembershipId === collaborator.membershipId
-                                  ? 'contained'
-                                  : 'outlined'
-                              }
-                              size="small"
-                              onClick={() =>
-                                void handleSelectActivityCollaborator(
-                                  collaborator.membershipId,
-                                )
-                              }
-                            >
-                              {collaborator.displayName} ({collaborator.noteCount})
-                            </Button>
-                          ))}
-                        </Stack>
-                        {resolvedSelectedActivityCollaborator ? (
-                          <Stack
-                            direction={{ xs: 'column', sm: 'row' }}
-                            spacing={1}
-                            sx={{ alignItems: { sm: 'center' } }}
-                          >
-                            <Chip
-                              label={`Filtering by ${resolvedSelectedActivityCollaborator.displayName}`}
-                              size="small"
-                              color="primary"
-                            />
-                            <Button
-                              size="small"
-                              variant="text"
-                              onClick={() => void handleSelectActivityCollaborator(null)}
-                            >
-                              Clear filter
-                            </Button>
-                          </Stack>
-                        ) : null}
-                      </Stack>
-
-                      {!isSharedMode && isLoadingActivity ? (
-                        <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
-                          <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
-                            <CircularProgress size={28} />
-                            <Typography color="text.secondary" variant="body2">
-                              Loading recent activity…
-                            </Typography>
-                          </Stack>
-                        </Box>
-                      ) : sortedActivityEntries.length === 0 ? (
-                        <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                          {resolvedSelectedActivityCollaborator
-                            ? `No recent notes for ${resolvedSelectedActivityCollaborator.displayName} yet.`
-                            : 'No notes in this campaign yet. Create your first note to get started.'}
-                        </Alert>
-                      ) : (
-                        <List
-                          disablePadding
-                          aria-label="Recent activity list"
-                          sx={{ display: 'grid', gap: 1.5 }}
-                        >
-                          {sortedActivityEntries.map((activityEntry) => (
-                            <ListItemButton
-                              key={activityEntry.id}
-                              selected={selectedNoteId === activityEntry.id && !isCreating}
-                              onClick={() => handleSelectNote(activityEntry)}
-                              sx={{
-                                borderRadius: noteItemRadius,
-                                border: '1px solid',
-                                borderColor:
-                                  selectedNoteId === activityEntry.id && !isCreating
-                                    ? 'primary.main'
-                                    : 'divider',
-                                alignItems: 'flex-start',
-                              }}
-                            >
-                              <ListItemText
-                                disableTypography
-                                primary={
-                                  <Stack
-                                    direction="row"
-                                    spacing={1.5}
-                                    sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
-                                  >
-                                    <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                                      <Typography
-                                        variant="subtitle1"
-                                        title={activityEntry.title}
-                                        sx={singleLineTextSx}
-                                      >
-                                        {activityEntry.title}
-                                      </Typography>
-                                      <Typography
-                                        color="text.secondary"
-                                        variant="body2"
-                                        title={excerpt(activityEntry.body)}
-                                        sx={singleLineTextSx}
-                                      >
-                                        {excerpt(activityEntry.body)}
-                                      </Typography>
-                                      <Typography
-                                        color="text.secondary"
-                                        variant="caption"
-                                        title={formatSessionLine(activityEntry.sessionName)}
-                                        sx={singleLineTextSx}
-                                      >
-                                        {formatSessionLine(activityEntry.sessionName)}
-                                      </Typography>
-                                    </Stack>
-                                    <Stack spacing={0.75} sx={{ alignItems: 'flex-end', flexShrink: 0 }}>
-                                      <Chip
-                                        label={activityEntry.action === 'created' ? 'Created' : 'Edited'}
-                                        color={
-                                          activityEntry.action === 'created'
-                                            ? 'primary'
-                                            : 'secondary'
-                                        }
-                                        size="small"
-                                      />
-                                      <Chip label={activityEntry.status} size="small" />
-                                      <Typography color="text.secondary" variant="caption">
-                                        {formatTimestamp(activityEntry.updatedAt)}
-                                      </Typography>
-                                    </Stack>
-                                  </Stack>
-                                }
-                              />
-                            </ListItemButton>
-                          ))}
-                        </List>
-                      )}
-                    </Stack>
-                ) : noteBrowseMode === 'sessions' && !selectedSessionName ? (
-                    resolvedSessionSummaries.length === 0 ? (
-                      <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                        No session-linked notes yet. Add a session name to notes when you want
-                        a quick “what happened in this session?” view.
-                      </Alert>
-                    ) : (
-                      <List
-                        disablePadding
-                        aria-label="Session list"
-                        sx={{ display: 'grid', gap: 1.5 }}
-                      >
-                        {resolvedSessionSummaries.map((sessionSummary) => (
-                          <ListItemButton
-                            key={sessionSummary.sessionName}
-                            onClick={() =>
-                              void handleSelectSession(sessionSummary.sessionName)
-                            }
-                            sx={{
-                              borderRadius: noteItemRadius,
-                              border: '1px solid',
-                              borderColor: 'divider',
-                              alignItems: 'flex-start',
-                            }}
-                          >
-                            <ListItemText
-                              disableTypography
-                              primary={
-                                <Stack
-                                  direction="row"
-                                  spacing={1.5}
-                                  sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
-                                >
-                                  <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                                    <Typography
-                                      variant="subtitle1"
-                                      title={sessionSummary.sessionName}
-                                      sx={singleLineTextSx}
-                                    >
-                                      {sessionSummary.sessionName}
-                                    </Typography>
-                                    <Typography color="text.secondary" variant="body2" sx={singleLineTextSx}>
-                                      Open this session to review the note trail.
-                                    </Typography>
-                                    <Typography
-                                      color="text.secondary"
-                                      variant="caption"
-                                      title={formatTimestamp(sessionSummary.latestActivity)}
-                                      sx={singleLineTextSx}
-                                    >
-                                      Latest activity {formatTimestamp(sessionSummary.latestActivity)}
-                                    </Typography>
-                                  </Stack>
-                                  <Chip
-                                    label={`${sessionSummary.noteCount} ${
-                                      sessionSummary.noteCount === 1 ? 'note' : 'notes'
-                                    }`}
-                                    size="small"
-                                  />
-                                </Stack>
-                              }
-                            />
-                          </ListItemButton>
-                        ))}
-                      </List>
-                    )
-                ) : (
-                    <Stack spacing={2}>
-                      {noteBrowseMode === 'sessions' && selectedSessionName ? (
-                        <Stack
-                          direction={{ xs: 'column', sm: 'row' }}
-                          spacing={1}
-                          sx={{ justifyContent: 'space-between', alignItems: { sm: 'center' } }}
-                        >
-                          <Button variant="text" onClick={handleOpenSessionBrowser}>
-                            Back to sessions
-                          </Button>
-                          <Chip
-                            label={`${
-                              resolvedSelectedSessionSummary?.noteCount ?? displayedNotes.length
-                            } ${
-                              (resolvedSelectedSessionSummary?.noteCount ?? displayedNotes.length) === 1
-                                ? 'note'
-                                : 'notes'
-                            } in ${selectedSessionName}`}
-                            size="small"
-                          />
-                        </Stack>
-                      ) : null}
-
-                      {!isSharedMode && isLoadingSessionNotes ? (
-                        <Box sx={{ display: 'grid', placeItems: 'center', py: 6 }}>
-                          <Stack spacing={1.5} sx={{ alignItems: 'center' }}>
-                            <CircularProgress size={28} />
-                            <Typography color="text.secondary" variant="body2">
-                              Loading session notes…
-                            </Typography>
-                          </Stack>
-                        </Box>
-                      ) : displayedNotes.length === 0 ? (
-                        noteBrowseMode === 'notes' && !selectedTagFilter && !selectedSessionName && canEditWorkspace ? (
-                          <Stack spacing={2} sx={{ py: 2 }}>
-                            <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                              No notes yet in this campaign. Create the first one to start using the workspace.
-                            </Alert>
-                            <Button
-                              variant="contained"
-                              startIcon={<AddRoundedIcon />}
-                              onClick={handleStartNote}
-                              sx={{ alignSelf: 'flex-start' }}
-                            >
-                              New note
-                            </Button>
-                          </Stack>
-                        ) : (
-                          <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
-                            {noteBrowseMode === 'notes' && selectedTagFilter
-                              ? `No notes tagged ${selectedTagFilter} yet. Clear the filter or add that tag to a note to reuse it later.`
-                              : noteBrowseMode === 'sessions' && selectedSessionName
-                              ? 'No notes remain in this session. Head back to the session list or save a note with the same session name.'
-                              : canEditWorkspace
-                              ? 'No notes yet in this campaign. Create the first one to start using the workspace.'
-                              : 'No notes yet in this campaign.'}
-                          </Alert>
-                        )
-                      ) : (
-                        <List
-                          disablePadding
-                          aria-label={
-                            noteBrowseMode === 'sessions' && selectedSessionName
-                              ? 'Session notes'
-                              : 'Notes list'
-                          }
-                          sx={{ display: 'grid', gap: 1.5 }}
-                        >
-                          {displayedNotes.map((note) => (
-                            <ListItemButton
-                              key={note.id}
-                              selected={selectedNoteId === note.id && !isCreating}
-                              onClick={() => handleSelectNote(note)}
-                              sx={{
-                                borderRadius: noteItemRadius,
-                                border: '1px solid',
-                                borderColor:
-                                  selectedNoteId === note.id && !isCreating
-                                    ? 'primary.main'
-                                    : 'divider',
-                                alignItems: 'flex-start',
-                              }}
-                            >
-                              <ListItemText
-                                disableTypography
-                                primary={
-                                  <Stack
-                                    direction="row"
-                                    spacing={1.5}
-                                    sx={{ justifyContent: 'space-between', alignItems: 'flex-start' }}
-                                  >
-                                    <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                                      <Typography
-                                        variant="subtitle1"
-                                        title={note.title}
-                                        sx={singleLineTextSx}
-                                      >
-                                        {note.title}
-                                      </Typography>
-                                      <Typography
-                                        color="text.secondary"
-                                        variant="body2"
-                                        title={excerpt(note.body)}
-                                        sx={singleLineTextSx}
-                                      >
-                                        {excerpt(note.body)}
-                                      </Typography>
-                                      <Typography
-                                        color="text.secondary"
-                                        variant="caption"
-                                        title={formatSessionLine(note.sessionName)}
-                                        sx={singleLineTextSx}
-                                      >
-                                        {formatSessionLine(note.sessionName)}
-                                      </Typography>
-                                    </Stack>
-                                    <Stack spacing={0.75} sx={{ alignItems: 'flex-end', flexShrink: 0 }}>
-                                      <Chip
-                                        label={note.status}
-                                        color={
-                                          note.status === 'active'
-                                            ? 'secondary'
-                                            : note.status === 'archived'
-                                              ? 'default'
-                                              : 'primary'
-                                        }
-                                        size="small"
-                                      />
-                                      <Typography color="text.secondary" variant="caption">
-                                        Updated {formatTimestamp(note.updatedAt)}
-                                      </Typography>
-                                    </Stack>
-                                  </Stack>
-                                }
-                              />
-                            </ListItemButton>
-                          ))}
-                        </List>
-                      )}
-                    </Stack>
-                )}
-              </NotesBrowsePane>
-            ) : null}
-
-            {showEditorPane ? (
-              <NoteEditPage
-                surfaceRadius={surfaceRadius}
-                isSinglePaneNoteWorkspace={isSinglePaneNoteWorkspace}
-                canEditWorkspace={canEditWorkspace}
-                isCreating={isCreating}
-                noteBrowseMode={noteBrowseMode}
-                selectedSessionName={selectedSessionName}
-                campaignName={resolvedCampaign?.name ?? overview.campaign.name}
-                selectedNoteTemplateId={selectedNoteTemplateId}
-                selectedNoteTemplate={selectedNoteTemplate}
-                draft={draft}
-                tagFacets={tagFacets}
-                draftTags={draftTags}
-                tagInputValue={tagInputValue}
-                noteLinkOptions={noteLinkOptions}
-                isSaving={isSaving}
-                isDeleting={isDeleting}
-                selectedNote={selectedNote}
-                linkedNotes={linkedNotes}
-                backlinks={backlinks}
-                onBack={() => setNarrowWorkspacePanel('browse')}
-                onSelectNoteTemplate={handleSelectNoteTemplate}
-                onDraftChange={handleDraftChange}
-                onTagInputChange={setTagInputValue}
-                onDraftTagsChange={handleDraftTagsChange}
-                onCommitPendingTagInput={commitPendingTagInput}
-                onSave={handleSaveNote}
-                onDelete={handleDeleteNote}
-                onSelectNote={handleSelectNote}
-                onExcerpt={excerpt}
-              />
-            ) : null}
-
-            <Box
-              aria-label="Application brand"
-              sx={{
-                display: { xs: 'inline-flex', lg: 'none' },
-                alignItems: 'center',
-                alignSelf: 'center',
-                gap: 0.75,
-                px: 1.25,
-                py: 0.75,
-                borderRadius: '999px',
-                border: '1px solid',
-                borderColor: 'rgba(167, 139, 250, 0.2)',
-                bgcolor: 'rgba(15, 23, 42, 0.72)',
-                color: 'rgba(255, 255, 255, 0.78)',
-                backdropFilter: 'blur(12px)',
-                boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
-                maxWidth: 'calc(100vw - 24px)',
-              }}
-            >
-              <DndNotesMark fontSize="small" />
-              <Typography
-                variant="caption"
-                sx={{
-                  ...singleLineTextSx,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                }}
-              >
-                D&amp;D Notes
-              </Typography>
-            </Box>
-          </Box>
-        </Stack>
-      </Container>
-    </Box>
+    <CampaignDetailPage
+      owner={owner}
+      authToken={authToken}
+      isSharedMode={isSharedMode}
+      isKeycloakMode={isKeycloakMode}
+      canEditWorkspace={canEditWorkspace}
+      canManageSelectedCampaign={canManageSelectedCampaign}
+      resolvedCampaign={resolvedCampaign}
+      resolvedSelectedCampaignId={resolvedSelectedCampaignId}
+      resolvedCampaignOptions={resolvedCampaignOptions}
+      resolvedDesktopSubtitle={resolvedDesktopSubtitle}
+      campaignFormMode={campaignFormMode}
+      campaignDraft={campaignDraft}
+      selectedCampaignTemplateId={selectedCampaignTemplateId}
+      isSavingCampaign={isSavingCampaign}
+      useCompactDesktopHeader={useCompactDesktopHeader}
+      currentCampaignMemberships={currentCampaignMemberships}
+      membershipConsolidationDraft={membershipConsolidationDraft}
+      membershipConsolidationPreview={membershipConsolidationPreview}
+      membershipConsolidationNotice={membershipConsolidationNotice}
+      selectedSourceMembership={selectedSourceMembership}
+      selectedTargetMembership={selectedTargetMembership}
+      hasValidMembershipConsolidationSelection={hasValidMembershipConsolidationSelection}
+      canApplyMembershipConsolidation={canApplyMembershipConsolidation}
+      isPreviewingMembershipConsolidation={isPreviewingMembershipConsolidation}
+      isApplyingMembershipConsolidation={isApplyingMembershipConsolidation}
+      shareLinks={shareLinks}
+      shareLinkDraft={shareLinkDraft}
+      shareLinkNotice={shareLinkNotice}
+      revealedShareLinks={revealedShareLinks}
+      shareLinkActionErrors={shareLinkActionErrors}
+      revealingShareLinkId={revealingShareLinkId}
+      copiedShareLinkId={copiedShareLinkId}
+      isCreatingShareLink={isCreatingShareLink}
+      resolvedMembership={resolvedMembership}
+      accountNotice={accountNotice}
+      isLinkingAccount={isLinkingAccount}
+      isRegisterMode={isRegisterMode}
+      registerDraft={registerDraft}
+      loginDraft={loginDraft}
+      overview={overview}
+      error={error}
+      noteBrowseMode={noteBrowseMode}
+      selectedSessionName={selectedSessionName}
+      selectedTagFilter={selectedTagFilter}
+      searchText={searchText}
+      draft={draft}
+      tagInputValue={tagInputValue}
+      selectedNoteId={selectedNoteId}
+      isCreating={isCreating}
+      isLoadingSessionNotes={isLoadingSessionNotes}
+      isLoadingActivity={isLoadingActivity}
+      isQuickCapturing={isQuickCapturing}
+      isSaving={isSaving}
+      isDeleting={isDeleting}
+      selectedNoteTemplateId={selectedNoteTemplateId}
+      selectedNoteTemplate={selectedNoteTemplate}
+      quickCaptureTitle={quickCaptureTitle}
+      isQuickCaptureOpen={isQuickCaptureOpen}
+      selectedNote={selectedNote}
+      filteredNotes={filteredNotes}
+      displayedNotes={displayedNotes}
+      tagFacets={tagFacets}
+      draftTags={draftTags}
+      noteLinkOptions={noteLinkOptions}
+      linkedNotes={linkedNotes}
+      backlinks={backlinks}
+      resolvedSessionSummaries={resolvedSessionSummaries}
+      resolvedSelectedSessionSummary={resolvedSelectedSessionSummary}
+      selectedActivityMembershipId={selectedActivityMembershipId}
+      resolvedActivityCollaborators={resolvedActivityCollaborators}
+      resolvedSelectedActivityCollaborator={resolvedSelectedActivityCollaborator}
+      sortedActivityEntries={sortedActivityEntries}
+      selectedTagFacet={selectedTagFacet}
+      showSplitNoteWorkspace={showSplitNoteWorkspace}
+      canSplitNoteWorkspace={canSplitNoteWorkspace}
+      showBrowsePane={showBrowsePane}
+      showEditorPane={showEditorPane}
+      workspaceEditorLabel={workspaceEditorLabel}
+      onSelectCampaign={(campaignId) => void handleSelectCampaign(campaignId)}
+      onNewCampaign={handleOpenCampaignCreate}
+      onOpenSettings={handleOpenCampaignSettings}
+      onNewNote={handleStartNote}
+      onLogout={() => void handleLogout()}
+      onCampaignDraftChange={handleCampaignDraftChange}
+      onSelectedCampaignTemplateIdChange={setSelectedCampaignTemplateId}
+      onSaveCampaign={() => void handleSaveCampaign()}
+      onCancelCampaignForm={handleCancelCampaignForm}
+      onMembershipConsolidationDraftChange={handleMembershipConsolidationDraftChange}
+      onPreviewMembershipConsolidation={() => void handlePreviewMembershipConsolidation()}
+      onApplyMembershipConsolidation={() => void handleApplyMembershipConsolidation()}
+      onShareLinkDraftChange={handleShareLinkDraftChange}
+      onCreateShareLink={() => void handleCreateShareLink()}
+      onRevealShareLink={(shareLinkId) => void handleRevealShareLink(shareLinkId)}
+      onToggleShareLinkVisibility={handleToggleShareLinkVisibility}
+      onCopyShareLink={(shareLinkId) => void handleCopyShareLink(shareLinkId)}
+      onRevokeShareLink={(shareLinkId) => void handleRevokeShareLink(shareLinkId)}
+      onRegisterDraftChange={(field, value) =>
+        setRegisterDraft((currentDraft) => ({ ...currentDraft, [field]: value }))
+      }
+      onLoginDraftChange={(field, value) =>
+        setLoginDraft((currentDraft) => ({ ...currentDraft, [field]: value }))
+      }
+      onToggleRegisterMode={() => {
+        setAccountNotice(null)
+        setError(null)
+        setIsRegisterMode((current) => !current)
+      }}
+      onLinkSharedMembership={() => void handleLinkSharedMembership()}
+      onOpenAllNotes={handleOpenAllNotes}
+      onOpenSessionBrowser={handleOpenSessionBrowser}
+      onOpenRecentActivity={() => void handleOpenRecentActivity()}
+      onSelectTagFilter={handleSelectTagFilter}
+      onClearTagFilter={handleClearTagFilter}
+      onClearSearch={handleClearSearch}
+      onSearchTextChange={setSearchText}
+      onSelectSession={(sessionName) => void handleSelectSession(sessionName)}
+      onSelectActivityCollaborator={(membershipId) => void handleSelectActivityCollaborator(membershipId)}
+      onSelectNote={handleSelectNote}
+      onShowBrowsePane={handleShowBrowsePane}
+      onShowEditorPane={handleShowEditorPane}
+      onToggleSplitWorkspace={handleToggleSplitWorkspace}
+      onToggleQuickCapture={() => setIsQuickCaptureOpen((currentValue) => !currentValue)}
+      onQuickCaptureValueChange={setQuickCaptureTitle}
+      onQuickCaptureSubmit={() => void handleQuickCapture()}
+      onShowBrowsePanel={() => setNarrowWorkspacePanel('browse')}
+      onSelectNoteTemplate={handleSelectNoteTemplate}
+      onDraftChange={handleDraftChange}
+      onTagInputChange={setTagInputValue}
+      onDraftTagsChange={handleDraftTagsChange}
+      onCommitPendingTagInput={commitPendingTagInput}
+      onSaveNote={() => void handleSaveNote()}
+      onDeleteNote={() => void handleDeleteNote()}
+    />
   )
 }
 

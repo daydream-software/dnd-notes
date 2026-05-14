@@ -6,13 +6,13 @@ import {
 } from '../api'
 import type { CampaignShareLink, CampaignShareLinkInput, ShareAccessLevel } from '../types'
 
-interface ShareLinkDraft {
+export interface ShareLinkDraft {
   label: string
   accessLevel: ShareAccessLevel
   frameAncestors: string
 }
 
-interface RevealedShareLink {
+export interface RevealedShareLink {
   url: string
   isVisible: boolean
 }
