@@ -16,8 +16,8 @@
   },
   "license": "FSL-1.1-MIT",
   "dependencies": {
-    "@dnd-notes/postgres-migrations": "*",
     "@dnd-notes/keycloak-jwt": "*",
+    "@dnd-notes/postgres-migrations": "*",
     "@kubernetes/client-node": "^1.4.0",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
