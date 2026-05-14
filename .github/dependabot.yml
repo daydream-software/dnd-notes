@@ -35,6 +35,26 @@ updates:
           - "eslint-plugin-*"
           - "typescript-eslint"
           - "@typescript-eslint/*"
+      express:
+        patterns:
+          - "express"
+          - "@types/express"
+      cors:
+        patterns:
+          - "cors"
+          - "@types/cors"
+      pg:
+        patterns:
+          - "pg"
+          - "@types/pg"
+      supertest:
+        patterns:
+          - "supertest"
+          - "@types/supertest"
+      jsdom:
+        patterns:
+          - "jsdom"
+          - "@types/jsdom"
     ignore:
       # @types/node is pinned to ^24.x because @kubernetes/client-node@1.x
       # declares @types/node@^24 as a peer; npm's workspace deduplication
