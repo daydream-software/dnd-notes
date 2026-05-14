@@ -55,6 +55,9 @@ updates:
         patterns:
           - "jsdom"
           - "@types/jsdom"
+      commitlint:
+        patterns:
+          - "@commitlint/*"
     ignore:
       # @types/node is pinned to ^24.x because @kubernetes/client-node@1.x
       # declares @types/node@^24 as a peer; npm's workspace deduplication
