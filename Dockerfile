@@ -2,7 +2,7 @@
 # Multi-stage Dockerfile for dnd-notes tenant app
 # Produces a single-origin container with web + API served by Express
 
-FROM node:22.21.1-bookworm-slim AS base
+FROM node:24.15.0-bookworm-slim AS base
 WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
@@ -33,7 +33,7 @@ RUN npm run build --workspace platform/keycloak-jwt
 RUN npm run build --workspace apps/api
 RUN npm run build --workspace apps/web
 
-FROM node:22.21.1-bookworm-slim AS runtime
+FROM node:24.15.0-bookworm-slim AS runtime
 WORKDIR /app
 
 # Install runtime dependencies

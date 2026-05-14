@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.4
 # Multi-stage Dockerfile for the internal dnd-notes control plane
 
-FROM node:22.21.1-bookworm-slim AS base
+FROM node:24.15.0-bookworm-slim AS base
 WORKDIR /app
 COPY package*.json ./
 COPY scripts/prepare.mjs scripts/build-portal-utils.mjs ./scripts/
@@ -27,7 +27,7 @@ RUN npm run build --workspace packages/postgres-migrations
 RUN npm run build --workspace platform/keycloak-jwt
 RUN npm run build --workspace apps/control-plane
 
-FROM node:22.21.1-bookworm-slim AS runtime
+FROM node:24.15.0-bookworm-slim AS runtime
 WORKDIR /app
 
 COPY --from=deps /app/node_modules ./node_modules
