@@ -245,7 +245,31 @@
   @media (max-width: 960px) {
     .campaign-card { width: 100%; }
   }
+  /* On narrow viewports the campaign card stacks: title + subtitle row,
+     controls (dropdown + icon buttons) on the row below. Same layout the
+     React tenant uses — no horizontal overflow. */
   @media (max-width: 720px) {
+    .campaign-card {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 6px;
+    }
+    .campaign-card__title { grid-row: 1; grid-column: 1; }
+    .campaign-card__subtitle {
+      grid-row: 2; grid-column: 1;
+      white-space: normal; max-height: 60px;
+    }
+    .campaign-card__controls {
+      grid-row: 3; grid-column: 1;
+      margin-top: 4px;
+      gap: 10px;
+    }
+    .campaign-card__select { flex: 1; max-width: none; padding: 6px 10px; }
+    .campaign-card__select .eyebrow { display: none; }
+    body[data-scrolled="true"] .campaign-card__select { max-width: none; }
+    .campaign-card__controls .icon-btn { width: 32px; height: 32px; }
+    .campaign-card__controls .icon-btn svg { width: 16px; height: 16px; }
+
     footer.signature {
       flex-direction: column;
       gap: 10px;
@@ -254,7 +278,6 @@
       text-align: center;
     }
     footer.signature .sep { display: none; }
-    .campaign-card__subtitle { white-space: normal; max-height: 60px; }
   }
 
   .doc-note {

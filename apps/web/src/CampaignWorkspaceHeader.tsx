@@ -75,19 +75,18 @@ export default function CampaignWorkspaceHeader({
       ? { xs: 1.5, md: 0.75 }
       : { xs: 1.5, md: 1.75 }
 
-  // On desktop, controls always flow into a single horizontal row alongside
-  // the campaign title — dropdown next to icons. Narrow viewports keep the
-  // dropdown stacked above the icon grid (full-width on mobile).
-  const useRowControls = !useNarrowFloatingHeader
+  // Controls always flow into a single horizontal row — dropdown next to
+  // icons. Same layout on mobile and desktop so the header reads the same
+  // at every viewport.
   const controls = (
     <Stack
-      direction={useRowControls ? 'row' : 'column'}
-      spacing={useRowControls ? 1 : 0.75}
+      direction="row"
+      spacing={1}
       sx={{
         width: { xs: '100%', md: 'auto' },
         minWidth: 0,
         maxWidth: '100%',
-        alignItems: useRowControls ? 'center' : 'stretch',
+        alignItems: 'center',
       }}
     >
       <TextField
@@ -96,7 +95,7 @@ export default function CampaignWorkspaceHeader({
         label="Campaign"
         value={selectedCampaignId}
         onChange={(event) => onSelectCampaign(event.target.value)}
-        sx={useRowControls ? { minWidth: 200 } : undefined}
+        sx={{ flex: { xs: 1, md: 'unset' }, minWidth: { md: 200 } }}
       >
         {campaignOptions.map((campaign) => (
           <MenuItem key={campaign.id} value={campaign.id}>
@@ -106,14 +105,9 @@ export default function CampaignWorkspaceHeader({
       </TextField>
       <Box
         sx={{
-          display: useRowControls ? 'inline-flex' : 'grid',
+          display: 'inline-flex',
           gap: useNarrowFloatingHeader ? 0.25 : 0.5,
-          ...(useRowControls
-            ? {}
-            : {
-                gridTemplateColumns: `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`,
-                width: '100%',
-              }),
+          flexShrink: 0,
           minWidth: 0,
         }}
       >
@@ -142,11 +136,11 @@ export default function CampaignWorkspaceHeader({
         position: stickyDesktop ? 'sticky' : { xs: 'sticky', lg: 'static' },
         top: { xs: 8, md: 12 },
         zIndex: 2,
-        alignSelf: { xs: 'center', lg: 'stretch' },
-        width: { xs: 'min(100%, 360px)', lg: '100%' },
-        minHeight: { xs: 150, md: 'auto' },
+        alignSelf: 'stretch',
+        width: '100%',
+        minHeight: { md: 'auto' },
         minWidth: 0,
-        maxWidth: { xs: 360, lg: 'none' },
+        maxWidth: 'none',
         // Border-radius collapses to a pill on compact so the card reads as a
         // sticky control bar instead of a full surface.
         borderRadius: compactDesktop
@@ -226,10 +220,9 @@ export default function CampaignWorkspaceHeader({
               >
                 {subtitle}
               </Typography>
-              {useNarrowFloatingHeader ? <Stack spacing={0.5} sx={{ pt: 0.25 }}>{controls}</Stack> : null}
             </Stack>
 
-            {!useNarrowFloatingHeader ? controls : null}
+            {controls}
           </Stack>
         </Stack>
       </CardContent>
