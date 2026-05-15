@@ -127,6 +127,7 @@ export interface UseCampaignResult {
   setMembershipConsolidationPreview: React.Dispatch<React.SetStateAction<MembershipConsolidationSummary | null>>
   setMembershipConsolidationNotice: React.Dispatch<React.SetStateAction<string | null>>
   resetMembershipConsolidationState: () => void
+  resetCampaign: () => void
   handleCampaignDraftChange: <Field extends keyof CampaignDraft>(
     field: Field,
     value: CampaignDraft[Field],
@@ -207,6 +208,17 @@ export function useCampaign(): UseCampaignResult {
     setIsPreviewingMembershipConsolidation(false)
     setIsApplyingMembershipConsolidation(false)
   }, [])
+
+  const resetCampaign = useCallback(() => {
+    localStorage.removeItem(selectedCampaignStorageKey)
+    setCampaigns([])
+    setSelectedCampaignId(null)
+    setMemberships([])
+    setCampaignDraft(createCampaignDraft())
+    setCampaignFormMode('closed')
+    setSelectedCampaignTemplateId(blankCampaignTemplateId)
+    resetMembershipConsolidationState()
+  }, [resetMembershipConsolidationState])
 
   const handleCampaignDraftChange = useCallback(
     <Field extends keyof CampaignDraft>(field: Field, value: CampaignDraft[Field]) => {
@@ -554,6 +566,7 @@ export function useCampaign(): UseCampaignResult {
     setMembershipConsolidationPreview,
     setMembershipConsolidationNotice,
     resetMembershipConsolidationState,
+    resetCampaign,
     handleCampaignDraftChange,
     handleMembershipConsolidationDraftChange,
     handleOpenCampaignCreate,

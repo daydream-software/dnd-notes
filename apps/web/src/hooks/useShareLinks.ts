@@ -88,6 +88,7 @@ export interface UseShareLinksResult {
   setRevealingShareLinkId: React.Dispatch<React.SetStateAction<string | null>>
   setCopiedShareLinkId: React.Dispatch<React.SetStateAction<string | null>>
   resetShareLinkInteractionState: () => void
+  resetShareLinks: () => void
   handleShareLinkDraftChange: <Field extends keyof ShareLinkDraft>(
     field: Field,
     value: ShareLinkDraft[Field],
@@ -128,6 +129,16 @@ export function useShareLinks(): UseShareLinksResult {
   const [isCreatingShareLink, setIsCreatingShareLink] = useState(false)
 
   const resetShareLinkInteractionState = useCallback(() => {
+    setShareLinkNotice(null)
+    setRevealedShareLinks({})
+    setShareLinkActionErrors({})
+    setRevealingShareLinkId(null)
+    setCopiedShareLinkId(null)
+  }, [])
+
+  const resetShareLinks = useCallback(() => {
+    setShareLinks([])
+    setShareLinkDraft(createShareLinkDraft())
     setShareLinkNotice(null)
     setRevealedShareLinks({})
     setShareLinkActionErrors({})
@@ -314,6 +325,7 @@ export function useShareLinks(): UseShareLinksResult {
     setRevealingShareLinkId,
     setCopiedShareLinkId,
     resetShareLinkInteractionState,
+    resetShareLinks,
     handleShareLinkDraftChange,
     handleCreateShareLink,
     handleRevealShareLink,

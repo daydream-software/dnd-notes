@@ -88,6 +88,7 @@ export interface UseSessionResult {
   setIsSubmittingAuth: React.Dispatch<React.SetStateAction<boolean>>
   setIsLinkingAccount: React.Dispatch<React.SetStateAction<boolean>>
   setAccountNotice: React.Dispatch<React.SetStateAction<string | null>>
+  resetSession: () => void
   completeAuthentication: (
     token: string,
     nextOwner: OwnerAccount,
@@ -135,6 +136,15 @@ export function useSession(): UseSessionResult {
   const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
+
+  const resetSession = useCallback(() => {
+    localStorage.removeItem(authTokenStorageKey)
+    clearStoredKeycloakTokens()
+    keycloakClientRef.current?.clear()
+    keycloakClientRef.current = null
+    setAuthToken(null)
+    setOwner(null)
+  }, [keycloakClientRef])
 
   const completeAuthentication = useCallback(
     async (
@@ -394,6 +404,7 @@ export function useSession(): UseSessionResult {
     setIsSubmittingAuth,
     setIsLinkingAccount,
     setAccountNotice,
+    resetSession,
     completeAuthentication,
     bootstrapAuth,
     startKeycloakRefresh,

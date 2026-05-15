@@ -14,7 +14,6 @@ import {
 import {
   fetchCampaignShareLinks,
   fetchCampaignMemberships,
-  fetchSessionNotes,
 } from './api'
 import { isKeycloakAuthConfig } from './keycloak-client'
 import { getNoteStarterTemplate } from './templates'
@@ -29,24 +28,15 @@ import JoinPage from './pages/JoinPage'
 import LoginPage from './pages/LoginPage'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
 import { useShareLinks, createShareLinkDraft as createShareLinkDraftFn } from './hooks/useShareLinks'
-import {
-  useSession,
-  authTokenStorageKey,
-  clearStoredKeycloakTokens,
-} from './hooks/useSession'
+import { useSession } from './hooks/useSession'
 import {
   useCampaign,
   createCampaignDraft,
-  createMembershipConsolidationDraft,
   selectedCampaignStorageKey,
-  blankCampaignTemplateId,
-  blankNoteTemplateId,
-  type MembershipConsolidationDraft,
 } from './hooks/useCampaign'
 import {
   useNotes,
   createEmptyDraft as createEmptyDraftFn,
-  createDraftFromNote,
 } from './hooks/useNotes'
 import { useGuestSession } from './hooks/useGuestSession'
 
@@ -93,6 +83,7 @@ function App() {
     handleCopyShareLink: handleCopyShareLinkFromHook,
     handleRevokeShareLink: handleRevokeShareLinkFromHook,
     handleCreateShareLink: handleCreateShareLinkFromHook,
+    resetShareLinks,
   } = useShareLinks()
 
   const {
@@ -107,13 +98,12 @@ function App() {
     isLinkingAccount,
     accountNotice,
     keycloakClientRef,
-    setAuthToken,
-    setOwner,
     setIsRegisterMode,
     setRegisterDraft,
     setLoginDraft,
     setIsLinkingAccount,
     setAccountNotice,
+    resetSession,
     bootstrapAuth,
     startKeycloakRefresh,
     handleSubmitAuth: handleSubmitAuthFromHook,
@@ -143,8 +133,8 @@ function App() {
     setCampaignDraft,
     setCampaignFormMode,
     setSelectedCampaignTemplateId,
-    setMembershipConsolidationDraft,
     resetMembershipConsolidationState,
+    resetCampaign,
     handleCampaignDraftChange,
     handleMembershipConsolidationDraftChange: handleMembershipConsolidationDraftChangeFromHook,
     handleSaveCampaign: handleSaveCampaignFromHook,
@@ -190,15 +180,11 @@ function App() {
     resolvedSelectedActivityCollaborator,
     sortedActivityEntries,
     selectedNoteIdRef,
-    selectedActivityMembershipIdRef,
-    sessionRequestIdRef,
-    sessionAbortControllerRef,
     setOverview,
     setNotes,
     setNoteBrowseMode,
     setSessionSummaries,
     setSelectedSessionName,
-    setSessionNotes,
     setSelectedActivityMembershipId,
     setSelectedTagFilter,
     setSearchText,
@@ -206,13 +192,11 @@ function App() {
     setTagInputValue,
     setSelectedNoteId,
     setIsCreating,
-    setIsLoadingSessionNotes,
-    setSelectedNoteTemplateId,
     setQuickCaptureTitle,
     setIsQuickCaptureOpen,
+    resetNotes,
     resetSessionBrowserState,
     resetActivityState,
-    loadActivity,
     loadWorkspace: loadWorkspaceFromHook,
     loadSharedWorkspace: loadSharedWorkspaceFromHook,
     handleDraftChange,
@@ -224,6 +208,9 @@ function App() {
     handleSaveNote: handleSaveNoteFromHook,
     handleDeleteNote: handleDeleteNoteFromHook,
     handleQuickCapture: handleQuickCaptureFromHook,
+    handleSelectSession: handleSelectSessionFromHook,
+    handleOpenRecentActivity: handleOpenRecentActivityFromHook,
+    handleSelectActivityCollaborator: handleSelectActivityCollaboratorFromHook,
   } = useNotes(isSharedMode)
 
   // Guest campaign state — kept in App so loadSharedWorkspace can reference it without circular deps
@@ -237,41 +224,15 @@ function App() {
   const showSplitNoteWorkspace = canSplitNoteWorkspace && wantsSplitNoteWorkspace
 
   const clearSession = useCallback(() => {
-    localStorage.removeItem(authTokenStorageKey)
-    clearStoredKeycloakTokens()
-    localStorage.removeItem(selectedCampaignStorageKey)
-    keycloakClientRef.current?.clear()
-    keycloakClientRef.current = null
-    resetSessionBrowserState()
-    resetActivityState()
-    setAuthToken(null)
-    setOwner(null)
-    setCampaigns([])
-    setSelectedCampaignId(null)
-    setMemberships([])
-    setShareLinks([])
-    setOverview(null)
-    setNotes([])
-    setNoteBrowseMode('notes')
+    resetSession()
+    resetCampaign()
+    resetNotes()
+    resetShareLinks()
+    setSharedCampaign(null)
+    setShareLink(null)
     setNarrowWorkspacePanel('browse')
-    setSessionSummaries([])
-    setQuickCaptureTitle('')
-    setSelectedNoteId(null)
-    setDraft(createEmptyDraftFn())
-    setCampaignDraft(createCampaignDraft())
-    setShareLinkDraft(createShareLinkDraftFn())
-    setMembershipConsolidationDraft(createMembershipConsolidationDraft())
-    setCampaignFormMode('closed')
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setSelectedNoteTemplateId(blankNoteTemplateId)
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-  }, [
-    resetActivityState,
-    resetMembershipConsolidationState,
-    resetSessionBrowserState,
-    resetShareLinkInteractionState,
-  ])
+    setError(null)
+  }, [resetCampaign, resetNotes, resetSession, resetShareLinks])
 
   const loadWorkspace = useCallback(
     async (
@@ -541,166 +502,6 @@ function App() {
     )
   }
 
-  const handleMembershipConsolidationDraftChange = <
-    Field extends keyof MembershipConsolidationDraft,
-  >(
-    field: Field,
-    value: MembershipConsolidationDraft[Field],
-  ) => {
-    handleMembershipConsolidationDraftChangeFromHook(field, value)
-    setError(null)
-  }
-
-  const handleOpenAllNotes = () => {
-    setNoteBrowseMode('notes')
-    setNarrowWorkspacePanel('browse')
-    resetSessionBrowserState()
-    setError(null)
-  }
-
-  const handleSelectTagFilter = (tag: string) => {
-    setNoteBrowseMode('notes')
-    setNarrowWorkspacePanel('browse')
-    resetSessionBrowserState()
-    const nextTag = selectedTagFilter === tag ? null : tag
-    setSelectedTagFilter(nextTag)
-    setError(null)
-  }
-
-  const handleClearTagFilter = () => {
-    setSelectedTagFilter(null)
-    setError(null)
-  }
-
-  const handleClearSearch = () => {
-    setSearchText('')
-    setError(null)
-  }
-
-  const handleOpenSessionBrowser = () => {
-    setNoteBrowseMode('sessions')
-    setNarrowWorkspacePanel('browse')
-    resetSessionBrowserState()
-    setError(null)
-  }
-
-  const handleOpenRecentActivity = async () => {
-    if (isSharedMode) {
-      setNoteBrowseMode('activity')
-      setNarrowWorkspacePanel('browse')
-      resetSessionBrowserState()
-      setError(null)
-      return
-    }
-
-    if (!authToken || !selectedCampaignId) {
-      return
-    }
-
-    setNoteBrowseMode('activity')
-    setNarrowWorkspacePanel('browse')
-    resetSessionBrowserState()
-    setError(null)
-    await loadActivity(
-      authToken,
-      selectedCampaignId,
-      selectedActivityMembershipIdRef.current,
-    )
-  }
-
-  const handleSelectActivityCollaborator = async (membershipId: string | null) => {
-    if (isSharedMode) {
-      setSelectedActivityMembershipId(membershipId)
-      setError(null)
-      return
-    }
-
-    if (!authToken || !selectedCampaignId) {
-      return
-    }
-
-    setSelectedActivityMembershipId(membershipId)
-    setError(null)
-    await loadActivity(authToken, selectedCampaignId, membershipId)
-  }
-
-  const handleSelectSession = async (sessionName: string) => {
-    if (isSharedMode) {
-      setNoteBrowseMode('sessions')
-      setSelectedSessionName(sessionName)
-      setNarrowWorkspacePanel('browse')
-      setError(null)
-      return
-    }
-
-    if (!authToken || !selectedCampaignId) {
-      return
-    }
-
-    sessionRequestIdRef.current += 1
-    const requestId = sessionRequestIdRef.current
-
-    sessionAbortControllerRef.current?.abort()
-    const abortController = new AbortController()
-    sessionAbortControllerRef.current = abortController
-
-    setError(null)
-    setNoteBrowseMode('sessions')
-    setSelectedSessionName(sessionName)
-    setSessionNotes([])
-    setIsLoadingSessionNotes(true)
-
-    try {
-      const sessionNotesResponse = await fetchSessionNotes(
-        authToken,
-        sessionName,
-        selectedCampaignId,
-        abortController.signal,
-      )
-
-      if (
-        abortController.signal.aborted ||
-        sessionRequestIdRef.current !== requestId
-      ) {
-        return
-      }
-
-      setSessionNotes(sessionNotesResponse.notes)
-
-      const currentSelectedId = selectedNoteIdRef.current
-      const currentSessionNote =
-        currentSelectedId !== null
-          ? sessionNotesResponse.notes.find((note) => note.id === currentSelectedId) ?? null
-          : null
-      const nextSelectedNote = currentSessionNote ?? sessionNotesResponse.notes[0] ?? null
-
-      if (nextSelectedNote) {
-        setSelectedNoteId(nextSelectedNote.id)
-        setIsCreating(false)
-        setSelectedNoteTemplateId(blankNoteTemplateId)
-        setDraft(createDraftFromNote(nextSelectedNote))
-      }
-    } catch (loadError) {
-      if (
-        abortController.signal.aborted ||
-        sessionRequestIdRef.current !== requestId
-      ) {
-        return
-      }
-
-      resetSessionBrowserState()
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : 'Could not load notes for that session.',
-      )
-    } finally {
-      if (sessionRequestIdRef.current === requestId) {
-        setIsLoadingSessionNotes(false)
-      }
-    }
-  }
-
   const handleStartNote = () => {
     if (!canEditWorkspace) {
       return
@@ -896,16 +697,6 @@ function App() {
     setShareLinks([])
     resetShareLinkInteractionState()
     await loadWorkspace(authToken, campaignId)
-  }
-
-  const handleShowBrowsePane = () => {
-    setWantsSplitNoteWorkspace(false)
-    setNarrowWorkspacePanel('browse')
-  }
-
-  const handleShowEditorPane = () => {
-    setWantsSplitNoteWorkspace(false)
-    setNarrowWorkspacePanel('editor')
   }
 
   const handleToggleSplitWorkspace = () => {
@@ -1105,7 +896,10 @@ function App() {
       onSelectedCampaignTemplateIdChange={setSelectedCampaignTemplateId}
       onSaveCampaign={() => void handleSaveCampaign()}
       onCancelCampaignForm={handleCancelCampaignForm}
-      onMembershipConsolidationDraftChange={handleMembershipConsolidationDraftChange}
+      onMembershipConsolidationDraftChange={(field, value) => {
+        handleMembershipConsolidationDraftChangeFromHook(field, value)
+        setError(null)
+      }}
       onPreviewMembershipConsolidation={() => void handlePreviewMembershipConsolidation()}
       onApplyMembershipConsolidation={() => void handleApplyMembershipConsolidation()}
       onShareLinkDraftChange={handleShareLinkDraftChange}
@@ -1126,18 +920,45 @@ function App() {
         setIsRegisterMode((current) => !current)
       }}
       onLinkSharedMembership={() => void handleLinkSharedMembership()}
-      onOpenAllNotes={handleOpenAllNotes}
-      onOpenSessionBrowser={handleOpenSessionBrowser}
-      onOpenRecentActivity={() => void handleOpenRecentActivity()}
-      onSelectTagFilter={handleSelectTagFilter}
-      onClearTagFilter={handleClearTagFilter}
-      onClearSearch={handleClearSearch}
+      onOpenAllNotes={() => {
+        setNoteBrowseMode('notes')
+        setNarrowWorkspacePanel('browse')
+        resetSessionBrowserState()
+        setError(null)
+      }}
+      onOpenSessionBrowser={() => {
+        setNoteBrowseMode('sessions')
+        setNarrowWorkspacePanel('browse')
+        resetSessionBrowserState()
+        setError(null)
+      }}
+      onOpenRecentActivity={() => {
+        setNarrowWorkspacePanel('browse')
+        setError(null)
+        void handleOpenRecentActivityFromHook(authToken, selectedCampaignId)
+      }}
+      onSelectTagFilter={(tag) => {
+        setNoteBrowseMode('notes')
+        setNarrowWorkspacePanel('browse')
+        resetSessionBrowserState()
+        setSelectedTagFilter(selectedTagFilter === tag ? null : tag)
+        setError(null)
+      }}
+      onClearTagFilter={() => { setSelectedTagFilter(null); setError(null) }}
+      onClearSearch={() => { setSearchText(''); setError(null) }}
       onSearchTextChange={setSearchText}
-      onSelectSession={(sessionName) => void handleSelectSession(sessionName)}
-      onSelectActivityCollaborator={(membershipId) => void handleSelectActivityCollaborator(membershipId)}
+      onSelectSession={(sessionName) => {
+        setNarrowWorkspacePanel('browse')
+        setError(null)
+        void handleSelectSessionFromHook(sessionName, authToken, selectedCampaignId, undefined, (message) => setError(message))
+      }}
+      onSelectActivityCollaborator={(membershipId) => {
+        setError(null)
+        void handleSelectActivityCollaboratorFromHook(membershipId, authToken, selectedCampaignId, (message) => setError(message))
+      }}
       onSelectNote={handleSelectNote}
-      onShowBrowsePane={handleShowBrowsePane}
-      onShowEditorPane={handleShowEditorPane}
+      onShowBrowsePane={() => { setWantsSplitNoteWorkspace(false); setNarrowWorkspacePanel('browse') }}
+      onShowEditorPane={() => { setWantsSplitNoteWorkspace(false); setNarrowWorkspacePanel('editor') }}
       onToggleSplitWorkspace={handleToggleSplitWorkspace}
       onToggleQuickCapture={() => setIsQuickCaptureOpen((currentValue) => !currentValue)}
       onQuickCaptureValueChange={setQuickCaptureTitle}
