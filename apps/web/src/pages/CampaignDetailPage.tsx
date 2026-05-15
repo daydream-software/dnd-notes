@@ -7,11 +7,9 @@ import {
   Box,
   Container,
   Stack,
-  Typography,
 } from '@mui/material'
 import { Footer } from '@dnd-notes/theme'
 import { useMemo } from 'react'
-import { DndNotesMark } from '../DndNotesMark'
 import CampaignWorkspaceHeader from '../CampaignWorkspaceHeader'
 import { useScrolled } from '../hooks/useScrolled'
 import type { UseShareLinksResult } from '../hooks/useShareLinks'
@@ -25,12 +23,6 @@ import CampaignAdminPane from '../components/CampaignAdminPane'
 import NotesWorkspacePane from '../components/NotesWorkspacePane'
 
 const surfaceRadius = '24px'
-const singleLineTextSx = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-} as const
 
 export interface CampaignDetailPageProps {
   // Bundled hook results
@@ -222,57 +214,12 @@ export default function CampaignDetailPage({
         <Stack spacing={2.5}>
           <Box
             sx={{
-              display: 'flex',
-              justifyContent: { xs: 'center', lg: 'space-between' },
-              alignItems: 'flex-start',
-              gap: 2,
               width: '100%',
               position: { xs: 'static', lg: 'sticky' },
               top: { lg: 12 },
               zIndex: { lg: 3 },
             }}
           >
-            <Box
-              aria-label="Application brand"
-              sx={{
-                display: { xs: 'none', lg: 'inline-flex' },
-                alignItems: 'center',
-                flexShrink: 0,
-                gap: scrolled ? 0 : 0.75,
-                px: scrolled ? 0.75 : 1.25,
-                py: 0.75,
-                borderRadius: '999px',
-                border: '1px solid',
-                borderColor: 'rgba(167, 139, 250, 0.2)',
-                bgcolor: 'rgba(15, 23, 42, 0.72)',
-                color: 'rgba(255, 255, 255, 0.78)',
-                backdropFilter: 'blur(12px)',
-                boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
-                maxWidth: '100%',
-                transition: (theme) =>
-                  theme.transitions.create(['gap', 'padding'], {
-                    duration: theme.transitions.duration.shorter,
-                  }),
-              }}
-            >
-              <DndNotesMark fontSize="small" />
-              <Typography
-                variant="caption"
-                sx={{
-                  ...singleLineTextSx,
-                  letterSpacing: '0.08em',
-                  textTransform: 'uppercase',
-                  maxWidth: scrolled ? 0 : 120,
-                  opacity: scrolled ? 0 : 1,
-                  transition: (theme) =>
-                    theme.transitions.create(['max-width', 'opacity'], {
-                      duration: theme.transitions.duration.shorter,
-                    }),
-                }}
-              >
-                D&amp;D Notes
-              </Typography>
-            </Box>
             <CampaignWorkspaceHeader
               campaignName={resolvedCampaignName}
               mobileSubtitle={resolvedCampaignMobileSubtitle}
@@ -287,7 +234,7 @@ export default function CampaignDetailPage({
                 { ariaLabel: 'Sign out', color: 'inherit', icon: <LogoutRoundedIcon fontSize="small" />, onClick: () => void handleLogout() },
               ]}
               surfaceRadius={surfaceRadius}
-              compactDesktop={canSplitNoteWorkspace || scrolled}
+              compactDesktop={scrolled}
               stickyDesktop={false}
             />
           </Box>

@@ -61,19 +61,33 @@ export default function CampaignWorkspaceHeader({
   const theme = useTheme()
   const useNarrowFloatingHeader = useMediaQuery(theme.breakpoints.down('md'))
   const subtitle = useNarrowFloatingHeader ? mobileSubtitle : (desktopSubtitle ?? mobileSubtitle)
-  const contentPadding = useNarrowFloatingHeader ? { xs: 1, md: 1.25 } : { xs: 1.25, md: 1.5 }
+  // compactDesktop shrinks the card vertically on desktop — half the padding,
+  // pill border, hidden subtitle, smaller title. The mobile breakpoint always
+  // uses the roomy padding because there's no scroll-driven compact there.
+  const contentPadding = useNarrowFloatingHeader
+    ? { xs: 1, md: 1.25 }
+    : compactDesktop
+      ? { xs: 1.25, md: 0.75 }
+      : { xs: 1.25, md: 1.5 }
   const contentBottomPadding = useNarrowFloatingHeader
     ? { xs: 2, md: 2.25 }
-    : { xs: 1.5, md: 1.75 }
+    : compactDesktop
+      ? { xs: 1.5, md: 0.75 }
+      : { xs: 1.5, md: 1.75 }
 
+  // On desktop, controls always flow into a single horizontal row alongside
+  // the campaign title — dropdown next to icons. Narrow viewports keep the
+  // dropdown stacked above the icon grid (full-width on mobile).
+  const useRowControls = !useNarrowFloatingHeader
   const controls = (
     <Stack
-      spacing={0.75}
+      direction={useRowControls ? 'row' : 'column'}
+      spacing={useRowControls ? 1 : 0.75}
       sx={{
         width: { xs: '100%', md: 'auto' },
         minWidth: 0,
         maxWidth: '100%',
-        ...(compactDesktop ? { minWidth: { md: 320 } } : {}),
+        alignItems: useRowControls ? 'center' : 'stretch',
       }}
     >
       <TextField
@@ -82,6 +96,7 @@ export default function CampaignWorkspaceHeader({
         label="Campaign"
         value={selectedCampaignId}
         onChange={(event) => onSelectCampaign(event.target.value)}
+        sx={useRowControls ? { minWidth: 200 } : undefined}
       >
         {campaignOptions.map((campaign) => (
           <MenuItem key={campaign.id} value={campaign.id}>
@@ -91,10 +106,14 @@ export default function CampaignWorkspaceHeader({
       </TextField>
       <Box
         sx={{
-          display: 'grid',
+          display: useRowControls ? 'inline-flex' : 'grid',
           gap: useNarrowFloatingHeader ? 0.25 : 0.5,
-          gridTemplateColumns: `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`,
-          width: '100%',
+          ...(useRowControls
+            ? {}
+            : {
+                gridTemplateColumns: `repeat(${Math.max(actions.length, 1)}, minmax(0, 1fr))`,
+                width: '100%',
+              }),
           minWidth: 0,
         }}
       >
@@ -123,37 +142,26 @@ export default function CampaignWorkspaceHeader({
         position: stickyDesktop ? 'sticky' : { xs: 'sticky', lg: 'static' },
         top: { xs: 8, md: 12 },
         zIndex: 2,
-        alignSelf: { xs: 'center', lg: 'flex-end' },
-        width: { xs: 'min(100%, 360px)', lg: compactDesktop ? 560 : 'auto' },
+        alignSelf: { xs: 'center', lg: 'stretch' },
+        width: { xs: 'min(100%, 360px)', lg: '100%' },
         minHeight: { xs: 150, md: 'auto' },
         minWidth: 0,
-        maxWidth: { xs: 360, lg: compactDesktop ? 560 : 'none' },
-        borderRadius: surfaceRadius,
+        maxWidth: { xs: 360, lg: 'none' },
+        // Border-radius collapses to a pill on compact so the card reads as a
+        // sticky control bar instead of a full surface.
+        borderRadius: compactDesktop
+          ? { xs: surfaceRadius, md: '999px' }
+          : surfaceRadius,
         border: '1px solid',
-        borderColor: compactDesktop
-          ? 'rgba(167, 139, 250, 0.14)'
-          : theme.shape.cardBorder,
-        bgcolor: compactDesktop
-          ? 'rgba(15, 23, 42, 0.44)'
-          : 'rgba(15, 23, 42, 0.88)',
-        backdropFilter: compactDesktop ? 'blur(12px)' : 'blur(16px)',
+        borderColor: theme.shape.cardBorder,
+        bgcolor: 'rgba(15, 23, 42, 0.88)',
+        backdropFilter: 'blur(16px)',
         overflow: 'hidden',
-        boxShadow: compactDesktop
-          ? '0 16px 40px rgba(2, 6, 23, 0.18)'
-          : '0 16px 40px rgba(2, 6, 23, 0.26)',
+        boxShadow: '0 16px 40px rgba(2, 6, 23, 0.26)',
         transition: theme.transitions.create(
-          ['background-color', 'border-color', 'box-shadow', 'max-width'],
+          ['border-radius', 'max-width', 'padding'],
           { duration: theme.transitions.duration.shorter },
         ),
-        ...(compactDesktop
-          ? {
-              '&:hover': {
-                bgcolor: 'rgba(15, 23, 42, 0.88)',
-                borderColor: 'rgba(167, 139, 250, 0.22)',
-                boxShadow: '0 18px 44px rgba(2, 6, 23, 0.28)',
-              },
-            }
-          : {}),
       }}
     >
       <CardContent
@@ -172,12 +180,12 @@ export default function CampaignWorkspaceHeader({
             spacing={useNarrowFloatingHeader ? 0.75 : 1}
             sx={{
               justifyContent: 'space-between',
-              alignItems: { md: compactDesktop ? 'flex-start' : 'center' },
+              alignItems: { md: 'center' },
             }}
           >
             <Stack
               spacing={useNarrowFloatingHeader ? 0.35 : 0.5}
-              sx={{ minWidth: 0, maxWidth: 760 }}
+              sx={{ minWidth: 0, maxWidth: 760, flex: 1 }}
             >
               <Typography
                 variant="h5"
@@ -186,7 +194,12 @@ export default function CampaignWorkspaceHeader({
                   ...singleLineTextSx,
                   fontSize: useNarrowFloatingHeader
                     ? { xs: '1rem', md: '1.1rem' }
-                    : { xs: '1.05rem', md: '1.2rem' },
+                    : compactDesktop
+                      ? { xs: '1.05rem', md: '1rem' }
+                      : { xs: '1.05rem', md: '1.2rem' },
+                  transition: theme.transitions.create(['font-size'], {
+                    duration: theme.transitions.duration.shorter,
+                  }),
                 }}
               >
                 {campaignName}
@@ -194,7 +207,22 @@ export default function CampaignWorkspaceHeader({
               <Typography
                 color="rgba(255, 255, 255, 0.72)"
                 variant="caption"
-                sx={singleLineTextSx}
+                sx={{
+                  ...singleLineTextSx,
+                  // Collapse subtitle vertically when the desktop card is in
+                  // compact mode — keeps the row to a single line.
+                  ...(compactDesktop
+                    ? {
+                        display: { xs: 'block', md: 'none' },
+                        maxHeight: { md: 0 },
+                        opacity: { md: 0 },
+                      }
+                    : {}),
+                  transition: theme.transitions.create(
+                    ['max-height', 'opacity'],
+                    { duration: theme.transitions.duration.shorter },
+                  ),
+                }}
               >
                 {subtitle}
               </Typography>
