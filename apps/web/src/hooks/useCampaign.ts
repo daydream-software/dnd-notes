@@ -1,8 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   consolidateCampaignMemberships,
   createCampaign,
   createNote,
+  fetchCampaigns,
   updateCampaign,
 } from '../api'
 import {
@@ -102,6 +103,11 @@ export interface UseCampaignResult {
   campaigns: CampaignSummary[]
   selectedCampaignId: string | null
   memberships: CampaignMembership[]
+  currentCampaignMemberships: CampaignMembership[]
+  selectedSourceMembership: CampaignMembership | null
+  selectedTargetMembership: CampaignMembership | null
+  hasValidMembershipConsolidationSelection: boolean
+  canApplyMembershipConsolidation: boolean
   campaignDraft: CampaignDraft
   campaignFormMode: CampaignFormMode
   selectedCampaignTemplateId: string
@@ -121,6 +127,7 @@ export interface UseCampaignResult {
   setMembershipConsolidationPreview: React.Dispatch<React.SetStateAction<MembershipConsolidationSummary | null>>
   setMembershipConsolidationNotice: React.Dispatch<React.SetStateAction<string | null>>
   resetMembershipConsolidationState: () => void
+  resetCampaign: () => void
   handleCampaignDraftChange: <Field extends keyof CampaignDraft>(
     field: Field,
     value: CampaignDraft[Field],
@@ -162,6 +169,14 @@ export interface UseCampaignResult {
     selectedNoteId: string | null,
     onError: (message: string | null) => void,
   ) => Promise<void>
+  loadCampaigns: (
+    sessionToken: string,
+    preferredCampaignId: string | null | undefined,
+    preferredNoteId: string | null | undefined,
+    onLoadWorkspace: (token: string, campaignId: string, preferredNoteId?: string | null) => Promise<boolean | 'stale'>,
+    onResetWorkspaceState: () => void,
+    onError: (message: string | null) => void,
+  ) => Promise<void>
 }
 
 export function useCampaign(): UseCampaignResult {
@@ -193,6 +208,17 @@ export function useCampaign(): UseCampaignResult {
     setIsPreviewingMembershipConsolidation(false)
     setIsApplyingMembershipConsolidation(false)
   }, [])
+
+  const resetCampaign = useCallback(() => {
+    localStorage.removeItem(selectedCampaignStorageKey)
+    setCampaigns([])
+    setSelectedCampaignId(null)
+    setMemberships([])
+    setCampaignDraft(createCampaignDraft())
+    setCampaignFormMode('closed')
+    setSelectedCampaignTemplateId(blankCampaignTemplateId)
+    resetMembershipConsolidationState()
+  }, [resetMembershipConsolidationState])
 
   const handleCampaignDraftChange = useCallback(
     <Field extends keyof CampaignDraft>(field: Field, value: CampaignDraft[Field]) => {
@@ -437,10 +463,90 @@ export function useCampaign(): UseCampaignResult {
     ],
   )
 
+  const loadCampaigns = useCallback(
+    async (
+      sessionToken: string,
+      preferredCampaignId: string | null | undefined,
+      preferredNoteId: string | null | undefined,
+      onLoadWorkspace: (token: string, campaignId: string, preferredNoteId?: string | null) => Promise<boolean | 'stale'>,
+      onResetWorkspaceState: () => void,
+      onError: (message: string | null) => void,
+    ): Promise<void> => {
+      const campaignsResponse = await fetchCampaigns(sessionToken)
+      setCampaigns(campaignsResponse.campaigns)
+
+      const storedCampaignId = localStorage.getItem(selectedCampaignStorageKey)
+      const candidateCampaignId =
+        preferredCampaignId ?? storedCampaignId ?? campaignsResponse.campaigns[0]?.id ?? null
+
+      const nextCampaign =
+        candidateCampaignId !== null
+          ? campaignsResponse.campaigns.find(
+              (campaign) => campaign.id === candidateCampaignId,
+            ) ?? campaignsResponse.campaigns[0] ?? null
+          : null
+
+      if (!nextCampaign) {
+        setSelectedCampaignId(null)
+        setMemberships([])
+        setCampaignDraft(createCampaignDraft())
+        setCampaignFormMode(campaignsResponse.campaigns.length === 0 ? 'create' : 'closed')
+        onResetWorkspaceState()
+        onError(null)
+        return
+      }
+
+      await onLoadWorkspace(sessionToken, nextCampaign.id, preferredNoteId)
+    },
+    [setCampaignDraft, setCampaignFormMode, setCampaigns, setMemberships, setSelectedCampaignId],
+  )
+
+  const currentCampaignMemberships = useMemo(
+    () => memberships.filter((membership) => membership.campaignId === selectedCampaignId),
+    [memberships, selectedCampaignId],
+  )
+
+  const selectedSourceMembership = useMemo(
+    () =>
+      currentCampaignMemberships.find(
+        (membership) => membership.id === membershipConsolidationDraft.sourceMembershipId,
+      ) ?? null,
+    [currentCampaignMemberships, membershipConsolidationDraft.sourceMembershipId],
+  )
+
+  const selectedTargetMembership = useMemo(
+    () =>
+      currentCampaignMemberships.find(
+        (membership) => membership.id === membershipConsolidationDraft.targetMembershipId,
+      ) ?? null,
+    [currentCampaignMemberships, membershipConsolidationDraft.targetMembershipId],
+  )
+
+  const hasValidMembershipConsolidationSelection =
+    membershipConsolidationDraft.sourceMembershipId.length > 0 &&
+    membershipConsolidationDraft.targetMembershipId.length > 0 &&
+    membershipConsolidationDraft.sourceMembershipId !==
+      membershipConsolidationDraft.targetMembershipId
+
+  const canApplyMembershipConsolidation =
+    membershipConsolidationPreview !== null &&
+    !membershipConsolidationPreview.applied &&
+    membershipConsolidationPreview.sourceMembership.id ===
+      membershipConsolidationDraft.sourceMembershipId &&
+    membershipConsolidationPreview.targetMembership.id ===
+      membershipConsolidationDraft.targetMembershipId &&
+    (!membershipConsolidationPreview.requiresRoleMismatchConfirmation ||
+      membershipConsolidationDraft.confirmRoleMismatch)
+
   return {
     campaigns,
     selectedCampaignId,
     memberships,
+    currentCampaignMemberships,
+    selectedSourceMembership,
+    selectedTargetMembership,
+    hasValidMembershipConsolidationSelection,
+    canApplyMembershipConsolidation,
     campaignDraft,
     campaignFormMode,
     selectedCampaignTemplateId,
@@ -460,6 +566,7 @@ export function useCampaign(): UseCampaignResult {
     setMembershipConsolidationPreview,
     setMembershipConsolidationNotice,
     resetMembershipConsolidationState,
+    resetCampaign,
     handleCampaignDraftChange,
     handleMembershipConsolidationDraftChange,
     handleOpenCampaignCreate,
@@ -468,5 +575,6 @@ export function useCampaign(): UseCampaignResult {
     handleSaveCampaign,
     handlePreviewMembershipConsolidation,
     handleApplyMembershipConsolidation,
+    loadCampaigns,
   }
 }

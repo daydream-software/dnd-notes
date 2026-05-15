@@ -1,11 +1,13 @@
 import { useCallback, useRef, useState } from 'react'
 import {
+  fetchAuthConfig,
   fetchOwnerSession,
   loginOwner,
   logoutOwner,
   registerOwner,
 } from '../api'
 import {
+  createRuntimeKeycloakClient,
   isKeycloakAuthConfig,
   type RuntimeKeycloakClient,
   type StoredKeycloakTokens,
@@ -86,11 +88,23 @@ export interface UseSessionResult {
   setIsSubmittingAuth: React.Dispatch<React.SetStateAction<boolean>>
   setIsLinkingAccount: React.Dispatch<React.SetStateAction<boolean>>
   setAccountNotice: React.Dispatch<React.SetStateAction<string | null>>
+  resetSession: () => void
   completeAuthentication: (
     token: string,
     nextOwner: OwnerAccount,
     onCampaignsReady: (token: string) => Promise<void>,
   ) => Promise<void>
+  bootstrapAuth: (
+    isSharedMode: boolean,
+    isCancelled: () => boolean,
+    loadCampaigns: (token: string) => Promise<void>,
+    clearSession: () => void,
+    onError: (message: string) => void,
+  ) => Promise<void>
+  startKeycloakRefresh: (
+    clearSession: () => void,
+    onError: (message: string) => void,
+  ) => (() => void) | undefined
   handleSubmitAuth: (
     onCampaignsReady: (token: string) => Promise<void>,
     onError: (message: string) => void,
@@ -122,6 +136,15 @@ export function useSession(): UseSessionResult {
   const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
   const keycloakClientRef = useRef<RuntimeKeycloakClient | null>(null)
+
+  const resetSession = useCallback(() => {
+    localStorage.removeItem(authTokenStorageKey)
+    clearStoredKeycloakTokens()
+    keycloakClientRef.current?.clear()
+    keycloakClientRef.current = null
+    setAuthToken(null)
+    setOwner(null)
+  }, [keycloakClientRef])
 
   const completeAuthentication = useCallback(
     async (
@@ -233,6 +256,132 @@ export function useSession(): UseSessionResult {
     [],
   )
 
+  const bootstrapAuth = useCallback(
+    async (
+      isSharedMode: boolean,
+      isCancelled: () => boolean,
+      loadCampaigns: (token: string) => Promise<void>,
+      clearSession: () => void,
+      onError: (message: string) => void,
+    ): Promise<void> => {
+      try {
+        const nextAuthConfig = await fetchAuthConfig()
+
+        if (isCancelled()) {
+          return
+        }
+
+        setAuthConfig(nextAuthConfig)
+
+        if (isKeycloakAuthConfig(nextAuthConfig)) {
+          const keycloakClient = createRuntimeKeycloakClient(nextAuthConfig.keycloak)
+          keycloakClientRef.current = keycloakClient
+          const tokens = await keycloakClient.init(readStoredKeycloakTokens())
+
+          if (isCancelled()) {
+            return
+          }
+
+          if (!tokens) {
+            clearStoredKeycloakTokens()
+            localStorage.removeItem(authTokenStorageKey)
+            setAuthToken(null)
+            setOwner(null)
+            return
+          }
+
+          persistKeycloakTokens(tokens)
+          const session = await fetchOwnerSession(tokens.accessToken)
+
+          if (isCancelled()) {
+            return
+          }
+
+          setAuthToken(tokens.accessToken)
+          setOwner(session.owner)
+
+          if (!isSharedMode) {
+            await loadCampaigns(tokens.accessToken)
+          }
+
+          return
+        }
+
+        const storedToken = localStorage.getItem(authTokenStorageKey)
+
+        if (!storedToken) {
+          setAuthToken(null)
+          setOwner(null)
+          return
+        }
+
+        const session = await fetchOwnerSession(storedToken)
+
+        if (isCancelled()) {
+          return
+        }
+
+        setAuthToken(storedToken)
+        setOwner(session.owner)
+
+        if (!isSharedMode) {
+          await loadCampaigns(storedToken)
+        }
+      } catch (bootstrapError) {
+        if (!isCancelled()) {
+          clearSession()
+          console.error(bootstrapError)
+          onError('Could not initialize your session. Reload and try again.')
+        }
+      } finally {
+        if (!isCancelled()) {
+          setIsAuthReady(true)
+        }
+      }
+    },
+    [keycloakClientRef, setAuthConfig, setAuthToken, setIsAuthReady, setOwner],
+  )
+
+  const startKeycloakRefresh = useCallback(
+    (
+      clearSession: () => void,
+      onError: (message: string) => void,
+    ): (() => void) | undefined => {
+      if (!isKeycloakAuthConfig(authConfig) || !authToken || !keycloakClientRef.current) {
+        return undefined
+      }
+
+      let cancelled = false
+      const refreshInterval = window.setInterval(() => {
+        void keycloakClientRef.current
+          ?.refresh(30)
+          .then((tokens) => {
+            if (cancelled) {
+              return
+            }
+
+            persistKeycloakTokens(tokens)
+            setAuthToken(tokens.accessToken)
+          })
+          .catch((refreshError) => {
+            if (cancelled) {
+              return
+            }
+
+            clearSession()
+            console.error(refreshError)
+            onError('Your session expired. Sign in again.')
+          })
+      }, 15_000)
+
+      return () => {
+        cancelled = true
+        window.clearInterval(refreshInterval)
+      }
+    },
+    [authConfig, authToken, keycloakClientRef, setAuthToken],
+  )
+
   return {
     authToken,
     owner,
@@ -255,7 +404,10 @@ export function useSession(): UseSessionResult {
     setIsSubmittingAuth,
     setIsLinkingAccount,
     setAccountNotice,
+    resetSession,
     completeAuthentication,
+    bootstrapAuth,
+    startKeycloakRefresh,
     handleSubmitAuth,
     handleLogout,
     handleFetchOwnerSession,

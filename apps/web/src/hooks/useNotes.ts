@@ -339,6 +339,12 @@ export interface UseNotesResult {
   sharedSessionNotes: Note[]
   sharedActivityEntries: NoteActivityEntry[]
   sharedActivityCollaborators: ActivityCollaborator[]
+  // Resolved derived state (shared vs owner mode)
+  resolvedSessionSummaries: SessionSummary[]
+  resolvedSelectedSessionSummary: SessionSummary | null
+  resolvedActivityCollaborators: ActivityCollaborator[]
+  resolvedSelectedActivityCollaborator: ActivityCollaborator | null
+  sortedActivityEntries: NoteActivityEntry[]
   // Refs (for use in callbacks)
   selectedNoteIdRef: React.RefObject<string | null>
   noteBrowseModeRef: React.RefObject<NoteBrowseMode>
@@ -375,6 +381,7 @@ export interface UseNotesResult {
   setQuickCaptureTitle: React.Dispatch<React.SetStateAction<string>>
   setIsQuickCaptureOpen: React.Dispatch<React.SetStateAction<boolean>>
   // Callbacks
+  resetNotes: () => void
   resetSessionBrowserState: () => void
   resetActivityState: (preserveFilter?: boolean) => void
   loadActivity: (
@@ -435,6 +442,25 @@ export interface UseNotesResult {
     authToken: string | null,
     canEditWorkspace: boolean,
     onNarrowPanel?: () => void,
+    onError?: (message: string) => void,
+  ) => Promise<void>
+  handleSelectSession: (
+    sessionName: string,
+    authToken: string | null,
+    selectedCampaignId: string | null,
+    onNarrowPanel?: () => void,
+    onError?: (message: string) => void,
+  ) => Promise<void>
+  handleOpenRecentActivity: (
+    authToken: string | null,
+    selectedCampaignId: string | null,
+    onNarrowPanel?: () => void,
+    onError?: (message: string) => void,
+  ) => Promise<void>
+  handleSelectActivityCollaborator: (
+    membershipId: string | null,
+    authToken: string | null,
+    selectedCampaignId: string | null,
     onError?: (message: string) => void,
   ) => Promise<void>
 }
@@ -1346,6 +1372,194 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     [loadSharedWorkspace, loadWorkspace, quickCaptureTitle, resetSessionBrowserState],
   )
 
+  const resetNotes = useCallback(() => {
+    resetSessionBrowserState()
+    resetActivityState()
+    setOverview(null)
+    setNotes([])
+    setNoteBrowseMode('notes')
+    setSessionSummaries([])
+    setQuickCaptureTitle('')
+    setSelectedNoteId(null)
+    setDraft(createEmptyDraft())
+    setSelectedNoteTemplateId(blankNoteTemplateId)
+    setIsQuickCaptureOpen(false)
+  }, [resetActivityState, resetSessionBrowserState])
+
+  const handleSelectSession = useCallback(
+    async (
+      sessionName: string,
+      authToken: string | null,
+      selectedCampaignId: string | null,
+      onNarrowPanel?: () => void,
+      onError?: (message: string) => void,
+    ): Promise<void> => {
+      if (isSharedMode) {
+        setNoteBrowseMode('sessions')
+        setSelectedSessionName(sessionName)
+        onNarrowPanel?.()
+        return
+      }
+
+      if (!authToken || !selectedCampaignId) {
+        return
+      }
+
+      sessionRequestIdRef.current += 1
+      const requestId = sessionRequestIdRef.current
+
+      sessionAbortControllerRef.current?.abort()
+      const abortController = new AbortController()
+      sessionAbortControllerRef.current = abortController
+
+      setNoteBrowseMode('sessions')
+      setSelectedSessionName(sessionName)
+      setSessionNotes([])
+      setIsLoadingSessionNotes(true)
+
+      try {
+        const sessionNotesResponse = await fetchSessionNotes(
+          authToken,
+          sessionName,
+          selectedCampaignId,
+          abortController.signal,
+        )
+
+        if (
+          abortController.signal.aborted ||
+          sessionRequestIdRef.current !== requestId
+        ) {
+          return
+        }
+
+        setSessionNotes(sessionNotesResponse.notes)
+
+        const currentSelectedId = selectedNoteIdRef.current
+        const currentSessionNote =
+          currentSelectedId !== null
+            ? sessionNotesResponse.notes.find((note) => note.id === currentSelectedId) ?? null
+            : null
+        const nextSelectedNote = currentSessionNote ?? sessionNotesResponse.notes[0] ?? null
+
+        if (nextSelectedNote) {
+          setSelectedNoteId(nextSelectedNote.id)
+          setIsCreating(false)
+          setSelectedNoteTemplateId(blankNoteTemplateId)
+          setDraft(createDraftFromNote(nextSelectedNote))
+        }
+      } catch (loadError) {
+        if (
+          abortController.signal.aborted ||
+          sessionRequestIdRef.current !== requestId
+        ) {
+          return
+        }
+
+        resetSessionBrowserState()
+        onError?.(
+          loadError instanceof Error
+            ? loadError.message
+            : 'Could not load notes for that session.',
+        )
+      } finally {
+        if (sessionRequestIdRef.current === requestId) {
+          setIsLoadingSessionNotes(false)
+        }
+      }
+    },
+    [isSharedMode, resetSessionBrowserState],
+  )
+
+  const handleOpenRecentActivity = useCallback(
+    async (
+      authToken: string | null,
+      selectedCampaignId: string | null,
+      onNarrowPanel?: () => void,
+      onError?: (message: string) => void,
+    ): Promise<void> => {
+      if (isSharedMode) {
+        setNoteBrowseMode('activity')
+        onNarrowPanel?.()
+        resetSessionBrowserState()
+        return
+      }
+
+      if (!authToken || !selectedCampaignId) {
+        return
+      }
+
+      setNoteBrowseMode('activity')
+      onNarrowPanel?.()
+      resetSessionBrowserState()
+      await loadActivity(
+        authToken,
+        selectedCampaignId,
+        selectedActivityMembershipIdRef.current,
+        onError,
+      )
+    },
+    [isSharedMode, loadActivity, resetSessionBrowserState],
+  )
+
+  const handleSelectActivityCollaborator = useCallback(
+    async (
+      membershipId: string | null,
+      authToken: string | null,
+      selectedCampaignId: string | null,
+      onError?: (message: string) => void,
+    ): Promise<void> => {
+      if (isSharedMode) {
+        setSelectedActivityMembershipId(membershipId)
+        return
+      }
+
+      if (!authToken || !selectedCampaignId) {
+        return
+      }
+
+      setSelectedActivityMembershipId(membershipId)
+      await loadActivity(authToken, selectedCampaignId, membershipId, onError)
+    },
+    [isSharedMode, loadActivity],
+  )
+
+  // Resolved derived state (shared vs owner mode)
+  const resolvedSessionSummaries = isSharedMode ? sharedSessionSummaries : sessionSummaries
+
+  const resolvedSelectedSessionSummary = useMemo(
+    () =>
+      resolvedSessionSummaries.find(
+        (sessionSummary) => sessionSummary.sessionName === selectedSessionName,
+      ) ?? null,
+    [resolvedSessionSummaries, selectedSessionName],
+  )
+
+  const resolvedActivityCollaborators = isSharedMode ? sharedActivityCollaborators : activityCollaborators
+
+  const resolvedSelectedActivityCollaborator = useMemo(
+    () =>
+      resolvedActivityCollaborators.find(
+        (collaborator) => collaborator.membershipId === selectedActivityMembershipId,
+      ) ?? null,
+    [resolvedActivityCollaborators, selectedActivityMembershipId],
+  )
+
+  const sortedActivityEntries = useMemo(
+    () => {
+      const entries = isSharedMode
+        ? selectedActivityMembershipId
+          ? sharedActivityEntries.filter(
+              (entry) => getActivityAttribution(entry)?.membershipId === selectedActivityMembershipId,
+            )
+          : sharedActivityEntries
+        : activityEntries
+      return [...entries].sort((leftEntry, rightEntry) =>
+        rightEntry.updatedAt.localeCompare(leftEntry.updatedAt),
+      )
+    },
+    [activityEntries, isSharedMode, selectedActivityMembershipId, sharedActivityEntries],
+  )
+
   return {
     overview,
     notes,
@@ -1385,6 +1599,11 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     sharedSessionNotes,
     sharedActivityEntries,
     sharedActivityCollaborators,
+    resolvedSessionSummaries,
+    resolvedSelectedSessionSummary,
+    resolvedActivityCollaborators,
+    resolvedSelectedActivityCollaborator,
+    sortedActivityEntries,
     selectedNoteIdRef,
     noteBrowseModeRef,
     selectedSessionNameRef,
@@ -1418,6 +1637,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     setSelectedNoteTemplateId,
     setQuickCaptureTitle,
     setIsQuickCaptureOpen,
+    resetNotes,
     resetSessionBrowserState,
     resetActivityState,
     loadActivity,
@@ -1432,5 +1652,8 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     handleSaveNote,
     handleDeleteNote,
     handleQuickCapture,
+    handleSelectSession,
+    handleOpenRecentActivity,
+    handleSelectActivityCollaborator,
   }
 }
