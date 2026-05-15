@@ -1,3 +1,5 @@
+import { cardBorderColor } from '@dnd-notes/theme'
+
 export const markdownSx = {
   '& > :first-of-type': {
     mt: 0,
@@ -33,8 +35,8 @@ export const markdownSx = {
     wordBreak: 'break-word',
   },
   '& blockquote': {
-    borderLeft: '4px solid',
-    borderColor: 'divider',
+    borderLeft: '1px solid',
+    borderColor: cardBorderColor,
     color: 'text.secondary',
     m: 0,
     my: 1.5,
@@ -63,7 +65,7 @@ export const markdownSx = {
   '& hr': {
     border: 0,
     borderTop: '1px solid',
-    borderColor: 'divider',
+    borderColor: cardBorderColor,
     my: 2,
   },
   '& table': {
@@ -73,7 +75,7 @@ export const markdownSx = {
   },
   '& th, & td': {
     border: '1px solid',
-    borderColor: 'divider',
+    borderColor: cardBorderColor,
     p: 1,
     textAlign: 'left',
   },

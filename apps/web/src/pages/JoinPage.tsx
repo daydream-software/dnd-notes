@@ -9,6 +9,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Footer } from '@dnd-notes/theme'
 import type { GuestJoinInput } from '../types'
 
 const heroCardRadius = '32px'
@@ -32,9 +33,9 @@ export default function JoinPage({
   onJoin,
 }: JoinPageProps) {
   return (
-    <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: 3 }}>
-      <Container maxWidth="sm">
-        <Stack spacing={3}>
+    <Box component="main" sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', p: 3 }}>
+      <Container maxWidth="sm" sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
+        <Stack spacing={3} sx={{ width: '100%' }}>
           <Card sx={{ borderRadius: heroCardRadius }}>
             <CardContent sx={{ p: { xs: 3, md: 4 } }}>
               <Stack spacing={3}>
@@ -79,6 +80,7 @@ export default function JoinPage({
           </Card>
         </Stack>
       </Container>
+      <Footer variant="signature" />
     </Box>
   )
 }

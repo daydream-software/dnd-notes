@@ -7,11 +7,11 @@ import {
   Box,
   Container,
   Stack,
-  Typography,
 } from '@mui/material'
+import { Footer } from '@dnd-notes/theme'
 import { useMemo } from 'react'
-import { DndNotesMark } from '../DndNotesMark'
 import CampaignWorkspaceHeader from '../CampaignWorkspaceHeader'
+import { useScrolled } from '../hooks/useScrolled'
 import type { UseShareLinksResult } from '../hooks/useShareLinks'
 import type { UseCampaignResult } from '../hooks/useCampaign'
 import type { UseNotesResult } from '../hooks/useNotes'
@@ -23,12 +23,6 @@ import CampaignAdminPane from '../components/CampaignAdminPane'
 import NotesWorkspacePane from '../components/NotesWorkspacePane'
 
 const surfaceRadius = '24px'
-const singleLineTextSx = {
-  minWidth: 0,
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
-  whiteSpace: 'nowrap',
-} as const
 
 export interface CampaignDetailPageProps {
   // Bundled hook results
@@ -73,6 +67,7 @@ export default function CampaignDetailPage({
   setError, setNarrowWorkspacePanel, setWantsSplitNoteWorkspace,
   loadWorkspace, loadCampaigns, clearSession, guestStorageKey, shareToken, createShareLinkDraft,
 }: CampaignDetailPageProps) {
+  const scrolled = useScrolled(24)
   const showBrowsePane = showSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
   const showEditorPane = showSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
   const workspaceEditorLabel =
@@ -217,60 +212,23 @@ export default function CampaignDetailPage({
     <Box component="main" sx={{ minHeight: '100vh', py: { xs: 2.5, md: 4 }, width: '100%' }}>
       <Container maxWidth="xl" sx={{ minWidth: 0, position: 'relative' }}>
         <Stack spacing={2.5}>
-          <Box
-            sx={{
-              display: 'flex',
-              justifyContent: { xs: 'center', lg: 'space-between' },
-              alignItems: 'flex-start',
-              gap: 2,
-              width: '100%',
-              position: { xs: 'static', lg: 'sticky' },
-              top: { lg: 12 },
-              zIndex: { lg: 3 },
-            }}
-          >
-            <Box
-              aria-label="Application brand"
-              sx={{
-                display: { xs: 'none', lg: 'inline-flex' },
-                alignItems: 'center',
-                flexShrink: 0,
-                gap: 0.75,
-                px: 1.25,
-                py: 0.75,
-                borderRadius: '999px',
-                border: '1px solid',
-                borderColor: 'rgba(167, 139, 250, 0.2)',
-                bgcolor: 'rgba(15, 23, 42, 0.72)',
-                color: 'rgba(255, 255, 255, 0.78)',
-                backdropFilter: 'blur(12px)',
-                boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
-                maxWidth: '100%',
-              }}
-            >
-              <DndNotesMark fontSize="small" />
-              <Typography variant="caption" sx={{ ...singleLineTextSx, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-                D&amp;D Notes
-              </Typography>
-            </Box>
-            <CampaignWorkspaceHeader
-              campaignName={resolvedCampaignName}
-              mobileSubtitle={resolvedCampaignMobileSubtitle}
-              desktopSubtitle={resolvedDesktopSubtitle}
-              selectedCampaignId={resolvedSelectedCampaignId ?? notes.overview!.campaign.id}
-              campaignOptions={resolvedCampaignOptions}
-              onSelectCampaign={(id) => { if (!isSharedMode) void handleSelectCampaign(id) }}
-              actions={[
-                { ariaLabel: 'New campaign', color: 'inherit', icon: <AddCircleOutlineRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate },
-                { ariaLabel: 'Campaign settings', color: 'inherit', icon: <SettingsRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings, disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign },
-                { ariaLabel: 'New note', color: 'secondary', icon: <AddRoundedIcon fontSize="small" />, onClick: handleStartNote, disabled: !canEditWorkspace },
-                { ariaLabel: 'Sign out', color: 'inherit', icon: <LogoutRoundedIcon fontSize="small" />, onClick: () => void handleLogout() },
-              ]}
-              surfaceRadius={surfaceRadius}
-              compactDesktop={canSplitNoteWorkspace}
-              stickyDesktop={false}
-            />
-          </Box>
+          <CampaignWorkspaceHeader
+            campaignName={resolvedCampaignName}
+            mobileSubtitle={resolvedCampaignMobileSubtitle}
+            desktopSubtitle={resolvedDesktopSubtitle}
+            selectedCampaignId={resolvedSelectedCampaignId ?? notes.overview!.campaign.id}
+            campaignOptions={resolvedCampaignOptions}
+            onSelectCampaign={(id) => { if (!isSharedMode) void handleSelectCampaign(id) }}
+            actions={[
+              { ariaLabel: 'New campaign', color: 'inherit', icon: <AddCircleOutlineRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate },
+              { ariaLabel: 'Campaign settings', color: 'inherit', icon: <SettingsRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings, disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign },
+              { ariaLabel: 'New note', color: 'secondary', icon: <AddRoundedIcon fontSize="small" />, onClick: handleStartNote, disabled: !canEditWorkspace },
+              { ariaLabel: 'Sign out', color: 'inherit', icon: <LogoutRoundedIcon fontSize="small" />, onClick: () => void handleLogout() },
+            ]}
+            surfaceRadius={surfaceRadius}
+            compactDesktop={scrolled}
+            stickyDesktop
+          />
 
           {error ? <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>{error}</Alert> : null}
 
@@ -395,32 +353,9 @@ export default function CampaignDetailPage({
             onDeleteNote={() => void handleDeleteNote()}
           />
 
-          <Box
-            aria-label="Application brand"
-            sx={{
-              display: { xs: 'inline-flex', lg: 'none' },
-              alignItems: 'center',
-              alignSelf: 'center',
-              gap: 0.75,
-              px: 1.25,
-              py: 0.75,
-              borderRadius: '999px',
-              border: '1px solid',
-              borderColor: 'rgba(167, 139, 250, 0.2)',
-              bgcolor: 'rgba(15, 23, 42, 0.72)',
-              color: 'rgba(255, 255, 255, 0.78)',
-              backdropFilter: 'blur(12px)',
-              boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
-              maxWidth: 'calc(100vw - 24px)',
-            }}
-          >
-            <DndNotesMark fontSize="small" />
-            <Typography variant="caption" sx={{ ...singleLineTextSx, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              D&amp;D Notes
-            </Typography>
-          </Box>
         </Stack>
       </Container>
+      <Footer variant="signature" />
     </Box>
   )
 }

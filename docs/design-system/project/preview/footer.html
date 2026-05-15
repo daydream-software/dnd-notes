@@ -19,9 +19,8 @@
   }
 
   /* ============================================================
-     Sticky header — wraps BOTH the brand pill (left) and the
-     campaign card (right). Everything stays accessible at all
-     times; the only thing that changes on scroll is density.
+     Sticky header — single full-width campaign card. Density
+     changes on scroll; controls never disappear.
      ============================================================ */
   .app-header {
     position: sticky;
@@ -30,47 +29,13 @@
     margin: 12px auto 0;
     padding: 0 18px;
     max-width: 1240px;
-    display: flex;
-    align-items: stretch;
-    justify-content: space-between;
-    gap: 16px;
     pointer-events: none;
   }
   .app-header > * { pointer-events: auto; }
 
-  /* ----- Brand pill (left) ----- */
-  .brand-pill {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 18px;
-    flex-shrink: 0;
-    background: var(--bg-paper-soft);
-    border: 1px solid var(--brand-line);
-    border-radius: var(--radius-pill);
-    backdrop-filter: var(--blur-sm);
-    -webkit-backdrop-filter: var(--blur-sm);
-    box-shadow: var(--shadow-sm);
-    color: var(--fg-2);
-    transition:
-      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
-      gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
-  }
-  .brand-pill__mark { color: var(--brand-500); flex-shrink: 0; }
-  .brand-pill__text {
-    font-size: 12px; font-weight: 500;
-    letter-spacing: 0.08em; text-transform: uppercase;
-    white-space: nowrap;
-    overflow: hidden;
-    max-width: 200px;
-    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1),
-                opacity 200ms ease,
-                margin 280ms ease;
-  }
-
-  /* ----- Campaign card (right) ----- */
+  /* ----- Campaign card (full width) ----- */
   .campaign-card {
-    flex: 1;
+    width: 100%;
     min-width: 0;
     background: var(--bg-paper-strong);
     border: 1px solid var(--brand-line);
@@ -165,12 +130,6 @@
   .icon-btn svg { width: 18px; height: 18px; }
 
   /* ----- Scrolled state: condense, don't drop anything ----- */
-  body[data-scrolled="true"] .brand-pill { padding: 8px 12px; gap: 0; }
-  body[data-scrolled="true"] .brand-pill__text {
-    max-width: 0;
-    opacity: 0;
-    margin-left: -4px;
-  }
   body[data-scrolled="true"] .campaign-card {
     padding: 8px 14px;
     border-radius: var(--radius-pill);
@@ -284,11 +243,33 @@
   }
 
   @media (max-width: 960px) {
-    .app-header { flex-direction: column; gap: 10px; }
     .campaign-card { width: 100%; }
-    .brand-pill { align-self: center; }
   }
+  /* On narrow viewports the campaign card stacks: title + subtitle row,
+     controls (dropdown + icon buttons) on the row below. Same layout the
+     React tenant uses — no horizontal overflow. */
   @media (max-width: 720px) {
+    .campaign-card {
+      grid-template-columns: 1fr;
+      grid-template-rows: auto auto auto;
+      gap: 6px;
+    }
+    .campaign-card__title { grid-row: 1; grid-column: 1; }
+    .campaign-card__subtitle {
+      grid-row: 2; grid-column: 1;
+      white-space: normal; max-height: 60px;
+    }
+    .campaign-card__controls {
+      grid-row: 3; grid-column: 1;
+      margin-top: 4px;
+      gap: 10px;
+    }
+    .campaign-card__select { flex: 1; max-width: none; padding: 6px 10px; }
+    .campaign-card__select .eyebrow { display: none; }
+    body[data-scrolled="true"] .campaign-card__select { max-width: none; }
+    .campaign-card__controls .icon-btn { width: 32px; height: 32px; }
+    .campaign-card__controls .icon-btn svg { width: 16px; height: 16px; }
+
     footer.signature {
       flex-direction: column;
       gap: 10px;
@@ -297,7 +278,6 @@
       text-align: center;
     }
     footer.signature .sep { display: none; }
-    .campaign-card__subtitle { white-space: normal; max-height: 60px; }
   }
 
   .doc-note {
@@ -375,13 +355,8 @@
   </defs>
 </svg>
 
-<!-- ============== STICKY HEADER (brand + campaign, condenses on scroll) ============== -->
+<!-- ============== STICKY HEADER (full-width campaign card, condenses on scroll) ============== -->
 <header class="app-header">
-  <div class="brand-pill" aria-label="Application brand">
-    <svg class="brand-pill__mark" width="20" height="20" aria-hidden="true"><use href="#notes-mark"/></svg>
-    <span class="brand-pill__text">D&amp;D Notes</span>
-  </div>
-
   <div class="campaign-card" aria-label="Campaign workspace header">
     <h1 class="campaign-card__title">Moonshae Ledger</h1>
     <div class="campaign-card__subtitle">Moonshae Isles · Dungeons &amp; Dragons 5e · Owner User</div>
@@ -410,7 +385,7 @@
 </header>
 
 <main>
-  <p class="scroll-hint">Scroll — the brand pill loses its wordmark, the campaign card collapses its subtitle, but nothing functional disappears.</p>
+  <p class="scroll-hint">Scroll — the campaign card condenses to a single pill row; nothing functional disappears.</p>
   <section class="panel"><h2>Campaign stats</h2><p>Filler — represents the stats row.</p></section>
   <section class="panel panel--tall"><h2>Workspace toggle</h2><p>Filler — represents the workspace toggle area.</p></section>
   <section class="panel panel--tall"><h2>Notes pane</h2><p>Filler — represents the notes browse + editor split.</p></section>
@@ -445,7 +420,7 @@
 
 <aside class="doc-note">
   <strong>What changes on scroll</strong>
-  Header: brand pill loses its wordmark (mark stays); campaign card collapses its subtitle row, shrinks the title (h5 → h6), and the &quot;Campaign&quot; eyebrow disappears from the dropdown. <em>Nothing functional drops</em> — the campaign switcher and all four actions (New campaign, Settings, New note, Sign out) remain at all times.
+  Header: campaign card collapses its subtitle row, shrinks the title (h5 → h6), border-radius pills, and the &quot;Campaign&quot; eyebrow disappears from the dropdown. <em>Nothing functional drops</em> — the campaign switcher and all four actions (New campaign, Settings, New note, Sign out) remain at all times. No floating brand pill — the corporate / product marks live in the footer.
   <br><strong>Tokens</strong>
   All values come from <code>colors_and_type.css</code>: <code>--bg-paper-soft</code>, <code>--brand-line</code>, <code>--radius-pill</code>, <code>--radius-xl</code>, <code>--blur-sm</code>, <code>--shadow-sm</code>. No raw hex.
   <br><strong>Footer</strong>

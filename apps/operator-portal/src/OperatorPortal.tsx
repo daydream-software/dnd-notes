@@ -26,6 +26,7 @@ import {
   Tooltip,
   Typography,
 } from '@mui/material'
+import { Footer } from '@dnd-notes/theme'
 import * as React from 'react'
 import {
   buildAccountConsoleUrl,
@@ -471,6 +472,7 @@ export default function OperatorPortal({
   }, [fleetStatus])
 
   return (
+    <>
     <Container maxWidth="xl" sx={{ py: 5 }}>
       <Stack spacing={3}>
         <Card sx={{ borderRadius: surfaceRadius }}>
@@ -961,5 +963,7 @@ export default function OperatorPortal({
         tenantStatus={upgradeTarget}
       />
     </Container>
+    <Footer variant="signature" />
+    </>
   )
 }
