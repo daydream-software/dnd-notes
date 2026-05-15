@@ -62,9 +62,9 @@ updates:
       # @types/node is pinned to ^24.x because @kubernetes/client-node@1.x
       # declares @types/node@^24 as a peer; npm's workspace deduplication
       # propagates that pin across every workspace's node_modules regardless
-      # of declared range. Runtime stays on Node 22 (.nvmrc); only the types
-      # are permissive. Allow patch/minor bumps within 24.x; block majors so
-      # dependabot stops re-proposing 25.x.
+      # of declared range. Aligned with the runtime (Node 24, .nvmrc). Allow
+      # patch/minor bumps within 24.x; block majors so dependabot stops
+      # re-proposing 25.x.
       - dependency-name: "@types/node"
         update-types:
           - "version-update:semver-major"
