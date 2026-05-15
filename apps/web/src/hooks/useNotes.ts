@@ -1477,11 +1477,10 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       onNarrowPanel?: () => void,
       onError?: (message: string) => void,
     ): Promise<void> => {
-      setNoteBrowseMode('activity')
-      onNarrowPanel?.()
-      resetSessionBrowserState()
-
       if (isSharedMode) {
+        setNoteBrowseMode('activity')
+        onNarrowPanel?.()
+        resetSessionBrowserState()
         return
       }
 
@@ -1489,6 +1488,9 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         return
       }
 
+      setNoteBrowseMode('activity')
+      onNarrowPanel?.()
+      resetSessionBrowserState()
       await loadActivity(
         authToken,
         selectedCampaignId,
@@ -1506,9 +1508,8 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
       selectedCampaignId: string | null,
       onError?: (message: string) => void,
     ): Promise<void> => {
-      setSelectedActivityMembershipId(membershipId)
-
       if (isSharedMode) {
+        setSelectedActivityMembershipId(membershipId)
         return
       }
 
@@ -1516,6 +1517,7 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         return
       }
 
+      setSelectedActivityMembershipId(membershipId)
       await loadActivity(authToken, selectedCampaignId, membershipId, onError)
     },
     [isSharedMode, loadActivity],
