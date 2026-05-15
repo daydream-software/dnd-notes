@@ -9,7 +9,7 @@ This lane intentionally uses **k3d for daily iteration** and keeps the control p
 - Docker with BuildKit support (Docker 23+ or `docker buildx` v0.10+)
 - `k3d`
 - `kubectl`
-- Node `22.21.1`
+- Node `24.15.0`
 - repo dependencies installed via `npm install`
 - `mkcert` installed on the host where your browsers run (Windows or macOS), with `mkcert -install` executed so the local CA is trusted by the OS and browser trust store
 

@@ -6,7 +6,7 @@ Built as an npm monorepo with a React + Material UI frontend, an Express + TypeS
 
 ## Prerequisites
 
-- Node.js 22 (use `nvm use` to pick up the pinned version from `.nvmrc`)
+- Node.js 24 (use `nvm use` to pick up the pinned version from `.nvmrc`)
 - Docker (required only for the k3d platform loop)
 - k3d (required only for the k3d platform loop)
 
