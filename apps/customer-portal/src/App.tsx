@@ -1547,7 +1547,7 @@ export default function App({
       </Container>
       <Footer
         variant="rich"
-        tagline="Calm, mobile-friendly note-taking for tabletop campaigns. Built by a one-person studio, kept intentionally focused."
+        tagline="Calm, mobile-friendly note-taking for tabletop campaigns."
       />
     </Box>
   )
