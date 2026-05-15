@@ -7910,3 +7910,71 @@ Coordinator took over inside the same worktree and successfully wrote the same f
 
 **Related PRs/issues:** #283 (slice 6), #146 (parent issue).
 
+---
+
+### 2026-05-15: Scout-then-execute pattern for uncertain refactor scope (User/Stef)
+
+**Context:** Slice 7 of #146 (App.tsx final composition, PR #285). Before executing, Stef did a Phase 1 scout (no code, plan only) and proposed a 3-sub-slice split. User overrode to a single PR; Stef executed with distinct commits for bisectability.
+
+**Decision:** When a refactor's scope is uncertain, ask Stef for a Phase 1 scout (no code, just plan) before committing to single-vs-split-PR. Scout output shapes the execution strategy without blocking the user's final call.
+
+**Pattern:** Scout → user decides on PR shape → execute with commits that match the sub-slice boundaries.
+
+**Related PRs/issues:** #285 (slice 7), #146 (parent issue).
+
+---
+
+### 2026-05-15: Coordinator must re-verify subagent test claims before gate dispatch (User)
+
+**Context:** Slice 7 of #146 (PR #285). Stef reported "59 failed | 3 passed" as pre-existing baseline. Coordinator re-ran on main: 68/68 passing. Stef's worktree also passed 68/68 — he had misread an earlier invocation. Caught before Mikey gate at cost of ~30 seconds.
+
+**Decision:** When a subagent's test result claim is load-bearing for the next gate (Mikey review, PR open), the coordinator re-runs the suite independently before proceeding. Cheap insurance against gate dispatch on false data.
+
+**Related PRs/issues:** #285 (slice 7).
+
+---
+
+### 2026-05-15: WT-vs-HEAD divergence recovery procedure (User/Stef)
+
+**Context:** Slice 7 of #146 (PR #285). After Stef's long execute session, App.tsx in the working tree matched main (1535 lines), but HEAD had the actual slice 7 work (978 lines), and the index had staged a revert. Reflog showed only the 3 expected commits — no destructive git command logged. Cause unknown.
+
+**Decision:** Before dispatching Mikey after a long Stef session, coordinator runs `git status` + `wc -l` on key files in Stef's worktree. If WT diverges from HEAD: (1) verify HEAD has the work via reflog, (2) `git reset --hard HEAD` to restore, (3) re-run all checks, then proceed. Do not panic — work is safe in commits as long as reflog confirms them.
+
+**Related PRs/issues:** #285 (slice 7).
+
+---
+
+### 2026-05-15: CodeRabbit can be wrong about JS semantics — verify against spec (User/Stef)
+
+**Context:** Slice 7 of #146 (PR #285). CodeRabbit flagged `isLinkingAccount` getting stuck if Keycloak login fails (useGuestSession.ts:278), claiming `return` inside `try` bypasses `finally`. This is factually incorrect per ECMAScript spec.
+
+**Decision:** When CodeRabbit's justification rests on a language-semantics claim, verify against the ECMAScript spec (or MDN), not against CodeRabbit's confidence. In this case: `return` inside `try` always executes `finally`. Additionally, `keycloakClient.login()` triggers a full-page redirect — component unmounts before the function yields regardless.
+
+**Pattern:** Spec check → reply with spec citation → `@coderabbitai resolve`.
+
+**Related PRs/issues:** #285 (slice 7).
+
+---
+
+### 2026-05-15: Decomposition unlocks acceptance bars when a large child props-out the coordinator (User/Stef/Mikey)
+
+**Context:** Slice 7 of #146 (PR #285). After initial 3 commits, App.tsx was at 978 lines, not <300. Bottleneck: CampaignDetailPage's 90-prop interface forced App to thread all campaign-workspace props through one call site. No further state push could close the gap.
+
+**Decision:** When shrinking a coordinator component hits a floor caused by a single large prop-recipient, the unlock is decomposing that child into pane components (NotesWorkspacePane, CampaignAdminPane), not pushing more state down. Coordinator dispatched Stef for a decomposition pass; App.tsx reached 273 lines.
+
+**Pattern:** Identify the largest single prop-recipient → decompose it along existing comment-section seams → re-measure coordinator size.
+
+**Related PRs/issues:** #285 (slice 7), #146 (parent issue closed).
+
+---
+
+### 2026-05-15: #146 epic closed — App.tsx 273 lines, 7 slices complete (User/Stef/Mikey)
+
+**Context:** PR #285 merged 02:15:39 UTC 2026-05-15. Issue #146 closed.
+
+**Outcome:** App.tsx reduced from "2500+ lines" (issue body) to 273 lines (~89% reduction across 7 slices). CampaignDetailPage.tsx decomposed from 1819 → 426 lines. New components: CampaignAdminPane.tsx (822), NotesWorkspacePane.tsx (861). New page: JoinPage.tsx (84). New hook: useGuestSession.ts (357). Lint warnings: 7 → 0 naturally (no eslint-disable introduced).
+
+**Follow-up:** Issue #286 (JoinPage empty display name), issue #284 (design-system violations in CampaignDetailPage). Mikey nit: wrapper handler ordering in CampaignDetailPage.tsx L376/L381/L382 inconsistent with guard-first intent — worth a sweep.
+
+**Related PRs/issues:** #285 (slice 7), #146 (closed), #284, #286.
+
