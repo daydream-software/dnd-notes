@@ -24,7 +24,7 @@ There is **one product**: the `dnd-notes` web app (`apps/web`). It's a React + V
   - `logo.svg` — **placeholder only** (the Vite-template bolt that ships with the repo's favicon slot — not a real brand mark yet). Flagged for design.
   - `icons.svg` — SVG sprite (bluesky / discord / docs / github / social / x icons)
   - `hero.png` — original repo hero illustration (stacked translucent cards)
-- `preview/` — design-system tab cards (typography, color, components, etc.)
+- `preview/` — design-system tab cards (typography, color, components, etc.). Run `npm run design:preview` from the repo root, then open <http://127.0.0.1:7787/preview/>.
 - `ui_kits/web/` — React/JSX recreation of the dnd-notes app (sidebar, browse pane, editor, etc.) with an interactive `index.html`
 - `SKILL.md` — agent skill manifest (cross-compatible with Claude Code Agent Skills)
 
