@@ -686,13 +686,12 @@ if [[ "${tenant_state}" == "ready" && "${RESET_TENANT}" != "true" ]]; then
   tenant_namespace="$(json_get resources.namespace <"${WORK_DIR}/tenant-get.json")"
   tenant_subdomain="$(json_get tenant.subdomain <"${WORK_DIR}/tenant-get.json")"
   tenant_hostname="${tenant_subdomain}.${TENANT_BASE_DOMAIN}"
-  # When the tenant is reused, the tenant deployment isn't restarted by the
-  # provisioning path, so a freshly-built tenant image would never get loaded.
-  # Trigger a rolling restart so the new image (just imported above) takes
-  # effect. Skip if --no-rebuild — no fresh image to pick up.
-  if [[ "${NO_REBUILD}" != "true" ]]; then
-    run_visible kubectl rollout restart -n "${tenant_namespace}" deployment/dnd-notes
-  fi
+  # When the tenant is reused, the provisioning path doesn't restart the
+  # tenant deployment, so an imported image would never get loaded onto the
+  # running pod. Roll it unconditionally: ensure_image_ready re-imports (or
+  # builds, if missing) even with --no-rebuild, and the platform deployments
+  # above are also rolled every time — keeping this symmetrical.
+  run_visible kubectl rollout restart -n "${tenant_namespace}" deployment/dnd-notes
 else
   # Deprovision if resetting or in a non-terminal failure state
   if [[ -n "${tenant_state}" ]]; then
