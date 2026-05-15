@@ -61,19 +61,16 @@ export default function CampaignWorkspaceHeader({
   const theme = useTheme()
   const useNarrowFloatingHeader = useMediaQuery(theme.breakpoints.down('md'))
   const subtitle = useNarrowFloatingHeader ? mobileSubtitle : (desktopSubtitle ?? mobileSubtitle)
-  // compactDesktop shrinks the card vertically on desktop — half the padding,
-  // pill border, hidden subtitle, smaller title. The mobile breakpoint always
-  // uses the roomy padding because there's no scroll-driven compact there.
-  const contentPadding = useNarrowFloatingHeader
-    ? { xs: 1, md: 1.25 }
-    : compactDesktop
-      ? { xs: 1.25, md: 0.75 }
-      : { xs: 1.25, md: 1.5 }
-  const contentBottomPadding = useNarrowFloatingHeader
-    ? { xs: 2, md: 2.25 }
-    : compactDesktop
-      ? { xs: 1.5, md: 0.75 }
-      : { xs: 1.5, md: 1.75 }
+  // compactDesktop (driven by scroll) shrinks the card vertically — halved
+  // padding, pill border, hidden subtitle, smaller title. Applies at every
+  // viewport: mobile compacts too, otherwise the scrolled header keeps too
+  // much vertical real estate.
+  const contentPadding = compactDesktop
+    ? { xs: 0.75, md: 0.75 }
+    : { xs: 1.25, md: 1.5 }
+  const contentBottomPadding = compactDesktop
+    ? { xs: 0.75, md: 0.75 }
+    : { xs: 1.5, md: 1.75 }
 
   // Controls always flow into a single horizontal row — dropdown next to
   // icons. Same layout on mobile and desktop so the header reads the same
@@ -141,8 +138,9 @@ export default function CampaignWorkspaceHeader({
         minHeight: { md: 'auto' },
         minWidth: 0,
         maxWidth: 'none',
-        // Border-radius collapses to a pill on compact so the card reads as a
-        // sticky control bar instead of a full surface.
+        // Border-radius collapses to a pill on compact (desktop only — on
+        // mobile the card still has two content rows so the pill curve would
+        // clip the title; keep the regular radius there).
         borderRadius: compactDesktop
           ? { xs: surfaceRadius, md: '999px' }
           : surfaceRadius,
@@ -186,11 +184,9 @@ export default function CampaignWorkspaceHeader({
                 title={campaignName}
                 sx={{
                   ...singleLineTextSx,
-                  fontSize: useNarrowFloatingHeader
-                    ? { xs: '1rem', md: '1.1rem' }
-                    : compactDesktop
-                      ? { xs: '1.05rem', md: '1rem' }
-                      : { xs: '1.05rem', md: '1.2rem' },
+                  fontSize: compactDesktop
+                    ? { xs: '0.95rem', md: '1rem' }
+                    : { xs: '1.05rem', md: '1.2rem' },
                   transition: theme.transitions.create(['font-size'], {
                     duration: theme.transitions.duration.shorter,
                   }),
@@ -203,17 +199,17 @@ export default function CampaignWorkspaceHeader({
                 variant="caption"
                 sx={{
                   ...singleLineTextSx,
-                  // Collapse subtitle vertically when the desktop card is in
-                  // compact mode — keeps the row to a single line.
+                  // Collapse subtitle when the card is in compact mode (any
+                  // viewport) — keeps the row tight.
                   ...(compactDesktop
                     ? {
-                        display: { xs: 'block', md: 'none' },
-                        maxHeight: { md: 0 },
-                        opacity: { md: 0 },
+                        maxHeight: 0,
+                        opacity: 0,
+                        margin: 0,
                       }
                     : {}),
                   transition: theme.transitions.create(
-                    ['max-height', 'opacity'],
+                    ['max-height', 'opacity', 'margin'],
                     { duration: theme.transitions.duration.shorter },
                   ),
                 }}

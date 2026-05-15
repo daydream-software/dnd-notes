@@ -212,32 +212,23 @@ export default function CampaignDetailPage({
     <Box component="main" sx={{ minHeight: '100vh', py: { xs: 2.5, md: 4 }, width: '100%' }}>
       <Container maxWidth="xl" sx={{ minWidth: 0, position: 'relative' }}>
         <Stack spacing={2.5}>
-          <Box
-            sx={{
-              width: '100%',
-              position: { xs: 'static', lg: 'sticky' },
-              top: { lg: 12 },
-              zIndex: { lg: 3 },
-            }}
-          >
-            <CampaignWorkspaceHeader
-              campaignName={resolvedCampaignName}
-              mobileSubtitle={resolvedCampaignMobileSubtitle}
-              desktopSubtitle={resolvedDesktopSubtitle}
-              selectedCampaignId={resolvedSelectedCampaignId ?? notes.overview!.campaign.id}
-              campaignOptions={resolvedCampaignOptions}
-              onSelectCampaign={(id) => { if (!isSharedMode) void handleSelectCampaign(id) }}
-              actions={[
-                { ariaLabel: 'New campaign', color: 'inherit', icon: <AddCircleOutlineRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate },
-                { ariaLabel: 'Campaign settings', color: 'inherit', icon: <SettingsRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings, disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign },
-                { ariaLabel: 'New note', color: 'secondary', icon: <AddRoundedIcon fontSize="small" />, onClick: handleStartNote, disabled: !canEditWorkspace },
-                { ariaLabel: 'Sign out', color: 'inherit', icon: <LogoutRoundedIcon fontSize="small" />, onClick: () => void handleLogout() },
-              ]}
-              surfaceRadius={surfaceRadius}
-              compactDesktop={scrolled}
-              stickyDesktop={false}
-            />
-          </Box>
+          <CampaignWorkspaceHeader
+            campaignName={resolvedCampaignName}
+            mobileSubtitle={resolvedCampaignMobileSubtitle}
+            desktopSubtitle={resolvedDesktopSubtitle}
+            selectedCampaignId={resolvedSelectedCampaignId ?? notes.overview!.campaign.id}
+            campaignOptions={resolvedCampaignOptions}
+            onSelectCampaign={(id) => { if (!isSharedMode) void handleSelectCampaign(id) }}
+            actions={[
+              { ariaLabel: 'New campaign', color: 'inherit', icon: <AddCircleOutlineRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignCreate },
+              { ariaLabel: 'Campaign settings', color: 'inherit', icon: <SettingsRoundedIcon fontSize="small" />, onClick: isSharedMode ? () => window.location.assign('/') : handleOpenCampaignSettings, disabled: isSharedMode ? resolvedMembership?.userId === null : !canManageSelectedCampaign },
+              { ariaLabel: 'New note', color: 'secondary', icon: <AddRoundedIcon fontSize="small" />, onClick: handleStartNote, disabled: !canEditWorkspace },
+              { ariaLabel: 'Sign out', color: 'inherit', icon: <LogoutRoundedIcon fontSize="small" />, onClick: () => void handleLogout() },
+            ]}
+            surfaceRadius={surfaceRadius}
+            compactDesktop={scrolled}
+            stickyDesktop
+          />
 
           {error ? <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>{error}</Alert> : null}
 
