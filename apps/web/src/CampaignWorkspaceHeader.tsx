@@ -176,7 +176,7 @@ export default function CampaignWorkspaceHeader({
             }}
           >
             <Stack
-              spacing={useNarrowFloatingHeader ? 0.35 : 0.5}
+              spacing={compactDesktop ? 0 : (useNarrowFloatingHeader ? 0.35 : 0.5)}
               sx={{ minWidth: 0, maxWidth: 760, flex: 1 }}
             >
               <Typography

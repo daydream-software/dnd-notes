@@ -29,7 +29,7 @@ export const cardBorderColor = 'rgba(167, 139, 250, 0.2)' as const
 /** Softer purple-translucent border for nested / outlined surfaces. */
 export const cardBorderColorSubtle = 'rgba(167, 139, 250, 0.18)' as const
 /** Heavier purple-translucent border for hover / selected states. */
-export const cardBorderColorHover = 'rgba(167, 139, 250, 0.4)' as const
+export const cardBorderColorHover = 'rgba(167, 139, 250, 0.22)' as const
 
 /**
  * Spread-ready glass-card surface bundle. Use when an `sx`-styled element

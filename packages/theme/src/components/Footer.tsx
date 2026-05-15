@@ -119,7 +119,7 @@ function SignatureFooter({ version, githubUrl, privacyHref, termsHref }: Require
       <Separator />
       <Link href={termsHref} sx={linkSx}>Terms</Link>
       <Separator />
-      <Link href={githubUrl} target="_blank" rel="noopener" sx={linkSx} aria-label="GitHub repository">
+      <Link href={githubUrl} target="_blank" rel="noopener noreferrer" sx={linkSx} aria-label="GitHub repository">
         <GitHubMark width={13} height={13} />
         GitHub
       </Link>
@@ -189,7 +189,7 @@ function RichFooter({
           <Box component="span" sx={sectionLabelSx}>Product</Box>
           <Link href="/changelog" sx={linkSx}>Changelog</Link>
           <Link href="/status" sx={linkSx}>Status</Link>
-          <Link href={githubUrl} target="_blank" rel="noopener" sx={linkSx}>
+          <Link href={githubUrl} target="_blank" rel="noopener noreferrer" sx={linkSx}>
             <GitHubMark width={13} height={13} />
             GitHub
           </Link>
@@ -210,7 +210,7 @@ function RichFooter({
 
       <Box
         sx={{
-          borderTop: '1px solid rgba(167, 139, 250, 0.14)',
+          borderTop: '1px solid rgba(167, 139, 250, 0.18)',
           px: { xs: 3, md: 4 },
           py: 2,
           display: 'flex',

@@ -35,7 +35,7 @@ export const markdownSx = {
     wordBreak: 'break-word',
   },
   '& blockquote': {
-    borderLeft: '4px solid',
+    borderLeft: '1px solid',
     borderColor: cardBorderColor,
     color: 'text.secondary',
     m: 0,
