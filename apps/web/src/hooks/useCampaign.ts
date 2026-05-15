@@ -3,6 +3,7 @@ import {
   consolidateCampaignMemberships,
   createCampaign,
   createNote,
+  fetchCampaigns,
   updateCampaign,
 } from '../api'
 import {
@@ -160,6 +161,14 @@ export interface UseCampaignResult {
     selectedCampaignId: string,
     onLoadWorkspace: (token: string, campaignId: string, preferredNoteId: string | null, suppressError?: boolean) => Promise<boolean | 'stale'>,
     selectedNoteId: string | null,
+    onError: (message: string | null) => void,
+  ) => Promise<void>
+  loadCampaigns: (
+    sessionToken: string,
+    preferredCampaignId: string | null | undefined,
+    preferredNoteId: string | null | undefined,
+    onLoadWorkspace: (token: string, campaignId: string, preferredNoteId?: string | null) => Promise<boolean | 'stale'>,
+    onResetWorkspaceState: () => void,
     onError: (message: string | null) => void,
   ) => Promise<void>
 }
@@ -437,6 +446,44 @@ export function useCampaign(): UseCampaignResult {
     ],
   )
 
+  const loadCampaigns = useCallback(
+    async (
+      sessionToken: string,
+      preferredCampaignId: string | null | undefined,
+      preferredNoteId: string | null | undefined,
+      onLoadWorkspace: (token: string, campaignId: string, preferredNoteId?: string | null) => Promise<boolean | 'stale'>,
+      onResetWorkspaceState: () => void,
+      onError: (message: string | null) => void,
+    ): Promise<void> => {
+      const campaignsResponse = await fetchCampaigns(sessionToken)
+      setCampaigns(campaignsResponse.campaigns)
+
+      const storedCampaignId = localStorage.getItem(selectedCampaignStorageKey)
+      const candidateCampaignId =
+        preferredCampaignId ?? storedCampaignId ?? campaignsResponse.campaigns[0]?.id ?? null
+
+      const nextCampaign =
+        candidateCampaignId !== null
+          ? campaignsResponse.campaigns.find(
+              (campaign) => campaign.id === candidateCampaignId,
+            ) ?? campaignsResponse.campaigns[0] ?? null
+          : null
+
+      if (!nextCampaign) {
+        setSelectedCampaignId(null)
+        setMemberships([])
+        setCampaignDraft(createCampaignDraft())
+        setCampaignFormMode(campaignsResponse.campaigns.length === 0 ? 'create' : 'closed')
+        onResetWorkspaceState()
+        onError(null)
+        return
+      }
+
+      await onLoadWorkspace(sessionToken, nextCampaign.id, preferredNoteId)
+    },
+    [setCampaignDraft, setCampaignFormMode, setCampaigns, setMemberships, setSelectedCampaignId],
+  )
+
   return {
     campaigns,
     selectedCampaignId,
@@ -468,5 +515,6 @@ export function useCampaign(): UseCampaignResult {
     handleSaveCampaign,
     handlePreviewMembershipConsolidation,
     handleApplyMembershipConsolidation,
+    loadCampaigns,
   }
 }

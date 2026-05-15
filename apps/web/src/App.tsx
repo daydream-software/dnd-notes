@@ -1,13 +1,7 @@
 import {
   Alert,
   Box,
-  Button,
-  Card,
-  CardContent,
   Container,
-  Stack,
-  TextField,
-  Typography,
   useMediaQuery,
 } from '@mui/material'
 import { useTheme } from '@mui/material/styles'
@@ -18,42 +12,27 @@ import {
   useState,
 } from 'react'
 import {
-  claimSharedMembership,
-  fetchAuthConfig,
   fetchCampaignShareLinks,
   fetchCampaignMemberships,
-  fetchCampaigns,
-  fetchOwnerSession,
   fetchSessionNotes,
-  fetchSharedSession,
-  joinSharedCampaign,
-  loginOwner,
-  registerOwner,
 } from './api'
-import {
-  createRuntimeKeycloakClient,
-  isKeycloakAuthConfig,
-} from './keycloak-client'
+import { isKeycloakAuthConfig } from './keycloak-client'
 import { getNoteStarterTemplate } from './templates'
 import type {
-  CampaignMembership,
   CampaignShareLink,
   CampaignSummary,
-  GuestJoinInput,
   Note,
   NoteActivityEntry,
 } from './types'
 import CampaignDetailPage from './pages/CampaignDetailPage'
 import CampaignListPage from './pages/CampaignListPage'
+import JoinPage from './pages/JoinPage'
 import LoginPage from './pages/LoginPage'
 import { WorkspaceLoadingView } from './WorkspaceLoadingView'
 import { useShareLinks, createShareLinkDraft as createShareLinkDraftFn } from './hooks/useShareLinks'
 import {
   useSession,
   authTokenStorageKey,
-  missingKeycloakClientErrorMessage,
-  readStoredKeycloakTokens,
-  persistKeycloakTokens,
   clearStoredKeycloakTokens,
 } from './hooks/useSession'
 import {
@@ -65,12 +44,12 @@ import {
   blankNoteTemplateId,
   type MembershipConsolidationDraft,
 } from './hooks/useCampaign'
-
 import {
   useNotes,
   createEmptyDraft as createEmptyDraftFn,
   createDraftFromNote,
 } from './hooks/useNotes'
+import { useGuestSession } from './hooks/useGuestSession'
 
 type NarrowWorkspacePanel = 'browse' | 'editor'
 
@@ -108,6 +87,7 @@ function App() {
   )
   const isSharedMode = shareToken !== null
   const guestStorageKey = shareToken ? `${guestTokenStoragePrefix}${shareToken}` : null
+
   const {
     shareLinks,
     shareLinkDraft,
@@ -127,6 +107,7 @@ function App() {
     handleRevokeShareLink: handleRevokeShareLinkFromHook,
     handleCreateShareLink: handleCreateShareLinkFromHook,
   } = useShareLinks()
+
   const {
     authToken,
     owner,
@@ -141,16 +122,17 @@ function App() {
     keycloakClientRef,
     setAuthToken,
     setOwner,
-    setAuthConfig,
-    setIsAuthReady,
     setIsRegisterMode,
     setRegisterDraft,
     setLoginDraft,
     setIsLinkingAccount,
     setAccountNotice,
+    bootstrapAuth,
+    startKeycloakRefresh,
     handleSubmitAuth: handleSubmitAuthFromHook,
     handleLogout: handleLogoutFromHook,
   } = useSession()
+
   const {
     campaigns,
     selectedCampaignId,
@@ -180,11 +162,9 @@ function App() {
     handleOpenCampaignCreate: handleOpenCampaignCreateFromHook,
     handleOpenCampaignSettings: handleOpenCampaignSettingsFromHook,
     handleCancelCampaignForm: handleCancelCampaignFormFromHook,
+    loadCampaigns: loadCampaignsFromHook,
   } = useCampaign()
-  const [sharedCampaign, setSharedCampaign] = useState<CampaignSummary | null>(null)
-  const [shareLink, setShareLink] = useState<CampaignShareLink | null>(null)
-  const [sharedMembership, setSharedMembership] = useState<CampaignMembership | null>(null)
-  const [guestToken, setGuestToken] = useState<string | null>(null)
+
   const {
     overview,
     noteBrowseMode,
@@ -255,14 +235,184 @@ function App() {
     handleDeleteNote: handleDeleteNoteFromHook,
     handleQuickCapture: handleQuickCaptureFromHook,
   } = useNotes(isSharedMode)
-  const [isSharedReady, setIsSharedReady] = useState(!isSharedMode)
-  const [isJoining, setIsJoining] = useState(false)
-  const [joinDraft, setJoinDraft] = useState<GuestJoinInput>({ displayName: '' })
+
+  // Guest campaign state — kept in App so loadSharedWorkspace can reference it without circular deps
+  const [sharedCampaign, setSharedCampaign] = useState<CampaignSummary | null>(null)
+  const [shareLink, setShareLink] = useState<CampaignShareLink | null>(null)
+
   const [error, setError] = useState<string | null>(null)
   const [narrowWorkspacePanel, setNarrowWorkspacePanel] =
     useState<NarrowWorkspacePanel>('browse')
   const [wantsSplitNoteWorkspace, setWantsSplitNoteWorkspace] = useState(false)
   const showSplitNoteWorkspace = canSplitNoteWorkspace && wantsSplitNoteWorkspace
+
+  const clearSession = useCallback(() => {
+    localStorage.removeItem(authTokenStorageKey)
+    clearStoredKeycloakTokens()
+    localStorage.removeItem(selectedCampaignStorageKey)
+    keycloakClientRef.current?.clear()
+    keycloakClientRef.current = null
+    resetSessionBrowserState()
+    resetActivityState()
+    setAuthToken(null)
+    setOwner(null)
+    setCampaigns([])
+    setSelectedCampaignId(null)
+    setMemberships([])
+    setShareLinks([])
+    setOverview(null)
+    setNotes([])
+    setNoteBrowseMode('notes')
+    setNarrowWorkspacePanel('browse')
+    setSessionSummaries([])
+    setQuickCaptureTitle('')
+    setSelectedNoteId(null)
+    setDraft(createEmptyDraftFn())
+    setCampaignDraft(createCampaignDraft())
+    setShareLinkDraft(createShareLinkDraftFn())
+    setMembershipConsolidationDraft(createMembershipConsolidationDraft())
+    setCampaignFormMode('closed')
+    setSelectedCampaignTemplateId(blankCampaignTemplateId)
+    setSelectedNoteTemplateId(blankNoteTemplateId)
+    resetShareLinkInteractionState()
+    resetMembershipConsolidationState()
+  }, [
+    resetActivityState,
+    resetMembershipConsolidationState,
+    resetSessionBrowserState,
+    resetShareLinkInteractionState,
+  ])
+
+  const loadWorkspace = useCallback(
+    async (
+      sessionToken: string,
+      campaignId: string,
+      preferredNoteId?: string | null,
+      suppressError = false,
+    ): Promise<boolean | 'stale'> => {
+      const ok = await loadWorkspaceFromHook(
+        sessionToken,
+        campaignId,
+        preferredNoteId,
+        suppressError,
+        (id) => setSelectedCampaignId(id),
+        (campaign) => setCampaignDraft(createCampaignDraft(campaign)),
+        (message) => setError(message),
+      )
+      if (ok === true) {
+        localStorage.setItem(selectedCampaignStorageKey, campaignId)
+        setError(null)
+      }
+      return ok
+    },
+    [loadWorkspaceFromHook, setCampaignDraft, setSelectedCampaignId],
+  )
+
+  const loadSharedWorkspace = useCallback(
+    async (
+      activeGuestToken: string,
+      preferredNoteId?: string | null,
+      accessLevel?: CampaignShareLink['accessLevel'],
+    ): Promise<boolean | 'stale'> => {
+      const ok = await loadSharedWorkspaceFromHook(
+        shareToken as string,
+        activeGuestToken,
+        preferredNoteId,
+        accessLevel,
+        shareLink,
+        (campaign) => {
+          setSharedCampaign(campaign)
+          setSelectedCampaignId(campaign.id)
+          setCampaigns([campaign])
+        },
+        (message) => setError(message),
+      )
+      if (ok === true) {
+        setError(null)
+      }
+      return ok
+    },
+    [loadSharedWorkspaceFromHook, setCampaigns, setSelectedCampaignId, shareLink, shareToken],
+  )
+
+  const loadCampaigns = useCallback(
+    async (
+      sessionToken: string,
+      preferredCampaignId?: string | null,
+      preferredNoteId?: string | null,
+    ) => {
+      await loadCampaignsFromHook(
+        sessionToken,
+        preferredCampaignId,
+        preferredNoteId,
+        loadWorkspace,
+        () => {
+          setOverview(null)
+          setNotes([])
+          setSessionSummaries([])
+          resetSessionBrowserState()
+          resetActivityState()
+          setQuickCaptureTitle('')
+          setSelectedNoteId(null)
+          setShareLinks([])
+        },
+        (message) => setError(message),
+      )
+    },
+    [
+      loadCampaignsFromHook,
+      loadWorkspace,
+      resetActivityState,
+      resetSessionBrowserState,
+      setNotes,
+      setOverview,
+      setQuickCaptureTitle,
+      setSelectedNoteId,
+      setSessionSummaries,
+      setShareLinks,
+    ],
+  )
+
+  const {
+    sharedMembership,
+    guestToken,
+    isSharedReady,
+    isJoining,
+    joinDraft,
+    setJoinDraft,
+    handleJoinSharedCampaign,
+    handleLinkSharedMembership,
+  } = useGuestSession({
+    shareToken,
+    guestStorageKey,
+    isSharedMode,
+    setSharedCampaign,
+    setShareLink,
+    authToken,
+    authConfig,
+    owner,
+    isRegisterMode,
+    registerDraft,
+    loginDraft,
+    keycloakClientRef,
+    setRegisterDraft,
+    setAccountNotice,
+    setIsLinkingAccount,
+    setSelectedCampaignId,
+    setCampaigns,
+    setNoteBrowseMode,
+    setSelectedSessionName,
+    setSelectedActivityMembershipId,
+    setOverview,
+    setNotes,
+    setSelectedNoteId,
+    setIsCreating,
+    setDraft,
+    loadSharedWorkspace,
+    setError,
+    createEmptyDraft: createEmptyDraftFn,
+  })
+
   const isBootstrapping = !isAuthReady || !isSharedReady
 
   const selectedCampaign = useMemo(
@@ -379,334 +529,28 @@ function App() {
       }`
     : ''
 
+  // Clear stale tag filter when the active tag is removed from a campaign's notes
   useEffect(() => {
-    if (
-      selectedTagFilter &&
-      !tagFacets.some((tagFacet) => tagFacet.tag === selectedTagFilter)
-    ) {
+    if (selectedTagFilter && !tagFacets.some((tagFacet) => tagFacet.tag === selectedTagFilter)) {
       setSelectedTagFilter(null)
     }
-  }, [selectedTagFilter, tagFacets])
+  }, [selectedTagFilter, tagFacets, setSelectedTagFilter])
 
-  const clearSession = useCallback(() => {
-    localStorage.removeItem(authTokenStorageKey)
-    clearStoredKeycloakTokens()
-    localStorage.removeItem(selectedCampaignStorageKey)
-    keycloakClientRef.current?.clear()
-    keycloakClientRef.current = null
-    resetSessionBrowserState()
-    resetActivityState()
-    setAuthToken(null)
-    setOwner(null)
-    setCampaigns([])
-    setSelectedCampaignId(null)
-    setMemberships([])
-    setShareLinks([])
-    setOverview(null)
-    setNotes([])
-    setNoteBrowseMode('notes')
-    setNarrowWorkspacePanel('browse')
-    setSessionSummaries([])
-    setQuickCaptureTitle('')
-    setSelectedNoteId(null)
-    setDraft(createEmptyDraftFn())
-    setCampaignDraft(createCampaignDraft())
-    setShareLinkDraft(createShareLinkDraftFn())
-    setMembershipConsolidationDraft(createMembershipConsolidationDraft())
-    setCampaignFormMode('closed')
-    setSelectedCampaignTemplateId(blankCampaignTemplateId)
-    setSelectedNoteTemplateId(blankNoteTemplateId)
-    resetShareLinkInteractionState()
-    resetMembershipConsolidationState()
-  }, [
-    resetActivityState,
-    resetMembershipConsolidationState,
-    resetSessionBrowserState,
-    resetShareLinkInteractionState,
-  ])
-
-  const loadWorkspace = useCallback(
-    async (
-      sessionToken: string,
-      campaignId: string,
-      preferredNoteId?: string | null,
-      suppressError = false,
-    ): Promise<boolean | 'stale'> => {
-      const ok = await loadWorkspaceFromHook(
-        sessionToken,
-        campaignId,
-        preferredNoteId,
-        suppressError,
-        (id) => setSelectedCampaignId(id),
-        (campaign) => setCampaignDraft(createCampaignDraft(campaign)),
-        (message) => setError(message),
-      )
-      if (ok === true) {
-        localStorage.setItem(selectedCampaignStorageKey, campaignId)
-        setError(null)
-      }
-      return ok
-    },
-    [loadWorkspaceFromHook, setCampaignDraft, setSelectedCampaignId],
-  )
-
-  const loadSharedWorkspace = useCallback(
-    async (
-      activeGuestToken: string,
-      preferredNoteId?: string | null,
-      accessLevel?: CampaignShareLink['accessLevel'],
-    ): Promise<boolean | 'stale'> => {
-      const ok = await loadSharedWorkspaceFromHook(
-        shareToken as string,
-        activeGuestToken,
-        preferredNoteId,
-        accessLevel,
-        shareLink,
-        (campaign) => {
-          setSharedCampaign(campaign)
-          setSelectedCampaignId(campaign.id)
-          setCampaigns([campaign])
-        },
-        (message) => setError(message),
-      )
-      if (ok === true) {
-        setError(null)
-      }
-      return ok
-    },
-    [loadSharedWorkspaceFromHook, setCampaigns, setSelectedCampaignId, shareLink, shareToken],
-  )
-
-  const loadCampaigns = useCallback(
-    async (
-      sessionToken: string,
-      preferredCampaignId?: string | null,
-      preferredNoteId?: string | null,
-    ) => {
-      const campaignsResponse = await fetchCampaigns(sessionToken)
-      setCampaigns(campaignsResponse.campaigns)
-
-      const storedCampaignId = localStorage.getItem(selectedCampaignStorageKey)
-      const candidateCampaignId =
-        preferredCampaignId ?? storedCampaignId ?? campaignsResponse.campaigns[0]?.id ?? null
-
-      const nextCampaign =
-        candidateCampaignId !== null
-          ? campaignsResponse.campaigns.find(
-              (campaign) => campaign.id === candidateCampaignId,
-            ) ?? campaignsResponse.campaigns[0] ?? null
-          : null
-
-      if (!nextCampaign) {
-        setSelectedCampaignId(null)
-        setOverview(null)
-        setNotes([])
-        setSessionSummaries([])
-        resetSessionBrowserState()
-        resetActivityState()
-        setQuickCaptureTitle('')
-        setSelectedNoteId(null)
-        setMemberships([])
-        setShareLinks([])
-        setCampaignDraft(createCampaignDraft())
-        setCampaignFormMode(campaignsResponse.campaigns.length === 0 ? 'create' : 'closed')
-        setError(null)
-        return
-      }
-
-      await loadWorkspace(sessionToken, nextCampaign.id, preferredNoteId)
-    },
-    [loadWorkspace, resetActivityState, resetSessionBrowserState],
-  )
-
+  // Bootstrap auth — runs once on mount
   useEffect(() => {
     let cancelled = false
-
-    const bootstrapAuth = async () => {
-      try {
-        const nextAuthConfig = await fetchAuthConfig()
-
-        if (cancelled) {
-          return
-        }
-
-        setAuthConfig(nextAuthConfig)
-
-        if (isKeycloakAuthConfig(nextAuthConfig)) {
-          const keycloakClient = createRuntimeKeycloakClient(nextAuthConfig.keycloak)
-          keycloakClientRef.current = keycloakClient
-          const tokens = await keycloakClient.init(readStoredKeycloakTokens())
-
-          if (cancelled) {
-            return
-          }
-
-          if (!tokens) {
-            clearStoredKeycloakTokens()
-            localStorage.removeItem(authTokenStorageKey)
-            setAuthToken(null)
-            setOwner(null)
-            return
-          }
-
-          persistKeycloakTokens(tokens)
-          const session = await fetchOwnerSession(tokens.accessToken)
-
-          if (cancelled) {
-            return
-          }
-
-          setAuthToken(tokens.accessToken)
-          setOwner(session.owner)
-
-          if (!isSharedMode) {
-            await loadCampaigns(tokens.accessToken)
-          }
-
-          return
-        }
-
-        const storedToken = localStorage.getItem(authTokenStorageKey)
-
-        if (!storedToken) {
-          setAuthToken(null)
-          setOwner(null)
-          return
-        }
-
-        const session = await fetchOwnerSession(storedToken)
-
-        if (cancelled) {
-          return
-        }
-
-        setAuthToken(storedToken)
-        setOwner(session.owner)
-
-        if (!isSharedMode) {
-          await loadCampaigns(storedToken)
-        }
-      } catch (bootstrapError) {
-        if (!cancelled) {
-          clearSession()
-          console.error(bootstrapError)
-          setError('Could not initialize your session. Reload and try again.')
-        }
-      } finally {
-        if (!cancelled) {
-          setIsAuthReady(true)
-        }
-      }
-    }
-
-    void bootstrapAuth()
-
+    void bootstrapAuth(isSharedMode, () => cancelled, loadCampaigns, clearSession, (message) => setError(message))
     return () => {
       cancelled = true
     }
-  }, [clearSession, isSharedMode, loadCampaigns])
+  }, [bootstrapAuth, clearSession, isSharedMode, loadCampaigns])
 
+  // Keycloak token refresh — runs whenever auth token or config changes
   useEffect(() => {
-    if (!isKeycloakAuthConfig(authConfig) || !authToken || !keycloakClientRef.current) {
-      return
-    }
+    return startKeycloakRefresh(clearSession, (message) => setError(message))
+  }, [authConfig, authToken, clearSession, startKeycloakRefresh])
 
-    let cancelled = false
-    const refreshInterval = window.setInterval(() => {
-      void keycloakClientRef.current
-        ?.refresh(30)
-        .then((tokens) => {
-          if (cancelled) {
-            return
-          }
-
-          persistKeycloakTokens(tokens)
-          setAuthToken(tokens.accessToken)
-        })
-        .catch((refreshError) => {
-          if (cancelled) {
-            return
-          }
-
-          clearSession()
-          console.error(refreshError)
-          setError('Your session expired. Sign in again.')
-        })
-    }, 15_000)
-
-    return () => {
-      cancelled = true
-      window.clearInterval(refreshInterval)
-    }
-  }, [authConfig, authToken, clearSession])
-
-  useEffect(() => {
-    if (!isSharedMode || !shareToken || !guestStorageKey) {
-      return
-    }
-
-    let cancelled = false
-
-    const bootstrapSharedSession = async () => {
-      const storedGuestToken = localStorage.getItem(guestStorageKey)
-
-      try {
-        const session = await fetchSharedSession(shareToken, storedGuestToken)
-
-        if (cancelled) {
-          return
-        }
-
-        setSharedCampaign(session.campaign)
-        setShareLink(session.shareLink)
-        setSharedMembership(session.membership)
-        setSelectedCampaignId(session.campaign.id)
-        setCampaigns([session.campaign])
-        setError(null)
-
-        if (session.membership && storedGuestToken) {
-          setGuestToken(storedGuestToken)
-          setRegisterDraft((currentDraft) =>
-            currentDraft.displayName.trim().length > 0
-              ? currentDraft
-              : {
-                  ...currentDraft,
-                  displayName: session.membership?.displayName ?? '',
-                },
-          )
-          await loadSharedWorkspace(storedGuestToken, undefined, session.shareLink.accessLevel)
-        } else {
-          localStorage.removeItem(guestStorageKey)
-          setGuestToken(null)
-          setOverview(null)
-          setNotes([])
-          setSelectedNoteId(null)
-          setIsCreating(false)
-          setDraft(createEmptyDraftFn())
-          setAccountNotice(null)
-        }
-      } catch (sessionError) {
-        if (!cancelled) {
-          setError(
-            sessionError instanceof Error
-              ? sessionError.message
-              : 'Could not load the shared campaign.',
-          )
-        }
-      } finally {
-        if (!cancelled) {
-          setIsSharedReady(true)
-        }
-      }
-    }
-
-    void bootstrapSharedSession()
-
-    return () => {
-      cancelled = true
-    }
-  }, [guestStorageKey, isSharedMode, loadSharedWorkspace, shareToken])
-
+  // Memberships + share links — fetch when campaign settings are open
   useEffect(() => {
     if (isSharedMode) {
       return
@@ -762,6 +606,8 @@ function App() {
     resetMembershipConsolidationState,
     resetShareLinkInteractionState,
     selectedCampaignId,
+    setMemberships,
+    setShareLinks,
   ])
 
   const handleSelectNote = (note: Note) => {
@@ -961,118 +807,6 @@ function App() {
       isSharedMode ? () => setNarrowWorkspacePanel('editor') : undefined,
       (message) => setError(message),
     )
-  }
-
-  const handleJoinSharedCampaign = async () => {
-    if (!shareToken || !guestStorageKey) {
-      return
-    }
-
-    setError(null)
-    setAccountNotice(null)
-    setIsJoining(true)
-
-    try {
-      const response = await joinSharedCampaign(shareToken, joinDraft)
-
-      localStorage.setItem(guestStorageKey, response.guestToken)
-      setGuestToken(response.guestToken)
-      setSharedCampaign(response.campaign)
-      setShareLink(response.shareLink)
-      setSharedMembership(response.membership)
-      setSelectedCampaignId(response.campaign.id)
-      setCampaigns([response.campaign])
-      setNoteBrowseMode('notes')
-      setSelectedSessionName(null)
-      setSelectedActivityMembershipId(null)
-      setRegisterDraft((currentDraft) =>
-        currentDraft.displayName.trim().length > 0
-          ? currentDraft
-          : {
-              ...currentDraft,
-              displayName: response.membership.displayName,
-            },
-      )
-      await loadSharedWorkspace(response.guestToken, undefined, response.shareLink.accessLevel)
-    } catch (joinError) {
-      setError(
-        joinError instanceof Error ? joinError.message : 'Could not join the shared campaign.',
-      )
-    } finally {
-      setIsJoining(false)
-    }
-  }
-
-  const handleLinkSharedMembership = async () => {
-    if (!shareToken || !guestToken || !sharedMembership || !guestStorageKey) {
-      return
-    }
-
-    setError(null)
-    setAccountNotice(null)
-    setIsLinkingAccount(true)
-
-    try {
-      if (isKeycloakAuthConfig(authConfig)) {
-        if (!authToken) {
-          const keycloakClient = keycloakClientRef.current
-
-          if (!keycloakClient) {
-            throw new Error(missingKeycloakClientErrorMessage)
-          }
-
-          await keycloakClient.login(window.location.href)
-          return
-        }
-
-        const claimedMembership = await claimSharedMembership(
-          shareToken,
-          authToken,
-          guestToken,
-        )
-
-        if (claimedMembership.guestToken) {
-          localStorage.setItem(guestStorageKey, claimedMembership.guestToken)
-          setGuestToken(claimedMembership.guestToken)
-        }
-
-        localStorage.setItem(selectedCampaignStorageKey, claimedMembership.membership.campaignId)
-        setSharedMembership(claimedMembership.membership)
-        setAccountNotice(
-          owner ? `Linked to ${owner.displayName}.` : 'Linked this guest membership.',
-        )
-        return
-      }
-
-      const session = isRegisterMode
-        ? await registerOwner(registerDraft)
-        : await loginOwner(loginDraft)
-
-      localStorage.setItem(authTokenStorageKey, session.token)
-
-      const claimedMembership = await claimSharedMembership(shareToken, session.token, guestToken)
-
-      if (claimedMembership.guestToken) {
-        localStorage.setItem(guestStorageKey, claimedMembership.guestToken)
-        setGuestToken(claimedMembership.guestToken)
-      }
-
-      localStorage.setItem(selectedCampaignStorageKey, claimedMembership.membership.campaignId)
-      setSharedMembership(claimedMembership.membership)
-      setAccountNotice(
-        isRegisterMode
-          ? `Account created and linked to ${session.owner.displayName}.`
-          : `Linked to ${session.owner.displayName}.`,
-      )
-    } catch (linkError) {
-      setError(
-        linkError instanceof Error
-          ? linkError.message
-          : 'Could not link this guest membership to a real account.',
-      )
-    } finally {
-      setIsLinkingAccount(false)
-    }
   }
 
   const handleSelectNoteTemplate = (templateId: string) => {
@@ -1290,49 +1024,14 @@ function App() {
 
   if (isSharedMode && !sharedMembership) {
     return (
-      <Box component="main" sx={{ minHeight: '100vh', display: 'grid', placeItems: 'center', p: 3 }}>
-        <Container maxWidth="sm">
-          <Stack spacing={3}>
-            <Card sx={{ borderRadius: heroCardRadius }}>
-              <CardContent sx={{ p: { xs: 3, md: 4 } }}>
-                <Stack spacing={3}>
-                  <Box>
-                    <Typography
-                      variant="overline"
-                      sx={{ color: 'text.secondary', letterSpacing: '0.18em' }}
-                    >
-                      Shared campaign access
-                    </Typography>
-                    <Typography variant="h3" sx={{ mt: 1 }}>
-                      Join {sharedCampaign?.name}
-                    </Typography>
-                    <Typography color="text.secondary" sx={{ mt: 2 }}>
-                      Pick the name you want this campaign to use for you. You can return with
-                      the same shared link and keep this guest identity.
-                    </Typography>
-                  </Box>
-
-                  {error ? (
-                    <Alert severity="error" sx={{ borderRadius: surfaceRadius }}>
-                      {error}
-                    </Alert>
-                  ) : null}
-
-                  <TextField
-                    label="Display name"
-                    value={joinDraft.displayName}
-                    onChange={(event) => setJoinDraft({ displayName: event.target.value })}
-                  />
-
-                  <Button variant="contained" onClick={handleJoinSharedCampaign} disabled={isJoining} sx={{ alignSelf: 'flex-start' }}>
-                    {isJoining ? 'Joining campaign…' : 'Join campaign'}
-                  </Button>
-                </Stack>
-              </CardContent>
-            </Card>
-          </Stack>
-        </Container>
-      </Box>
+      <JoinPage
+        campaignName={sharedCampaign?.name}
+        joinDraft={joinDraft}
+        isJoining={isJoining}
+        error={error}
+        onJoinDraftChange={setJoinDraft}
+        onJoin={() => void handleJoinSharedCampaign()}
+      />
     )
   }
 
