@@ -7872,3 +7872,41 @@ Coordinator took over inside the same worktree and successfully wrote the same f
 
 **Related PRs:** #263 (vitest), #271 (eslint), #276 (types), #279 (commitlint), #272 (@types/node ignore).
 
+---
+
+### 2026-05-15: Refactor slice strategy — pre-existing violations go to follow-up issue (User/Stef/Mikey)
+
+**Context:** Slice 6 of #146 (CampaignDetailPage extraction, PR #283). CodeRabbit flagged two Major design-system violations in `CampaignDetailPage.tsx`: missing glass treatment on `<Card>` surfaces and non-standard border color tokens (`'divider'` / `'primary.main'` instead of `rgba(167, 139, 250, 0.18-0.22)`).
+
+**Finding:** Both violations pre-existed in `main:App.tsx` before extraction. The refactor only moved them — no new violations introduced.
+
+**Decision:** Do not expand the refactor PR to fix pre-existing violations. Track them in a dedicated follow-up issue (#284: "chore(web): fix design-system violations in CampaignDetailPage"). Justification: keeps the slice mechanical and revertible; the PR diff stays a pure file move with no visual/behavior change.
+
+**Pattern:** When CodeRabbit flags code in a refactor PR that pre-existed verbatim in the source file, verify at original line ranges, then route to a follow-up issue. Reply to CodeRabbit with justification + tracking-issue link.
+
+**Related PRs/issues:** #283 (slice 6 extraction), #284 (follow-up design-system fix).
+
+---
+
+### 2026-05-15: @coderabbitai resolve accelerates re-evaluation (User)
+
+**Context:** PR #283 had CHANGES_REQUESTED from CodeRabbit over pre-existing design-system violations that the refactor moved but did not introduce.
+
+**Decision:** After replying with justification (pre-existing code, tracking issue opened) and pinging `@coderabbitai resolve`, CodeRabbit re-evaluated and lifted CHANGES_REQUESTED to APPROVED within minutes.
+
+**Lesson:** `@coderabbitai resolve` (not `full review`) is the correct nudge after a substantive justification reply. The combination — explanation + tracking-issue link + resolve ping — is the fastest path to lifting a disputed review.
+
+**Related:** decisions entry for CodeRabbit retrigger syntax (`@coderabbitai full review` vs `resolve`).
+
+---
+
+### 2026-05-15: #146 slice 6 done — App.tsx at 1535 lines, slice 7 remaining (Stef/Mikey)
+
+**Context:** PR #283 merged. App.tsx went from 2927 → 1535 lines after CampaignDetailPage extraction.
+
+**Status:** 6 of 7 slices of #146 complete.
+
+**Remaining:** Slice 7 — composition pass. Acceptance criteria: App.tsx < 300 lines. At 1535 lines, ~1235 lines remain to route. Mikey notes that the 124-prop signature on CampaignDetailPage is the upper bound of a single page boundary; sub-decomposition into `NotesWorkspacePane` / `CampaignAdminPane` / `ShareLinksPane` along comment-grouped section seams is the recommended approach for slice 7.
+
+**Related PRs/issues:** #283 (slice 6), #146 (parent issue).
+
