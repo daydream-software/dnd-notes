@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Footer signature + shrinking header (full)</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<style>
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--page-bg);
+    background-attachment: fixed;
+    font-family: var(--font-sans);
+    color: var(--fg-1);
+    line-height: 1.55;
+  }
+
+  /* ============================================================
+     Sticky header — wraps BOTH the brand pill (left) and the
+     campaign card (right). Everything stays accessible at all
+     times; the only thing that changes on scroll is density.
+     ============================================================ */
+  .app-header {
+    position: sticky;
+    top: 12px;
+    z-index: 10;
+    margin: 12px auto 0;
+    padding: 0 18px;
+    max-width: 1240px;
+    display: flex;
+    align-items: stretch;
+    justify-content: space-between;
+    gap: 16px;
+    pointer-events: none;
+  }
+  .app-header > * { pointer-events: auto; }
+
+  /* ----- Brand pill (left) ----- */
+  .brand-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 18px;
+    flex-shrink: 0;
+    background: var(--bg-paper-soft);
+    border: 1px solid var(--brand-line);
+    border-radius: var(--radius-pill);
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    box-shadow: var(--shadow-sm);
+    color: var(--fg-2);
+    transition:
+      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      gap 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .brand-pill__mark { color: var(--brand-500); flex-shrink: 0; }
+  .brand-pill__text {
+    font-size: 12px; font-weight: 500;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    white-space: nowrap;
+    overflow: hidden;
+    max-width: 200px;
+    transition: max-width 280ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 200ms ease,
+                margin 280ms ease;
+  }
+
+  /* ----- Campaign card (right) ----- */
+  .campaign-card {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg-paper-strong);
+    border: 1px solid var(--brand-line);
+    border-radius: var(--radius-xl);
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    box-shadow: var(--shadow-sm);
+    padding: 16px 18px;
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto auto;
+    gap: 4px 18px;
+    align-items: center;
+    transition:
+      padding 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      grid-template-rows 280ms cubic-bezier(0.4, 0, 0.2, 1),
+      border-radius 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .campaign-card__title {
+    grid-row: 1; grid-column: 1;
+    font-size: 1.45rem;       /* h5-ish, scales down on scroll */
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0;
+    color: var(--fg-1);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: font-size 280ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .campaign-card__subtitle {
+    grid-row: 2; grid-column: 1;
+    font-size: 12.5px;
+    color: var(--fg-3);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-height: 24px;
+    transition: max-height 280ms cubic-bezier(0.4, 0, 0.2, 1),
+                opacity 200ms ease,
+                margin 200ms ease;
+  }
+  .campaign-card__controls {
+    grid-row: 1 / span 2; grid-column: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+  .campaign-card__select {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--bg-paper-soft);
+    border: 1px solid var(--brand-line-soft);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    color: var(--fg-2);
+    cursor: pointer;
+    transition: padding 280ms ease, font-size 280ms ease, max-width 280ms ease;
+    max-width: 220px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .campaign-card__select .caret { color: var(--fg-muted); font-size: 11px; }
+  .campaign-card__select .eyebrow {
+    color: var(--fg-muted); font-size: 10px;
+    letter-spacing: 0.08em; text-transform: uppercase;
+    transition: opacity 200ms ease, max-width 280ms ease;
+    overflow: hidden;
+    max-width: 80px;
+  }
+  .campaign-card__actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  .icon-btn {
+    width: 36px; height: 36px;
+    display: inline-grid; place-items: center;
+    border: 0; background: transparent;
+    color: var(--fg-2);
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: background 160ms ease, color 160ms ease;
+  }
+  .icon-btn:hover { background: var(--action-hover); color: var(--brand-500); }
+  .icon-btn.amber { color: var(--warn); }
+  .icon-btn.amber:hover { color: var(--warn); background: var(--warn-soft); }
+  .icon-btn svg { width: 18px; height: 18px; }
+
+  /* ----- Scrolled state: condense, don't drop anything ----- */
+  body[data-scrolled="true"] .brand-pill { padding: 8px 12px; gap: 0; }
+  body[data-scrolled="true"] .brand-pill__text {
+    max-width: 0;
+    opacity: 0;
+    margin-left: -4px;
+  }
+  body[data-scrolled="true"] .campaign-card {
+    padding: 8px 14px;
+    border-radius: var(--radius-pill);
+    grid-template-rows: auto 0;
+  }
+  body[data-scrolled="true"] .campaign-card__title {
+    font-size: 1rem;
+  }
+  body[data-scrolled="true"] .campaign-card__subtitle {
+    max-height: 0;
+    opacity: 0;
+    margin: 0;
+  }
+  body[data-scrolled="true"] .campaign-card__select {
+    padding: 6px 12px; font-size: 12.5px;
+    max-width: 180px;
+  }
+  body[data-scrolled="true"] .campaign-card__select .eyebrow {
+    max-width: 0;
+    opacity: 0;
+  }
+  body[data-scrolled="true"] .icon-btn { width: 32px; height: 32px; }
+  body[data-scrolled="true"] .icon-btn svg { width: 16px; height: 16px; }
+
+  /* ============================================================
+     Page filler (represents workspace below header)
+     ============================================================ */
+  main {
+    max-width: 1240px;
+    margin: 32px auto 0;
+    padding: 0 24px 96px;
+  }
+  .scroll-hint {
+    text-align: center;
+    color: var(--fg-muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 24px 0;
+    letter-spacing: 0.02em;
+  }
+  .panel {
+    background: var(--bg-paper);
+    border: 1px solid var(--brand-line-soft);
+    border-radius: var(--radius-xl);
+    padding: 28px 32px;
+    margin-bottom: 18px;
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+  }
+  .panel h2 {
+    margin: 0 0 6px;
+    font-size: var(--fs-h6);
+    letter-spacing: -0.01em;
+  }
+  .panel p {
+    margin: 0;
+    color: var(--fg-muted);
+    font-size: var(--fs-body-sm);
+  }
+  .panel--tall { min-height: 280px; }
+
+  /* ============================================================
+     Footer signature (option 1)
+     ============================================================ */
+  footer.signature {
+    margin: 64px auto 24px;
+    max-width: 1240px;
+    padding: 18px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    background: var(--bg-paper-soft);
+    border: 1px solid var(--brand-line-faint);
+    border-radius: var(--radius-pill);
+    backdrop-filter: var(--blur-sm);
+    -webkit-backdrop-filter: var(--blur-sm);
+    color: var(--fg-2);
+    font-size: 12px;
+    letter-spacing: 0.04em;
+  }
+  footer.signature .brand-lockup {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--brand-500);
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  footer.signature .brand-lockup .product { color: var(--fg-2); }
+  footer.signature .sep { color: var(--fg-disabled); }
+  footer.signature a {
+    color: var(--fg-2);
+    text-decoration: none;
+    transition: color 160ms ease;
+    letter-spacing: 0.02em;
+  }
+  footer.signature a:hover { color: var(--brand-500); }
+  footer.signature .version {
+    font-family: var(--font-mono);
+    color: var(--fg-muted);
+    font-size: 11px;
+    letter-spacing: 0;
+  }
+  footer.signature .copy {
+    color: var(--fg-muted);
+    font-size: 11px;
+    letter-spacing: 0;
+  }
+
+  @media (max-width: 960px) {
+    .app-header { flex-direction: column; gap: 10px; }
+    .campaign-card { width: 100%; }
+    .brand-pill { align-self: center; }
+  }
+  @media (max-width: 720px) {
+    footer.signature {
+      flex-direction: column;
+      gap: 10px;
+      border-radius: var(--radius-xl);
+      padding: 18px 22px;
+      text-align: center;
+    }
+    footer.signature .sep { display: none; }
+    .campaign-card__subtitle { white-space: normal; max-height: 60px; }
+  }
+
+  .doc-note {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 14px 24px;
+    color: var(--fg-muted);
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    line-height: 1.6;
+  }
+  .doc-note strong {
+    color: var(--brand-500); font-family: var(--font-sans);
+    letter-spacing: 0.08em; text-transform: uppercase;
+    font-size: 10px; font-weight: 600; display: block; margin-bottom: 4px;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== SVG library (marks + MUI Rounded action icons) ============== -->
+<svg width="0" height="0" style="position: absolute" aria-hidden="true">
+  <defs>
+    <symbol id="dd-mark" viewBox="0 0 64 64">
+      <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <circle cx="32" cy="32" r="14"/>
+        <line x1="32" y1="6"  x2="32" y2="11"/>
+        <line x1="32" y1="53" x2="32" y2="58"/>
+        <line x1="6"  y1="32" x2="11" y2="32"/>
+        <line x1="53" y1="32" x2="58" y2="32"/>
+        <line x1="14.2" y1="14.2" x2="17.7" y2="17.7"/>
+        <line x1="46.3" y1="46.3" x2="49.8" y2="49.8"/>
+        <line x1="14.2" y1="49.8" x2="17.7" y2="46.3"/>
+        <line x1="46.3" y1="17.7" x2="49.8" y2="14.2"/>
+      </g>
+      <path d="M 32 23 A 9 9 0 0 1 32 41 A 4.5 9 0 0 0 32 23 Z"
+            fill="currentColor" fill-opacity="0.95"
+            stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/>
+    </symbol>
+    <symbol id="notes-mark" viewBox="0 0 64 64">
+      <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <path d="M 23 58 H 49 A 4 4 0 0 0 53 54 V 44 A 4 4 0 0 0 49 40 H 23 A 4 4 0 0 0 19 44 V 54 A 4 4 0 0 0 23 58 Z"/>
+        <line x1="22" y1="48" x2="50" y2="48" stroke-opacity="0.55"/>
+        <path d="M 28 40 V 36 A 2 2 0 0 1 30 34 H 42 A 2 2 0 0 1 44 36 V 40"/>
+        <path d="M 30 34 V 31 H 42 V 34"/>
+      </g>
+      <g stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" fill="none">
+        <line x1="9" y1="9" x2="32" y2="32"/>
+        <path d="M 10 8 C 24 10, 32 18, 32 32 C 22 32, 14 24, 9 9 Z" fill="currentColor" fill-opacity="0.18"/>
+        <line x1="14" y1="14" x2="18.5" y2="18"   stroke-width="2"/>
+        <line x1="18" y1="18" x2="23"   y2="22"   stroke-width="2"/>
+        <line x1="22" y1="22" x2="27"   y2="26.5" stroke-width="2"/>
+      </g>
+    </symbol>
+
+    <!-- MUI Rounded icons (re-traced) -->
+    <symbol id="ic-plus-circle" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2m4 11h-3v3a1 1 0 0 1-2 0v-3H8a1 1 0 0 1 0-2h3V8a1 1 0 0 1 2 0v3h3a1 1 0 0 1 0 2"/>
+    </symbol>
+    <symbol id="ic-settings" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M19.5 12a1 1 0 0 0 .75-1.65l-1.6-1.9.6-2.4a1 1 0 0 0-.92-1.24l-2.46-.1-1.42-2a1 1 0 0 0-1.5-.2L11 3.84 8.85 2.51a1 1 0 0 0-1.5.2l-1.42 2-2.46.1a1 1 0 0 0-.92 1.24l.6 2.4-1.6 1.9a1 1 0 0 0 0 1.3l1.6 1.9-.6 2.4a1 1 0 0 0 .92 1.24l2.46.1 1.42 2a1 1 0 0 0 1.5.2L11 20.16l2.15 1.33a1 1 0 0 0 1.5-.2l1.42-2 2.46-.1a1 1 0 0 0 .92-1.24l-.6-2.4 1.6-1.9A1 1 0 0 0 19.5 12M11 16a4 4 0 1 1 4-4 4 4 0 0 1-4 4"/>
+    </symbol>
+    <symbol id="ic-plus" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M19 13h-6v6a1 1 0 0 1-2 0v-6H5a1 1 0 0 1 0-2h6V5a1 1 0 0 1 2 0v6h6a1 1 0 0 1 0 2"/>
+    </symbol>
+    <symbol id="ic-logout" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M10.09 15.59 11.5 17l5-5-5-5-1.41 1.41L12.67 11H3v2h9.67M19 3H5a2 2 0 0 0-2 2v4h2V5h14v14H5v-4H3v4a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2"/>
+    </symbol>
+    <symbol id="ic-github" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.1.79-.25.79-.56v-1.95c-3.2.7-3.87-1.54-3.87-1.54-.52-1.33-1.27-1.69-1.27-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.25 3.34.96.1-.74.4-1.25.73-1.54-2.55-.29-5.24-1.27-5.24-5.66 0-1.25.45-2.27 1.18-3.07-.12-.29-.51-1.46.11-3.04 0 0 .96-.31 3.15 1.17a10.94 10.94 0 0 1 5.74 0c2.19-1.48 3.15-1.17 3.15-1.17.63 1.58.24 2.75.12 3.04.74.8 1.18 1.82 1.18 3.07 0 4.4-2.7 5.37-5.26 5.65.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56C20.21 21.38 23.5 17.07 23.5 12 23.5 5.65 18.35.5 12 .5z"/>
+    </symbol>
+    <symbol id="ic-caret-down" viewBox="0 0 24 24">
+      <path fill="currentColor" d="M7 10l5 5 5-5z"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ============== STICKY HEADER (brand + campaign, condenses on scroll) ============== -->
+<header class="app-header">
+  <div class="brand-pill" aria-label="Application brand">
+    <svg class="brand-pill__mark" width="20" height="20" aria-hidden="true"><use href="#notes-mark"/></svg>
+    <span class="brand-pill__text">D&amp;D Notes</span>
+  </div>
+
+  <div class="campaign-card" aria-label="Campaign workspace header">
+    <h1 class="campaign-card__title">Moonshae Ledger</h1>
+    <div class="campaign-card__subtitle">Moonshae Isles · Dungeons &amp; Dragons 5e · Owner User</div>
+    <div class="campaign-card__controls">
+      <button class="campaign-card__select" aria-label="Switch campaign">
+        <span class="eyebrow">Campaign</span>
+        <span>Moonshae Ledger</span>
+        <svg class="caret" width="12" height="12" aria-hidden="true"><use href="#ic-caret-down"/></svg>
+      </button>
+      <div class="campaign-card__actions" role="group">
+        <button class="icon-btn" aria-label="New campaign">
+          <svg aria-hidden="true"><use href="#ic-plus-circle"/></svg>
+        </button>
+        <button class="icon-btn" aria-label="Campaign settings">
+          <svg aria-hidden="true"><use href="#ic-settings"/></svg>
+        </button>
+        <button class="icon-btn amber" aria-label="New note">
+          <svg aria-hidden="true"><use href="#ic-plus"/></svg>
+        </button>
+        <button class="icon-btn" aria-label="Sign out">
+          <svg aria-hidden="true"><use href="#ic-logout"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <p class="scroll-hint">Scroll — the brand pill loses its wordmark, the campaign card collapses its subtitle, but nothing functional disappears.</p>
+  <section class="panel"><h2>Campaign stats</h2><p>Filler — represents the stats row.</p></section>
+  <section class="panel panel--tall"><h2>Workspace toggle</h2><p>Filler — represents the workspace toggle area.</p></section>
+  <section class="panel panel--tall"><h2>Notes pane</h2><p>Filler — represents the notes browse + editor split.</p></section>
+  <section class="panel panel--tall"><h2>More notes</h2><p>Padding so the page is genuinely scrollable.</p></section>
+  <section class="panel"><h2>End of workspace</h2><p>Below this card, the footer signature appears in flow.</p></section>
+</main>
+
+<footer class="signature">
+  <span class="brand-lockup">
+    <svg width="18" height="18" aria-hidden="true"><use href="#dd-mark"/></svg>
+    Daydream Software
+  </span>
+  <span class="sep">·</span>
+  <span class="brand-lockup">
+    <svg width="16" height="16" aria-hidden="true"><use href="#notes-mark"/></svg>
+    <span class="product">D&amp;D Notes</span>
+  </span>
+  <span class="sep">·</span>
+  <a href="/privacy">Privacy</a>
+  <span class="sep">·</span>
+  <a href="/terms">Terms</a>
+  <span class="sep">·</span>
+  <a href="https://github.com/daydream-software/dnd-notes" target="_blank" rel="noopener">
+    <svg width="13" height="13" style="vertical-align: -2px;" aria-hidden="true"><use href="#ic-github"/></svg>
+    GitHub
+  </a>
+  <span class="sep">·</span>
+  <span class="version">v0.1.0</span>
+  <span class="sep">·</span>
+  <span class="copy">© 2026 Daydream Software</span>
+</footer>
+
+<aside class="doc-note">
+  <strong>What changes on scroll</strong>
+  Header: brand pill loses its wordmark (mark stays); campaign card collapses its subtitle row, shrinks the title (h5 → h6), and the &quot;Campaign&quot; eyebrow disappears from the dropdown. <em>Nothing functional drops</em> — the campaign switcher and all four actions (New campaign, Settings, New note, Sign out) remain at all times.
+  <br><strong>Tokens</strong>
+  All values come from <code>colors_and_type.css</code>: <code>--bg-paper-soft</code>, <code>--brand-line</code>, <code>--radius-pill</code>, <code>--radius-xl</code>, <code>--blur-sm</code>, <code>--shadow-sm</code>. No raw hex.
+  <br><strong>Footer</strong>
+  In normal flow, only visible at scroll end. Daydream Software leads (corporate identity), D&amp;D Notes follows as a child product. Privacy + Terms placeholders; GitHub link live; version + copyright stamp.
+</aside>
+
+<script>
+  const body = document.body;
+  const setScrolled = () => {
+    if (window.scrollY > 24) body.dataset.scrolled = 'true';
+    else body.removeAttribute('data-scrolled');
+  };
+  setScrolled();
+  document.addEventListener('scroll', setScrolled, { passive: true });
+</script>
+
+</body>
+</html>

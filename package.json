@@ -21,6 +21,7 @@
     "dev:control-plane": "npm run dev --workspace apps/control-plane",
     "dev:operator-portal": "npm run dev --workspace apps/operator-portal",
     "dev:customer-portal": "npm run dev --workspace apps/customer-portal",
+    "design:preview": "echo 'Design system preview → http://127.0.0.1:7787/preview/' && python3 -m http.server 7787 --bind 127.0.0.1 --directory docs/design-system/project",
     "k3d:up": "bash ./scripts/k3d/up.sh",
     "k3d:down": "bash ./scripts/k3d/down.sh",
     "k3d:status": "bash ./scripts/k3d/status.sh",
