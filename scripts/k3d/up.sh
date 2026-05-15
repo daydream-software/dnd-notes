@@ -54,12 +54,16 @@ Bring up the persistent local k3d platform and tenant for interactive developmen
 
 What it does:
   1. Bootstraps the k3d cluster + infra (idempotent — skipped if cluster exists)
-  2. Builds and imports tenant and control-plane images (skip with --no-rebuild)
-  3. Deploys the control plane into k3d and waits for rollout
-  4. Provisions a deterministic 'dev' tenant if not already present/ready
+  2. Builds and imports tenant + control-plane + portal images (skip with --no-rebuild)
+  3. Deploys the control plane and portals into k3d and rolls them to pick up fresh images
+  4. Provisions the deterministic 'dev' tenant — or, if already ready, rolls the
+     tenant deployment so the freshly built tenant image is loaded
   5. Seeds the tenant with standard sample data (idempotent)
   6. Writes .k3d-state/state.json with URLs, credentials, and token snippets
   7. Prints a human-readable summary
+
+Running k3d:up while the cluster is already up is the supported way to pick up
+new code: it rebuilds every frontend image and rolls every deployment.
 
 Flags:
   --no-rebuild     Skip image builds when the Docker image tag already exists locally
@@ -682,6 +686,13 @@ if [[ "${tenant_state}" == "ready" && "${RESET_TENANT}" != "true" ]]; then
   tenant_namespace="$(json_get resources.namespace <"${WORK_DIR}/tenant-get.json")"
   tenant_subdomain="$(json_get tenant.subdomain <"${WORK_DIR}/tenant-get.json")"
   tenant_hostname="${tenant_subdomain}.${TENANT_BASE_DOMAIN}"
+  # When the tenant is reused, the tenant deployment isn't restarted by the
+  # provisioning path, so a freshly-built tenant image would never get loaded.
+  # Trigger a rolling restart so the new image (just imported above) takes
+  # effect. Skip if --no-rebuild — no fresh image to pick up.
+  if [[ "${NO_REBUILD}" != "true" ]]; then
+    run_visible kubectl rollout restart -n "${tenant_namespace}" deployment/dnd-notes
+  fi
 else
   # Deprovision if resetting or in a non-terminal failure state
   if [[ -n "${tenant_state}" ]]; then
