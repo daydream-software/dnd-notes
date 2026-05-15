@@ -1,4 +1,5 @@
 import { Box, Link, Typography } from '@mui/material'
+import { cardBorderColor } from '@dnd-notes/theme'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { markdownSx } from './note-markdown-styles'
@@ -48,7 +49,7 @@ export function NoteBodyPreview({
                     alignItems: 'center',
                     backgroundColor: 'action.selected',
                     border: '1px solid',
-                    borderColor: 'divider',
+                    borderColor: cardBorderColor,
                     borderRadius: 999,
                     color: 'text.primary',
                     display: 'inline-flex',

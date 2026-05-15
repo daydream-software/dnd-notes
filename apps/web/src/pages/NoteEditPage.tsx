@@ -11,6 +11,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { cardBorderColor, cardBorderColorHover } from '@dnd-notes/theme'
 import NoteBodyEditor from '../NoteBodyEditor'
 import NoteEditorActions from '../NoteEditorActions'
 import { NoteBodyPreview } from '../note-formatting'
@@ -243,7 +244,7 @@ export default function NoteEditPage({
                 <Box
                   sx={{
                     border: '1px solid',
-                    borderColor: 'divider',
+                    borderColor: cardBorderColor,
                     borderRadius: surfaceRadius,
                     p: { xs: 2, sm: 2.5 },
                   }}
@@ -286,7 +287,7 @@ export default function NoteEditPage({
                         variant="outlined"
                         sx={{
                           cursor: 'pointer',
-                          '&:hover': { borderColor: 'primary.main' },
+                          '&:hover': { borderColor: cardBorderColorHover },
                         }}
                         onClick={() => onSelectNote(note)}
                       >
@@ -335,7 +336,7 @@ export default function NoteEditPage({
                         variant="outlined"
                         sx={{
                           cursor: 'pointer',
-                          '&:hover': { borderColor: 'primary.main' },
+                          '&:hover': { borderColor: cardBorderColorHover },
                         }}
                         onClick={() => onSelectNote(note)}
                       >

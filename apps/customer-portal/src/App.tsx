@@ -21,6 +21,7 @@ import {
   Toolbar,
   Typography,
 } from '@mui/material'
+import { Footer } from '@dnd-notes/theme'
 import { buildAccountConsoleUrl, buildPortalRedirectUri, portalKeycloakConfig } from './config'
 import {
   createPortalTenant,
@@ -1544,6 +1545,10 @@ export default function App({
           ) : null}
         </Stack>
       </Container>
+      <Footer
+        variant="rich"
+        tagline="Calm, mobile-friendly note-taking for tabletop campaigns. Built by a one-person studio, kept intentionally focused."
+      />
     </Box>
   )
 }

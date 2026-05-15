@@ -19,6 +19,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { cardBorderColor } from '@dnd-notes/theme'
 import {
   $convertFromMarkdownString,
   $convertToMarkdownString,
@@ -824,7 +825,7 @@ export default function NoteBodyEditor({
               maxWidth: '100%',
               minWidth: 0,
               border: '1px solid',
-              borderColor: 'divider',
+              borderColor: cardBorderColor,
               borderRadius: surfaceRadius,
               p: { xs: 1.25, sm: 2 },
             }}
@@ -858,7 +859,7 @@ export default function NoteBodyEditor({
                       alignItems: 'center',
                       backgroundColor: 'action.selected',
                       border: '1px solid',
-                      borderColor: 'divider',
+                      borderColor: cardBorderColor,
                       borderRadius: 999,
                       color: 'text.primary',
                       display: 'inline-flex',

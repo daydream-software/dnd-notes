@@ -11,6 +11,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { Footer } from '@dnd-notes/theme'
 import AdminPage from './AdminPage'
 import type { CampaignDraft } from '../hooks/useCampaign'
 import {
@@ -182,6 +183,7 @@ export default function CampaignListPage({
           </Card>
         </Stack>
       </Container>
+      <Footer variant="signature" />
     </Box>
   )
 }

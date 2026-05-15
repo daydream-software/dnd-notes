@@ -12,6 +12,7 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { cardBorderColor } from '@dnd-notes/theme'
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded'
 import {
   describeCampaignMembership,
@@ -658,7 +659,7 @@ export default function CampaignAdminPane({
                             aria-label={`${shareLinkLabel} shared link`}
                             sx={{
                               border: '1px solid',
-                              borderColor: 'divider',
+                              borderColor: cardBorderColor,
                               borderRadius: noteItemRadius,
                               px: 2,
                               py: 1.75,
@@ -691,7 +692,7 @@ export default function CampaignAdminPane({
                                   <Box
                                     sx={{
                                       border: '1px solid',
-                                      borderColor: 'divider',
+                                      borderColor: cardBorderColor,
                                       borderRadius: 2,
                                       px: 1.5,
                                       py: 1.25,

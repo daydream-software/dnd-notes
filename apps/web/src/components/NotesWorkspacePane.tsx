@@ -16,6 +16,7 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { cardBorderColor, cardBorderColorHover } from '@dnd-notes/theme'
 import { useMemo } from 'react'
 import { formatTimestamp } from '../formatTimestamp'
 import { markdownToPlainText } from '../note-excerpts'
@@ -550,8 +551,8 @@ export default function NotesWorkspacePane({
                             border: '1px solid',
                             borderColor:
                               selectedNoteId === activityEntry.id && !isCreating
-                                ? 'primary.main'
-                                : 'divider',
+                                ? cardBorderColorHover
+                                : cardBorderColor,
                             alignItems: 'flex-start',
                           }}
                         >
@@ -632,7 +633,7 @@ export default function NotesWorkspacePane({
                         sx={{
                           borderRadius: noteItemRadius,
                           border: '1px solid',
-                          borderColor: 'divider',
+                          borderColor: cardBorderColor,
                           alignItems: 'flex-start',
                         }}
                       >
@@ -756,8 +757,8 @@ export default function NotesWorkspacePane({
                             border: '1px solid',
                             borderColor:
                               selectedNoteId === note.id && !isCreating
-                                ? 'primary.main'
-                                : 'divider',
+                                ? cardBorderColorHover
+                                : cardBorderColor,
                             alignItems: 'flex-start',
                           }}
                         >

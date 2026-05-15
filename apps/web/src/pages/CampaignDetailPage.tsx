@@ -9,9 +9,11 @@ import {
   Stack,
   Typography,
 } from '@mui/material'
+import { Footer } from '@dnd-notes/theme'
 import { useMemo } from 'react'
 import { DndNotesMark } from '../DndNotesMark'
 import CampaignWorkspaceHeader from '../CampaignWorkspaceHeader'
+import { useScrolled } from '../hooks/useScrolled'
 import type { UseShareLinksResult } from '../hooks/useShareLinks'
 import type { UseCampaignResult } from '../hooks/useCampaign'
 import type { UseNotesResult } from '../hooks/useNotes'
@@ -73,6 +75,7 @@ export default function CampaignDetailPage({
   setError, setNarrowWorkspacePanel, setWantsSplitNoteWorkspace,
   loadWorkspace, loadCampaigns, clearSession, guestStorageKey, shareToken, createShareLinkDraft,
 }: CampaignDetailPageProps) {
+  const scrolled = useScrolled(24)
   const showBrowsePane = showSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
   const showEditorPane = showSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
   const workspaceEditorLabel =
@@ -235,8 +238,8 @@ export default function CampaignDetailPage({
                 display: { xs: 'none', lg: 'inline-flex' },
                 alignItems: 'center',
                 flexShrink: 0,
-                gap: 0.75,
-                px: 1.25,
+                gap: scrolled ? 0 : 0.75,
+                px: scrolled ? 0.75 : 1.25,
                 py: 0.75,
                 borderRadius: '999px',
                 border: '1px solid',
@@ -246,10 +249,27 @@ export default function CampaignDetailPage({
                 backdropFilter: 'blur(12px)',
                 boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
                 maxWidth: '100%',
+                transition: (theme) =>
+                  theme.transitions.create(['gap', 'padding'], {
+                    duration: theme.transitions.duration.shorter,
+                  }),
               }}
             >
               <DndNotesMark fontSize="small" />
-              <Typography variant="caption" sx={{ ...singleLineTextSx, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
+              <Typography
+                variant="caption"
+                sx={{
+                  ...singleLineTextSx,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  maxWidth: scrolled ? 0 : 120,
+                  opacity: scrolled ? 0 : 1,
+                  transition: (theme) =>
+                    theme.transitions.create(['max-width', 'opacity'], {
+                      duration: theme.transitions.duration.shorter,
+                    }),
+                }}
+              >
                 D&amp;D Notes
               </Typography>
             </Box>
@@ -267,7 +287,7 @@ export default function CampaignDetailPage({
                 { ariaLabel: 'Sign out', color: 'inherit', icon: <LogoutRoundedIcon fontSize="small" />, onClick: () => void handleLogout() },
               ]}
               surfaceRadius={surfaceRadius}
-              compactDesktop={canSplitNoteWorkspace}
+              compactDesktop={canSplitNoteWorkspace || scrolled}
               stickyDesktop={false}
             />
           </Box>
@@ -395,32 +415,9 @@ export default function CampaignDetailPage({
             onDeleteNote={() => void handleDeleteNote()}
           />
 
-          <Box
-            aria-label="Application brand"
-            sx={{
-              display: { xs: 'inline-flex', lg: 'none' },
-              alignItems: 'center',
-              alignSelf: 'center',
-              gap: 0.75,
-              px: 1.25,
-              py: 0.75,
-              borderRadius: '999px',
-              border: '1px solid',
-              borderColor: 'rgba(167, 139, 250, 0.2)',
-              bgcolor: 'rgba(15, 23, 42, 0.72)',
-              color: 'rgba(255, 255, 255, 0.78)',
-              backdropFilter: 'blur(12px)',
-              boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
-              maxWidth: 'calc(100vw - 24px)',
-            }}
-          >
-            <DndNotesMark fontSize="small" />
-            <Typography variant="caption" sx={{ ...singleLineTextSx, letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-              D&amp;D Notes
-            </Typography>
-          </Box>
         </Stack>
       </Container>
+      <Footer variant="signature" />
     </Box>
   )
 }
