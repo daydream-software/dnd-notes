@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import {
   consolidateCampaignMemberships,
   createCampaign,
@@ -103,6 +103,11 @@ export interface UseCampaignResult {
   campaigns: CampaignSummary[]
   selectedCampaignId: string | null
   memberships: CampaignMembership[]
+  currentCampaignMemberships: CampaignMembership[]
+  selectedSourceMembership: CampaignMembership | null
+  selectedTargetMembership: CampaignMembership | null
+  hasValidMembershipConsolidationSelection: boolean
+  canApplyMembershipConsolidation: boolean
   campaignDraft: CampaignDraft
   campaignFormMode: CampaignFormMode
   selectedCampaignTemplateId: string
@@ -484,10 +489,52 @@ export function useCampaign(): UseCampaignResult {
     [setCampaignDraft, setCampaignFormMode, setCampaigns, setMemberships, setSelectedCampaignId],
   )
 
+  const currentCampaignMemberships = useMemo(
+    () => memberships.filter((membership) => membership.campaignId === selectedCampaignId),
+    [memberships, selectedCampaignId],
+  )
+
+  const selectedSourceMembership = useMemo(
+    () =>
+      currentCampaignMemberships.find(
+        (membership) => membership.id === membershipConsolidationDraft.sourceMembershipId,
+      ) ?? null,
+    [currentCampaignMemberships, membershipConsolidationDraft.sourceMembershipId],
+  )
+
+  const selectedTargetMembership = useMemo(
+    () =>
+      currentCampaignMemberships.find(
+        (membership) => membership.id === membershipConsolidationDraft.targetMembershipId,
+      ) ?? null,
+    [currentCampaignMemberships, membershipConsolidationDraft.targetMembershipId],
+  )
+
+  const hasValidMembershipConsolidationSelection =
+    membershipConsolidationDraft.sourceMembershipId.length > 0 &&
+    membershipConsolidationDraft.targetMembershipId.length > 0 &&
+    membershipConsolidationDraft.sourceMembershipId !==
+      membershipConsolidationDraft.targetMembershipId
+
+  const canApplyMembershipConsolidation =
+    membershipConsolidationPreview !== null &&
+    !membershipConsolidationPreview.applied &&
+    membershipConsolidationPreview.sourceMembership.id ===
+      membershipConsolidationDraft.sourceMembershipId &&
+    membershipConsolidationPreview.targetMembership.id ===
+      membershipConsolidationDraft.targetMembershipId &&
+    (!membershipConsolidationPreview.requiresRoleMismatchConfirmation ||
+      membershipConsolidationDraft.confirmRoleMismatch)
+
   return {
     campaigns,
     selectedCampaignId,
     memberships,
+    currentCampaignMemberships,
+    selectedSourceMembership,
+    selectedTargetMembership,
+    hasValidMembershipConsolidationSelection,
+    canApplyMembershipConsolidation,
     campaignDraft,
     campaignFormMode,
     selectedCampaignTemplateId,

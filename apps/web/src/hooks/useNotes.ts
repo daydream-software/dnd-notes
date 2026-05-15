@@ -339,6 +339,12 @@ export interface UseNotesResult {
   sharedSessionNotes: Note[]
   sharedActivityEntries: NoteActivityEntry[]
   sharedActivityCollaborators: ActivityCollaborator[]
+  // Resolved derived state (shared vs owner mode)
+  resolvedSessionSummaries: SessionSummary[]
+  resolvedSelectedSessionSummary: SessionSummary | null
+  resolvedActivityCollaborators: ActivityCollaborator[]
+  resolvedSelectedActivityCollaborator: ActivityCollaborator | null
+  sortedActivityEntries: NoteActivityEntry[]
   // Refs (for use in callbacks)
   selectedNoteIdRef: React.RefObject<string | null>
   noteBrowseModeRef: React.RefObject<NoteBrowseMode>
@@ -1346,6 +1352,43 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     [loadSharedWorkspace, loadWorkspace, quickCaptureTitle, resetSessionBrowserState],
   )
 
+  // Resolved derived state (shared vs owner mode)
+  const resolvedSessionSummaries = isSharedMode ? sharedSessionSummaries : sessionSummaries
+
+  const resolvedSelectedSessionSummary = useMemo(
+    () =>
+      resolvedSessionSummaries.find(
+        (sessionSummary) => sessionSummary.sessionName === selectedSessionName,
+      ) ?? null,
+    [resolvedSessionSummaries, selectedSessionName],
+  )
+
+  const resolvedActivityCollaborators = isSharedMode ? sharedActivityCollaborators : activityCollaborators
+
+  const resolvedSelectedActivityCollaborator = useMemo(
+    () =>
+      resolvedActivityCollaborators.find(
+        (collaborator) => collaborator.membershipId === selectedActivityMembershipId,
+      ) ?? null,
+    [resolvedActivityCollaborators, selectedActivityMembershipId],
+  )
+
+  const sortedActivityEntries = useMemo(
+    () => {
+      const entries = isSharedMode
+        ? selectedActivityMembershipId
+          ? sharedActivityEntries.filter(
+              (entry) => getActivityAttribution(entry)?.membershipId === selectedActivityMembershipId,
+            )
+          : sharedActivityEntries
+        : activityEntries
+      return [...entries].sort((leftEntry, rightEntry) =>
+        rightEntry.updatedAt.localeCompare(leftEntry.updatedAt),
+      )
+    },
+    [activityEntries, isSharedMode, selectedActivityMembershipId, sharedActivityEntries],
+  )
+
   return {
     overview,
     notes,
@@ -1385,6 +1428,11 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     sharedSessionNotes,
     sharedActivityEntries,
     sharedActivityCollaborators,
+    resolvedSessionSummaries,
+    resolvedSelectedSessionSummary,
+    resolvedActivityCollaborators,
+    resolvedSelectedActivityCollaborator,
+    sortedActivityEntries,
     selectedNoteIdRef,
     noteBrowseModeRef,
     selectedSessionNameRef,

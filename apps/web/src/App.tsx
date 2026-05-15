@@ -22,7 +22,6 @@ import type {
   CampaignShareLink,
   CampaignSummary,
   Note,
-  NoteActivityEntry,
 } from './types'
 import CampaignDetailPage from './pages/CampaignDetailPage'
 import CampaignListPage from './pages/CampaignListPage'
@@ -60,20 +59,8 @@ function getShareTokenFromPath(pathname: string) {
   return match ? decodeURIComponent(match[1]) : null
 }
 
-function sortActivityEntries(entries: NoteActivityEntry[]) {
-  return [...entries].sort((leftEntry, rightEntry) =>
-    rightEntry.updatedAt.localeCompare(leftEntry.updatedAt),
-  )
-}
-
 const heroCardRadius = '32px'
 const surfaceRadius = '24px'
-
-function getActivityAttribution(entry: NoteActivityEntry) {
-  return entry.action === 'created'
-    ? (entry.createdBy ?? entry.lastEditedBy)
-    : (entry.lastEditedBy ?? entry.createdBy)
-}
 
 function App() {
   const theme = useTheme()
@@ -136,7 +123,11 @@ function App() {
   const {
     campaigns,
     selectedCampaignId,
-    memberships,
+    currentCampaignMemberships,
+    selectedSourceMembership,
+    selectedTargetMembership,
+    hasValidMembershipConsolidationSelection,
+    canApplyMembershipConsolidation,
     campaignDraft,
     campaignFormMode,
     selectedCampaignTemplateId,
@@ -168,10 +159,7 @@ function App() {
   const {
     overview,
     noteBrowseMode,
-    sessionSummaries,
     selectedSessionName,
-    activityEntries,
-    activityCollaborators,
     selectedActivityMembershipId,
     selectedTagFilter,
     searchText,
@@ -196,9 +184,11 @@ function App() {
     noteLinkOptions,
     linkedNotes,
     backlinks,
-    sharedSessionSummaries,
-    sharedActivityEntries,
-    sharedActivityCollaborators,
+    resolvedSessionSummaries,
+    resolvedSelectedSessionSummary,
+    resolvedActivityCollaborators,
+    resolvedSelectedActivityCollaborator,
+    sortedActivityEntries,
     selectedNoteIdRef,
     selectedActivityMembershipIdRef,
     sessionRequestIdRef,
@@ -430,82 +420,15 @@ function App() {
     : overview?.membership ?? null
   const canEditWorkspace = isSharedMode ? shareLink?.accessLevel === 'editor' : true
 
-  const currentCampaignMemberships = useMemo(
-    () =>
-      memberships.filter(
-        (membership) => membership.campaignId === selectedCampaignId,
-      ),
-    [memberships, selectedCampaignId],
-  )
   const activeMembership = overview?.membership ?? null
   const canManageSelectedCampaign = activeMembership?.role === 'owner'
   const selectedNoteTemplate = getNoteStarterTemplate(selectedNoteTemplateId)
-  const resolvedSessionSummaries = isSharedMode ? sharedSessionSummaries : sessionSummaries
-  const resolvedSelectedSessionSummary = useMemo(
-    () =>
-      resolvedSessionSummaries.find(
-        (sessionSummary) => sessionSummary.sessionName === selectedSessionName,
-      ) ?? null,
-    [resolvedSessionSummaries, selectedSessionName],
-  )
-  const resolvedActivityCollaborators = isSharedMode
-    ? sharedActivityCollaborators
-    : activityCollaborators
-  const resolvedSelectedActivityCollaborator = useMemo(
-    () =>
-      resolvedActivityCollaborators.find(
-        (collaborator) => collaborator.membershipId === selectedActivityMembershipId,
-      ) ?? null,
-    [resolvedActivityCollaborators, selectedActivityMembershipId],
-  )
-  const selectedSourceMembership = useMemo(
-    () =>
-      currentCampaignMemberships.find(
-        (membership) => membership.id === membershipConsolidationDraft.sourceMembershipId,
-      ) ?? null,
-    [currentCampaignMemberships, membershipConsolidationDraft.sourceMembershipId],
-  )
-  const selectedTargetMembership = useMemo(
-    () =>
-      currentCampaignMemberships.find(
-        (membership) => membership.id === membershipConsolidationDraft.targetMembershipId,
-      ) ?? null,
-    [currentCampaignMemberships, membershipConsolidationDraft.targetMembershipId],
-  )
   const selectedTagFacet = useMemo(
     () =>
       selectedTagFilter
         ? tagFacets.find((tagFacet) => tagFacet.tag === selectedTagFilter) ?? null
         : null,
     [selectedTagFilter, tagFacets],
-  )
-  const hasValidMembershipConsolidationSelection =
-    membershipConsolidationDraft.sourceMembershipId.length > 0 &&
-    membershipConsolidationDraft.targetMembershipId.length > 0 &&
-    membershipConsolidationDraft.sourceMembershipId !==
-      membershipConsolidationDraft.targetMembershipId
-  const canApplyMembershipConsolidation =
-    membershipConsolidationPreview !== null &&
-    !membershipConsolidationPreview.applied &&
-    membershipConsolidationPreview.sourceMembership.id ===
-      membershipConsolidationDraft.sourceMembershipId &&
-    membershipConsolidationPreview.targetMembership.id ===
-      membershipConsolidationDraft.targetMembershipId &&
-    (!membershipConsolidationPreview.requiresRoleMismatchConfirmation ||
-      membershipConsolidationDraft.confirmRoleMismatch)
-  const sortedActivityEntries = useMemo(
-    () =>
-      sortActivityEntries(
-        isSharedMode
-          ? selectedActivityMembershipId
-            ? sharedActivityEntries.filter(
-                (entry) =>
-                  getActivityAttribution(entry)?.membershipId === selectedActivityMembershipId,
-              )
-            : sharedActivityEntries
-          : activityEntries,
-      ),
-    [activityEntries, isSharedMode, selectedActivityMembershipId, sharedActivityEntries],
   )
   const showBrowsePane = showSplitNoteWorkspace || narrowWorkspacePanel === 'browse'
   const showEditorPane = showSplitNoteWorkspace || narrowWorkspacePanel === 'editor'
