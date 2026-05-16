@@ -8082,3 +8082,25 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-portals-responsive-294
 
+---
+
+### 2026-05-16: apps/web component test pattern — ThemeProvider wrap, no app-test-helpers (Stef/Chunk)
+
+**Context:** Issue #286 added the first component-level presentational test in apps/web (`JoinPage.test.tsx`). Two helpers exist and are easy to confuse.
+
+**Decision:**
+- Component-level presentational tests: wrap with `ThemeProvider`, call explicit `cleanup()` in `afterEach`. This mirrors `WorkspaceLoadingView.test.tsx`.
+- `app-test-helpers.tsx` is full-App scaffolding (mocks fetch, registers owner, drives Keycloak). Do **not** use it for isolated component tests.
+
+**Session:** 2026-05-16-join-page-disable-286
+
+---
+
+### 2026-05-16: jest-dom not installed in apps/web — use raw DOM assertions (Stef/Chunk)
+
+**Context:** Issue #286 tests needed to assert on `disabled` state. `@testing-library/jest-dom` (which provides `toBeDisabled()`) is not installed in the apps/web suite.
+
+**Decision:** Assert with `(element as HTMLButtonElement).disabled === true/false`. Installing jest-dom is a candidate follow-up (improves readability) but is not blocking. If it is installed in the future, migrate assertions to `.toBeDisabled()` / `.not.toBeDisabled()`.
+
+**Session:** 2026-05-16-join-page-disable-286
+
