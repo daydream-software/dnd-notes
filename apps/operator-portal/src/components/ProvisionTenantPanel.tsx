@@ -15,8 +15,8 @@ import {
   Typography,
 } from '@mui/material'
 import * as React from 'react'
-import { ApiError, createTenant, provisionTenant } from './control-plane-api'
-import type { CreateTenantRequest } from './types'
+import { ApiError, createTenant, provisionTenant } from '../control-plane-api'
+import type { CreateTenantRequest } from '../types'
 
 const { useEffect, useMemo, useState } = React
 
