@@ -78,10 +78,12 @@ async function readJson<T>(response: Response) {
 
     try {
       const errorBody: ErrorResponse = await response.json()
-      const details = errorBody.details?.join(' ')
-      errorMessage = details
-        ? `${errorBody.error} ${details}`
-        : errorBody.error
+      if (errorBody.error != null) {
+        const details = errorBody.details?.join(' ')
+        errorMessage = details
+          ? `${errorBody.error} ${details}`
+          : errorBody.error
+      }
     } catch {
       // Ignore malformed error payloads and use the generic message above.
     }
