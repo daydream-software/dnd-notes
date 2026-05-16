@@ -508,5 +508,11 @@ describe('useNotes — handleSaveNote (owner mode)', () => {
     // loadActivity calls fetchNoteActivity internally
     expect(vi.mocked(fetchNoteActivity)).toHaveBeenCalledOnce()
     expect(result.current.isSaving).toBe(false)
+
+    // Pin ordering: activity reload must fire AFTER createNote, never before.
+    // Without this, a refactor that reorders the await chain could silently pass.
+    expect(vi.mocked(createNote).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(fetchNoteActivity).mock.invocationCallOrder[0],
+    )
   })
 })
