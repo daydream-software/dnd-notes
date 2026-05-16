@@ -44,3 +44,6 @@ Team update (2026-05-11T22:00:00Z): #216 filed — codify `cardBorder`+`cardShad
 
 
 
+
+Team update (2026-05-15T15:30:00Z): Design-system pass execution (#292) — const border exports (`cardBorderColor`, `cardBorderColorSubtle`, `cardBorderColorHover`) added to `@dnd-notes/theme`, MuiCard glass `styleOverrides.root`, 12 borderColor swaps across apps/web pages, `useScrolled` hook for sticky header, CampaignWorkspaceHeader full-width redesign with mobile responsiveness iteration (5+ rounds). CodeRabbit triage round 1: accepted bumps to border opacities, added rel="noopener noreferrer", fixed Stack spacing and blockquote sizing, added `strict: true` to theme tsconfigs, posted PR-level comment defending eyebrow typographic pattern. OperatorPortal split execution (#147 → PR #295) — reduced 969 → 151 lines (OperatorPortal.tsx), extracted FleetStatusPage.tsx (558), new hooks (useOperatorAuth, useFleetStatus, useDeprovision, useUpgrade), new components (AuthGate, PortalHeader), dialogs moved to components/, 48/48 test coverage. CodeRabbit round 1 (via Stef): accepted fast-refresh extraction, refresh-path authz recompute, handleLogin try/catch, empty-token guard. — decided by coordinator.
+

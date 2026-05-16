@@ -7978,3 +7978,85 @@ Coordinator took over inside the same worktree and successfully wrote the same f
 
 **Related PRs/issues:** #285 (slice 7), #146 (closed), #284, #286.
 
+
+---
+
+### 2026-05-15: k3d:up is the official "pick up new code" command (Brand/Coordinator)
+
+**Context:** PR #293 (k3d rollout fix). User noted that `npm run k3d:build-image` "never really worked", and during design-system smoke testing, `npm run k3d:up` (on already-up cluster) was rebuilding tenant image but not restarting the tenant deployment when reusing the `ready` tenant.
+
+**Root cause:** Platform deployments got unconditional `kubectl rollout restart` at lines 630–632, but the tenant-reuse path lacked the symmetric restart.
+
+**Decision:** `k3d:up` is now the official "pick up new code" command when a cluster is already running — rebuilds all 4 images (control-plane, portals, tenant) and restarts all 4 deployments symmetrically. Use this instead of trying to rebuild images in isolation.
+
+**Implementation:** Added `kubectl rollout restart -n ${tenant_namespace} deployment/dnd-notes` in the tenant-reuse branch of the k3d script. First commit had a `--no-rebuild` guard; follow-up dropped it because `ensure_image_ready` re-imports the image regardless, creating asymmetry.
+
+**Related PRs/issues:** #293.
+
+---
+
+### 2026-05-15: @dnd-notes/theme const border exports are canonical (Coordinator/Stef)
+
+**Context:** PR #292 (design-system pass). New `cardBorderColor` (0.2), `cardBorderColorSubtle` (0.18), `cardBorderColorHover` (0.4) const exports added to `packages/theme/src/index.ts`.
+
+**Decision:** These three exports are the canonical way to set borderColor in component `sx`. Never inline raw `rgba(167, 139, 250, ...)` values in app code. Never rely on MUI `'divider'` or `'primary.main'` aliases for borders — they don't respect the glass design system.
+
+**Pattern:** When a component needs a border color:
+
+```typescript
+import { cardBorderColor, cardBorderColorSubtle, cardBorderColorHover } from '@dnd-notes/theme';
+
+sx={{
+  borderColor: cardBorderColor,  // or Subtle/Hover variant
+  border: '1px solid',
+}}
+```
+
+**Related PRs/issues:** #292.
+
+---
+
+### 2026-05-15: MuiCard.styleOverrides.root applies glass globally (Coordinator)
+
+**Context:** PR #292 (design-system pass). `MuiCard.styleOverrides.root` in `packages/theme/src/index.ts` now applies `backdrop-filter: blur(12px)` and shadow to every Card automatically.
+
+**Decision:** Do not redeclare glass (`backdrop-filter`, `boxShadow`) in individual Card `sx` props. The theme handles it. If a specific Card needs different glass or shadow, override only that property — don't re-declare the whole stack.
+
+**Pattern:** Glass is now inherited from the theme; Card surfaces are automatically composited.
+
+**Related PRs/issues:** #292.
+
+---
+
+### 2026-05-15: Brand pill removed from workspace header; lives in Footer (User/Coordinator)
+
+**Context:** PR #291 (Footer brainstorm). User decision: "le D&D NOTES flottant" (floating brand pill on every page header) should disappear.
+
+**Decision:** Brand pill is no longer a floating workspace header element. It now lives in the Footer (`<Footer>` component with `rich` and `signature` variants). The workspace header (`CampaignWorkspaceHeader`) is now a full-width campaign card with no brand pill.
+
+**Implications for portals:**
+- Customer-portal landing: use Footer `rich` variant (includes brand pill + copyright + tagline).
+- Operator-portal: use Footer `signature` variant.
+- Notes app: use Footer `signature` variant.
+
+**Related PRs/issues:** #291, #292.
+
+---
+
+### 2026-05-15: Eyebrow typography is a design-system exception (Coordinator/Stef)
+
+**Context:** PR #292 (design-system pass). CodeRabbit flagged uppercase text in column headers, lock-up labels, and section eyebrows as a sentence-case violation. Stef clarified that this is an intentional typographic pattern.
+
+**Decision:** Eyebrow labels (10–12px column headers, lock-up labels like "Makers of D&D Notes", section eyebrows) may use 0.08–0.18em letter-spacing + uppercase. This is a design-system pattern, not a violation of the "sentence case everywhere" rule. Alongside the existing brand-pill exception (D&D NOTES), eyebrows form a deliberate typographic hierarchy.
+
+**Pattern:** Eyebrows are rare. Use for:
+- Table/grid column headers (optional).
+- Lockup bylines below brand marks.
+- Section introductory labels.
+
+Never use uppercase for button labels, navigation text, or body copy.
+
+**Related PRs/issues:** #292 (CodeRabbit round 1, thread resolved via PR-level comment).
+
+**Recommendation:** Add one line to CLAUDE.md under Copy & tone section documenting this exception, pending user approval.
+

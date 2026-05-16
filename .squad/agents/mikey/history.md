@@ -285,3 +285,6 @@ Decision document: `.squad/decisions/inbox/mikey-epic-82-kickoff.md`
 
 📌 Team update (2026-04-26T22:36:26Z): PR #120 review triage completed. No new formal rejections or lockout triggers. Five open bot threads identified as stale: three outdated, two already fixed. Cleared for merge pending CI completion. — Mikey
 
+
+Team update (2026-05-15T15:30:00Z): Pre-PR gate reviews for design-system day (2026-05-15) — approved #289 (Node 22 → 24 textual cleanup, no follow-ups), #291 (Footer brainstorm design + mockup, one `rgba` → `var()` swap), #292 (design-system pass: glass cards, border const exports, 12 borderColor swaps, 5+ user iteration rounds, Stef CodeRabbit triage x2, all 6 threads resolved), #295 (OperatorPortal split: 969 → 151 lines, FleetStatusPage, 4 hooks, 48/48 tests, one dead `options?` param dropped, Stef+coordinator CodeRabbit triage x2, 6 threads resolved). All approvals followed by surgical follow-ups; no blockers. — decided by coordinator.
+
