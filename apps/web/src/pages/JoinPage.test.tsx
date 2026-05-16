@@ -26,8 +26,9 @@ function renderJoinPage(displayName = '') {
 }
 
 function getJoinButton() {
-  // MUI disabled buttons still carry role="button"; use the native <button> element
-  return screen.getByRole('button', { name: 'Join campaign' }) as HTMLButtonElement
+  // MUI disabled buttons still carry role="button"; use the native <button> element.
+  // Matches both 'Join campaign' (idle) and 'Joining campaign…' (isJoining=true).
+  return screen.getByRole('button', { name: /^Join(ing)? campaign/ }) as HTMLButtonElement
 }
 
 describe('JoinPage — join button disabled state', () => {
@@ -67,7 +68,7 @@ describe('JoinPage — join button disabled state', () => {
       </ThemeProvider>,
     )
 
-    expect((screen.getByRole('button', { name: 'Join campaign' }) as HTMLButtonElement).disabled).toBe(true)
+    expect(getJoinButton().disabled).toBe(true)
 
     await user.type(screen.getByLabelText('Display name'), 'R')
 
@@ -84,6 +85,22 @@ describe('JoinPage — join button disabled state', () => {
       </ThemeProvider>,
     )
 
-    expect((screen.getByRole('button', { name: 'Join campaign' }) as HTMLButtonElement).disabled).toBe(false)
+    expect(getJoinButton().disabled).toBe(false)
+  })
+
+  it('is disabled when joining, even with a valid display name', () => {
+    render(
+      <ThemeProvider theme={theme}>
+        <JoinPage
+          campaignName="Test Campaign"
+          joinDraft={{ displayName: 'Mara' }}
+          isJoining={true}
+          error={null}
+          onJoinDraftChange={vi.fn()}
+          onJoin={vi.fn()}
+        />
+      </ThemeProvider>,
+    )
+    expect(getJoinButton().disabled).toBe(true)
   })
 })
