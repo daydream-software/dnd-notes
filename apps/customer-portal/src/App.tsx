@@ -13,14 +13,18 @@ import {
   CircularProgress,
   Container,
   Divider,
+  IconButton,
   Link,
   MenuItem,
   Paper,
   Stack,
   TextField,
   Toolbar,
+  Tooltip,
   Typography,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
+import useMediaQuery from '@mui/material/useMediaQuery'
 import { Footer } from '@dnd-notes/theme'
 import { buildAccountConsoleUrl, buildPortalRedirectUri, portalKeycloakConfig } from './config'
 import {
@@ -135,6 +139,8 @@ export default function App({
   keycloakClientFactory = createCustomerKeycloakClient,
   navigate = (url) => { window.location.assign(url) },
 }: AppProps = {}) {
+  const theme = useTheme()
+  const isXs = useMediaQuery(theme.breakpoints.down('sm'))
   const keycloakClientRef = useRef<CustomerKeycloakClient | null>(null)
   /** Tracks tenant IDs that were already in `ready` state when first observed. */
   const seenReadyTenantIdsRef = useRef<Set<string>>(new Set())
@@ -675,38 +681,75 @@ export default function App({
   return (
     <Box sx={{ minHeight: '100vh' }}>
       <AppBar position="static" color="transparent" elevation={0}>
-        <Toolbar sx={{ justifyContent: 'space-between', gap: 2 }}>
-          <Typography variant="h6" sx={{ fontWeight: 700, letterSpacing: '0.08em' }}>
+        <Toolbar sx={{ justifyContent: 'space-between', gap: 1, minHeight: { xs: 56, md: 64 } }}>
+          <Typography
+            variant="h6"
+            sx={{ fontWeight: 700, letterSpacing: '0.08em', flexShrink: 0 }}
+          >
             D&amp;D NOTES
           </Typography>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Chip
-              label={
-                activeCatalog?.provisioningConfigured
-                  ? 'Self-serve provisioning enabled'
-                  : 'Provisioning placeholder mode'
-              }
-              color={activeCatalog?.provisioningConfigured ? 'success' : 'warning'}
-              variant="outlined"
-            />
+          <Stack
+            direction="row"
+            spacing={0.5}
+            sx={{ alignItems: 'center', minWidth: 0, flexShrink: 0 }}
+          >
+            {!isXs ? (
+              <Chip
+                label={
+                  activeCatalog?.provisioningConfigured
+                    ? 'Self-serve provisioning enabled'
+                    : 'Provisioning placeholder mode'
+                }
+                color={activeCatalog?.provisioningConfigured ? 'success' : 'warning'}
+                variant="outlined"
+                size="small"
+              />
+            ) : null}
             {isAuthenticated && authMode === 'keycloak' ? (
-              <Button
-                color="inherit"
-                startIcon={<ManageAccountsRoundedIcon />}
-                component="a"
-                href={buildAccountConsoleUrl(portalKeycloakConfig)}
-              >
-                Account settings
-              </Button>
+              isXs ? (
+                <Tooltip title="Account settings">
+                  <IconButton
+                    color="inherit"
+                    component="a"
+                    href={buildAccountConsoleUrl(portalKeycloakConfig)}
+                    aria-label="Account settings"
+                    size="small"
+                  >
+                    <ManageAccountsRoundedIcon />
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Button
+                  color="inherit"
+                  startIcon={<ManageAccountsRoundedIcon />}
+                  component="a"
+                  href={buildAccountConsoleUrl(portalKeycloakConfig)}
+                >
+                  Account settings
+                </Button>
+              )
             ) : null}
             {isAuthenticated ? (
-              <Button
-                color="inherit"
-                startIcon={<LogoutRoundedIcon />}
-                onClick={handleLogout}
-              >
-                Sign out
-              </Button>
+              isXs ? (
+                <Tooltip title="Sign out">
+                  <IconButton
+                    color="inherit"
+                    onClick={handleLogout}
+                    aria-label="Sign out"
+                    size="small"
+                  >
+                    <LogoutRoundedIcon />
+                  </IconButton>
+                </Tooltip>
+              ) : (
+                <Button
+                  color="inherit"
+                  startIcon={<LogoutRoundedIcon />}
+                  onClick={handleLogout}
+                >
+                  Sign out
+                </Button>
+              )
             ) : null}
           </Stack>
         </Toolbar>
@@ -945,6 +988,7 @@ export default function App({
                                   : normalizeSlug(event.target.value),
                               }))
                             }
+                            fullWidth
                             required
                           />
                           <TextField
@@ -959,6 +1003,7 @@ export default function App({
                                 tenantSlug: normalizeSlug(event.target.value),
                               }))
                             }}
+                            fullWidth
                             required
                           />
                           <TextField
@@ -972,6 +1017,7 @@ export default function App({
                                 planTier: event.target.value,
                               }))
                             }
+                            fullWidth
                           >
                             {planOptions.map((plan) => (
                               <MenuItem key={plan.id} value={plan.id}>
@@ -990,6 +1036,7 @@ export default function App({
                                 paymentProvider: event.target.value as typeof currentDraft.paymentProvider,
                               }))
                             }
+                            fullWidth
                           >
                             <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
                             <MenuItem value="square">Square (coming soon)</MenuItem>
@@ -1011,6 +1058,7 @@ export default function App({
                                 billingEmail: event.target.value,
                               }))
                             }
+                            fullWidth
                           />
                           <Button
                             type="submit"
@@ -1200,6 +1248,7 @@ export default function App({
                               email: event.target.value,
                             }))
                           }
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1213,6 +1262,7 @@ export default function App({
                               displayName: event.target.value,
                             }))
                           }
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1228,6 +1278,7 @@ export default function App({
                             }))
                           }
                           helperText="At least 10 characters for the local portal auth slice."
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1244,6 +1295,7 @@ export default function App({
                               billingEmail: event.target.value,
                             }))
                           }
+                          fullWidth
                         />
                         <TextField
                           id="signup-tenant-name"
@@ -1259,6 +1311,7 @@ export default function App({
                                 : normalizeSlug(event.target.value),
                             }))
                           }
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1278,6 +1331,7 @@ export default function App({
                               tenantSlug: normalizeSlug(event.target.value),
                             }))
                           }}
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1291,6 +1345,7 @@ export default function App({
                               planTier: event.target.value,
                             }))
                           }
+                          fullWidth
                         >
                           {planOptions.map((plan) => (
                             <MenuItem key={plan.id} value={plan.id}>
@@ -1309,6 +1364,7 @@ export default function App({
                               paymentProvider: event.target.value as typeof currentDraft.paymentProvider,
                             }))
                           }
+                          fullWidth
                         >
                           <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
                           <MenuItem value="square">Square (coming soon)</MenuItem>
@@ -1365,6 +1421,7 @@ export default function App({
                                 : normalizeSlug(event.target.value),
                             }))
                           }
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1379,6 +1436,7 @@ export default function App({
                               tenantSlug: normalizeSlug(event.target.value),
                             }))
                           }}
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1392,6 +1450,7 @@ export default function App({
                               planTier: event.target.value,
                             }))
                           }
+                          fullWidth
                         >
                           {planOptions.map((plan) => (
                             <MenuItem key={plan.id} value={plan.id}>
@@ -1410,6 +1469,7 @@ export default function App({
                               paymentProvider: event.target.value as typeof currentDraft.paymentProvider,
                             }))
                           }
+                          fullWidth
                         >
                           <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
                           <MenuItem value="square">Square (coming soon)</MenuItem>
@@ -1429,6 +1489,7 @@ export default function App({
                               billingEmail: event.target.value,
                             }))
                           }
+                          fullWidth
                         />
                         <Button
                           type="submit"
@@ -1452,6 +1513,7 @@ export default function App({
                           slotProps={{ htmlInput: { 'aria-label': 'Portal email' } }}
                           value={loginEmail}
                           onChange={(event) => setLoginEmail(event.target.value)}
+                          fullWidth
                           required
                         />
                         <TextField
@@ -1461,6 +1523,7 @@ export default function App({
                           slotProps={{ htmlInput: { 'aria-label': 'Password' } }}
                           value={loginPassword}
                           onChange={(event) => setLoginPassword(event.target.value)}
+                          fullWidth
                           required
                         />
                         <Button

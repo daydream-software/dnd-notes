@@ -10,6 +10,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
+import useMediaQuery from '@mui/material/useMediaQuery'
 import * as React from 'react'
 import { provisionTenant } from '../control-plane-api'
 import type { FleetTenantStatus } from '../types'
@@ -61,6 +63,8 @@ export default function TenantUpgradeDialog({
   surfaceRadius,
   tenantStatus,
 }: TenantUpgradeDialogProps) {
+  const theme = useTheme()
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const [targetVersion, setTargetVersion] = useState('')
   const [reason, setReason] = useState('')
   const [confirmationValue, setConfirmationValue] = useState('')
@@ -143,6 +147,7 @@ export default function TenantUpgradeDialog({
           onClose()
         }
       }}
+      fullScreen={fullScreen}
       fullWidth
       maxWidth="sm"
     >
