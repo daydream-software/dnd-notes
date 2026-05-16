@@ -183,6 +183,16 @@ describe('LoginPage — input callbacks', () => {
     expect(onRegisterDraftChange).toHaveBeenCalledWith('displayName', 'Dungeon Master')
   })
 
+  it('calls onRegisterDraftChange with field and value when typing in password (local register)', () => {
+    const { onRegisterDraftChange } = renderLoginPage({ isRegisterMode: true })
+
+    fireEvent.change(screen.getByLabelText('Password'), {
+      target: { value: 'securepass123' },
+    })
+
+    expect(onRegisterDraftChange).toHaveBeenCalledWith('password', 'securepass123')
+  })
+
   it('calls onToggleRegisterMode when the toggle button is clicked in local sign-in mode', () => {
     const { onToggleRegisterMode } = renderLoginPage()
 
