@@ -294,3 +294,5 @@ Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 s
 
 
 Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 slice 5 — (1) mock at the API layer (fetchOverview/fetchNotes/fetchSessions), not at internal unexported helpers; (2) invocationCallOrder for ordering assertions between mocks; (3) no-double-toast invariants require both count AND specific message string assertions — decided by Chunk + Mikey (#144 slice 5)
+
+Team update (2026-05-16T00:00:00Z): Four testing patterns canonized from #144 slice 5b — (1) Deferred block required in test file JSDoc headers (list omitted paths + rationale); (2) non-Error throw (mockRejectedValueOnce('bare string')) to exercise fallback string branches; (3) loadSharedWorkspace mock surface is 2 fetchers not 3 (no sessions in shared mode); (4) keep same-scenario dual tests split when contracts are independent — decided by Chunk + Mikey (#144 slice 5b)

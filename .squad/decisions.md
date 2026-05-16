@@ -8252,3 +8252,51 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-usenotes-save-144-slice5
 
+---
+
+### 2026-05-16: Deferred block required in test file headers
+**Decided by:** Mikey (#144 slice 5b soft improvement)
+**Type:** Testing pattern
+
+**Context:** Slice 5b initially shipped without a `Deferred:` block. CodeRabbit and future reviewers read missing coverage items as accidental omissions rather than intentional choices.
+
+**Decision:** Every test slice file must include a `Deferred (intentional, consistent with slice N):` block at the bottom of the file's JSDoc header, naming each deferred path and the rationale. Applies to all future test slices.
+
+**Session:** 2026-05-16-usenotes-shared-save-144-slice5b
+
+---
+
+### 2026-05-16: Non-Error throw test for fallback string branches
+**Decided by:** Chunk + Mikey (#144 slice 5b)
+**Type:** Testing pattern
+
+**Context:** When a handler contains `err instanceof Error ? err.message : '<fallback>'`, the fallback branch can only be exercised by throwing a non-Error value. Throwing an Error instance always hits the first branch and leaves the fallback string untested.
+
+**Decision:** Use `mockRejectedValueOnce('bare string')` (not `new Error(...)`) to exercise fallback branches. This locks the literal string distinct from sibling code paths — a refactor that accidentally swaps owner/shared error messages will fail loudly. Applied in slice 5b test 7 to lock `'Could not save the shared note.'` vs owner's `'Could not save the note.'`.
+
+**Session:** 2026-05-16-usenotes-shared-save-144-slice5b
+
+---
+
+### 2026-05-16: loadSharedWorkspace mock surface is 2 fetchers, not 3
+**Decided by:** Chunk (#144 slice 5b, verified from primary source)
+**Type:** Testing pattern / API surface
+
+**Context:** The prompt guessed the shared workspace loader mirrored owner's `loadWorkspace` (3 fetchers: fetchOverview + fetchNotes + fetchSessions). Chunk verified against useNotes.ts lines 916-919.
+
+**Decision:** `loadSharedWorkspace` calls only `fetchSharedOverview` + `fetchSharedNotes` — no sessions in shared mode. Mock surface for shared-mode reload tests is 2 fetchers. Verification from primary source before writing mocks is the correct habit.
+
+**Session:** 2026-05-16-usenotes-shared-save-144-slice5b
+
+---
+
+### 2026-05-16: Keep same-scenario dual tests split
+**Decided by:** Chunk + Mikey (#144 slice 5b)
+**Type:** Testing pattern
+
+**Context:** Tests 8 and 9 in slice 5b share the same setup (createSharedNote ok + fetchSharedOverview rejects) but assert different contracts: (8) no double-toast on `onError`, (9) `onNarrowPanel` not called on failure. CodeRabbit may suggest collapsing them into one test.
+
+**Decision:** Do not collapse. Independent contracts in separate tests make regression attribution clearer — a failing test tells you exactly which contract broke. Collapsing masks which invariant failed.
+
+**Session:** 2026-05-16-usenotes-shared-save-144-slice5b
+
