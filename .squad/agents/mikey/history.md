@@ -292,3 +292,5 @@ Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 s
 
 Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 slice 4 — (1) vi.mocked(fn).mock.calls for call-arg inspection, not module-level alias + inline property casts; (2) pin causal ordering with explicit assertions before downstream effects when error swallowing is involved; (3) symmetric onError(null) assertion in happy-path tests — decided by Mikey (#144 slice 4)
 
+
+Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 slice 5 — (1) mock at the API layer (fetchOverview/fetchNotes/fetchSessions), not at internal unexported helpers; (2) invocationCallOrder for ordering assertions between mocks; (3) no-double-toast invariants require both count AND specific message string assertions — decided by Chunk + Mikey (#144 slice 5)

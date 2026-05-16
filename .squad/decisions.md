@@ -8216,3 +8216,39 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-usecampaign-create-144-slice4
 
+---
+
+### 2026-05-16: Mock at the API layer, not at internal helpers
+**Decided by:** Chunk + Mikey (#144 slice 5)
+**Type:** Testing pattern
+
+**Context:** `loadWorkspace` in useNotes.ts is internal and unexported. Mocking it directly is not possible without re-exporting internals or patching module internals.
+
+**Decision:** Mock the three underlying API calls in `Promise.all` (`fetchOverview`, `fetchNotes`, `fetchSessions`) rather than the internal helper. Fragility budget: a future 4th API call added to loadWorkspace fails loudly in jsdom (network attempt via `vi.importActual` spread) — not silent breakage. Same pattern as existing useNotes.test.ts race-guard tests.
+
+**Session:** 2026-05-16-usenotes-save-144-slice5
+
+---
+
+### 2026-05-16: invocationCallOrder for cross-mock ordering assertions
+**Decided by:** Mikey (must-fix, #144 slice 5)
+**Type:** Testing pattern
+
+**Context:** When a test asserts "X happens AFTER Y", bare `toHaveBeenCalled` on both does not pin order — a refactor that parallelizes the awaits could silently pass.
+
+**Decision:** Use `expect(vi.mocked(X).mock.invocationCallOrder[0]).toBeLessThan(vi.mocked(Y).mock.invocationCallOrder[0])` to pin causal ordering between two mock calls. Applied to the activity-reload-after-save test (commit `6f30a79`). Required for all future tests that make ordering claims.
+
+**Session:** 2026-05-16-usenotes-save-144-slice5
+
+---
+
+### 2026-05-16: No-double-toast invariants need count AND message string
+**Decided by:** Chunk + Mikey (#144 slice 5)
+**Type:** Testing pattern
+
+**Context:** A test asserting `onError` called exactly once would silently pass if both error paths fired the same error message — count alone does not distinguish which code path reached the callback.
+
+**Decision:** "No double-toast" tests must assert two things: (1) `onError` called exactly once, and (2) with the specific message from the expected code path (not a shared message). String match rules out the outer catch reaching `onError` when only the inner path should have fired.
+
+**Session:** 2026-05-16-usenotes-save-144-slice5
+
