@@ -8180,3 +8180,39 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-useshareLinks-144-slice6
 
+---
+
+### 2026-05-16: vi.mocked() for call-arg inspection over manual casts
+**Decided by:** Mikey (must-fix, #144 slice 4)
+**Type:** Testing pattern
+
+**Context:** When asserting on mock call args, pre-existing code used a module-level alias `const fnMock = fn as ReturnType<typeof vi.fn>` and then inline property casts like `(c[1] as { title: string }).title`. Both layers of casting are noise.
+
+**Decision:** Use `vi.mocked(fn).mock.calls` for call-arg inspection — vitest types `.mock.calls` automatically to `Parameters<typeof fn>[]`, eliminating both the outer cast and inline property casts. The module-level alias pattern is acceptable for `.mockReset()` / `.mockResolvedValue()` calls but must NOT be used for call-arg inspection. Future cleanup opportunity: replace module-level aliases entirely with `vi.mocked()` at call sites.
+
+**Session:** 2026-05-16-usecampaign-create-144-slice4
+
+---
+
+### 2026-05-16: Pin causal ordering with explicit assertions when error swallowing is involved
+**Decided by:** Mikey (must-fix, #144 slice 4)
+**Type:** Testing pattern
+
+**Context:** A test that only asserts downstream effects (e.g. onLoadCampaigns called, form closed) after an async handler implicitly assumes the prior step succeeded. If a regression misorders calls (e.g. starts note loop before awaiting createCampaign), it can pass spuriously.
+
+**Decision:** Add an explicit `expect(createCampaignMock).toHaveBeenCalledOnce()` BEFORE downstream assertions whenever error swallowing is involved. Causal ordering must be pinned explicitly, not inferred from downstream success signals. Apply to all future test slices involving sequential async steps with swallowed errors.
+
+**Session:** 2026-05-16-usecampaign-create-144-slice4
+
+---
+
+### 2026-05-16: Symmetric onError assertions in happy-path tests
+**Decided by:** Mikey (must-fix, #144 slice 4)
+**Type:** Testing pattern
+
+**Context:** Success tests that omit `expect(onError).toHaveBeenCalledWith(null)` (the entry-reset call) allow regressions that fire an unexpected error in the happy path to slip past undetected.
+
+**Decision:** Mirror assertion shape across success/failure tests — happy-path tests must assert `onError(null)` (the reset) in addition to downstream success signals. Symmetry between success and failure assertions is required for all future test slices.
+
+**Session:** 2026-05-16-usecampaign-create-144-slice4
+

@@ -290,3 +290,5 @@ Team update (2026-05-15T15:30:00Z): Pre-PR gate reviews for design-system day (2
 
 Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 slice 6 — (1) synchronous-state invariants: bare act() + mid-flight assert + trailing settle act(); (2) it.todo() over commented-out test blocks universally; (3) DELETE writeText from file-level clipboard mock (not redefine to {}) when testing execCommand fallback — decided by Mikey + Chunk (#144 slice 6)
 
+Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 slice 4 — (1) vi.mocked(fn).mock.calls for call-arg inspection, not module-level alias + inline property casts; (2) pin causal ordering with explicit assertions before downstream effects when error swallowing is involved; (3) symmetric onError(null) assertion in happy-path tests — decided by Mikey (#144 slice 4)
+
