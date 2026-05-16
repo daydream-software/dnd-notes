@@ -86,6 +86,8 @@ describe('useShareLinks', () => {
     // Restore clipboard
     if (originalClipboard) {
       Object.defineProperty(navigator, 'clipboard', originalClipboard)
+    } else {
+      Reflect.deleteProperty(navigator, 'clipboard')
     }
   })
 
