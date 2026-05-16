@@ -7,7 +7,7 @@
  *   - Keycloak mode (authConfig.mode === 'keycloak' + keycloakClientRef set)
  */
 import { act, renderHook } from '@testing-library/react'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { authTokenStorageKey, useSession } from './useSession'
 
 // Stub logoutOwner from the API module while preserving other exports.
@@ -44,7 +44,9 @@ function buildKeycloakAuthConfig() {
 
 // jsdom does not allow vi.spyOn on window.location (non-configurable).
 // Override with a plain mock fn via Object.defineProperty instead.
+// Capture the original so we can restore it in afterAll to avoid cross-suite pollution.
 const assignMock = vi.fn()
+const originalLocation = window.location
 
 Object.defineProperty(window, 'location', {
   configurable: true,
@@ -56,6 +58,13 @@ Object.defineProperty(window, 'location', {
 })
 
 describe('useSession — handleLogout', () => {
+  afterAll(() => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      writable: true,
+      value: originalLocation,
+    })
+  })
   beforeEach(() => {
     logoutOwnerMock.mockReset()
     assignMock.mockReset()
@@ -289,6 +298,7 @@ describe('useSession — handleLogout', () => {
       })
 
       // Keycloak path early-returns before shared/owner localStorage work.
+      expect(localStorage.getItem(authTokenStorageKey)).toBe('kc-token')
       expect(assignMock).not.toHaveBeenCalled()
       expect(logoutOwnerMock).not.toHaveBeenCalled()
     })
