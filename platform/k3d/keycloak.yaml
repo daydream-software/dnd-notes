@@ -1804,8 +1804,6 @@ type: Opaque
 stringData:
   KC_BOOTSTRAP_ADMIN_USERNAME: admin
   KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-  KEYCLOAK_ADMIN: admin
-  KEYCLOAK_ADMIN_PASSWORD: admin
 ---
 apiVersion: apps/v1
 kind: Deployment

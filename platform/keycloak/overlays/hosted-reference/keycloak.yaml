@@ -12,8 +12,6 @@ type: Opaque
 stringData:
   KC_BOOTSTRAP_ADMIN_USERNAME: replace-with-admin-username
   KC_BOOTSTRAP_ADMIN_PASSWORD: replace-with-managed-secret
-  KEYCLOAK_ADMIN: replace-with-admin-username
-  KEYCLOAK_ADMIN_PASSWORD: replace-with-managed-secret
 ---
 apiVersion: apps/v1
 kind: Deployment
