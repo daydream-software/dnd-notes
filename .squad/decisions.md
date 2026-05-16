@@ -8104,3 +8104,23 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-join-page-disable-286
 
+---
+
+### 2026-05-16: k3d ingress-nginx rollout timeout flake — follow-up needed (Brand/CI)
+
+**Context:** PR #297 (issue #286, test-only second push `77e37df`) hit a `kubectl rollout status -n ingress-nginx deployment/ingress-nginx-controller --timeout=240s` timeout during bootstrap. The 4-min window is hardcoded in `scripts/k3d/bootstrap.sh:315`. The commit was test-only (cannot affect pod scheduling) — confirmed CI runner flakiness, not a regression. First push on the same branch passed in 5m12s. User merged.
+
+**Decision:** Not blocking, but the 240s window is too tight for slow runners. Actionable follow-up: bump the ingress-nginx rollout timeout from 240s to 360s+ OR add a retry loop in bootstrap.sh so transient runner slowness does not fail the entire smoke.
+
+**Session:** 2026-05-16-join-page-286-merged
+
+---
+
+### 2026-05-16: State-tolerant test helper matcher pattern (Stef/Chunk)
+
+**Context:** JoinPage tests needed a `getJoinButton()` helper that survives the button's accessible name changing from `"Join campaign"` to `"Joining campaign…"` when `isJoining=true`. A hardcoded string matcher throws when the label flips mid-test.
+
+**Decision:** When a button's accessible name changes with state, use a regex in the test helper: `/^Join(ing)? campaign/`. This is the canonical precedent for future agents writing similar helpers — prefer state-tolerant matchers over hardcoded label strings whenever button copy is state-dependent.
+
+**Session:** 2026-05-16-join-page-286-merged
+
