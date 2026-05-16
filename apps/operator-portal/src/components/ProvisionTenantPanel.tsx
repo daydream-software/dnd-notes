@@ -14,6 +14,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
+import useMediaQuery from '@mui/material/useMediaQuery'
 import * as React from 'react'
 import { ApiError, createTenant, provisionTenant } from '../control-plane-api'
 import type { CreateTenantRequest } from '../types'
@@ -107,6 +109,8 @@ export default function ProvisionTenantPanel({
   suggestedVersion,
   surfaceRadius,
 }: ProvisionTenantPanelProps) {
+  const theme = useTheme()
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const [draft, setDraft] = useState(() => createInitialDraft(suggestedVersion))
   const [isReviewOpen, setIsReviewOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -377,6 +381,7 @@ export default function ProvisionTenantPanel({
             setIsReviewOpen(false)
           }
         }}
+        fullScreen={fullScreen}
         fullWidth
         maxWidth="sm"
       >

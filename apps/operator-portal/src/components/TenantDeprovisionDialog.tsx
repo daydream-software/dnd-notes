@@ -11,6 +11,8 @@ import {
   TextField,
   Typography,
 } from '@mui/material'
+import { useTheme } from '@mui/material/styles'
+import useMediaQuery from '@mui/material/useMediaQuery'
 import * as React from 'react'
 import { deprovisionTenant } from '../control-plane-api'
 import type { FleetTenantStatus } from '../types'
@@ -40,6 +42,8 @@ export default function TenantDeprovisionDialog({
   surfaceRadius,
   tenantStatus,
 }: TenantDeprovisionDialogProps) {
+  const theme = useTheme()
+  const fullScreen = useMediaQuery(theme.breakpoints.down('sm'))
   const [reason, setReason] = useState('')
   const [confirmationValue, setConfirmationValue] = useState('')
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -97,6 +101,7 @@ export default function TenantDeprovisionDialog({
           onClose()
         }
       }}
+      fullScreen={fullScreen}
       fullWidth
       maxWidth="sm"
     >
