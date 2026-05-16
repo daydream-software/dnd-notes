@@ -681,7 +681,7 @@ export default function App({
   return (
     <Box sx={{ minHeight: '100vh' }}>
       <AppBar position="static" color="transparent" elevation={0}>
-        <Toolbar sx={{ justifyContent: 'space-between', gap: 1, minHeight: { xs: 56, md: 64 } }}>
+        <Toolbar sx={{ justifyContent: 'space-between', gap: 1, minHeight: { xs: 56, sm: 64 } }}>
           <Typography
             variant="h6"
             sx={{ fontWeight: 700, letterSpacing: '0.08em', flexShrink: 0 }}
