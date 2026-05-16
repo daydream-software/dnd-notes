@@ -1,7 +1,7 @@
 import AccountCircleRoundedIcon from '@mui/icons-material/AccountCircleRounded'
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded'
 import ManageAccountsRoundedIcon from '@mui/icons-material/ManageAccountsRounded'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type SubmitEvent } from 'react'
 import {
   Alert,
   AppBar,
@@ -500,7 +500,7 @@ export default function App({
     }))
   }
 
-  const handleSignup = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     setIsSubmittingSignup(true)
@@ -540,7 +540,7 @@ export default function App({
     }
   }
 
-  const handleLogin = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleLogin = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     setError(null)
@@ -590,7 +590,7 @@ export default function App({
 
   const isAuthenticated = authMode === 'keycloak' ? Boolean(keycloakToken) : Boolean(sessionToken)
 
-  const handleCreateTenant = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handleCreateTenant = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
 
     const currentToken =
