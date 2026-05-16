@@ -8124,3 +8124,23 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-join-page-286-merged
 
+---
+
+### 2026-05-16: Empty-string sentinel over detect-removed-keys for provisioning attributes (Data/Coordinator)
+
+**Context:** Issue #248 required clearing a stale `tenant_display_name` Keycloak client attribute when `displayName` flips from non-null to null. Two options: (1) patch `specMatchesExisting` to detect removed keys — architecturally cleaner, future-proofs all attributes; (2) always send the full attribute set with an empty-string sentinel — lighter touch, 1-line diff.
+
+**Decision:** Chose Option 2. The FTL template (`template.ftl:36-42`) already treats empty string as falsy via `?has_content`, so empty-string is the correct sentinel. Option 1's "detect removed keys" generalization is not pulled by any other use case in provisioning today and would be premature abstraction.
+
+**Session:** 2026-05-16-clear-stale-tenant-display-name-248
+
+---
+
+### 2026-05-16: Raw-SQL pg-mem mutation acceptable in provisioning flip test (Data/Coordinator/Mikey)
+
+**Context:** The new `clears tenant_display_name attribute on ensureClient when displayName flips non-null to null` test (issue #248) needed to simulate an "edit displayName" API path that does not yet exist in the registry. The only available mechanism was a raw `UPDATE` on the pg-mem `tenants` table between two `provisionTenant` calls.
+
+**Decision:** Raw-SQL mutation is acceptable here — scoped to the test only, no production path bypassed. Adding an `updateTenantDisplayName` registry method was deemed out of scope for #248. Mikey explicitly approved. CodeRabbit may raise it; if so, that work belongs in a separate issue.
+
+**Session:** 2026-05-16-clear-stale-tenant-display-name-248
+
