@@ -70,7 +70,7 @@ export default function JoinPage({
                 <Button
                   variant="contained"
                   onClick={onJoin}
-                  disabled={isJoining}
+                  disabled={isJoining || joinDraft.displayName.trim().length === 0}
                   sx={{ alignSelf: 'flex-start' }}
                 >
                   {isJoining ? 'Joining campaign…' : 'Join campaign'}
