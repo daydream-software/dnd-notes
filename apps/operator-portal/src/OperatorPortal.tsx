@@ -6,7 +6,8 @@ import { useOperatorAuth } from './hooks/useOperatorAuth'
 import AuthGate from './components/AuthGate'
 import PortalHeader from './components/PortalHeader'
 import ProvisionTenantPanel from './components/ProvisionTenantPanel'
-import FleetStatusPage, { buildSummaryCards } from './pages/FleetStatusPage'
+import FleetStatusPage from './pages/FleetStatusPage'
+import { buildSummaryCards } from './pages/fleetSummaryCards'
 import type { OperatorKeycloakConfig } from './types'
 import type { RuntimeKeycloakClient } from './keycloak-client'
 
@@ -128,7 +129,7 @@ export default function OperatorPortal({
                 surfaceRadius={surfaceRadius}
                 onError={onError}
                 onNotice={onNotice}
-                onRefresh={() => loadFleet(authToken ?? '')}
+                onRefresh={async () => { if (authToken) { await loadFleet(authToken) } }}
               />
             ) : (
               <ProvisionTenantPanel
@@ -137,7 +138,7 @@ export default function OperatorPortal({
                 disabledReason={mutationDisabledReason}
                 onError={onError}
                 onProvisioned={onNotice}
-                onRefresh={() => loadFleet(authToken ?? '')}
+                onRefresh={async () => { if (authToken) { await loadFleet(authToken) } }}
                 suggestedVersion={suggestedProvisionVersion}
                 surfaceRadius={surfaceRadius}
               />

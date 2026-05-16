@@ -157,6 +157,15 @@ export function useOperatorAuth(
 
           persistKeycloakTokens(tokens)
           setAuthToken(tokens.accessToken)
+
+          const authorized = isAuthorized(tokens.accessToken)
+          setIsRoleAuthorized(authorized)
+
+          if (!authorized) {
+            clearSession()
+            setAuthError('Your operator access changed. Sign in again.')
+            return
+          }
         })
         .catch((refreshError) => {
           if (cancelled) {
@@ -184,7 +193,15 @@ export function useOperatorAuth(
       return
     }
 
-    await keycloakClientRef.current.login(buildOperatorRedirectUri())
+    try {
+      await keycloakClientRef.current.login(buildOperatorRedirectUri())
+    } catch (loginError) {
+      setAuthError(
+        loginError instanceof Error
+          ? loginError.message
+          : 'Could not start the sign-in flow. Reload and try again.',
+      )
+    }
   }, [])
 
   const handleLogout = useCallback(async () => {

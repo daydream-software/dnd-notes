@@ -1,12 +1,8 @@
-import ApartmentRoundedIcon from '@mui/icons-material/ApartmentRounded'
-import BackupRoundedIcon from '@mui/icons-material/BackupRounded'
 import CheckCircleRoundedIcon from '@mui/icons-material/CheckCircleRounded'
 import ContentCopyRoundedIcon from '@mui/icons-material/ContentCopyRounded'
 import DeleteForeverRoundedIcon from '@mui/icons-material/DeleteForeverRounded'
 import ErrorOutlineRoundedIcon from '@mui/icons-material/ErrorOutlineRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
-import SecurityRoundedIcon from '@mui/icons-material/SecurityRounded'
-import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import {
   Alert,
   Box,
@@ -33,6 +29,7 @@ import type {
   FleetTenantStatus,
   TenantState,
 } from '../types'
+import type { SummaryCard } from './fleetSummaryCards'
 
 const { useCallback, useState } = React
 
@@ -160,13 +157,6 @@ function CopyField({ label, value }: CopyFieldProps) {
 }
 
 // ── FleetStatusPage ───────────────────────────────────────────────────────────
-
-interface SummaryCard {
-  label: string
-  value: string
-  helper: string
-  icon: React.ReactNode
-}
 
 export interface FleetStatusPageProps {
   actor: string
@@ -518,41 +508,3 @@ export default function FleetStatusPage({
   )
 }
 
-// ── Summary card builder (used by OperatorPortal to pass data in) ─────────────
-
-export function buildSummaryCards(fleetStatus: FleetStatusResponse): SummaryCard[] {
-  return [
-    {
-      label: 'Fleet tenants',
-      value: String(fleetStatus.summary.totalTenants),
-      helper: `${fleetStatus.summary.tenantsByCurrentState.ready} ready · ${fleetStatus.summary.tenantsByCurrentState.failed} failed`,
-      icon: React.createElement(ApartmentRoundedIcon, { color: 'primary' }),
-    },
-    {
-      label: 'Needs attention',
-      value: String(fleetStatus.summary.tenantsNeedingAttention),
-      helper: `${fleetStatus.summary.tenantsMissingBackupMetadata} missing backup metadata`,
-      icon:
-        fleetStatus.summary.tenantsNeedingAttention > 0
-          ? React.createElement(WarningAmberRoundedIcon, { color: 'warning' })
-          : React.createElement(CheckCircleRoundedIcon, { color: 'success' }),
-    },
-    {
-      label: 'Backups tracked',
-      value: `${fleetStatus.summary.tenantsWithBackupMetadata}/${fleetStatus.summary.totalTenants}`,
-      helper: `${fleetStatus.summary.tenantsMissingBackupMetadata} missing`,
-      icon: React.createElement(BackupRoundedIcon, { color: 'secondary' }),
-    },
-    {
-      label: 'Provisioning lane',
-      value:
-        fleetStatus.dependencies.tenantProvisioning.status === 'healthy'
-          ? 'Healthy'
-          : 'Disabled',
-      helper:
-        fleetStatus.dependencies.tenantProvisioning.details ??
-        'Provisioning endpoint ready.',
-      icon: React.createElement(SecurityRoundedIcon, { color: 'info' }),
-    },
-  ]
-}
