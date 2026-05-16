@@ -475,9 +475,12 @@ export class TenantProvisioningService implements TenantProvisioningPort {
             ],
             attributes: {
               'pkce.code.challenge.method': 'S256',
-              ...(refreshedTenant.displayName !== null
-                ? { tenant_display_name: refreshedTenant.displayName }
-                : {}),
+              // Always include tenant_display_name so that flipping displayName
+              // non-null -> null on re-sync clears the stale Keycloak attribute.
+              // The FTL template guards with `?has_content`, which treats an
+              // empty string as falsy -- the heading falls back to
+              // "Sign in to D&D Notes" when displayName is null (#248).
+              tenant_display_name: refreshedTenant.displayName ?? '',
             },
           })
 
