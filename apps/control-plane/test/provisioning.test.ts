@@ -1502,7 +1502,7 @@ describe('TenantProvisioningService', () => {
     }
   })
 
-  it('omits tenant_display_name attribute on ensureClient when tenant has no displayName', async () => {
+  it('sets tenant_display_name to empty string on ensureClient when tenant has no displayName', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
     const databaseManager = new FakeDatabaseManager()
     const infrastructureManager = new FakeInfrastructureManager()
@@ -1535,8 +1535,65 @@ describe('TenantProvisioningService', () => {
       assert.equal(keycloakAdminClient.ensureCalls.length, 1)
       const ensureCall = keycloakAdminClient.ensureCalls[0]
       const attrs = ensureCall.attributes as Record<string, string> | undefined
-      // No displayName means no tenant_display_name attribute — template falls back to 'Sign in to D&D Notes'
-      assert.equal(attrs?.['tenant_display_name'], undefined)
+      // No displayName means tenant_display_name is sent as '' — the FTL `?has_content` guard
+      // treats an empty string as falsy, so the heading falls back to 'Sign in to D&D Notes'.
+      assert.equal(attrs?.['tenant_display_name'], '')
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('clears tenant_display_name attribute on ensureClient when displayName flips non-null to null', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    const keycloakAdminClient = new FakeKeycloakAdminClient()
+
+    const provisioningService = new TenantProvisioningService({
+      tenantRegistry,
+      databaseManager,
+      infrastructureManager,
+      keycloakAdminClient,
+      tenantRuntimeAuth: keycloakTenantRuntimeAuth,
+      baseDomain: 'dnd-notes.test',
+      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+    })
+
+    try {
+      // First provision: tenant has a displayName — attribute is set.
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        displayName: 'My Workspace',
+        version: '1.0.0',
+      })
+
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      const firstCall = keycloakAdminClient.ensureCalls[0]
+      const firstAttrs = firstCall.attributes as Record<string, string> | undefined
+      assert.equal(firstAttrs?.['tenant_display_name'], 'My Workspace')
+
+      // Simulate displayName flipping to null (e.g. via a future "edit tenant" API).
+      await pool.query("UPDATE tenants SET display_name = NULL WHERE id = 'tenant-demo'")
+
+      // Second provision: displayName is now null — attribute must be cleared to ''.
+      await provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      assert.equal(keycloakAdminClient.ensureCalls.length, 2)
+      const secondCall = keycloakAdminClient.ensureCalls[1]
+      const secondAttrs = secondCall.attributes as Record<string, string> | undefined
+      // tenant_display_name must be '' so the FTL `?has_content` guard triggers
+      // the fallback heading "Sign in to D&D Notes" (#248).
+      assert.equal(secondAttrs?.['tenant_display_name'], '')
     } finally {
       await provisioningService.close()
       await cleanup()
