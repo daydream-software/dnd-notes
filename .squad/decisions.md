@@ -8300,3 +8300,15 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-usenotes-shared-save-144-slice5b
 
+---
+
+### 2026-05-16: Annotate test stubs with production types
+**Decided by:** Chunk + Mikey (stub sweep, chore/web-usenotes-test-stub-sweep)
+**Type:** Testing pattern
+
+**Context:** Vitest spy patterns (`vi.spyOn`, `mockImplementation`, `mockResolvedValue`) do not type-check returned data against the production interface. A stub of wrong shape silently satisfies a spy. The bug was found during stub sweep follow-up to slice 5 (#305): `stubOverview` had stale fields (`memberCount`, `noteCount`) and a wrong value (`setting: null` instead of `''`) that `tsc -b` did not catch until the const was explicitly annotated.
+
+**Decision:** Always annotate test stubs with their production type: `const stubX: ProductionType = { ... }`. Once annotated, the const itself fails to compile when the production type drifts. Apply to all future test stubs representing production data shapes.
+
+**Session:** 2026-05-16-usenotes-test-stub-sweep
+
