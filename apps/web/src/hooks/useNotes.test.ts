@@ -9,6 +9,7 @@
 import { act, renderHook } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as api from '../api'
+import type { NotesOverview, NotesResponse, SessionsResponse } from '../types'
 import { useNotes } from './useNotes'
 
 // ---------------------------------------------------------------------------
@@ -27,24 +28,31 @@ function deferred<T>() {
 }
 
 /** Minimal NotesOverview stub. */
-const stubOverview = {
+const stubOverview: NotesOverview = {
   campaign: {
     id: 'camp-1',
     name: 'Test Campaign',
     tagline: '',
     system: '',
-    setting: null,
+    setting: '',
     nextSession: null,
     archivedAt: null,
     createdAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-01T00:00:00.000Z',
   },
-  memberCount: 1,
-  noteCount: 1,
+  membership: null,
+  stats: {
+    totalNotes: 0,
+    draftNotes: 0,
+    activeNotes: 0,
+    archivedNotes: 0,
+    sessionLinkedNotes: 0,
+  },
+  recentNotes: [],
 }
 
 /** Minimal NotesResponse stub. */
-const stubNotesResponse = {
+const stubNotesResponse: NotesResponse = {
   notes: [
     {
       id: 'note-1',
@@ -65,7 +73,7 @@ const stubNotesResponse = {
 }
 
 /** Minimal SessionsResponse stub. */
-const stubSessionsResponse = { sessions: [] }
+const stubSessionsResponse: SessionsResponse = { sessions: [] }
 
 // ---------------------------------------------------------------------------
 // 3a: Race guard — loadWorkspace
