@@ -244,7 +244,7 @@ export default function FleetStatusPage({
             <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: 'wrap' }}>
               <Chip
                 label={`Control plane ${fleetStatus.controlPlane.status}`}
-                color="success"
+                color={fleetStatus.controlPlane.status === 'healthy' ? 'success' : 'warning'}
                 size="small"
               />
               <Chip
