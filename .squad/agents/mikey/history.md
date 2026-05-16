@@ -288,3 +288,5 @@ Decision document: `.squad/decisions/inbox/mikey-epic-82-kickoff.md`
 
 Team update (2026-05-15T15:30:00Z): Pre-PR gate reviews for design-system day (2026-05-15) — approved #289 (Node 22 → 24 textual cleanup, no follow-ups), #291 (Footer brainstorm design + mockup, one `rgba` → `var()` swap), #292 (design-system pass: glass cards, border const exports, 12 borderColor swaps, 5+ user iteration rounds, Stef CodeRabbit triage x2, all 6 threads resolved), #295 (OperatorPortal split: 969 → 151 lines, FleetStatusPage, 4 hooks, 48/48 tests, one dead `options?` param dropped, Stef+coordinator CodeRabbit triage x2, 6 threads resolved). All approvals followed by surgical follow-ups; no blockers. — decided by coordinator.
 
+Team update (2026-05-16T00:00:00Z): Three testing patterns canonized from #144 slice 6 — (1) synchronous-state invariants: bare act() + mid-flight assert + trailing settle act(); (2) it.todo() over commented-out test blocks universally; (3) DELETE writeText from file-level clipboard mock (not redefine to {}) when testing execCommand fallback — decided by Mikey + Chunk (#144 slice 6)
+

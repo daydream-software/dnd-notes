@@ -8144,3 +8144,39 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-clear-stale-tenant-display-name-248
 
+---
+
+### 2026-05-16: Synchronous-state invariants — never-resolving-promise pattern
+**Decided by:** Mikey (must-fix, #144 slice 6)
+**Type:** Testing pattern
+
+**Context:** An `await handle*` + post-await assertion can pass even if the side-effect lands in the success branch rather than synchronously on entry. Slice 6 needed proof that state clears BEFORE the API resolves.
+
+**Decision:** Capture the returned promise in a bare `act()` (no await), assert the synchronous side-effect mid-flight, then resolve + settle in a trailing `act()`. Analogous to the cancel-in-flight fake-timer pattern from slice 3. Apply to all future test slices asserting synchronous-state invariants.
+
+**Session:** 2026-05-16-useshareLinks-144-slice6
+
+---
+
+### 2026-05-16: it.todo() over commented-out test blocks
+**Decided by:** Mikey (must-fix, #144 slice 6)
+**Type:** Testing convention
+
+**Context:** A multi-line `// it(...)` comment block is committed dead code — CodeRabbit flags it, future authors may miss the intent.
+
+**Decision:** Use `it.todo('desc')` instead. Keeps the slot visible in test output, is idiomatic vitest, and survives lint. Apply universally across all test files.
+
+**Session:** 2026-05-16-useshareLinks-144-slice6
+
+---
+
+### 2026-05-16: File-level clipboard mock + per-test deletion for execCommand fallback
+**Decided by:** Chunk + Mikey (#144 slice 6)
+**Type:** Testing pattern
+
+**Context:** Testing the `navigator.clipboard` execCommand fallback requires temporarily removing `writeText` from the mock. Redefining `clipboard` to `{}` shadows the file-level override and leaks state across tests.
+
+**Decision:** Temporarily DELETE `writeText` from the file-level `navigator.clipboard` mock (not redefine `clipboard` to `{}`). Restore after the test. Pattern is inline-documented in the `it.todo` block in `useShareLinks.test.ts` for the next author.
+
+**Session:** 2026-05-16-useshareLinks-144-slice6
+
