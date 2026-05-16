@@ -8060,3 +8060,25 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Recommendation:** Add one line to CLAUDE.md under Copy & tone section documenting this exception, pending user approval.
 
+---
+
+### 2026-05-16: previews orphan branch commitlint workaround (Coordinator/Scribe)
+
+**Context:** Husky commit-msg hook (commitlint) looks for `commitlint.config.cjs` and `node_modules/.bin/commitlint` relative to CWD. The `previews` orphan branch worktree has neither natively (no package.json, no node_modules).
+
+**Workaround in use:** Symlink both from the main repo into the previews worktree before committing screenshot batches.
+
+**Follow-up candidate:** A small hook fix to skip or short-circuit commitlint when run from a worktree with no `package.json` would remove the symlink dance. Not blocking; file as chore if the pattern recurs.
+
+**Session:** 2026-05-16-portals-responsive-294
+
+---
+
+### 2026-05-16: sandbox allowlist excludes bare 127.0.0.1 — use nip.io URLs (Coordinator)
+
+**Context:** Claude Code sandbox permits `*.127.0.0.1.nip.io` but not bare `127.0.0.1`. kubectl calls targeting the k3d API server at `127.0.0.1:46503` fail in sandboxed shell with permission errors.
+
+**Decision:** Any agent needing cluster access must route via nip.io ingress URLs (Playwright MCP, curl, etc.). Direct kubectl from sandboxed agents is not viable on this setup; kubectl commands should be issued by the human via `! ` shell prefix or a non-sandboxed step.
+
+**Session:** 2026-05-16-portals-responsive-294
+
