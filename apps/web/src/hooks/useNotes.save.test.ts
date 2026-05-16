@@ -270,6 +270,11 @@ describe('useNotes — handleSaveNote (owner mode)', () => {
     expect(vi.mocked(fetchOverview)).toHaveBeenCalledOnce()
     expect(vi.mocked(fetchNotes)).toHaveBeenCalledOnce()
 
+    // Verify that the correct preferredNoteId propagated through loadWorkspace:
+    // selectedNoteId must be the newly created note's id, not null or stale.
+    expect(result.current.selectedNoteId).toBe('new-note-id')
+    expect(result.current.isCreating).toBe(false)
+
     // isSaving must be cleared in the finally block
     expect(result.current.isSaving).toBe(false)
 
@@ -321,6 +326,10 @@ describe('useNotes — handleSaveNote (owner mode)', () => {
 
     // loadWorkspace was triggered (fetch functions called)
     expect(vi.mocked(fetchOverview)).toHaveBeenCalledOnce()
+
+    // Verify the correct preferredNoteId propagated: selectedNoteId must still
+    // be the existing note's id, not clobbered to null or another value.
+    expect(result.current.selectedNoteId).toBe('existing-note-id')
 
     expect(result.current.isSaving).toBe(false)
     expect(onError).not.toHaveBeenCalled()
