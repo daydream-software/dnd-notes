@@ -32,7 +32,6 @@ export interface ControlPlaneAdminAuth {
 }
 
 export interface PortalKeycloakAuth {
-  mode: 'local' | 'keycloak'
   verifyBearerToken(token: string): Promise<PortalTokenClaims>
 }
 
@@ -148,26 +147,14 @@ interface CreatePortalKeycloakAuthOptions {
   jwksUrl?: string
   keycloakRealm?: string
   keycloakUrl?: string
-  mode?: string
 }
 
 export function createPortalKeycloakAuth(
   options: CreatePortalKeycloakAuthOptions = {},
 ): PortalKeycloakAuth {
-  const mode = options.mode === 'keycloak' ? 'keycloak' : 'local'
-
-  if (mode === 'local') {
-    return {
-      mode,
-      async verifyBearerToken() {
-        throw new ControlPlaneAuthError(401, 'Portal Keycloak auth is not enabled.')
-      },
-    }
-  }
-
   if (!options.clientId) {
     throw new Error(
-      'CUSTOMER_PORTAL_AUTH_MODE=keycloak requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
+      'Portal Keycloak auth requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
     )
   }
 
@@ -179,7 +166,7 @@ export function createPortalKeycloakAuth(
 
   if (!issuer) {
     throw new Error(
-      'CUSTOMER_PORTAL_AUTH_MODE=keycloak requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
+      'Portal Keycloak auth requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
     )
   }
 
@@ -187,7 +174,6 @@ export function createPortalKeycloakAuth(
   const jwksUrl = options.jwksUrl ?? `${issuer}/protocol/openid-connect/certs`
 
   return {
-    mode,
     async verifyBearerToken(token) {
       let claims: PortalJwtClaims
 

@@ -41,7 +41,7 @@ test('tenant database bootstrap applies the baseline migration including owner_a
     )
     assert.deepEqual(
       migrations.rows.map((row) => row.name),
-      ['0001_baseline.sql'],
+      ['0001_baseline.sql', '0002_remove_local_auth.sql'],
     )
 
     const legacyLedger = await pool.query<{ table_name: string }>(`
@@ -69,7 +69,7 @@ test('tenant database bootstrap is idempotent across repeated invocations', asyn
     const migrations = await pool.query<{ name: string }>(
       `SELECT name FROM ${tenantApiMigrationLedgerTable} ORDER BY name`,
     )
-    assert.equal(migrations.rows.length, 1)
+    assert.equal(migrations.rows.length, 2)
   } finally {
     await pool.end()
   }

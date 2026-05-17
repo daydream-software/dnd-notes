@@ -52,8 +52,6 @@ const CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES =
     ?.split(',')
     .map((role) => role.trim())
     .filter((role) => role.length > 0) ?? []
-const CUSTOMER_PORTAL_AUTH_MODE =
-  process.env.CUSTOMER_PORTAL_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
 const CUSTOMER_PORTAL_KEYCLOAK_URL = process.env.CUSTOMER_PORTAL_KEYCLOAK_URL
 const rawCustomerPortalKeycloakJwksUrl =
   process.env.CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL?.trim()
@@ -74,8 +72,6 @@ const CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION =
   rawCustomerPortalDefaultTenantVersion.length > 0
     ? rawCustomerPortalDefaultTenantVersion
     : undefined
-const TENANT_AUTH_MODE =
-  process.env.TENANT_AUTH_MODE === 'keycloak' ? 'keycloak' : 'local'
 const TENANT_KEYCLOAK_URL = process.env.TENANT_KEYCLOAK_URL
 const rawTenantKeycloakJwksUrl = process.env.TENANT_KEYCLOAK_JWKS_URL?.trim()
 const TENANT_KEYCLOAK_JWKS_URL =
@@ -151,18 +147,16 @@ const adminAuth = createControlPlaneAdminAuth({
 })
 
 if (
-  CUSTOMER_PORTAL_AUTH_MODE === 'keycloak' &&
-  (!CUSTOMER_PORTAL_KEYCLOAK_URL ||
-    !CUSTOMER_PORTAL_KEYCLOAK_REALM ||
-    !CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID)
+  !CUSTOMER_PORTAL_KEYCLOAK_URL ||
+  !CUSTOMER_PORTAL_KEYCLOAK_REALM ||
+  !CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID
 ) {
   throw new Error(
-    'CUSTOMER_PORTAL_AUTH_MODE=keycloak requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
+    'Portal Keycloak auth requires CUSTOMER_PORTAL_KEYCLOAK_URL, CUSTOMER_PORTAL_KEYCLOAK_REALM, and CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID.',
   )
 }
 
 const portalKeycloakAuth = createPortalKeycloakAuth({
-  mode: CUSTOMER_PORTAL_AUTH_MODE,
   keycloakUrl: CUSTOMER_PORTAL_KEYCLOAK_URL,
   jwksUrl: CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL,
   keycloakRealm: CUSTOMER_PORTAL_KEYCLOAK_REALM,
@@ -261,12 +255,9 @@ if (ENABLE_TENANT_PROVISIONING) {
     )
   }
 
-  if (
-    TENANT_AUTH_MODE === 'keycloak' &&
-    (!TENANT_KEYCLOAK_URL || !TENANT_KEYCLOAK_REALM)
-  ) {
+  if (!TENANT_KEYCLOAK_URL || !TENANT_KEYCLOAK_REALM) {
     throw new Error(
-      'Provisioning with TENANT_AUTH_MODE=keycloak requires TENANT_KEYCLOAK_URL and TENANT_KEYCLOAK_REALM. The per-tenant client ID is derived automatically from the tenant ID.',
+      'Provisioning requires TENANT_KEYCLOAK_URL and TENANT_KEYCLOAK_REALM. The per-tenant client ID is derived automatically from the tenant ID.',
     )
   }
 
@@ -288,18 +279,14 @@ if (ENABLE_TENANT_PROVISIONING) {
     imageRepository: TENANT_IMAGE_REPOSITORY,
     databaseAdminUrl: TENANT_DATABASE_ADMIN_URL,
     databaseRuntimeUrl: TENANT_DATABASE_RUNTIME_URL,
-    tenantRuntimeAuth:
-      TENANT_AUTH_MODE === 'keycloak'
-        ? {
-            mode: 'keycloak',
-            keycloakUrl: TENANT_KEYCLOAK_URL,
-            keycloakJwksUrl: TENANT_KEYCLOAK_JWKS_URL,
-            keycloakRealm: TENANT_KEYCLOAK_REALM,
-          }
-        : { mode: 'local' },
+    tenantRuntimeAuth: {
+      keycloakUrl: TENANT_KEYCLOAK_URL,
+      keycloakJwksUrl: TENANT_KEYCLOAK_JWKS_URL,
+      keycloakRealm: TENANT_KEYCLOAK_REALM,
+    },
     // Pass the admin client (may be null when KEYCLOAK_ADMIN_* is not configured)
     // so the provisioner can create per-tenant Keycloak clients. When absent the
-    // step is silently skipped — useful for local-auth environments.
+    // step is silently skipped.
     keycloakAdminClient: keycloakAdminClient ?? undefined,
     imagePullSecretName: TENANT_IMAGE_PULL_SECRET,
     publicScheme: TENANT_PUBLIC_SCHEME,
@@ -316,7 +303,6 @@ const app = createApp({
   adminAuth,
   tenantProvisioningService,
   trustProxy: CONTROL_PLANE_TRUST_PROXY,
-  portalAuthMode: CUSTOMER_PORTAL_AUTH_MODE,
   portalKeycloakAuth,
   portalDefaultTenantVersion: CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION,
   tenantBaseDomain: TENANT_BASE_DOMAIN,

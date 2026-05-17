@@ -16,7 +16,6 @@ import {
   type BackupVerificationStatus,
   type PortalAccount,
   type PortalBillingProvider,
-  type PortalSession,
   type RestoreRun,
   type RoleSyncStatus,
   type StateTransition,
@@ -40,9 +39,8 @@ const tenantStorageSelectColumns = `id, desired_state, current_state, storage_re
   storage_mode, storage_migration_status,
   storage_migration_failure_reason, storage_migration_updated_at`
 const portalAccountSelectColumns = `id, email, display_name, billing_email,
-  billing_provider, password_hash, auth_provider, keycloak_sub, role_sync_status,
+  billing_provider, keycloak_sub, role_sync_status,
   created_at, updated_at`
-const portalSessionSelectColumns = `id, account_id, token_hash, expires_at, created_at`
 const stateTransitionSelectColumns = `id, tenant_id, from_state, to_state,
   triggered_by, reason, created_at`
 const backupCatalogSelectColumns = `id, tenant_id, status, format, location, size_bytes,
@@ -114,20 +112,10 @@ interface PortalAccountRow {
   display_name: string
   billing_email: string | null
   billing_provider: PortalBillingProvider | null
-  password_hash: string | null
-  auth_provider: 'local' | 'keycloak'
   keycloak_sub: string | null
   role_sync_status: RoleSyncStatus
   created_at: Date | string
   updated_at: Date | string
-}
-
-interface PortalSessionRow {
-  id: string
-  account_id: string
-  token_hash: string
-  expires_at: Date | string
-  created_at: Date | string
 }
 
 interface StateTransitionRow {
@@ -827,20 +815,16 @@ export class TenantRegistry {
     id: string
     email: string
     displayName: string
-    passwordHash?: string | null
     billingEmail?: string | null
     billingProvider?: PortalBillingProvider | null
-    authProvider?: 'local' | 'keycloak'
     keycloakSub?: string | null
   }): Promise<PortalAccount> {
     const {
       id,
       email,
       displayName,
-      passwordHash,
       billingEmail,
       billingProvider,
-      authProvider = 'local',
       keycloakSub,
     } = params
 
@@ -851,11 +835,9 @@ export class TenantRegistry {
          display_name,
          billing_email,
          billing_provider,
-         password_hash,
-         auth_provider,
          keycloak_sub
        )
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING ${portalAccountSelectColumns}`,
       [
         id,
@@ -863,8 +845,6 @@ export class TenantRegistry {
         displayName,
         billingEmail ?? null,
         billingProvider ?? null,
-        passwordHash ?? null,
-        authProvider,
         keycloakSub ?? null,
       ],
     )
@@ -903,11 +883,9 @@ export class TenantRegistry {
            display_name,
            billing_email,
            billing_provider,
-           password_hash,
-           auth_provider,
            keycloak_sub
          )
-         VALUES ($1, $2, $3, NULL, NULL, NULL, 'keycloak', $4)
+         VALUES ($1, $2, $3, NULL, NULL, $4)
          RETURNING ${portalAccountSelectColumns}`,
         [id, email, displayName, keycloakSub],
       )
@@ -1102,28 +1080,6 @@ export class TenantRegistry {
     return result.rows.map((row) => this.mapRowToPortalAccount(row))
   }
 
-  async getPortalAccountAuthByEmail(email: string): Promise<{
-    account: PortalAccount
-    passwordHash: string | null
-  } | null> {
-    const row = await this.run<PortalAccountRow>(
-      `SELECT ${portalAccountSelectColumns}
-       FROM portal_accounts
-       WHERE email = $1`,
-      [email],
-    )
-    const record = row.rows[0]
-
-    if (!record) {
-      return null
-    }
-
-    return {
-      account: this.mapRowToPortalAccount(record),
-      passwordHash: record.password_hash ?? null,
-    }
-  }
-
   async updatePortalAccount(accountId: string, params: {
     displayName: string
     billingEmail?: string | null
@@ -1151,53 +1107,6 @@ export class TenantRegistry {
     }
 
     return this.mapRowToPortalAccount(row)
-  }
-
-  async createPortalSession(params: {
-    id: string
-    accountId: string
-    tokenHash: string
-    expiresAt: string
-  }): Promise<PortalSession> {
-    const { id, accountId, tokenHash, expiresAt } = params
-
-    await this.purgeExpiredPortalSessions()
-    const result = await this.run<PortalSessionRow>(
-      `INSERT INTO portal_sessions (id, account_id, token_hash, expires_at)
-       VALUES ($1, $2, $3, $4)
-       RETURNING ${portalSessionSelectColumns}`,
-      [id, accountId, tokenHash, expiresAt],
-    )
-    const row = result.rows[0]
-
-    if (!row) {
-      throw new Error('Failed to retrieve created portal session')
-    }
-
-    return this.mapRowToPortalSession(row)
-  }
-
-  async getPortalSessionByTokenHash(tokenHash: string): Promise<PortalSession | null> {
-    await this.purgeExpiredPortalSessions()
-    const now = new Date().toISOString()
-
-    const row = await this.run<PortalSessionRow>(
-      `SELECT ${portalSessionSelectColumns}
-       FROM portal_sessions
-       WHERE token_hash = $1
-         AND expires_at > $2`,
-      [tokenHash, now],
-    )
-
-    return row.rows[0] ? this.mapRowToPortalSession(row.rows[0]) : null
-  }
-
-  async deletePortalSessionByTokenHash(tokenHash: string): Promise<void> {
-    await this.run(
-      `DELETE FROM portal_sessions
-       WHERE token_hash = $1`,
-      [tokenHash],
-    )
   }
 
   async updateTenantState(
@@ -1981,21 +1890,10 @@ export class TenantRegistry {
       displayName: row.display_name,
       billingEmail: row.billing_email ?? null,
       billingProvider: row.billing_provider ?? null,
-      authProvider: row.auth_provider,
       keycloakSub: row.keycloak_sub ?? null,
       roleSyncStatus: row.role_sync_status ?? 'complete',
       createdAt: normalizeTimestamp(row.created_at),
       updatedAt: normalizeTimestamp(row.updated_at),
-    }
-  }
-
-  private mapRowToPortalSession(row: PortalSessionRow): PortalSession {
-    return {
-      id: row.id,
-      accountId: row.account_id,
-      tokenHash: row.token_hash,
-      expiresAt: normalizeTimestamp(row.expires_at),
-      createdAt: normalizeTimestamp(row.created_at),
     }
   }
 
@@ -2029,12 +1927,4 @@ export class TenantRegistry {
     }
   }
 
-  private async purgeExpiredPortalSessions(): Promise<void> {
-    const now = new Date().toISOString()
-    await this.run(
-      `DELETE FROM portal_sessions
-       WHERE expires_at <= $1`,
-      [now],
-    )
-  }
 }

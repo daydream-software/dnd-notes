@@ -1,9 +1,48 @@
 import { DataType, newDb, type IMemoryDb } from 'pg-mem'
-import { TenantRegistry } from '../src/tenant-registry.js'
+import { TenantRegistry, type TenantRegistryPoolLike } from '../src/tenant-registry.js'
 
 export interface RegisterPgMemTenantRegistrySupportOptions {
   tryAdvisoryLockImpl?: (key1: unknown, key2: unknown) => boolean
   advisoryUnlockImpl?: (key1: unknown, key2: unknown) => boolean
+}
+
+/**
+ * pg-mem does not fully handle DROP COLUMN when the column has a named CHECK
+ * constraint — the constraint is not removed and subsequent INSERTs fail.
+ * This wrapper intercepts the migration SQL for 0005_remove_local_auth and
+ * emits an explicit DROP CONSTRAINT before the DROP COLUMN so pg-mem can
+ * keep up with the real migration.
+ */
+function rewriteSqlForPgMem(sql: string): string {
+  return sql.replace(
+    /ALTER TABLE portal_accounts\s+DROP COLUMN IF EXISTS auth_provider/gi,
+    [
+      'ALTER TABLE portal_accounts DROP CONSTRAINT IF EXISTS portal_accounts_constraint_1',
+      'ALTER TABLE portal_accounts DROP COLUMN IF EXISTS auth_provider',
+    ].join(';\n  '),
+  )
+}
+
+export function wrapPoolForPgMem(pool: TenantRegistryPoolLike): TenantRegistryPoolLike {
+  return {
+    async query(text: string, values?: readonly unknown[]) {
+      return pool.query(rewriteSqlForPgMem(text), values)
+    },
+    async connect() {
+      const client = await pool.connect()
+      return {
+        query(text: string, values?: readonly unknown[]) {
+          return client.query(rewriteSqlForPgMem(text), values)
+        },
+        release(error?: Error) {
+          client.release(error)
+        },
+      }
+    },
+    async end() {
+      await pool.end()
+    },
+  }
 }
 
 export function registerPgMemTenantRegistrySupport(
@@ -65,7 +104,7 @@ export function createTestTenantRegistry() {
   const pool = new Pool()
   const tenantRegistry = new TenantRegistry(
     'postgresql://control-plane.test/tenant-registry',
-    { pool },
+    { pool: wrapPoolForPgMem(pool) },
   )
 
   return {

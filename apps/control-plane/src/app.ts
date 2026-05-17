@@ -1,15 +1,11 @@
 import { createRequire } from 'node:module'
 import {
-  createHash,
   randomBytes,
   randomUUID,
-  scrypt,
-  timingSafeEqual,
 } from 'node:crypto'
 import { rateLimit, type Options as RateLimitOptions } from 'express-rate-limit'
 import express, {
   type Express,
-  type NextFunction,
   type Request,
   type Response,
 } from 'express'
@@ -58,9 +54,6 @@ import type {
   PortalAccount,
   PortalCatalogResponse,
   PortalDashboardResponse,
-  PortalLogoutResponse,
-  PortalSession,
-  PortalSessionResponse,
   PortalTenantSummary,
   RestoreRunListResponse,
   RestoreRunResponse,
@@ -278,17 +271,6 @@ function buildTenantStorageStatus(
   }
 }
 
-interface RateLimitBucket {
-  count: number
-  resetAt: number
-}
-
-interface RateLimitPolicy {
-  maxRequests: number
-  windowMs: number
-  errorMessage: string
-}
-
 interface CreateAppOptions {
   tenantRegistry: TenantRegistry
   adminToken?: string
@@ -296,7 +278,6 @@ interface CreateAppOptions {
   tenantProvisioningService?: TenantProvisioningPort
   tenantBackupDispatcher?: TenantBackupDispatcher
   trustProxy?: boolean | number
-  portalAuthMode?: 'local' | 'keycloak'
   portalKeycloakAuth?: PortalKeycloakAuth
   portalDefaultTenantVersion?: string
   tenantBaseDomain?: string
@@ -318,11 +299,9 @@ const require = createRequire(import.meta.url)
 const { version: appVersion } = require('../package.json') as { version: string }
 
 const tenantSlugPattern = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
-const portalSessionLifetimeMs = 30 * 24 * 60 * 60 * 1000
 const internalRoutePrefix = '/internal'
 const tenantRoutePrefix = `${internalRoutePrefix}/tenants`
 const portalRoutePrefix = '/portal'
-const dummyPortalPasswordHash = `${'0'.repeat(32)}:${'0'.repeat(128)}`
 const portalPlanCatalog = [
   {
     id: 'adventurer',
@@ -347,17 +326,6 @@ const portalPlanCatalog = [
   },
 ] as const
 const portalPlanSchema = z.enum(['adventurer', 'guild', 'realm'])
-const rateLimitBucketSweepIntervalMs = 60 * 1000
-const portalSignupRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many portal signup attempts. Please wait before trying again.',
-}
-const portalLoginRateLimitPolicy: RateLimitPolicy = {
-  maxRequests: 5,
-  windowMs: 1000 * 60 * 15,
-  errorMessage: 'Too many portal login attempts. Please wait before trying again.',
-}
 
 /**
  * Parse a non-negative integer from an environment variable.
@@ -398,8 +366,6 @@ export function makeRateLimiter(options: Partial<RateLimitOptions>) {
   return rateLimit({ ...rateLimitDefaults, ...options })
 }
 
-const portalAuthWindowMs = readPositiveIntEnv('RATE_LIMIT_PORTAL_WINDOW_MS', 15 * 60 * 1000)
-const portalAuthMax = readPositiveIntEnv('RATE_LIMIT_PORTAL_AUTH_MAX', 5)
 const internalAdminWindowMs = readPositiveIntEnv('RATE_LIMIT_INTERNAL_WINDOW_MS', 15 * 60 * 1000)
 const internalAdminMax = readPositiveIntEnv('RATE_LIMIT_INTERNAL_MAX', 100)
 
@@ -453,23 +419,6 @@ const provisionTenantSchema = z.object({
 const deprovisionTenantSchema = z.object({
   triggeredBy: z.string().min(1),
   reason: z.string().min(1).optional(),
-})
-
-const portalSignupSchema = z.object({
-  email: z.string().trim().email(),
-  displayName: z.string().trim().min(1).max(80),
-  password: z.string().min(10).max(200),
-  billingEmail: z.string().trim().email().optional(),
-  paymentProvider: portalBillingProviderSchema,
-  tenantName: z.string().trim().min(1).max(80),
-  tenantSlug: z.string().min(1).max(63).regex(tenantSlugPattern),
-  planTier: portalPlanSchema,
-  acceptTerms: z.literal(true),
-})
-
-const portalLoginSchema = z.object({
-  email: z.string().trim().email(),
-  password: z.string().min(1).max(200),
 })
 
 const portalCreateTenantSchema = z.object({
@@ -539,47 +488,10 @@ function getTenantConflictResponse(error: ConstraintConflictError): ErrorRespons
   return { error: 'Tenant already exists' }
 }
 
-function getPortalSignupConflictResponse(
-  error: ConstraintConflictError,
-): ErrorResponse {
-  const constraint = readConstraintName(error)
-
-  if (constraint === 'portal_accounts_email_key') {
-    return {
-      error: 'Portal account already exists',
-      details:
-        'An account already exists for that email. Sign in instead of signing up again.',
-    }
-  }
-
-  if (
-    error.message.includes('portal_accounts.email') ||
-    error.message.includes('portal_accounts_email_key')
-  ) {
-    return {
-      error: 'Portal account already exists',
-      details:
-        'An account already exists for that email. Sign in instead of signing up again.',
-    }
-  }
-
-  return {
-    error: 'Portal signup conflict',
-    details: 'A portal account or tenant already exists for the supplied signup details.',
-  }
-}
-
 function getPortalTenantConflictResponse(): ErrorResponse {
   return {
     error: 'Portal tenant conflict',
     details: 'A tenant already exists for the supplied tenant details.',
-  }
-}
-
-function getPortalSignupFailureResponse(): ErrorResponse {
-  return {
-    error: 'Failed to complete portal signup',
-    details: 'An unexpected error occurred while creating your account. Please try again later.',
   }
 }
 
@@ -607,10 +519,6 @@ function logUnexpectedError(message: string, error: unknown) {
   console.error('%s: %s', message, getErrorMessage(error))
 }
 
-function readRateLimitClientId(request: Request) {
-  return request.ip ?? request.socket.remoteAddress ?? 'unknown'
-}
-
 function normalizePortalEmail(email: string) {
   return email.trim().toLowerCase()
 }
@@ -636,57 +544,8 @@ function derivePortalDisplayName(claims: PortalTokenClaims, normalizedEmail: str
   return normalizedEmail.split('@')[0] ?? normalizedEmail
 }
 
-function createPortalSessionToken() {
-  return randomBytes(32).toString('hex')
-}
-
-function hashPortalSessionToken(token: string) {
-  return createHash('sha256').update(token).digest('hex')
-}
-
-function derivePortalPasswordKey(password: string, salt: string) {
-  return new Promise<Buffer>((resolve, reject) => {
-    scrypt(password, salt, 64, (error, derivedKey) => {
-      if (error) {
-        reject(error)
-        return
-      }
-
-      resolve(derivedKey as Buffer)
-    })
-  })
-}
-
-async function createPortalPasswordHash(password: string) {
-  const salt = randomBytes(16).toString('hex')
-  const derivedKey = (await derivePortalPasswordKey(password, salt)).toString('hex')
-  return `${salt}:${derivedKey}`
-}
-
-async function verifyPortalPassword(password: string, storedHash: string) {
-  const [salt, expectedHex] = storedHash.split(':')
-
-  if (!salt || !expectedHex) {
-    return false
-  }
-
-  const provided = await derivePortalPasswordKey(password, salt)
-  const expected = Buffer.from(expectedHex, 'hex')
-
-  if (provided.length !== expected.length) {
-    return false
-  }
-
-  return timingSafeEqual(provided, expected)
-}
-
-function buildPortalSessionExpiry() {
-  return new Date(Date.now() + portalSessionLifetimeMs).toISOString()
-}
-
 interface PortalAuthenticatedRequest extends Request {
   portalAccount?: PortalAccount
-  portalSession?: PortalSession
 }
 
 function createAdminAuthMiddleware(
@@ -730,43 +589,6 @@ function createAdminAuthMiddleware(
   }
 }
 
-function createPortalSessionMiddleware(
-  tenantRegistry: TenantRegistry,
-): express.RequestHandler {
-  return async (request, response, next) => {
-    const authorizationHeader = request.header('authorization')
-
-    if (!authorizationHeader?.startsWith('Bearer ')) {
-      request.resume()
-      response.status(401).json({ error: 'Unauthorized' })
-      return
-    }
-
-    const rawToken = authorizationHeader.slice('Bearer '.length).trim()
-    const tokenHash = hashPortalSessionToken(rawToken)
-    const portalSession = await tenantRegistry.getPortalSessionByTokenHash(tokenHash)
-
-    if (!portalSession) {
-      request.resume()
-      response.status(401).json({ error: 'Unauthorized' })
-      return
-    }
-
-    const portalAccount = await tenantRegistry.getPortalAccount(portalSession.accountId)
-
-    if (!portalAccount) {
-      request.resume()
-      response.status(401).json({ error: 'Unauthorized' })
-      return
-    }
-
-    const portalRequest = request as PortalAuthenticatedRequest
-    portalRequest.portalSession = portalSession
-    portalRequest.portalAccount = portalAccount
-    next()
-  }
-}
-
 export function createApp({
   tenantRegistry,
   adminToken,
@@ -774,7 +596,6 @@ export function createApp({
   tenantProvisioningService,
   tenantBackupDispatcher = new ThrowingTenantBackupDispatcher(),
   trustProxy = false,
-  portalAuthMode = 'local',
   portalKeycloakAuth,
   portalDefaultTenantVersion = appVersion,
   tenantBaseDomain,
@@ -785,30 +606,11 @@ export function createApp({
   const app = express()
   app.set('trust proxy', trustProxy)
   const portalJsonParser = express.json({ limit: '16kb' })
-  const rateLimitBuckets = new Map<string, RateLimitBucket>()
-  // Per-instance express-rate-limit middleware for portal auth routes.
-  // Created inside createApp so that test instances each get isolated stores.
-  const portalSignupLimiter = makeRateLimiter({
-    windowMs: portalAuthWindowMs,
-    limit: portalAuthMax,
-    message: { error: 'Too many portal signup attempts. Please wait before trying again.' },
-  })
-  const portalLoginLimiter = makeRateLimiter({
-    windowMs: portalAuthWindowMs,
-    limit: portalAuthMax,
-    message: { error: 'Too many portal login attempts. Please wait before trying again.' },
-  })
-  const portalLogoutLimiter = makeRateLimiter({
-    windowMs: portalAuthWindowMs,
-    limit: 30,
-    message: { error: 'Too many requests. Please wait before trying again.' },
-  })
   const internalAdminLimiter = makeRateLimiter({
     windowMs: internalAdminWindowMs,
     limit: internalAdminMax,
     message: { error: 'Too many internal admin requests. Please wait before trying again.' },
   })
-  let nextRateLimitBucketSweepAt = 0
   const buildHealthResponse = (): HealthResponse => ({
     status: 'healthy',
     uptime: process.uptime(),
@@ -953,7 +755,6 @@ export function createApp({
     })
   }
   const buildPortalCatalogResponse = (): PortalCatalogResponse => ({
-    authMode: portalAuthMode,
     defaultTenantVersion: portalDefaultTenantVersion,
     provisioningConfigured: tenantProvisioningService !== undefined,
     slugPolicy: {
@@ -1033,81 +834,9 @@ export function createApp({
       tenants,
     }
   }
-  const buildPortalSessionResponse = async (
-    account: PortalAccount,
-  ): Promise<PortalSessionResponse> => {
-    const token = createPortalSessionToken()
-    await tenantRegistry.createPortalSession({
-      id: randomUUID(),
-      accountId: account.id,
-      tokenHash: hashPortalSessionToken(token),
-      expiresAt: buildPortalSessionExpiry(),
-    })
-
-    return {
-      token,
-      dashboard: await buildPortalDashboardResponse(account),
-    }
-  }
-  const isRateLimited = (
-    request: Request,
-    response: Response<ErrorResponse>,
-    policyKey: string,
-    policy: RateLimitPolicy,
-  ) => {
-    const now = Date.now()
-
-    if (now >= nextRateLimitBucketSweepAt) {
-      for (const [key, bucket] of rateLimitBuckets) {
-        if (bucket.resetAt <= now) {
-          rateLimitBuckets.delete(key)
-        }
-      }
-
-      nextRateLimitBucketSweepAt = now + rateLimitBucketSweepIntervalMs
-    }
-
-    const bucketKey = [policyKey, readRateLimitClientId(request)].join(':')
-    const existingBucket = rateLimitBuckets.get(bucketKey)
-
-    if (!existingBucket || existingBucket.resetAt <= now) {
-      rateLimitBuckets.set(bucketKey, {
-        count: 1,
-        resetAt: now + policy.windowMs,
-      })
-      return false
-    }
-
-    if (existingBucket.count >= policy.maxRequests) {
-      request.resume()
-      response.set(
-        'Retry-After',
-        Math.max(1, Math.ceil((existingBucket.resetAt - now) / 1000)).toString(),
-      )
-      response.status(429).json({ error: policy.errorMessage })
-      return true
-    }
-
-    existingBucket.count += 1
-    return false
-  }
-  const ensurePortalLocalAuthEnabled = (
-    response: Response<ErrorResponse>,
-  ): boolean => {
-    if (portalAuthMode === 'local') {
-      return true
-    }
-
-    response.status(501).json({
-      error:
-        'This endpoint is only available in local portal auth mode. Use Keycloak authentication instead.',
-    })
-    return false
-  }
-
   const createPortalKeycloakSessionMiddleware = (): express.RequestHandler => {
     return async (request, response: Response<ErrorResponse>, next) => {
-      if (!portalKeycloakAuth || portalKeycloakAuth.mode !== 'keycloak') {
+      if (!portalKeycloakAuth) {
         response.status(501).json({ error: 'Portal Keycloak auth is not configured.' })
         return
       }
@@ -1254,22 +983,6 @@ export function createApp({
 
       const portalRequest = request as PortalAuthenticatedRequest
       portalRequest.portalAccount = portalAccount
-      next()
-    }
-  }
-  const createPortalRateLimitMiddleware = (
-    policyKey: string,
-    policy: RateLimitPolicy,
-  ) => {
-    return (
-      request: Request,
-      response: Response<ErrorResponse>,
-      next: NextFunction,
-    ) => {
-      if (isRateLimited(request, response, policyKey, policy)) {
-        return
-      }
-
       next()
     }
   }
@@ -1456,157 +1169,7 @@ export function createApp({
     },
   )
 
-  app.post(
-    `${portalRoutePrefix}/signup`,
-    portalSignupLimiter,
-    createPortalRateLimitMiddleware('portal-signup', portalSignupRateLimitPolicy),
-    portalJsonParser,
-    async (
-      request: Request,
-      response: Response<PortalSessionResponse | ErrorResponse>,
-    ) => {
-      if (!ensurePortalLocalAuthEnabled(response)) {
-        return
-      }
-
-      const parseResult = portalSignupSchema.safeParse(request.body)
-
-      if (!parseResult.success) {
-        response.status(400).json({
-          error: 'Invalid request body',
-          details: parseResult.error.message,
-        })
-        return
-      }
-
-      const normalizedEmail = normalizePortalEmail(parseResult.data.email)
-      const normalizedBillingEmail =
-        parseResult.data.billingEmail?.trim() ?? normalizedEmail
-
-      let createdAccount: PortalAccount | null = null
-
-      try {
-        const existingAccount = await tenantRegistry.getPortalAccountByEmail(
-          normalizedEmail,
-        )
-        if (existingAccount) {
-          response.status(409).json({
-            error: 'Portal account already exists',
-            details:
-              'An account already exists for that email. Sign in instead of signing up again.',
-          })
-          return
-        }
-
-        createdAccount = await tenantRegistry.createPortalAccount({
-          id: randomUUID(),
-          email: normalizedEmail,
-          displayName: parseResult.data.displayName,
-          passwordHash: await createPortalPasswordHash(parseResult.data.password),
-          billingEmail: normalizedBillingEmail,
-          billingProvider: parseResult.data.paymentProvider,
-        })
-
-        const { account } = await createPortalTenant({
-          account: createdAccount,
-          tenantName: parseResult.data.tenantName,
-          tenantSlug: parseResult.data.tenantSlug,
-          planTier: parseResult.data.planTier,
-          paymentProvider: parseResult.data.paymentProvider,
-          billingEmail: normalizedBillingEmail,
-        })
-
-        response.status(201).json(await buildPortalSessionResponse(account))
-      } catch (error) {
-        let effectiveError = error
-
-        if (createdAccount) {
-          try {
-            await tenantRegistry.deletePortalAccount(createdAccount.id)
-          } catch (accountCleanupError) {
-            effectiveError = new Error(
-              `${getErrorMessage(error)}; account cleanup failed: ${getErrorMessage(accountCleanupError)}`,
-              { cause: accountCleanupError },
-            )
-          }
-        }
-
-        if (
-          isConstraintConflictError(effectiveError) ||
-          (effectiveError instanceof Error && effectiveError.message.includes('already exists'))
-        ) {
-          response.status(409).json(getPortalSignupConflictResponse(effectiveError))
-          return
-        }
-
-        if (effectiveError instanceof Error) {
-          console.error('Portal signup failed', effectiveError)
-          response.status(500).json(getPortalSignupFailureResponse())
-          return
-        }
-
-        console.error('Portal signup failed', effectiveError)
-        response.status(500).json(getPortalSignupFailureResponse())
-      }
-    },
-  )
-
-  app.post(
-    `${portalRoutePrefix}/login`,
-    portalLoginLimiter,
-    createPortalRateLimitMiddleware('portal-login', portalLoginRateLimitPolicy),
-    portalJsonParser,
-    async (
-      request: Request,
-      response: Response<PortalSessionResponse | ErrorResponse>,
-    ) => {
-      if (!ensurePortalLocalAuthEnabled(response)) {
-        return
-      }
-
-      const parseResult = portalLoginSchema.safeParse(request.body)
-
-      if (!parseResult.success) {
-        response.status(400).json({
-          error: 'Invalid request body',
-          details: parseResult.error.message,
-        })
-        return
-      }
-
-      const normalizedEmail = normalizePortalEmail(parseResult.data.email)
-      const authRecord = await tenantRegistry.getPortalAccountAuthByEmail(
-        normalizedEmail,
-      )
-      const storedHash =
-        authRecord?.account.authProvider === 'local' && authRecord.passwordHash
-          ? authRecord.passwordHash
-          : dummyPortalPasswordHash
-      const passwordMatches = await verifyPortalPassword(
-        parseResult.data.password,
-        storedHash,
-      )
-      const passwordIsValid =
-        authRecord?.account.authProvider === 'local' &&
-        authRecord.passwordHash !== null &&
-        passwordMatches
-
-      if (!authRecord || !passwordIsValid) {
-        response.status(401).json({
-          error: 'Unauthorized',
-          details: 'Email or password is incorrect.',
-        })
-        return
-      }
-
-      response.json(await buildPortalSessionResponse(authRecord.account))
-    },
-  )
-
-  const portalAuthMiddleware =
-    portalAuthMode === 'keycloak'
-      ? createPortalKeycloakSessionMiddleware()
-      : createPortalSessionMiddleware(tenantRegistry)
+  const portalAuthMiddleware = createPortalKeycloakSessionMiddleware()
 
   app.get(
     `${portalRoutePrefix}/me`,
@@ -1691,35 +1254,6 @@ export function createApp({
         console.error('Failed to create portal tenant', error)
         response.status(500).json(getPortalTenantFailureResponse())
       }
-    },
-  )
-
-  app.post(
-    `${portalRoutePrefix}/logout`,
-    portalLogoutLimiter,
-    // Logout is a local-auth-only operation. In Keycloak mode, the SPA handles
-    // logout directly with Keycloak (front-channel). Returns 501 in Keycloak
-    // mode via ensurePortalLocalAuthEnabled before session middleware runs.
-    (_request: Request, response: Response, next: NextFunction) => {
-      if (!ensurePortalLocalAuthEnabled(response)) return
-      next()
-    },
-    createPortalSessionMiddleware(tenantRegistry),
-    portalJsonParser,
-    async (
-      request: Request,
-      response: Response<PortalLogoutResponse | ErrorResponse>,
-    ) => {
-      const portalRequest = request as PortalAuthenticatedRequest
-      const portalSession = portalRequest.portalSession
-
-      if (!portalSession) {
-        response.status(401).json({ error: 'Unauthorized' })
-        return
-      }
-
-      await tenantRegistry.deletePortalSessionByTokenHash(portalSession.tokenHash)
-      response.json({ signedOut: true })
     },
   )
 
