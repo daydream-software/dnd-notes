@@ -65,6 +65,8 @@ When reporting status, always report the effective config, not the persisted sta
 
 **Files:** `scripts/k3d/status.sh`, `scripts/k3d/down.sh`
 
+Team update (2026-05-16T00:00:00Z): Use `!= null` (loose null check) when guarding reads on results from `response.json()` casts in api.ts — catches both undefined (missing field) and null (explicit null). Any read from a `.json()` cast without a runtime guard is unsafe regardless of TypeScript type annotation. Zod validation at the api.ts boundary is a valid follow-up for future hardening. — decided by Chunk + Mikey (#308 fix)
+
 
 
 

@@ -8312,3 +8312,39 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-usenotes-test-stub-sweep
 
+---
+
+### 2026-05-16: `!= null` over `!== undefined` for nullish guards on `.json()` results
+**Decided by:** Chunk + Mikey (fix/web-api-readjson-status-fallback-308)
+**Type:** Code practice — API layer
+
+**Context:** `readJson` in `apps/web/src/api.ts` unconditionally assigned `errorBody.error`, overwriting the status-code fallback with `undefined` when the field was absent. The fix added a `!= null` guard. Test 4 in the new block (`{ error: null }` body on 400) explicitly pins `!= null` over `!== undefined` — catches both missing fields (undefined) and explicitly-null fields.
+
+**Decision:** Use `!= null` (loose null check) when guarding reads from `.json()` cast results. A future narrowing to `!== undefined` will fail the pinning test, making the intent visible in history.
+
+**Session:** 2026-05-16-readjson-status-fallback-308
+
+---
+
+### 2026-05-16: Runtime guards are load-bearing when type-cast comes from `.json()`
+**Decided by:** Chunk + Mikey (fix/web-api-readjson-status-fallback-308)
+**Type:** Code practice — API layer
+
+**Context:** `response.json()` returns `any`. The assignment `const errorBody: ErrorResponse = await response.json()` is an unsafe cast — TypeScript does not protect against missing fields at runtime. The #308 bug was caused by trusting the cast without a guard.
+
+**Decision:** Any code path that reads from a `.json()` result without an explicit runtime guard is a bug waiting to happen. Zod schema validation at the `api.ts` boundary is a valid follow-up hardening when the surface grows, but should not be pulled into a targeted bug fix. For now, explicit field guards (`!= null`) are required at every read site on `.json()` results.
+
+**Session:** 2026-05-16-readjson-status-fallback-308
+
+---
+
+### 2026-05-16: Document patch sketch in bug ticket before landing the surfacing slice
+**Decided by:** Coordinator + Mikey (fix/web-api-readjson-status-fallback-308 process retro)
+**Type:** Process — test-driven bug-fix loop
+
+**Context:** #308 was opened during slice 7's review when Chunk discovered a production bug. Because Mikey documented the patch sketch and test expectations in the bug ticket before the slice PR merged, the follow-up fix was nearly mechanical and landed the same day with zero ambiguity.
+
+**Decision:** When a test slice surfaces a real production bug, open a tracking issue with the patch sketch and expected test cases before merging the slice. The slice ships uncontaminated; the bug fix becomes a low-friction follow-up. This pattern keeps the slice PR scope clean and gives the fixing agent a spec rather than a blank page.
+
+**Session:** 2026-05-16-readjson-status-fallback-308
+
