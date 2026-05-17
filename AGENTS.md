@@ -85,7 +85,7 @@ Conventional Commits are enforced locally via Husky + commitlint:
 - Include issue reference in every commit: `feat(api): add route #123`
 - Use closing language on the final commit: `fixes #123`
 
-**Branch naming:** `squad/{issue-number}-{kebab-case-slug}` (e.g. `squad/42-fix-login`)
+**Branch naming:** `{type}/{kebab-case-slug}-{issue-number}` where `{type}` matches the conventional-commit prefix (`feat`, `fix`, `chore`, `test`, `refactor`, `docs`). Examples: `test/web-loginpage-coverage-144`, `fix/clear-stale-tenant-display-name-248`, `chore/drop-deprecated-keycloak-admin-env-235`.
 
 **PR format:**
 
@@ -110,5 +110,5 @@ Before starting any issue:
 **Planning persistence** (multi-phase tasks):
 
 1. Create/update `plan.md` with problem, approach, decisions, status, and next steps
-2. Mirror handoff context in `.squad/agents/copilot/history.md` at start, direction changes, and pauses
-3. Write impactful decisions to `.squad/decisions/inbox/copilot-{slug}.md`
+2. Mirror handoff context in `.squad/agents/{member}/history.md` (the member whose hat you're wearing) at start, direction changes, and pauses
+3. Write impactful decisions to `.squad/decisions/inbox/{member}-{slug}.md`; the `scribe` agent merges them into `.squad/decisions.md` at session end
