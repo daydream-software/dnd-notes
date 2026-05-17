@@ -8385,3 +8385,39 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-agents-md-copilot-drift
 
+---
+
+### 2026-05-16: Sandbox bypass for read-only k3d/kubectl (docker socket)
+**Decided by:** Coordinator (docs/k3d-host-ram-prerequisite-173)
+**Type:** Process — sandbox policy
+
+**Context:** Read-only cluster investigation via `kubectl top` / `k3d cluster list` requires the docker daemon socket (`/var/run/docker.sock`), which is outside the default sandbox allowlist. The error was `Operation not permitted` / `dial unix /var/run/docker.sock: socket: operation not permitted` — a classic sandbox-caused failure per the Bash tool's explicit guidance.
+
+**Decision:** Retry with `dangerouslyDisableSandbox: true` for docker/k3d/kubectl read-only investigative commands. Mutations (cluster create/delete, image imports, writes) need explicit user confirmation before bypassing. This pattern applies any time the docker socket is blocked by sandbox and the operation is read-only cluster inspection.
+
+**Session:** 2026-05-16-k3d-host-ram-173
+
+---
+
+### 2026-05-16: WSL2 memory cap framing — containment ceiling, not sufficiency floor
+**Decided by:** Mikey (via review pass, docs/k3d-host-ram-prerequisite-173)
+**Type:** Documentation convention — resource caps
+
+**Context:** Draft README text said "set memory=8GB to prevent OOM" alongside "plan for 6-8 GB free." Those contradict: 6 GB free + 2.5 GB cluster = 8.5 GB needed, so an 8 GB cap causes the OOM it claims to prevent.
+
+**Decision:** When documenting a memory cap, state both (a) the minimum allocation needed and (b) the cap value, with the cap explicitly framed as a containment ceiling — it prevents WSL from claiming unlimited host RAM on runaway, not a promise that the cap value is sufficient. The two numbers must be consistent. Applies to any resource-cap documentation in platform/k3d/.
+
+**Session:** 2026-05-16-k3d-host-ram-173
+
+---
+
+### 2026-05-16: Defer pod-level resources.limits until build-spike data captured
+**Decided by:** Coordinator (docs/k3d-host-ram-prerequisite-173)
+**Type:** Infrastructure — deferred action
+
+**Context:** Issue #173 reported ~10 GB RAM consumption. Live measurement showed 2.25 GiB at steady-state; hypothesis is a build-time spike during parallel image builds. Setting pod-level memory limits without measuring peak build-phase memory risks OOMKills during `k3d:up`.
+
+**Decision:** Do not author pod-level `resources.limits` until build-phase peak memory is instrumented and captured. If the 10 GB symptom recurs, the next step is to run `kubectl top pods --watch` during `k3d:up` and record per-pod peaks before setting any limits. Tracked via the #173 issue comment, not a new ticket.
+
+**Session:** 2026-05-16-k3d-host-ram-173
+
