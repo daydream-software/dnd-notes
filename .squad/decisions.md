@@ -8348,3 +8348,16 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-readjson-status-fallback-308
 
+### 2026-05-16: Coverage thresholds — strict spec values (50/40/50/50), vite.config.ts, scope-as-is
+**Decided by:** Coordinator + user (issue #145)
+**Type:** Quality / CI policy
+
+**Context:** Issue #145 requested vitest coverage thresholds for apps/web and apps/customer-portal. User was offered three options: strict spec values (50/40/50/50), current-state-minus-3%, or hybrid. User chose strict spec. Current coverage is ~30% above the floor in customer-portal and ~15-30% above in web.
+
+**Decision:**
+1. Thresholds set to `{ lines: 50, branches: 40, functions: 50, statements: 50 }` verbatim from issue spec — floor-not-snapshot, with planned quarterly ratchet upward.
+2. Thresholds live in existing `vite.config.ts` `test` block per-app, not extracted to a shared preset or new `vitest.config.ts`. Separate workspaces; shared config adds coupling with limited benefit.
+3. Coverage scope remains files-touched-by-tests (no `coverage.include` or `coverage.all: true`). When include patterns are added later, reported percentages may shift — acceptable, deferred to that PR.
+
+**Session:** 2026-05-16-vitest-coverage-thresholds-145
+
