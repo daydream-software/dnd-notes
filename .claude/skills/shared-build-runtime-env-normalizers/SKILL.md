@@ -14,7 +14,7 @@ Use this when a frontend workspace needs the same environment-derived normalizat
 
 - Extract the normalization helper into a small pure module under the workspace `src/` tree.
 - Import that helper from both the bundler config (for example `vite.config.ts`) and the runtime config module.
-- Keep the helper string-only and side-effect free so it is safe in both Node and browser-adjacent contexts.
+- Keep the helper string-only and side-effect-free so it is safe in both Node and browser-adjacent contexts.
 - Add a focused unit test that locks the exact edge cases the two call sites share (for example blank input, root path, and trailing-slash trimming).
 
 ## Examples
