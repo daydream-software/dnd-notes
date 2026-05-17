@@ -7,10 +7,12 @@ Follow the quick start in `README.md`. Run `npm install` to install dependencies
 ## Branch naming
 
 ```text
-squad/{issue-number}-{kebab-case-slug}
+{type}/{kebab-case-slug}-{issue-number}
 ```
 
-Example: `squad/86-k3d-json-state`
+Where `{type}` matches the conventional-commit prefix (`feat`, `fix`, `chore`, `test`, `refactor`, `docs`).
+
+Examples: `feat/k3d-json-state-86`, `fix/clear-stale-tenant-display-name-248`, `chore/drop-deprecated-keycloak-admin-env-235`.
 
 ## Commit format
 
