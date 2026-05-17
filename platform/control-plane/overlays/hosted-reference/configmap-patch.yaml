@@ -12,14 +12,12 @@ data:
   CONTROL_PLANE_KEYCLOAK_REALM: dnd-notes-workforce
   CONTROL_PLANE_KEYCLOAK_CLIENT_ID: dnd-notes-control-plane
   CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES: control-plane-admin,control-plane-workforce
-  TENANT_AUTH_MODE: keycloak
   TENANT_KEYCLOAK_URL: https://auth.example.com
   TENANT_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes/protocol/openid-connect/certs
   TENANT_KEYCLOAK_REALM: dnd-notes
   TENANT_INGRESS_CLASS_NAME: nginx
   KEYCLOAK_ADMIN_BASE_URL: https://auth.example.com
   KEYCLOAK_ADMIN_REALM: dnd-notes
-  CUSTOMER_PORTAL_AUTH_MODE: keycloak
   CUSTOMER_PORTAL_KEYCLOAK_URL: https://auth.example.com
   CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes/protocol/openid-connect/certs
   CUSTOMER_PORTAL_KEYCLOAK_REALM: dnd-notes

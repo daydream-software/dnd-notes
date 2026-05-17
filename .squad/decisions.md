@@ -2,6 +2,24 @@
 
 ## Active Decisions
 
+### 2026-05-17: Phase 2 exit executed — Keycloak-only auth (#318)
+**Decided by:** Coordinator (chore/remove-local-auth-mode-318)
+**Date:** 2026-05-17
+**Type:** Auth & Provisioning — cutover
+**PR:** TBD (this branch)
+
+**Context:** The Phase 2 exit row in this file (line 2495) and three repeated Release B plans (lines 1822, 3182, 3315) all called for removing `AUTH_PROVIDER=local` (renamed `AUTH_MODE=local` during Phase 2a) once Keycloak coexistence was stable. Coexistence shipped, the cutover never did; the 2026-05-09 KeycloakAdminClient decision (line 7030) explicitly preserved `CUSTOMER_PORTAL_AUTH_MODE=local` as an escape hatch. The drift was flagged during a repo-wide audit on 2026-05-17 and FFMikha confirmed dev-only state with no data migration concern.
+
+**Decision:** Execute the Phase 2 exit. Remove all three `*_AUTH_MODE` env switches (`AUTH_MODE`, `CUSTOMER_PORTAL_AUTH_MODE`, `TENANT_AUTH_MODE`), the local-auth code paths in `apps/api`, `apps/control-plane`, `apps/web`, and `apps/customer-portal`, and the local-auth schema (`owner_sessions`, `portal_sessions`, `password_hash`, `auth_provider`) via per-app migrations `0002_remove_local_auth.sql` / `0005_remove_local_auth.sql`. `CONTROL_PLANE_AUTH_MODE` (`static|keycloak`) is unaffected — it gates admin API auth, not user identity.
+
+**Rationale:** Locked plan since Phase 2 spec; intent has been Keycloak-only for months; aspirational "Legacy mode" label in `RUNTIME.md` was already half-honest about the direction. Dev-only project state means no user migration is needed.
+
+**Impacts:**
+- All tenant-app login flows redirect to Keycloak. Local username/password is gone.
+- `apps/api/.env.example` and `apps/control-plane/.env.example` drop the `*_AUTH_MODE=local` defaults; Keycloak env vars become required.
+- Customer-portal local error-flow tests (4 files from PR #316) are deleted; corresponding control-plane local routes (`/portal/signup`, `/portal/login`) are removed.
+- The Keycloak auto-link path that linked existing local accounts to a first-time Keycloak login is preserved as a forward-compat migration bridge in case anyone has a stale dev DB.
+
 ### 2026-05-08: K3d HTTPS via cert-manager & mkcert CA
 **Decided by:** Brand (CI/Scripts)  
 **Date:** 2026-05-08  

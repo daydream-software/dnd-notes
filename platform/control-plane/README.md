@@ -61,7 +61,9 @@ curl -H "Authorization: Bearer ${CONTROL_PLANE_TOKEN}" \
   http://localhost:3101/internal/tenants
 ```
 
-The control-plane service validates incoming bearer tokens against Keycloak JWKS. Set `CONTROL_PLANE_KEYCLOAK_JWKS_URL` when the control-plane pod needs a different network path to JWKS than the browser-facing issuer URL. Tenant runtime provisioning uses the separate `TENANT_AUTH_MODE` / `TENANT_KEYCLOAK_*` variables when it needs to inject Keycloak config into tenant pods. If tenant pods need a different network path for JWKS than the browser-facing issuer URL, set `TENANT_KEYCLOAK_JWKS_URL` as the server-side override.
+The control-plane service validates incoming bearer tokens against Keycloak JWKS. Set `CONTROL_PLANE_KEYCLOAK_JWKS_URL` when the control-plane pod needs a different network path to JWKS than the browser-facing issuer URL. Tenant runtime provisioning uses the separate `TENANT_KEYCLOAK_*` variables when it needs to inject Keycloak config into tenant pods. If tenant pods need a different network path for JWKS than the browser-facing issuer URL, set `TENANT_KEYCLOAK_JWKS_URL` as the server-side override.
+
+The customer portal is Keycloak-only as of the Phase 2 exit (#318); set `CUSTOMER_PORTAL_KEYCLOAK_*` to enable portal login. Local-account auth (`CUSTOMER_PORTAL_AUTH_MODE=local`, `/portal/signup`, `/portal/login`) is no longer supported.
 
 ## Local k3d rehearsal
 
@@ -94,7 +96,6 @@ The k3d overlay ConfigMap automatically sets:
 - `CONTROL_PLANE_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-dev`
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
-- `TENANT_AUTH_MODE=keycloak`
 - `TENANT_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
 - `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
