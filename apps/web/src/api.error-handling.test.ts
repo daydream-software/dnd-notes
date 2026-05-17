@@ -14,10 +14,10 @@
  * Additionally covers logoutOwner's special !ok-only invocation of readJson
  * (side-effect discard on 2xx, rethrow on non-2xx).
  *
- * Deferred: non-conforming 4xx JSON body (e.g. `{}` without an `error` field)
- * silently clobbers the fallback status message — `new Error(undefined)` is
- * thrown. This is a real bug surface but out of scope here; flagged in the
- * slice-7 report. None other.
+ * Bug fix (issue #308): non-conforming 4xx JSON body (e.g. `{}` without an
+ * `error` field) previously clobbered the fallback status message —
+ * `new Error(undefined)` was thrown. Fixed and covered below.
+ * Deferred: none.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -264,5 +264,66 @@ describe('logoutOwner — !ok-only readJson invocation', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(logoutOwner('auth-token')).rejects.toThrow('Request failed with status 500')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Bug fix #308 — non-conformant body shapes must not clobber the status fallback
+// ---------------------------------------------------------------------------
+
+describe('readJson — bug fix #308: non-conformant body shapes', () => {
+  it('body {} on 400 falls back to "Request failed with status 400" (not "undefined")', async () => {
+    const mockResponse = makeResponse({ ok: false, status: 400, body: {} })
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
+
+    await expect(
+      loginOwner({ email: 'a@example.com', password: 'pw' }),
+    ).rejects.toThrow('Request failed with status 400')
+  })
+
+  it('body { message: "unauth" } on 401 ignores non-conformant field and falls back to status', async () => {
+    // The ErrorResponse contract requires an `error` field; a `message` field is
+    // non-conformant. The guard `errorBody.error != null` keeps errorMessage intact.
+    const mockResponse = makeResponse({
+      ok: false,
+      status: 401,
+      body: { message: 'unauth' },
+    })
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
+
+    await expect(
+      loginOwner({ email: 'a@example.com', password: 'pw' }),
+    ).rejects.toThrow('Request failed with status 401')
+  })
+
+  it('body { details: ["x"] } on 400 falls back to status (details without error is non-conformant; dropped rather than synthesized)', async () => {
+    // Synthesizing a message from `details` alone when `error` is absent would
+    // be ambiguous and misleading. We drop `details` and keep the status fallback.
+    const mockResponse = makeResponse({
+      ok: false,
+      status: 400,
+      body: { details: ['x'] },
+    })
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
+
+    await expect(
+      loginOwner({ email: 'a@example.com', password: 'pw' }),
+    ).rejects.toThrow('Request failed with status 400')
+  })
+
+  it('body { error: null } on 400 falls back to status — null is explicitly nullish (covers the != vs !== intent)', async () => {
+    // `errorBody.error != null` catches both undefined (missing field) and
+    // null (explicit null). Using `!= null` rather than `!== null` is intentional
+    // so both values fall through to the status-code fallback.
+    const mockResponse = makeResponse({
+      ok: false,
+      status: 400,
+      body: { error: null },
+    })
+    vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
+
+    await expect(
+      loginOwner({ email: 'a@example.com', password: 'pw' }),
+    ).rejects.toThrow('Request failed with status 400')
   })
 })
