@@ -50,6 +50,15 @@ npm run test:portal-utils
 npm run test:ci                # all workspaces with JUnit + coverage
 ```
 
+**Coverage thresholds** (enforced by `vitest` in `test:ci`):
+
+- `apps/web` and `apps/customer-portal` fail `test:ci` if coverage drops below
+  `lines: 50`, `branches: 40`, `functions: 50`, `statements: 50`.
+- Thresholds are intentionally a floor, not a snapshot of current state. They
+  should be ratcheted upward periodically (e.g. once per quarter, or after a
+  coverage-focused sprint) — never lowered to make a failing PR green.
+- Other workspaces use Node's native test runner without coverage gates.
+
 **k3d cluster:**
 
 ```bash

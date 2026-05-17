@@ -80,6 +80,14 @@ export default defineConfig(({ mode }) => {
       environment: 'jsdom',
       pool: 'threads',
       testTimeout: 15000,
+      coverage: {
+        thresholds: {
+          lines: 50,
+          branches: 40,
+          functions: 50,
+          statements: 50,
+        },
+      },
     },
   }
 })
