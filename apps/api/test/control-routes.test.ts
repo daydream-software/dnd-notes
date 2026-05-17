@@ -160,7 +160,7 @@ function startStreamingJsonRequest({
 }
 
 test('GET /_control/info returns 503 when control plane token is not configured', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken: null })
+  const { app, cleanup } = await createTestApp({ controlPlaneToken: null })
 
   try {
     const response = await request(app).get('/_control/info')
@@ -177,7 +177,7 @@ for (const [description, configuredToken] of [
   ['whitespace-only', '   '],
 ] as const) {
   test(`GET /_control/info returns 503 when control plane token is ${description}`, async () => {
-    const { app, cleanup, issueToken } = await createTestApp({
+    const { app, cleanup } = await createTestApp({
       controlPlaneToken: configuredToken,
     })
 
@@ -195,7 +195,7 @@ for (const [description, configuredToken] of [
 }
 
 test('GET /_control/info rejects requests without a bearer token', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup } = await createTestApp({ controlPlaneToken })
 
   try {
     const response = await request(app).get('/_control/info')
@@ -208,7 +208,7 @@ test('GET /_control/info rejects requests without a bearer token', async () => {
 })
 
 test('GET /_control/info rejects requests with an invalid bearer token', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup } = await createTestApp({ controlPlaneToken })
 
   try {
     const response = await request(app)
@@ -223,7 +223,7 @@ test('GET /_control/info rejects requests with an invalid bearer token', async (
 })
 
 test('GET /_control/info reports tenant runtime metadata and DB connection state', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     controlPlaneToken,
     tenantId: 'tenant-test-1',
     appVersion: '9.9.9',
@@ -280,7 +280,7 @@ test('GET /_control/info reports last-write timestamp after a successful write',
 })
 
 test('GET /_control/info does not advance lastWriteAt for an aborted write', async () => {
-  const { app, cleanup, controlState, issueToken } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup, controlState } = await createTestApp({ controlPlaneToken })
   let releaseHandler: (() => void) | undefined
   const handlerReleased = new Promise<void>((resolve) => {
     releaseHandler = resolve
@@ -344,7 +344,7 @@ test('GET /_control/info does not advance lastWriteAt for an aborted write', asy
 })
 
 test('POST /_control/maintenance enable then disable toggles the maintenance state', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 0,
   })
@@ -387,7 +387,7 @@ test('POST /_control/maintenance enable then disable toggles the maintenance sta
 })
 
 test('POST /_control/maintenance drains only writes that started before maintenance mode', async () => {
-  const { app, cleanup, controlState, issueToken } = await createTestApp({
+  const { app, cleanup, controlState } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 500,
   })
@@ -472,7 +472,7 @@ test('POST /_control/maintenance drains only writes that started before maintena
 })
 
 test('POST /_control/maintenance rejects invalid mode values', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup } = await createTestApp({ controlPlaneToken })
 
   try {
     const response = await request(app)
@@ -531,7 +531,7 @@ test('Maintenance mode causes write endpoints to return 503 with stable error co
 })
 
 test('Maintenance mode does not block control-plane endpoints themselves', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 0,
   })

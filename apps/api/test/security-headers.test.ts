@@ -220,7 +220,7 @@ test('site admin access works with CORS headers', async () => {
 })
 
 test('unauthenticated requests for protected routes fail gracefully with CORS', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     allowedOrigins: ['http://malicious-site.com'],
   })
 
@@ -240,7 +240,7 @@ test('unauthenticated requests for protected routes fail gracefully with CORS', 
 })
 
 test('public health endpoint returns CORS headers', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     allowedOrigins: ['http://monitoring-tool.com'],
   })
 
@@ -383,7 +383,7 @@ test('OPTIONS preflight requests for share-link routes include CORS headers', as
 })
 
 test('CORS rejects non-whitelisted origins', async () => {
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     allowedOrigins: ['http://allowed-origin.com'],
   })
 

@@ -3,7 +3,6 @@ import { join } from 'node:path'
 import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 import request from 'supertest'
-import { createApp } from '../src/app.js'
 import { defaultCampaignId } from '../src/campaign.js'
 import {
   createTestApp,
@@ -18,7 +17,7 @@ const testFixtureWebDistPath = join(
 )
 
 test('GET /health returns service metadata', async (t) => {
-  const { app, cleanup, issueToken } = await createTestApp()
+  const { app, cleanup } = await createTestApp()
   t.after(cleanup)
 
   const response = await request(app).get('/health')
@@ -29,7 +28,7 @@ test('GET /health returns service metadata', async (t) => {
 })
 
 test('GET /healthz, /ready, and /readyz return probe metadata while the database is available', async (t) => {
-  const { app, cleanup, issueToken } = await createTestApp()
+  const { app, cleanup } = await createTestApp()
   t.after(cleanup)
 
   const [livenessResponse, readyResponse, readinessResponse] = await Promise.all([
@@ -56,7 +55,7 @@ test('GET /healthz, /ready, and /readyz return probe metadata while the database
 })
 
 test('GET /readyz returns 503 when the database is unavailable', async (t) => {
-  const { app, cleanup, noteStore, issueToken } = await createTestApp()
+  const { app, cleanup, noteStore } = await createTestApp()
   t.after(cleanup)
 
   const originalCheckHealth = noteStore.checkHealth
@@ -75,7 +74,7 @@ test('GET /readyz returns 503 when the database is unavailable', async (t) => {
 
 test('GET /readyz returns 503 while the server is shutting down', async (t) => {
   let shuttingDown = false
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     isShuttingDown: () => shuttingDown,
   })
   t.after(cleanup)
@@ -89,7 +88,7 @@ test('GET /readyz returns 503 while the server is shutting down', async (t) => {
 })
 
 test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
-  const { app, cleanup, issueToken } = await createTestApp({
+  const { app, cleanup } = await createTestApp({
     serveWeb: true,
     webDistPath: testFixtureWebDistPath,
   })

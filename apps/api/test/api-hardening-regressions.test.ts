@@ -5,7 +5,7 @@ import { defaultCampaignId } from '../src/campaign.js'
 import { createTestApp, registerOwner, withAuth, withGuest } from './test-helpers.js'
 
 test('API Hardening: CORS policy enforces origin allowlist', async () => {
-  const { app, cleanup, issueToken } = await createTestApp()
+  const { app, cleanup } = await createTestApp()
 
   try {
     const allowedResponse = await request(app)
@@ -47,7 +47,7 @@ test('API Hardening: CORS policy enforces origin allowlist', async () => {
 })
 
 test('API Hardening: Security headers are present on all responses', async () => {
-  const { app, cleanup, issueToken } = await createTestApp()
+  const { app, cleanup } = await createTestApp()
 
   try {
     const response = await request(app).get('/health')
