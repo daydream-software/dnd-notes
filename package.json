@@ -37,8 +37,6 @@
     "k3d:customer-portal-override": "bash ./scripts/k3d/customer-portal-override.sh",
     "platform:validate": "bash ./scripts/platform/validate-manifests.sh",
     "validate:keycloak-themes": "bash ./scripts/platform/validate-keycloak-theme-sync.sh",
-    "copilot:yolo": "bash ./scripts/copilot-yolo.sh",
-    "copilot:wait-review": "node --import tsx ./scripts/wait-copilot-review.ts",
     "lint:web": "npm run lint --workspace apps/web",
     "lint:operator-portal": "npm run lint --workspace apps/operator-portal",
     "lint:customer-portal": "npm run lint --workspace apps/customer-portal",

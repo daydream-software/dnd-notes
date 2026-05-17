@@ -16,8 +16,6 @@ data
 apps/web/.vite
 .husky
 .squad
-.copilot
-.copilot_here
 .worktrees
 docker/
 !docker/portal/

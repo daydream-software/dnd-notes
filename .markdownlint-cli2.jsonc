@@ -14,8 +14,6 @@
     "**/node_modules/**",
     "CHANGELOG.md",
     ".worktrees/**",
-    ".copilot/**",
-    ".github/agents/**",
     ".squad/decisions.md",
     ".squad/decisions-archive.md",
     ".squad/decisions/**",
@@ -23,12 +21,9 @@
     ".squad/agents/**",
     ".squad/orchestration-log/**",
     ".squad/sessions/**",
-    ".squad/skills/**",
     ".squad/templates/**",
     ".squad/docs/**",
     ".squad/ceremonies.md",
-    ".squad/qa-brief-*.md",
-    ".squad/phase2-recommendation.md",
     "docs/archive/**",
     "docs/design-system/**"
   ]
