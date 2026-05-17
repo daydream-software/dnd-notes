@@ -55,7 +55,6 @@ export interface PortalPlan {
 }
 
 export interface PortalCatalogResponse {
-  authMode: 'local' | 'keycloak'
   defaultTenantVersion: string
   provisioningConfigured: boolean
   slugPolicy: {
@@ -77,7 +76,6 @@ export interface PortalAccount {
   displayName: string
   billingEmail: string | null
   billingProvider: 'stripe' | 'square' | 'manual-review' | null
-  authProvider: 'local' | 'keycloak'
   keycloakSub: string | null
   createdAt: string
   updatedAt: string

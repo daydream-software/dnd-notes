@@ -176,8 +176,9 @@ export default function App({
   const [hasEditedSignupSlug, setHasEditedSignupSlug] = useState(false)
   const [hasEditedCreateTenantSlug, setHasEditedCreateTenantSlug] = useState(false)
 
-  // Derived auth mode from the catalog (server-driven).
-  const authMode = catalog?.authMode ?? 'keycloak'
+  // Portal auth is Keycloak-only post-cutover (#318); kept as a constant
+  // for compatibility with downstream checks that may still gate on it.
+  const authMode = 'keycloak' as const
 
   // --- Catalog fetch (runs on mount regardless of auth mode) ---
   useEffect(() => {
@@ -215,11 +216,9 @@ export default function App({
     }
   }, [])
 
-  // --- Keycloak bootstrap (gated on resolved auth mode from catalog) ---
+  // --- Keycloak bootstrap (gated on catalog load) ---
   useEffect(() => {
-    // Wait until catalog has resolved so we don't bootstrap Keycloak in local
-    // mode portals where Keycloak may not be reachable at all.
-    if (isLoadingCatalog || catalog?.authMode !== 'keycloak') {
+    if (isLoadingCatalog || !catalog) {
       return
     }
 
@@ -255,7 +254,7 @@ export default function App({
     return () => {
       cancelled = true
     }
-  }, [catalog?.authMode, isLoadingCatalog, keycloakClientFactory])
+  }, [catalog, isLoadingCatalog, keycloakClientFactory])
 
   // --- Keycloak dashboard hydration ---
   useEffect(() => {
@@ -309,43 +308,6 @@ export default function App({
   // --- Local-auth dashboard restore (hybrid escape hatch) ---
   const isLocalLoadingDashboard =
     Boolean(sessionToken) && hydratedSessionToken !== sessionToken
-
-  useEffect(() => {
-    if (authMode !== 'local' || !sessionToken) {
-      return
-    }
-
-    if (dashboard && hydratedSessionToken === sessionToken) {
-      return
-    }
-
-    const abortController = new AbortController()
-
-    fetchPortalDashboard(sessionToken, abortController.signal)
-      .then((response) => {
-        setDashboard(response)
-        setHydratedSessionToken(sessionToken)
-      })
-      .catch((requestError: unknown) => {
-        if (abortController.signal.aborted) {
-          return
-        }
-
-        clearSessionToken()
-        setSessionToken(null)
-        setDashboard(null)
-        setHydratedSessionToken(null)
-        setError(
-          requestError instanceof Error
-            ? requestError.message
-            : 'Failed to restore the customer portal session.',
-        )
-      })
-
-    return () => {
-      abortController.abort()
-    }
-  }, [authMode, dashboard, hydratedSessionToken, sessionToken])
 
   // --- Tenant polling (runs while any tenant is in a transient state) ---
   const transientStates = new Set(['provisioning', 'upgrading', 'restoring', 'maintenance'])
