@@ -95,38 +95,12 @@ export interface PortalDashboardResponse {
   tenants: PortalTenantSummary[]
 }
 
-export interface PortalSessionResponse {
-  token: string
-  dashboard: PortalDashboardResponse
-}
-
-export interface PortalSignupRequest {
-  email: string
-  displayName: string
-  password: string
-  billingEmail?: string
-  paymentProvider: 'stripe' | 'square' | 'manual-review'
-  tenantName: string
-  tenantSlug: string
-  planTier: string
-  acceptTerms: true
-}
-
 export interface PortalCreateTenantRequest {
   tenantName: string
   tenantSlug: string
   planTier: string
   paymentProvider: 'stripe' | 'square' | 'manual-review'
   billingEmail?: string
-}
-
-export interface PortalLoginRequest {
-  email: string
-  password: string
-}
-
-export interface PortalLogoutResponse {
-  signedOut: true
 }
 
 export interface ErrorResponse {

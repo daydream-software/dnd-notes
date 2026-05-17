@@ -31,9 +31,6 @@ import {
   createPortalTenant,
   fetchPortalCatalog,
   fetchPortalDashboard,
-  loginPortalAccount,
-  logoutPortal,
-  signupPortalAccount,
 } from './control-plane-api'
 import {
   clearStoredKeycloakTokens,
@@ -48,39 +45,12 @@ import type {
   PortalTenantSummary,
 } from './types'
 
-// Local-auth session storage key (hybrid escape hatch path only).
-const sessionTokenStorageKey = 'dnd-notes:customer-portal:session-token'
-
-const defaultSignupDraft = {
-  email: '',
-  displayName: '',
-  password: '',
-  billingEmail: '',
-  paymentProvider: 'stripe' as const,
-  tenantName: '',
-  tenantSlug: '',
-  planTier: '',
-}
-
 const defaultCreateTenantDraft = {
   tenantName: '',
   tenantSlug: '',
   planTier: '',
   paymentProvider: 'stripe' as const,
   billingEmail: '',
-}
-
-function readStoredSessionToken() {
-  const storedValue = window.sessionStorage.getItem(sessionTokenStorageKey)
-  return storedValue && storedValue.trim().length > 0 ? storedValue : null
-}
-
-function persistSessionToken(token: string) {
-  window.sessionStorage.setItem(sessionTokenStorageKey, token)
-}
-
-function clearSessionToken() {
-  window.sessionStorage.removeItem(sessionTokenStorageKey)
 }
 
 function formatTimestamp(value: string | null) {
@@ -159,26 +129,12 @@ export default function App({
   const [dashboard, setDashboard] = useState<PortalDashboardResponse | null>(null)
   const [isLoadingCatalog, setIsLoadingCatalog] = useState(true)
   const [isLoadingDashboard, setIsLoadingDashboard] = useState(false)
-  const [isSubmittingSignup, setIsSubmittingSignup] = useState(false)
   const [isSubmittingCreateTenant, setIsSubmittingCreateTenant] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
 
-  // Local-auth-mode state (hybrid escape hatch)
-  const [sessionToken, setSessionToken] = useState<string | null>(() =>
-    readStoredSessionToken(),
-  )
-  const [hydratedSessionToken, setHydratedSessionToken] = useState<string | null>(null)
-  const [loginEmail, setLoginEmail] = useState('')
-  const [loginPassword, setLoginPassword] = useState('')
-  const [signupDraft, setSignupDraft] = useState(defaultSignupDraft)
   const [createTenantDraft, setCreateTenantDraft] = useState(defaultCreateTenantDraft)
-  const [hasEditedSignupSlug, setHasEditedSignupSlug] = useState(false)
   const [hasEditedCreateTenantSlug, setHasEditedCreateTenantSlug] = useState(false)
-
-  // Portal auth is Keycloak-only post-cutover (#318); kept as a constant
-  // for compatibility with downstream checks that may still gate on it.
-  const authMode = 'keycloak' as const
 
   // --- Catalog fetch (runs on mount regardless of auth mode) ---
   useEffect(() => {
@@ -187,10 +143,6 @@ export default function App({
     fetchPortalCatalog(abortController.signal)
       .then((response) => {
         setCatalog(response)
-        setSignupDraft((currentDraft) => ({
-          ...currentDraft,
-          planTier: currentDraft.planTier || response.plans[0]?.id || '',
-        }))
         setCreateTenantDraft((currentDraft) => ({
           ...currentDraft,
           planTier: currentDraft.planTier || response.plans[0]?.id || '',
@@ -258,7 +210,7 @@ export default function App({
 
   // --- Keycloak dashboard hydration ---
   useEffect(() => {
-    if (authMode !== 'keycloak' || !keycloakToken || !isKeycloakReady) {
+    if (!keycloakToken || !isKeycloakReady) {
       return
     }
 
@@ -303,11 +255,7 @@ export default function App({
     return () => {
       cancelled = true
     }
-  }, [authMode, dashboard, isKeycloakReady, keycloakToken])
-
-  // --- Local-auth dashboard restore (hybrid escape hatch) ---
-  const isLocalLoadingDashboard =
-    Boolean(sessionToken) && hydratedSessionToken !== sessionToken
+  }, [dashboard, isKeycloakReady, keycloakToken])
 
   // --- Tenant polling (runs while any tenant is in a transient state) ---
   const transientStates = new Set(['provisioning', 'upgrading', 'restoring', 'maintenance'])
@@ -340,10 +288,7 @@ export default function App({
       inFlight = true
 
       try {
-        const currentToken =
-          authMode === 'keycloak'
-            ? await keycloakClientRef.current?.freshToken().catch(() => null)
-            : sessionToken
+        const currentToken = await keycloakClientRef.current?.freshToken().catch(() => null)
 
         if (!currentToken || cancelled) {
           return
@@ -391,7 +336,7 @@ export default function App({
       clearInterval(intervalId)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authMode, sessionToken, transientTenantIds])
+  }, [transientTenantIds])
 
   const activeCatalog = dashboard?.catalog ?? catalog
   const planOptions = activeCatalog?.plans ?? []
@@ -446,119 +391,14 @@ export default function App({
     }
   }, [])
 
-  // --- Local-auth handlers ---
-  const handleSuccessfulSession = (response: {
-    token: string
-    dashboard: PortalDashboardResponse
-  }) => {
-    persistSessionToken(response.token)
-    setSessionToken(response.token)
-    setDashboard(response.dashboard)
-    setHydratedSessionToken(response.token)
-    setLoginPassword('')
-    setCreateTenantDraft((currentDraft) => ({
-      ...currentDraft,
-      billingEmail: response.dashboard.account.billingEmail ?? '',
-    }))
-  }
+  const handleLogout = () => void handleKeycloakLogout()
 
-  const handleSignup = async (event: SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
-    setIsSubmittingSignup(true)
-    setError(null)
-    setNotice(null)
-
-    try {
-      const response = await signupPortalAccount({
-        email: signupDraft.email,
-        displayName: signupDraft.displayName,
-        password: signupDraft.password,
-        billingEmail: signupDraft.billingEmail || undefined,
-        paymentProvider: signupDraft.paymentProvider,
-        tenantName: signupDraft.tenantName,
-        tenantSlug: normalizeSlug(signupDraft.tenantSlug),
-        planTier: signupDraft.planTier,
-        acceptTerms: true,
-      })
-
-      handleSuccessfulSession(response)
-      setNotice('Portal account ready. Your first instance request is now tracked below.')
-      setSignupDraft((currentDraft) => ({
-        ...defaultSignupDraft,
-        planTier: currentDraft.planTier,
-        paymentProvider: currentDraft.paymentProvider,
-      }))
-      setHasEditedSignupSlug(false)
-      setLoginEmail(response.dashboard.account.email)
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'Failed to complete portal signup.',
-      )
-    } finally {
-      setIsSubmittingSignup(false)
-    }
-  }
-
-  const handleLogin = async (event: SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault()
-
-    setError(null)
-    setNotice(null)
-
-    try {
-      const response = await loginPortalAccount({
-        email: loginEmail,
-        password: loginPassword,
-      })
-      handleSuccessfulSession(response)
-      setNotice('Welcome back. Your customer dashboard is restored.')
-    } catch (requestError) {
-      setError(
-        requestError instanceof Error
-          ? requestError.message
-          : 'Failed to restore the portal session.',
-      )
-    }
-  }
-
-  const handleLocalLogout = async () => {
-    if (!sessionToken) {
-      return
-    }
-
-    setError(null)
-    setNotice(null)
-
-    try {
-      await logoutPortal(sessionToken)
-    } catch {
-      // Best-effort server cleanup; the local session still needs to clear.
-    }
-
-    clearSessionToken()
-    setSessionToken(null)
-    setDashboard(null)
-    setHydratedSessionToken(null)
-    setNotice('Signed out of the customer portal.')
-  }
-
-  const handleLogout =
-    authMode === 'keycloak'
-      ? () => void handleKeycloakLogout()
-      : () => void handleLocalLogout()
-
-  const isAuthenticated = authMode === 'keycloak' ? Boolean(keycloakToken) : Boolean(sessionToken)
+  const isAuthenticated = Boolean(keycloakToken)
 
   const handleCreateTenant = async (event: SubmitEvent<HTMLFormElement>) => {
     event.preventDefault()
 
-    const currentToken =
-      authMode === 'keycloak'
-        ? await keycloakClientRef.current?.freshToken().catch(() => null)
-        : sessionToken
+    const currentToken = await keycloakClientRef.current?.freshToken().catch(() => null)
 
     if (!currentToken) {
       setError('Sign in before requesting another tenant.')
@@ -667,7 +507,7 @@ export default function App({
                 size="small"
               />
             ) : null}
-            {isAuthenticated && authMode === 'keycloak' ? (
+            {isAuthenticated ? (
               isXs ? (
                 <Tooltip title="Account settings">
                   <IconButton
@@ -760,8 +600,6 @@ export default function App({
             </Alert>
           ) : null}
 
-          {authMode === 'keycloak' ? (
-            <>
               {!isAuthenticated ? (
                 renderKeycloakEntry()
               ) : (
@@ -1056,470 +894,6 @@ export default function App({
                   </Paper>
                 </Box>
               )}
-            </>
-          ) : (
-            // Local auth mode — hybrid escape hatch
-            <Box
-              sx={{
-                display: 'grid',
-                gap: 3,
-                gridTemplateColumns: {
-                  xs: '1fr',
-                  md: dashboard ? '1.4fr 1fr' : '1fr 1fr',
-                },
-              }}
-            >
-              <Paper sx={{ p: 3 }}>
-                <Stack spacing={2}>
-                  <Typography variant="h4">
-                    {dashboard ? 'Customer dashboard' : 'Create your first instance'}
-                  </Typography>
-                  <Typography color="text.secondary">
-                    {dashboard
-                      ? 'Track lifecycle state, backups, and app access for the tenants tied to your portal account.'
-                      : 'The first signup flow claims your portal account and immediately requests a dedicated tenant.'}
-                  </Typography>
-                  {dashboard ? (
-                    <Stack spacing={2}>
-                      <Paper variant="outlined" sx={{ p: 2 }}>
-                        <Stack spacing={1}>
-                          <Typography variant="h6">{dashboard.account.displayName}</Typography>
-                          <Typography color="text.secondary">
-                            {dashboard.account.email}
-                          </Typography>
-                          <Typography variant="body2" color="text.secondary">
-                            Billing provider:{' '}
-                            {dashboard.account.billingProvider ?? 'Captured as a placeholder'}
-                          </Typography>
-                        </Stack>
-                      </Paper>
-
-                      <Stack spacing={2}>
-                        {dashboard.tenants.length === 0 ? (
-                          <Alert severity="info">
-                            No tenant requests yet. Use the form on the right to create one.
-                          </Alert>
-                        ) : null}
-                        {dashboard.tenants.map((tenantSummary) => (
-                          <Paper
-                            key={tenantSummary.tenant.id}
-                            variant="outlined"
-                            sx={{ p: 2.5 }}
-                          >
-                            <Stack spacing={2}>
-                              <Stack
-                                direction={{ xs: 'column', sm: 'row' }}
-                                spacing={1}
-                                sx={{ justifyContent: 'space-between' }}
-                              >
-                                <Box>
-                                  <Typography variant="h6">
-                                    {tenantSummary.tenant.displayName ??
-                                      tenantSummary.tenant.slug}
-                                  </Typography>
-                                  <Typography color="text.secondary">
-                                    {tenantSummary.tenant.slug}
-                                  </Typography>
-                                </Box>
-                                <Stack
-                                  direction="row"
-                                  spacing={1}
-                                  sx={{ flexWrap: 'wrap' }}
-                                >
-                                  <Chip
-                                    label={formatStateLabel(
-                                      tenantSummary.tenant.currentState,
-                                    )}
-                                    color={getStateChipColor(
-                                      tenantSummary.tenant.currentState,
-                                    )}
-                                    size="small"
-                                  />
-                                  <Chip
-                                    label={tenantSummary.tenant.planTier ?? 'plan pending'}
-                                    size="small"
-                                    variant="outlined"
-                                  />
-                                </Stack>
-                              </Stack>
-
-                              <Typography variant="body2" color="text.secondary">
-                                Version {tenantSummary.tenant.version} · Last backup{' '}
-                                {formatTimestamp(tenantSummary.backup.lastBackupAt)}
-                              </Typography>
-
-                              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                                <Button
-                                  component={tenantSummary.appUrl ? Link : 'button'}
-                                  href={tenantSummary.appUrl ?? undefined}
-                                  target={tenantSummary.appUrl ? '_blank' : undefined}
-                                  rel={tenantSummary.appUrl ? 'noreferrer' : undefined}
-                                  variant="contained"
-                                  disabled={!tenantSummary.appUrl}
-                                >
-                                  {buildTenantLinkLabel(tenantSummary)}
-                                </Button>
-                                <Button variant="outlined" disabled>
-                                  Settings placeholder ({tenantSummary.settingsPath})
-                                </Button>
-                              </Stack>
-
-                              <Divider />
-
-                              <Typography variant="body2">
-                                Latest transition:{' '}
-                                {tenantSummary.latestTransition
-                                  ? `${formatStateLabel(tenantSummary.latestTransition.fromState)} → ${formatStateLabel(tenantSummary.latestTransition.toState)}`
-                                  : 'No transition recorded yet'}
-                              </Typography>
-                              {tenantSummary.tenant.currentState === 'failed' ? (
-                                <Alert severity="error">
-                                  Provisioning failed for this workspace. You can retry
-                                  by creating a new tenant request, or contact support
-                                  if the issue persists.
-                                </Alert>
-                              ) : null}
-                              {transientStates.has(tenantSummary.tenant.currentState) ? (
-                                <Alert severity="info">
-                                  Provisioning is in progress. The dashboard updates
-                                  automatically — no need to refresh.
-                                </Alert>
-                              ) : null}
-                              <Typography variant="body2" color="text.secondary">
-                                Custom domain, archive/reactivate, subscription management,
-                                team invites, and usage analytics stay intentionally
-                                placeholder for this issue.
-                              </Typography>
-                            </Stack>
-                          </Paper>
-                        ))}
-                      </Stack>
-                    </Stack>
-                  ) : (
-                    <form onSubmit={(e) => void handleSignup(e)}>
-                      <Stack spacing={2}>
-                        <TextField
-                          id="signup-work-email"
-                          label="Work email"
-                          type="email"
-                          slotProps={{ htmlInput: { 'aria-label': 'Work email' } }}
-                          value={signupDraft.email}
-                          onChange={(event) =>
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              email: event.target.value,
-                            }))
-                          }
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="signup-display-name"
-                          label="Display name"
-                          slotProps={{ htmlInput: { 'aria-label': 'Display name' } }}
-                          value={signupDraft.displayName}
-                          onChange={(event) =>
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              displayName: event.target.value,
-                            }))
-                          }
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="signup-password"
-                          label="Password"
-                          type="password"
-                          slotProps={{ htmlInput: { 'aria-label': 'Password' } }}
-                          value={signupDraft.password}
-                          onChange={(event) =>
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              password: event.target.value,
-                            }))
-                          }
-                          helperText="At least 10 characters for the local portal auth slice."
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="signup-billing-email"
-                          label="Billing email (optional)"
-                          type="email"
-                          slotProps={{
-                            htmlInput: { 'aria-label': 'Billing email (optional)' },
-                          }}
-                          value={signupDraft.billingEmail}
-                          onChange={(event) =>
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              billingEmail: event.target.value,
-                            }))
-                          }
-                          fullWidth
-                        />
-                        <TextField
-                          id="signup-tenant-name"
-                          label="Tenant name"
-                          slotProps={{ htmlInput: { 'aria-label': 'Tenant name' } }}
-                          value={signupDraft.tenantName}
-                          onChange={(event) =>
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              tenantName: event.target.value,
-                              tenantSlug: hasEditedSignupSlug
-                                ? currentDraft.tenantSlug
-                                : normalizeSlug(event.target.value),
-                            }))
-                          }
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="signup-tenant-slug"
-                          label="Tenant slug"
-                          slotProps={{ htmlInput: { 'aria-label': 'Tenant slug' } }}
-                          value={signupDraft.tenantSlug}
-                          helperText={
-                            activeCatalog
-                              ? `Lowercase letters, numbers, and hyphens only. Example: ${activeCatalog.slugPolicy.example}`
-                              : 'Lowercase letters, numbers, and hyphens only.'
-                          }
-                          onChange={(event) => {
-                            setHasEditedSignupSlug(true)
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              tenantSlug: normalizeSlug(event.target.value),
-                            }))
-                          }}
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="signup-plan-tier"
-                          select
-                          label="Plan"
-                          value={signupDraft.planTier}
-                          onChange={(event) =>
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              planTier: event.target.value,
-                            }))
-                          }
-                          fullWidth
-                        >
-                          {planOptions.map((plan) => (
-                            <MenuItem key={plan.id} value={plan.id}>
-                              {plan.name}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                        <TextField
-                          id="signup-payment-provider"
-                          select
-                          label="Payment provider"
-                          value={signupDraft.paymentProvider}
-                          onChange={(event) =>
-                            setSignupDraft((currentDraft) => ({
-                              ...currentDraft,
-                              paymentProvider: event.target.value as typeof currentDraft.paymentProvider,
-                            }))
-                          }
-                          fullWidth
-                        >
-                          <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
-                          <MenuItem value="square">Square (coming soon)</MenuItem>
-                          <MenuItem value="manual-review">Manual review (coming soon)</MenuItem>
-                        </TextField>
-                        <Button
-                          type="submit"
-                          variant="contained"
-                          size="large"
-                          disabled={isSubmittingSignup || isLoadingCatalog}
-                          sx={{ alignSelf: 'flex-start' }}
-                        >
-                          {isSubmittingSignup
-                            ? 'Creating portal account…'
-                            : 'Create portal account'}
-                        </Button>
-                      </Stack>
-                    </form>
-                  )}
-                </Stack>
-              </Paper>
-
-              <Paper sx={{ p: 3 }}>
-                <Stack spacing={2}>
-                  <Typography variant="h4">
-                    {dashboard
-                      ? dashboard.tenants.length === 0
-                        ? 'Create your first workspace'
-                        : 'Add another tenant'
-                      : 'Already have a portal account?'}
-                  </Typography>
-                  <Typography color="text.secondary">
-                    {dashboard
-                      ? dashboard.tenants.length === 0
-                        ? 'Your account is ready. Claim a tenant slug to spin up your dedicated note space.'
-                        : 'Request another tenant under the same owner account. The control plane keeps the portal scoped to your owned instances only.'
-                      : 'Sign back in with the same email to restore your customer dashboard without creating a duplicate account.'}
-                  </Typography>
-
-                  {dashboard ? (
-                    <form onSubmit={(e) => void handleCreateTenant(e)}>
-                      <Stack spacing={2}>
-                        <TextField
-                          id="create-tenant-name"
-                          label="Tenant name"
-                          slotProps={{ htmlInput: { 'aria-label': 'Tenant name' } }}
-                          value={createTenantDraft.tenantName}
-                          onChange={(event) =>
-                            setCreateTenantDraft((currentDraft) => ({
-                              ...currentDraft,
-                              tenantName: event.target.value,
-                              tenantSlug: hasEditedCreateTenantSlug
-                                ? currentDraft.tenantSlug
-                                : normalizeSlug(event.target.value),
-                            }))
-                          }
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="create-tenant-slug"
-                          label="Tenant slug"
-                          slotProps={{ htmlInput: { 'aria-label': 'Tenant slug' } }}
-                          value={createTenantDraft.tenantSlug}
-                          onChange={(event) => {
-                            setHasEditedCreateTenantSlug(true)
-                            setCreateTenantDraft((currentDraft) => ({
-                              ...currentDraft,
-                              tenantSlug: normalizeSlug(event.target.value),
-                            }))
-                          }}
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="create-plan-tier"
-                          select
-                          label="Plan"
-                          value={createTenantDraft.planTier}
-                          onChange={(event) =>
-                            setCreateTenantDraft((currentDraft) => ({
-                              ...currentDraft,
-                              planTier: event.target.value,
-                            }))
-                          }
-                          fullWidth
-                        >
-                          {planOptions.map((plan) => (
-                            <MenuItem key={plan.id} value={plan.id}>
-                              {plan.name}
-                            </MenuItem>
-                          ))}
-                        </TextField>
-                        <TextField
-                          id="create-payment-provider"
-                          select
-                          label="Payment provider"
-                          value={createTenantDraft.paymentProvider}
-                          onChange={(event) =>
-                            setCreateTenantDraft((currentDraft) => ({
-                              ...currentDraft,
-                              paymentProvider: event.target.value as typeof currentDraft.paymentProvider,
-                            }))
-                          }
-                          fullWidth
-                        >
-                          <MenuItem value="stripe">Stripe (coming soon)</MenuItem>
-                          <MenuItem value="square">Square (coming soon)</MenuItem>
-                          <MenuItem value="manual-review">Manual review (coming soon)</MenuItem>
-                        </TextField>
-                        <TextField
-                          id="create-billing-email"
-                          label="Billing email (optional)"
-                          type="email"
-                          slotProps={{
-                            htmlInput: { 'aria-label': 'Billing email (optional)' },
-                          }}
-                          value={createTenantDraft.billingEmail}
-                          onChange={(event) =>
-                            setCreateTenantDraft((currentDraft) => ({
-                              ...currentDraft,
-                              billingEmail: event.target.value,
-                            }))
-                          }
-                          fullWidth
-                        />
-                        <Button
-                          type="submit"
-                          variant="contained"
-                          disabled={isSubmittingCreateTenant}
-                          sx={{ alignSelf: 'flex-start' }}
-                        >
-                          {isSubmittingCreateTenant
-                            ? 'Submitting tenant request…'
-                            : 'Create tenant request'}
-                        </Button>
-                      </Stack>
-                    </form>
-                  ) : (
-                    <form onSubmit={(e) => void handleLogin(e)}>
-                      <Stack spacing={2}>
-                        <TextField
-                          id="login-email"
-                          label="Portal email"
-                          type="email"
-                          slotProps={{ htmlInput: { 'aria-label': 'Portal email' } }}
-                          value={loginEmail}
-                          onChange={(event) => setLoginEmail(event.target.value)}
-                          fullWidth
-                          required
-                        />
-                        <TextField
-                          id="login-password"
-                          label="Password"
-                          type="password"
-                          slotProps={{ htmlInput: { 'aria-label': 'Password' } }}
-                          value={loginPassword}
-                          onChange={(event) => setLoginPassword(event.target.value)}
-                          fullWidth
-                          required
-                        />
-                        <Button
-                          type="submit"
-                          variant="outlined"
-                          sx={{ alignSelf: 'flex-start' }}
-                        >
-                          Restore dashboard
-                        </Button>
-                      </Stack>
-                    </form>
-                  )}
-
-                  <Divider />
-
-                  <Stack spacing={1.5}>
-                    <Typography variant="h6">Future roadmap placeholders</Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Billing/subscription management:{' '}
-                      {activeCatalog?.placeholders.billingStatus ?? 'placeholder'}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Team member invites:{' '}
-                      {activeCatalog?.placeholders.teamInvites ?? 'coming-soon'}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      Usage analytics:{' '}
-                      {activeCatalog?.placeholders.usageAnalytics ?? 'coming-soon'}
-                    </Typography>
-                  </Stack>
-                </Stack>
-              </Paper>
-            </Box>
-          )}
 
           <Box
             sx={{
@@ -1565,7 +939,7 @@ export default function App({
             </Stack>
           </Paper>
 
-          {isLoadingCatalog || isLocalLoadingDashboard || isLoadingDashboard ? (
+          {isLoadingCatalog || isLoadingDashboard ? (
             <Alert severity="info">Loading portal data…</Alert>
           ) : null}
         </Stack>
