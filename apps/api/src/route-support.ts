@@ -266,35 +266,24 @@ export async function requireAuthenticatedAccount(
     return null
   }
 
-  if (runtimeAuth.mode === 'keycloak') {
-    try {
-      const identity = await runtimeAuth.authenticateBearerToken(token)
-      return await noteStore.findOrCreateOwnerByKeycloakIdentity(identity)
-    } catch (error) {
-      if (error instanceof KeycloakTokenValidationError) {
-        response.status(error.statusCode).json({ error: error.message })
-        return null
-      }
-
-      if (error instanceof OwnerKeycloakLinkConflictError) {
-        response.status(409).json({
-          error: 'This owner account is already linked to a different Keycloak identity.',
-        })
-        return null
-      }
-
-      throw error
+  try {
+    const identity = await runtimeAuth.authenticateBearerToken(token)
+    return await noteStore.findOrCreateOwnerByKeycloakIdentity(identity)
+  } catch (error) {
+    if (error instanceof KeycloakTokenValidationError) {
+      response.status(error.statusCode).json({ error: error.message })
+      return null
     }
+
+    if (error instanceof OwnerKeycloakLinkConflictError) {
+      response.status(409).json({
+        error: 'This owner account is already linked to a different Keycloak identity.',
+      })
+      return null
+    }
+
+    throw error
   }
-
-  const owner = await noteStore.getOwnerBySessionToken(token)
-
-  if (!owner) {
-    response.status(401).json({ error: 'Owner session is invalid or expired.' })
-    return null
-  }
-
-  return owner
 }
 
 export async function requireSiteAdmin(

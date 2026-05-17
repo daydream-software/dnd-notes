@@ -51,13 +51,13 @@ async function createTestApp(
 }
 
 test('CORS headers are present and permissive for authenticated requests', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://example.com'],
   })
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
 
     // OPTIONS preflight request (simulating CORS preflight)
     const preflightResponse = await agent
@@ -87,13 +87,13 @@ test('CORS headers are present and permissive for authenticated requests', async
 })
 
 test('CORS headers are present for guest shared-link requests', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://guest-origin.com'],
   })
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
 
     // Create a share link
     const createShareLinkResponse = await withAuth(agent, token)
@@ -127,11 +127,11 @@ test('CORS headers are present for guest shared-link requests', async () => {
 })
 
 test('CSP frame-ancestors header is applied for shared-link session endpoint', async () => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
 
     // Create a share link with frame-ancestors
     const createShareLinkResponse = await withAuth(agent, token)
@@ -159,11 +159,11 @@ test('CSP frame-ancestors header is applied for shared-link session endpoint', a
 })
 
 test('CSP frame-ancestors defaults to none when not specified', async () => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
 
     // Create a share link without frame-ancestors
     const createShareLinkResponse = await withAuth(agent, token)
@@ -188,14 +188,14 @@ test('CSP frame-ancestors defaults to none when not specified', async () => {
 })
 
 test('site admin access works with CORS headers', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     siteAdminEmails: ['admin@example.com'],
     allowedOrigins: ['http://admin-dashboard.com'],
   })
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent, {
+    const { token } = await registerOwner(agent, issueToken!, {
       email: 'admin@example.com',
       displayName: 'Admin User',
     })
@@ -220,7 +220,7 @@ test('site admin access works with CORS headers', async () => {
 })
 
 test('unauthenticated requests for protected routes fail gracefully with CORS', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://malicious-site.com'],
   })
 
@@ -240,7 +240,7 @@ test('unauthenticated requests for protected routes fail gracefully with CORS', 
 })
 
 test('public health endpoint returns CORS headers', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://monitoring-tool.com'],
   })
 
@@ -258,13 +258,13 @@ test('public health endpoint returns CORS headers', async () => {
 })
 
 test('guest cannot access owner-only routes even with CORS', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://guest-origin.com'],
   })
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
 
     // Create a share link and join as guest
     const createShareLinkResponse = await withAuth(agent, token)
@@ -296,13 +296,13 @@ test('guest cannot access owner-only routes even with CORS', async () => {
 })
 
 test('CSP frame-ancestors is applied to all shared session endpoints', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://test-origin.com'],
   })
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
 
     // Create a share link with specific frame-ancestors
     const createShareLinkResponse = await withAuth(agent, token)
@@ -349,13 +349,13 @@ test('CSP frame-ancestors is applied to all shared session endpoints', async () 
 })
 
 test('OPTIONS preflight requests for share-link routes include CORS headers', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://example.com'],
   })
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
 
     const createShareLinkResponse = await withAuth(agent, token)
       .post(`/api/campaigns/${defaultCampaignId}/share-links`)
@@ -383,7 +383,7 @@ test('OPTIONS preflight requests for share-link routes include CORS headers', as
 })
 
 test('CORS rejects non-whitelisted origins', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://allowed-origin.com'],
   })
 
@@ -405,13 +405,13 @@ test('CORS rejects non-whitelisted origins', async () => {
 })
 
 test('requests without origin header are allowed (mobile apps, curl, Postman)', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     allowedOrigins: ['http://allowed-origin.com'],
   })
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
     
     // Request without origin should be allowed (no Origin header = non-browser client)
     const response = await withAuth(agent, token)
@@ -424,11 +424,11 @@ test('requests without origin header are allowed (mobile apps, curl, Postman)', 
 })
 
 test('security headers are applied to all responses', async () => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
 
   try {
     const agent = request(app)
-    const { token } = await registerOwner(agent)
+    const { token } = await registerOwner(agent, issueToken!)
     
     const response = await withAuth(agent, token)
       .get('/api/campaigns')

@@ -7,16 +7,17 @@ import { createNoteStore } from '../src/note-store.js'
 import {
   createTestApp,
   createTestPgMemPool,
+  createTestRuntimeAuth,
   registerOwner,
   withAuth,
   withGuest,
 } from './test-helpers.js'
 
 test('quick capture creates a note with only a title using server defaults', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const createResponse = await authed.post('/api/notes').send({
@@ -47,10 +48,10 @@ test('quick capture creates a note with only a title using server defaults', asy
 })
 
 test('updating a note that omits body or status returns 400 instead of silently blanking fields', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const createResponse = await authed.post('/api/notes').send({
@@ -93,10 +94,10 @@ test('updating a note that omits body or status returns 400 instead of silently 
 })
 
 test('authenticated note session routes list sessions and preserve percent-encoded names', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const firstResponse = await authed.post('/api/notes').send({
@@ -155,10 +156,10 @@ test('authenticated note session routes list sessions and preserve percent-encod
 })
 
 test('invalid note payloads return explicit errors for an authenticated owner', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const response = await authed.post('/api/notes').send({
@@ -183,9 +184,10 @@ test('notes and owner sessions persist across app recreation when using the same
   })
 
   const firstStore = await createNoteStore({ postgresPool: pool })
-  const firstApp = createApp({ noteStore: firstStore })
+  const { runtimeAuth, issueToken } = createTestRuntimeAuth()
+  const firstApp = createApp({ noteStore: firstStore, runtimeAuth })
 
-  const { token } = await registerOwner(request(firstApp))
+  const { token } = await registerOwner(request(firstApp), issueToken)
   const firstAuthed = withAuth(request(firstApp), token)
 
   const createResponse = await firstAuthed.post('/api/notes').send({
@@ -205,7 +207,7 @@ test('notes and owner sessions persist across app recreation when using the same
     await secondStore.close()
   })
 
-  const secondApp = createApp({ noteStore: secondStore })
+  const secondApp = createApp({ noteStore: secondStore, runtimeAuth })
   const secondAuthed = withAuth(request(secondApp), token)
 
   const sessionResponse = await secondAuthed.get('/api/auth/session')
@@ -221,10 +223,10 @@ test('notes and owner sessions persist across app recreation when using the same
 })
 
 test('owner note creation and editing attributes notes to campaign membership', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token, owner } = await registerOwner(request(app))
+  const { token, owner } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const createResponse = await authed.post('/api/notes').send({
@@ -267,10 +269,10 @@ test('owner note creation and editing attributes notes to campaign membership', 
 })
 
 test('direct note updates preserve lastEditedBy when a provided membership lookup fails', async (t) => {
-  const { app, noteStore, cleanup } = await createTestApp()
+  const { app, noteStore, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const createResponse = await authed.post('/api/notes').send({
@@ -308,10 +310,10 @@ test('direct note updates preserve lastEditedBy when a provided membership looku
 })
 
 test('guest note creation and editing attributes notes to guest membership', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const shareLinkResponse = await authed
@@ -365,10 +367,10 @@ test('guest note creation and editing attributes notes to guest membership', asy
 })
 
 test('notes without membership attribution return null for createdBy and lastEditedBy', async (t) => {
-  const { app, noteStore, cleanup } = await createTestApp()
+  const { app, noteStore, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   noteStore.resetNotes(
@@ -392,10 +394,10 @@ test('notes without membership attribution return null for createdBy and lastEdi
 })
 
 test('session listing endpoint returns unique session names grouped from notes', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const emptySessionsResponse = await authed.get(
@@ -464,7 +466,7 @@ test('session listing endpoint returns unique session names grouped from notes',
 })
 
 test('session listing requires authentication and campaign access', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
   const unauthenticatedResponse = await request(app).get(
@@ -472,7 +474,7 @@ test('session listing requires authentication and campaign access', async (t) =>
   )
   assert.equal(unauthenticatedResponse.status, 401)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const nonExistentResponse = await authed.get(
@@ -482,10 +484,10 @@ test('session listing requires authentication and campaign access', async (t) =>
 })
 
 test('shared session listing endpoint returns sessions for guest members', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const shareLinkResponse = await authed
@@ -526,9 +528,9 @@ test('shared session listing endpoint returns sessions for guest members', async
 })
 
 test('note-to-note links support validation, cross-campaign blocking, and backlink discovery', async () => {
-  const { app, cleanup } = await createTestApp()
-  const { token: token1 } = await registerOwner(request(app), { email: 'user1@example.com' })
-  const { token: token2 } = await registerOwner(request(app), { email: 'user2@example.com' })
+  const { app, cleanup, issueToken } = await createTestApp()
+  const { token: token1 } = await registerOwner(request(app), issueToken!, { email: 'user1@example.com' })
+  const { token: token2 } = await registerOwner(request(app), issueToken!, { email: 'user2@example.com' })
   const authed1 = withAuth(request(app), token1)
   const authed2 = withAuth(request(app), token2)
 

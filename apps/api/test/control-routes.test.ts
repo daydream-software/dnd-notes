@@ -3,6 +3,7 @@ import http from 'node:http'
 import { once } from 'node:events'
 import test from 'node:test'
 import request from 'supertest'
+import { defaultCampaignId } from '../src/campaign.js'
 import { createTestApp, registerOwner, withAuth } from './test-helpers.js'
 
 const controlPlaneToken = 'test-control-plane-token'
@@ -159,7 +160,7 @@ function startStreamingJsonRequest({
 }
 
 test('GET /_control/info returns 503 when control plane token is not configured', async () => {
-  const { app, cleanup } = await createTestApp({ controlPlaneToken: null })
+  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken: null })
 
   try {
     const response = await request(app).get('/_control/info')
@@ -176,7 +177,7 @@ for (const [description, configuredToken] of [
   ['whitespace-only', '   '],
 ] as const) {
   test(`GET /_control/info returns 503 when control plane token is ${description}`, async () => {
-    const { app, cleanup } = await createTestApp({
+    const { app, cleanup, issueToken } = await createTestApp({
       controlPlaneToken: configuredToken,
     })
 
@@ -194,7 +195,7 @@ for (const [description, configuredToken] of [
 }
 
 test('GET /_control/info rejects requests without a bearer token', async () => {
-  const { app, cleanup } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
 
   try {
     const response = await request(app).get('/_control/info')
@@ -207,7 +208,7 @@ test('GET /_control/info rejects requests without a bearer token', async () => {
 })
 
 test('GET /_control/info rejects requests with an invalid bearer token', async () => {
-  const { app, cleanup } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
 
   try {
     const response = await request(app)
@@ -222,7 +223,7 @@ test('GET /_control/info rejects requests with an invalid bearer token', async (
 })
 
 test('GET /_control/info reports tenant runtime metadata and DB connection state', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     controlPlaneToken,
     tenantId: 'tenant-test-1',
     appVersion: '9.9.9',
@@ -255,10 +256,17 @@ test('GET /_control/info reports tenant runtime metadata and DB connection state
 })
 
 test('GET /_control/info reports last-write timestamp after a successful write', async () => {
-  const { app, cleanup } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
 
   try {
-    await registerOwner(request(app))
+    const { token } = await registerOwner(request(app), issueToken!)
+    // POST is required to register a write — provisioning via GET /api/auth/session
+    // does not count even though it inserts an owner row.
+    await request(app)
+      .post('/api/notes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ campaignId: defaultCampaignId, title: 'seed', body: 'seed' })
+      .expect(201)
 
     const response = await request(app)
       .get('/_control/info')
@@ -272,7 +280,7 @@ test('GET /_control/info reports last-write timestamp after a successful write',
 })
 
 test('GET /_control/info does not advance lastWriteAt for an aborted write', async () => {
-  const { app, cleanup, controlState } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup, controlState, issueToken } = await createTestApp({ controlPlaneToken })
   let releaseHandler: (() => void) | undefined
   const handlerReleased = new Promise<void>((resolve) => {
     releaseHandler = resolve
@@ -336,7 +344,7 @@ test('GET /_control/info does not advance lastWriteAt for an aborted write', asy
 })
 
 test('POST /_control/maintenance enable then disable toggles the maintenance state', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 0,
   })
@@ -379,7 +387,7 @@ test('POST /_control/maintenance enable then disable toggles the maintenance sta
 })
 
 test('POST /_control/maintenance drains only writes that started before maintenance mode', async () => {
-  const { app, cleanup, controlState } = await createTestApp({
+  const { app, cleanup, controlState, issueToken } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 500,
   })
@@ -464,7 +472,7 @@ test('POST /_control/maintenance drains only writes that started before maintena
 })
 
 test('POST /_control/maintenance rejects invalid mode values', async () => {
-  const { app, cleanup } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
 
   try {
     const response = await request(app)
@@ -480,7 +488,7 @@ test('POST /_control/maintenance rejects invalid mode values', async () => {
 })
 
 test('Maintenance mode causes write endpoints to return 503 with stable error code', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 0,
   })
@@ -488,7 +496,7 @@ test('Maintenance mode causes write endpoints to return 503 with stable error co
   try {
     // Register an owner *before* enabling maintenance so we have an authenticated
     // session for the write attempt below.
-    const { token } = await registerOwner(request(app))
+    const { token } = await registerOwner(request(app), issueToken!)
 
     await request(app)
       .post('/_control/maintenance')
@@ -523,7 +531,7 @@ test('Maintenance mode causes write endpoints to return 503 with stable error co
 })
 
 test('Maintenance mode does not block control-plane endpoints themselves', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 0,
   })

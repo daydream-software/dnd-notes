@@ -18,7 +18,7 @@ const testFixtureWebDistPath = join(
 )
 
 test('GET /health returns service metadata', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
   const response = await request(app).get('/health')
@@ -29,7 +29,7 @@ test('GET /health returns service metadata', async (t) => {
 })
 
 test('GET /healthz, /ready, and /readyz return probe metadata while the database is available', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
   const [livenessResponse, readyResponse, readinessResponse] = await Promise.all([
@@ -56,7 +56,7 @@ test('GET /healthz, /ready, and /readyz return probe metadata while the database
 })
 
 test('GET /readyz returns 503 when the database is unavailable', async (t) => {
-  const { app, cleanup, noteStore } = await createTestApp()
+  const { app, cleanup, noteStore, issueToken } = await createTestApp()
   t.after(cleanup)
 
   const originalCheckHealth = noteStore.checkHealth
@@ -75,7 +75,7 @@ test('GET /readyz returns 503 when the database is unavailable', async (t) => {
 
 test('GET /readyz returns 503 while the server is shutting down', async (t) => {
   let shuttingDown = false
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     isShuttingDown: () => shuttingDown,
   })
   t.after(cleanup)
@@ -89,7 +89,7 @@ test('GET /readyz returns 503 while the server is shutting down', async (t) => {
 })
 
 test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     serveWeb: true,
     webDistPath: testFixtureWebDistPath,
   })
@@ -116,12 +116,12 @@ test('SERVE_WEB fallback only serves HTML navigation requests', async (t) => {
 })
 
 test('site admins can read admin overview metrics and non-admins cannot', async (t) => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     siteAdminEmails: ['site-admin@example.com'],
   })
   t.after(cleanup)
 
-  const nonAdmin = await registerOwner(request(app), {
+  const nonAdmin = await registerOwner(request(app), issueToken!, {
     email: 'observer@example.com',
   })
   const nonAdminOverviewResponse = await withAuth(request(app), nonAdmin.token).get(
@@ -130,7 +130,7 @@ test('site admins can read admin overview metrics and non-admins cannot', async 
   assert.equal(nonAdminOverviewResponse.status, 403)
   assert.equal(nonAdminOverviewResponse.body.error, 'Site-admin access is required.')
 
-  const siteAdmin = await registerOwner(request(app), {
+  const siteAdmin = await registerOwner(request(app), issueToken!, {
     displayName: 'Site Admin',
     email: 'site-admin@example.com',
   })
@@ -184,12 +184,12 @@ test('site admins can read admin overview metrics and non-admins cannot', async 
 })
 
 test('site admins can read the admin account directory and non-admins cannot', async (t) => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     siteAdminEmails: ['site-admin@example.com'],
   })
   t.after(cleanup)
 
-  const nonAdmin = await registerOwner(request(app), {
+  const nonAdmin = await registerOwner(request(app), issueToken!, {
     displayName: 'Observer',
     email: 'observer@example.com',
   })
@@ -199,7 +199,7 @@ test('site admins can read the admin account directory and non-admins cannot', a
   assert.equal(nonAdminDirectoryResponse.status, 403)
   assert.equal(nonAdminDirectoryResponse.body.error, 'Site-admin access is required.')
 
-  const siteAdmin = await registerOwner(request(app), {
+  const siteAdmin = await registerOwner(request(app), issueToken!, {
     displayName: 'Site Admin',
     email: 'site-admin@example.com',
   })
@@ -225,7 +225,7 @@ test('site admins can read the admin account directory and non-admins cannot', a
 })
 
 test('owner auth and campaign endpoints support the management workflow', async (t) => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     publicWebUrl: 'https://notes.example.com',
   })
   t.after(cleanup)
@@ -233,7 +233,7 @@ test('owner auth and campaign endpoints support the management workflow', async 
   const unauthenticatedListResponse = await request(app).get('/api/campaigns')
   assert.equal(unauthenticatedListResponse.status, 401)
 
-  const { token, owner, payload } = await registerOwner(request(app))
+  const { token, owner, payload } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const sessionResponse = await authed.get('/api/auth/session')
@@ -340,18 +340,13 @@ test('owner auth and campaign endpoints support the management workflow', async 
   assert.equal(shareLinksAfterRevokeResponse.status, 200)
   assert.equal(shareLinksAfterRevokeResponse.body.shareLinks.length, 0)
 
-  const logoutResponse = await authed.post('/api/auth/logout')
-  assert.equal(logoutResponse.status, 204)
-
-  const expiredSessionResponse = await authed.get('/api/auth/session')
-  assert.equal(expiredSessionResponse.status, 401)
 })
 
 test('share link creation falls back to the request host when PUBLIC_WEB_URL is not configured', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const createShareLinkResponse = await authed
@@ -380,97 +375,6 @@ test('share link creation falls back to the request host when PUBLIC_WEB_URL is 
   )
 })
 
-test('owner registration is rate limited after repeated attempts', async (t) => {
-  const { app, cleanup } = await createTestApp()
-  t.after(cleanup)
-
-  for (let index = 0; index < 5; index += 1) {
-    const response = await request(app).post('/api/auth/register').send({
-      displayName: `Rate Limited ${index}`,
-      email: `rate-limit-${index}@example.com`,
-      password: 'moonlit-secret',
-    })
-
-    assert.equal(response.status, 201)
-  }
-
-  const limitedResponse = await request(app).post('/api/auth/register').send({
-    displayName: 'Rate Limited Final',
-    email: 'rate-limit-final@example.com',
-    password: 'moonlit-secret',
-  })
-
-  assert.equal(limitedResponse.status, 429)
-  assert.equal(
-    limitedResponse.body.error,
-    'Too many registration attempts. Please wait before trying again.',
-  )
-  assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
-})
-
-test('owner login is rate limited after repeated attempts', async (t) => {
-  const { app, cleanup } = await createTestApp()
-  t.after(cleanup)
-
-  await registerOwner(request(app), {
-    email: 'login-rate-limit@example.com',
-    password: 'moonlit-secret',
-  })
-
-  for (let index = 0; index < 5; index += 1) {
-    const response = await request(app).post('/api/auth/login').send({
-      email: 'login-rate-limit@example.com',
-      password: 'wrong-password',
-    })
-
-    assert.equal(response.status, 401)
-  }
-
-  const limitedResponse = await request(app).post('/api/auth/login').send({
-    email: 'login-rate-limit@example.com',
-    password: 'wrong-password',
-  })
-
-  assert.equal(limitedResponse.status, 429)
-  assert.equal(
-    limitedResponse.body.error,
-    'Too many login attempts. Please wait before trying again.',
-  )
-  assert.equal(typeof limitedResponse.headers['retry-after'], 'string')
-})
-
-test('owner auth normalizes email casing for registration, duplicate checks, and login', async (t) => {
-  const { app, cleanup } = await createTestApp()
-  t.after(cleanup)
-
-  const registration = await registerOwner(request(app), {
-    displayName: 'Aela',
-    email: 'Aela@Example.com',
-  })
-  assert.equal(registration.owner.email, 'aela@example.com')
-
-  const duplicateResponse = await request(app).post('/api/auth/register').send({
-    displayName: 'Duplicate Aela',
-    email: 'AELA@example.com',
-    password: 'moonlit-secret',
-  })
-  assert.equal(duplicateResponse.status, 409)
-
-  const loginResponse = await request(app).post('/api/auth/login').send({
-    email: 'AELA@example.com',
-    password: 'moonlit-secret',
-  })
-  assert.equal(loginResponse.status, 200)
-  assert.equal(loginResponse.body.owner.email, 'aela@example.com')
-  assert.equal(loginResponse.body.owner.keycloakSub, null)
-
-  const sessionResponse = await withAuth(request(app), registration.token).get(
-    '/api/auth/session',
-  )
-  assert.equal(sessionResponse.status, 200)
-  assert.equal(sessionResponse.body.owner.keycloakSub, null)
-})
-
 test('owner email lookups enforce unique lower(email) semantics', async (t) => {
   const { pool, cleanup } = await createTestApp()
   t.after(cleanup)
@@ -481,18 +385,16 @@ test('owner email lookups enforce unique lower(email) semantics', async (t) => {
         id,
         email,
         display_name,
-        password_hash,
         is_site_admin,
         keycloak_sub,
         created_at,
         updated_at
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7)
     `,
     [
       'owner-one',
       'owner@example.com',
       'Owner One',
-      'hash',
       0,
       null,
       '2026-04-24T00:00:00.000Z',
@@ -508,18 +410,16 @@ test('owner email lookups enforce unique lower(email) semantics', async (t) => {
             id,
             email,
             display_name,
-            password_hash,
             is_site_admin,
             keycloak_sub,
             created_at,
             updated_at
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)
         `,
         [
           'owner-two',
           'OWNER@example.com',
           'Owner Two',
-          'hash',
           0,
           null,
           '2026-04-24T00:00:00.000Z',
@@ -531,10 +431,10 @@ test('owner email lookups enforce unique lower(email) semantics', async (t) => {
 })
 
 test('authenticated owners can run the note CRUD workflow in a selected campaign', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const createResponse = await authed.post('/api/notes').send({
@@ -583,14 +483,14 @@ test('authenticated owners can run the note CRUD workflow in a selected campaign
   assert.equal(finalListResponse.body.notes.length, 0)
 })
 
-test('configured site-admin emails are promoted through registration and login', async (t) => {
+test('configured site-admin emails are promoted on first Keycloak auto-provisioning', async (t) => {
   const siteAdminEmail = 'admin@example.com'
-  const { app, reopenNoteStore, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     siteAdminEmails: [siteAdminEmail],
   })
   t.after(cleanup)
 
-  const registration = await registerOwner(request(app), {
+  const registration = await registerOwner(request(app), issueToken!, {
     displayName: 'Admin Aela',
     email: siteAdminEmail,
   })
@@ -599,16 +499,4 @@ test('configured site-admin emails are promoted through registration and login',
   const sessionResponse = await withAuth(request(app), registration.token).get('/api/auth/session')
   assert.equal(sessionResponse.status, 200)
   assert.equal(sessionResponse.body.owner.isSiteAdmin, true)
-
-  const reopenedStore = await reopenNoteStore()
-  t.after(async () => reopenedStore.close())
-
-  const reopenedApp = createApp({ noteStore: reopenedStore })
-  const loginResponse = await request(reopenedApp).post('/api/auth/login').send({
-    email: siteAdminEmail,
-    password: 'moonlit-secret',
-  })
-
-  assert.equal(loginResponse.status, 200)
-  assert.equal(loginResponse.body.owner.isSiteAdmin, true)
 })

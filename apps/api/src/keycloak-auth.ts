@@ -42,16 +42,12 @@ export class KeycloakTokenValidationError extends Error {
 }
 
 export interface TenantRuntimeAuth {
-  mode: 'local' | 'keycloak'
   authConfig: {
-    mode: 'local' | 'keycloak'
-    keycloak:
-      | {
-          url: string
-          realm: string
-          clientId: string
-        }
-      | null
+    keycloak: {
+      url: string
+      realm: string
+      clientId: string
+    }
   }
   authenticateBearerToken(token: string): Promise<KeycloakIdentity>
 }
@@ -62,7 +58,6 @@ interface CreateTenantRuntimeAuthOptions {
   jwksUrl?: string
   keycloakRealm?: string
   keycloakUrl?: string
-  mode?: string
 }
 
 const INVALID_TOKEN_MESSAGE = 'Owner access token is invalid or expired.'
@@ -84,7 +79,7 @@ function deriveDisplayName(claims: TenantJwtClaims): string {
 function buildKeycloakEndpoints(options: CreateTenantRuntimeAuthOptions) {
   if (!options.clientId) {
     throw new Error(
-      'AUTH_MODE=keycloak requires KEYCLOAK_URL, KEYCLOAK_REALM, and KEYCLOAK_TENANT_CLIENT_ID.',
+      'Keycloak auth requires KEYCLOAK_URL, KEYCLOAK_REALM, and KEYCLOAK_TENANT_CLIENT_ID.',
     )
   }
 
@@ -96,7 +91,7 @@ function buildKeycloakEndpoints(options: CreateTenantRuntimeAuthOptions) {
 
   if (!issuer) {
     throw new Error(
-      'AUTH_MODE=keycloak requires KEYCLOAK_URL, KEYCLOAK_REALM, and KEYCLOAK_TENANT_CLIENT_ID.',
+      'Keycloak auth requires KEYCLOAK_URL, KEYCLOAK_REALM, and KEYCLOAK_TENANT_CLIENT_ID.',
     )
   }
 
@@ -107,24 +102,26 @@ function buildKeycloakEndpoints(options: CreateTenantRuntimeAuthOptions) {
   }
 }
 
+/**
+ * Stub runtime auth that always rejects with 401. Used as the createApp
+ * default and in tests that don't need a real Keycloak issuer — every
+ * authenticated route returns "Owner access token is invalid or expired."
+ * without ever touching the network.
+ */
+export function createStubTenantRuntimeAuth(): TenantRuntimeAuth {
+  return {
+    authConfig: {
+      keycloak: { url: '', realm: '', clientId: '' },
+    },
+    async authenticateBearerToken() {
+      throw new KeycloakTokenValidationError(401, INVALID_TOKEN_MESSAGE)
+    },
+  }
+}
+
 export function createTenantRuntimeAuth(
   options: CreateTenantRuntimeAuthOptions = {},
 ): TenantRuntimeAuth {
-  const mode = options.mode === 'keycloak' ? 'keycloak' : 'local'
-
-  if (mode === 'local') {
-    return {
-      mode,
-      authConfig: {
-        mode,
-        keycloak: null,
-      },
-      async authenticateBearerToken() {
-        throw new KeycloakTokenValidationError(401, INVALID_TOKEN_MESSAGE)
-      },
-    }
-  }
-
   const { clientId, issuer, jwksUrl } = buildKeycloakEndpoints(options)
   const keycloakUrl = normalizeBaseUrl(
     options.keycloakUrl ?? issuer.replace(/\/realms\/[^/]+$/, ''),
@@ -132,9 +129,7 @@ export function createTenantRuntimeAuth(
   const keycloakRealm = options.keycloakRealm ?? issuer.split('/realms/')[1] ?? ''
 
   return {
-    mode,
     authConfig: {
-      mode,
       keycloak: {
         url: keycloakUrl,
         realm: keycloakRealm,

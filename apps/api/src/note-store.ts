@@ -63,7 +63,6 @@ import type {
   NoteReferenceType,
   NoteStats,
   OwnerAccount,
-  OwnerRegistrationInput,
   SessionSummary,
 } from './types.js'
 
@@ -123,15 +122,14 @@ export interface NoteStore {
   listCampaignShareLinks(campaignId: string): Promise<CampaignShareLink[]>
   userHasCampaignAccess(userId: string, campaignId: string): Promise<boolean>
   userOwnsCampaign(ownerUserId: string, campaignId: string): Promise<boolean>
-  createOwnerAccount(input: OwnerRegistrationInput): Promise<OwnerAccount | null>
-  authenticateOwner(email: string, password: string): Promise<OwnerAccount | null>
-  getOwnerBySessionToken(token: string): Promise<OwnerAccount | null>
+  createOwnerAccount(input: {
+    displayName: string
+    email: string
+  }): Promise<OwnerAccount | null>
   findOrCreateOwnerByKeycloakIdentity(
     identity: KeycloakOwnerIdentity,
   ): Promise<OwnerAccount>
   listOwnerAccounts(): Promise<AdminAccountSummary[]>
-  createOwnerSession(ownerUserId: string): Promise<string>
-  deleteOwnerSession(token: string): Promise<void>
   createCampaignShareLink(
     campaignId: string,
     input: CampaignShareLinkInput,
@@ -732,13 +730,9 @@ export async function createNoteStore(
     userHasCampaignAccess: memberships.userHasCampaignAccess,
     userOwnsCampaign: memberships.userOwnsCampaign,
     createOwnerAccount: ownerAccounts.createOwnerAccount,
-    authenticateOwner: ownerAccounts.authenticateOwner,
-    getOwnerBySessionToken: ownerAccounts.getOwnerBySessionToken,
     findOrCreateOwnerByKeycloakIdentity:
       ownerAccounts.findOrCreateOwnerByKeycloakIdentity,
     listOwnerAccounts: admin.listOwnerAccounts,
-    createOwnerSession: ownerAccounts.createOwnerSession,
-    deleteOwnerSession: ownerAccounts.deleteOwnerSession,
     createCampaignShareLink: shareLinks.createCampaignShareLink,
     revokeCampaignShareLink: shareLinks.revokeCampaignShareLink,
     getCampaignShareLinkReveal: shareLinks.getCampaignShareLinkReveal,

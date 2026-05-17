@@ -6,9 +6,6 @@
  * at module scope, so test isolation is preserved.
  *
  * Policy summary:
- *   auth-register   5 req / 15 min  — brute-force protection for account creation
- *   auth-login      5 req / 15 min  — brute-force protection for credential auth
- *   auth-logout     30 req / 15 min — logout is cheap but still bounded
  *   shared-join     10 req / 10 min — guest join is per-IP across all share links
  *   shared-claim    5 req / 15 min  — membership claim is sensitive
  *   write           100 req / 15 min — authenticated write operations (POST/PUT/DELETE)
@@ -16,7 +13,7 @@
  *
  * All limits are configurable via environment variables:
  *   RATE_LIMIT_WINDOW_MS       — window length in milliseconds (default varies per policy)
- *   RATE_LIMIT_AUTH_MAX        — max requests for auth endpoints (default 5)
+ *   RATE_LIMIT_AUTH_MAX        — max requests for share-link claim flow (default 5)
  *   RATE_LIMIT_WRITE_MAX       — max requests for write endpoints (default 100)
  *   RATE_LIMIT_READ_MAX        — max requests for read endpoints (default 300)
  *
@@ -66,30 +63,6 @@ export function makeRateLimiter(options: Partial<RateLimitOptions>) {
     return rateLimit({ ...rateLimitDefaults, ...options, limit: 1, skip: () => true })
   }
   return rateLimit({ ...rateLimitDefaults, ...options })
-}
-
-export function createAuthRegisterLimiter() {
-  return makeRateLimiter({
-    windowMs: defaultWindowMs,
-    limit: authMax,
-    message: { error: 'Too many registration attempts. Please wait before trying again.' },
-  })
-}
-
-export function createAuthLoginLimiter() {
-  return makeRateLimiter({
-    windowMs: defaultWindowMs,
-    limit: authMax,
-    message: { error: 'Too many login attempts. Please wait before trying again.' },
-  })
-}
-
-export function createAuthLogoutLimiter() {
-  return makeRateLimiter({
-    windowMs: defaultWindowMs,
-    limit: 30,
-    message: { error: 'Too many logout attempts. Please wait before trying again.' },
-  })
 }
 
 export function createSharedJoinLimiter() {
