@@ -8361,3 +8361,27 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-vitest-coverage-thresholds-145
 
+---
+
+### 2026-05-16: Surgical copilot removal, not Squad-doc audit
+**Decided by:** Coordinator (chore/agents-md-copilot-drift)
+**Type:** Process — documentation scope
+
+**Context:** User flagged that AGENTS.md still referenced "copilot" as a branch/path naming convention after #311 merged. The correct scope was removal of those specific string references, not a full audit of potentially-stale Squad documentation.
+
+**Decision:** When a doc drift is flagged with a specific artifact name ("copilot"), scope the fix strictly to that artifact. Broader Squad-doc audit (other stale paths, semantic drift in plan.md, dead agent dirs) is explicitly deferred unless the user broadens the scope. Surgical fixes keep diffs small and reviewable.
+
+**Session:** 2026-05-16-agents-md-copilot-drift
+
+---
+
+### 2026-05-16: Branch-naming convention reflects observed practice, not aspirational
+**Decided by:** Coordinator (chore/agents-md-copilot-drift)
+**Type:** Process — contribution convention
+
+**Context:** AGENTS.md's branch-naming example was stale (used `squad/{issue-number}-{kebab-case-slug}` format that no recent PR follows). The replacement was documented using three real same-day examples to anchor the convention empirically.
+
+**Decision:** AGENTS.md branch-naming convention is an empirical statement of current practice, not a directive. When the convention is updated, it must be grounded in actual recent PRs — not aspirational patterns. If future PRs adopt a different shape, the doc follows the practice, not the other way around.
+
+**Session:** 2026-05-16-agents-md-copilot-drift
+
