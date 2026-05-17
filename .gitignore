@@ -37,3 +37,6 @@ apps/*/.env.*.local
 # IDE
 .idea/
 .vscode/
+
+# Playwright MCP runtime snapshots
+.playwright-mcp/
