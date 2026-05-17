@@ -8421,3 +8421,27 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-k3d-host-ram-173
 
+---
+
+### 2026-05-16: Don't fake tests for absent validation paths — file product follow-ups instead
+**Decided by:** Chunk + Mikey (review gate, #143)
+**Type:** Testing convention
+
+**Context:** During #143 (customer-portal error-flow tests), three acceptance hints pointed at validation paths that don't exist in source: slug error state, plan `required` attr, disabled-plan UI. Writing passing tests against absent behavior would create a false coverage illusion.
+
+**Decision:** When test acceptance hints at validation that doesn't exist in source, file a product follow-up issue (not a test gap issue) and do not write assertions against the absent behavior. Gaps filed as #315. Applies across all frontend test work.
+
+**Session:** 2026-05-16-customer-portal-error-flows-143
+
+---
+
+### 2026-05-16: Accept fixture duplication within a PR; extract to test-helpers as separate refactor
+**Decided by:** Mikey (review gate, #143)
+**Type:** Testing convention
+
+**Context:** The 4 new test files in #143 each repeat `catalog`, `baseDashboard`, `makeKeycloakStub`, `sessionTokenStorageKey`. Mikey flagged it as predictable CodeRabbit churn but confirmed it doesn't belong in a coverage PR.
+
+**Decision:** Keep fixture duplication within a PR's scope boundary. Extraction to `test-helpers.ts` is a standalone refactor concern; conflating it with a coverage PR inflates scope and risks regressions. Pre-empt the CodeRabbit comment in the PR body when known in advance.
+
+**Session:** 2026-05-16-customer-portal-error-flows-143
+
