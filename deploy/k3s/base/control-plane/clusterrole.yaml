@@ -12,8 +12,13 @@ rules:
     resources: ["namespaces"]
     verbs: ["create", "get", "list", "watch", "delete"]
   - apiGroups: [""]
-    resources: ["configmaps", "secrets", "services"]
+    resources: ["configmaps", "services"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # Secrets: no cluster-wide list/watch — control-plane accesses secrets by
+  # known name only (tenant runtime secrets, imagePullSecrets)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]

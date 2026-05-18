@@ -20,13 +20,28 @@ spec:
         app.kubernetes.io/part-of: dnd-notes
     spec:
       terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: portal
           image: ghcr.io/daydream-software/dnd-notes-operator-portal
           imagePullPolicy: Always
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - name: http
               containerPort: 8080
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
           envFrom:
             - configMapRef:
                 name: operator-portal-config

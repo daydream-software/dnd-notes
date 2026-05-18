@@ -7,8 +7,10 @@ metadata:
     app.kubernetes.io/name: operator-portal
     app.kubernetes.io/component: operator-portal
     app.kubernetes.io/part-of: dnd-notes
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt-prod
+  # No cert-manager annotation here — TLS is handled by the shared wildcard
+  # Certificate in deploy/k3s/base/cert-manager/certificate.yaml which issues
+  # daydreamsoftware-wildcard-tls. Adding cluster-issuer here would cause
+  # cert-manager to attempt a redundant per-ingress certificate issuance.
 spec:
   ingressClassName: traefik
   tls:
