@@ -750,6 +750,7 @@ export class TenantRegistry {
     ownerId: string
     displayName?: string
     planTier?: string
+    /** @deprecated Phase 2 local-auth relic; will be removed once no callers send it. */
     initialAdminEmail?: string
     version: string
   }): Promise<Tenant> {

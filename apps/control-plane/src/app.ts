@@ -27,16 +27,14 @@ import {
   TenantControlError,
   type TenantControlClient,
 } from './tenant-control-client.js'
-import type { KeycloakAdminClient } from './keycloak-admin-client.js'
+import type { KeycloakAdminClient, KeycloakUserSummary } from './keycloak-admin-client.js'
 
 /**
- * Narrow subset of `KeycloakAdminClient` that `createApp` actually uses
- * (currently only the per-tenant role-assignment sweep). Typing the
- * `keycloakAdminClient` option this way lets tests provide a minimal,
- * type-safe fake without an `as unknown as KeycloakAdminClient` cast and
- * keeps drift detection meaningful (CodeRabbit #200).
+ * Narrow subset of `KeycloakAdminClient` that `createApp` actually uses.
+ * Typed as a `Pick<>` to keep test fakes minimal and type-safe, and to make
+ * surface-area drift detectable (CodeRabbit #200).
  */
-type AppKeycloakAdminClient = Pick<KeycloakAdminClient, 'assignClientRoleToUser'>
+type AppKeycloakAdminClient = Pick<KeycloakAdminClient, 'assignClientRoleToUser' | 'searchUsers'>
 import { formatUnknownError } from './error-formatting.js'
 import type { TenantRegistry } from './tenant-registry.js'
 import {
@@ -373,6 +371,7 @@ const createTenantSchema = z.object({
   id: z.string().min(1),
   slug: z.string().min(1).max(63).regex(tenantSlugPattern),
   ownerId: z.string().min(1),
+  /** @deprecated Phase 2 local-auth relic; will be removed once no callers send it. */
   initialAdminEmail: z.string().trim().email().optional(),
   version: z.string().min(1),
 })
@@ -2079,6 +2078,41 @@ export function createApp({
         response.status(500).json({
           error: 'Failed to deprovision tenant resources',
           details: getErrorMessage(error),
+        })
+      }
+    },
+  )
+
+  app.get(
+    '/internal/keycloak-users',
+    async (
+      request: Request,
+      response: Response<KeycloakUserSummary[] | ErrorResponse>,
+    ) => {
+      if (!keycloakAdminClient) {
+        response.status(501).json({
+          error: 'Keycloak admin client is not configured',
+        })
+        return
+      }
+
+      const rawQ = request.query['q']
+      const q = typeof rawQ === 'string' ? rawQ.trim() : ''
+
+      if (q.length === 0) {
+        response.status(400).json({
+          error: 'Query parameter "q" is required and must not be empty',
+        })
+        return
+      }
+
+      try {
+        const users = await keycloakAdminClient.searchUsers(q)
+        response.json(users)
+      } catch (error) {
+        console.error('[keycloak-users] upstream search failed:', error)
+        response.status(500).json({
+          error: 'Failed to search Keycloak users',
         })
       }
     },

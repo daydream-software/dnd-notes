@@ -37,6 +37,7 @@ export interface Tenant {
   ownerId: string
   displayName: string | null
   planTier: string | null
+  /** @deprecated Phase 2 local-auth relic; will be removed once no callers send it. */
   initialAdminEmail: string | null
   desiredState: TenantState
   currentState: TenantState

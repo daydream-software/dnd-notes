@@ -694,6 +694,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
       return ownerAccount.keycloakSub
     }
 
+    // DEPRECATED: see migration 0006; this fallback exists only for legacy rows.
     const fallbackEmail = tenant.initialAdminEmail
     if (!fallbackEmail || fallbackEmail.trim() === '') {
       return null

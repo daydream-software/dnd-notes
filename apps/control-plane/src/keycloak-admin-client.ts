@@ -40,6 +40,21 @@ export interface KeycloakClientSpec {
   [key: string]: unknown
 }
 
+/**
+ * Minimal user representation returned by the operator user-picker endpoint.
+ * Only the fields relevant to the picker are included; all other Keycloak
+ * attributes are intentionally excluded.
+ *
+ * `username` and the name fields may be absent for service accounts.
+ */
+export interface KeycloakUserSummary {
+  id: string
+  username: string | undefined
+  email: string | undefined
+  firstName: string | undefined
+  lastName: string | undefined
+}
+
 export interface KeycloakAdminClientOptions {
   /** In-cluster base URL, e.g. http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080 */
   baseUrl: string
@@ -459,6 +474,75 @@ export class KeycloakAdminClient {
     }
 
     return { id: first.id }
+  }
+
+  /**
+   * Searches Keycloak users by a free-text query using the admin REST API
+   * `GET /admin/realms/{realm}/users?search=<q>&max=20`. Returns up to 20
+   * matching users, each mapped to the minimal DTO the operator user-picker
+   * needs. Fields other than `id` may be absent in the Keycloak payload
+   * (e.g. a service account with no email) and are typed accordingly.
+   *
+   * Throws `KeycloakAdminError` on transport or parse failure.
+   */
+  async searchUsers(q: string): Promise<KeycloakUserSummary[]> {
+    let response: Response
+
+    try {
+      response = await this.adminFetch(
+        `/users?search=${encodeURIComponent(q)}&max=20`,
+      )
+    } catch (error) {
+      if (error instanceof KeycloakAdminError) {
+        throw error
+      }
+
+      throw new KeycloakAdminError(
+        0,
+        `Failed to reach Keycloak admin API: ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+
+    if (!response.ok) {
+      throw new KeycloakAdminError(
+        response.status,
+        `Keycloak admin GET users returned HTTP ${response.status}.`,
+      )
+    }
+
+    let users: Array<{
+      id?: string
+      username?: string
+      email?: string
+      firstName?: string
+      lastName?: string
+    }>
+
+    try {
+      users = (await response.json()) as typeof users
+    } catch {
+      throw new KeycloakAdminError(
+        0,
+        'Keycloak admin GET users returned a non-JSON response.',
+      )
+    }
+
+    if (!Array.isArray(users)) {
+      throw new KeycloakAdminError(
+        0,
+        'Keycloak admin GET users returned an unexpected payload shape.',
+      )
+    }
+
+    return users
+      .filter((u): u is typeof u & { id: string } => typeof u.id === 'string' && u.id.length > 0)
+      .map((u) => ({
+        id: u.id,
+        username: u.username,
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+      }))
   }
 
   /**
