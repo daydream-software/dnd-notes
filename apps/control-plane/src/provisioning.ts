@@ -1149,6 +1149,12 @@ export function buildTenantInfrastructureBundle(
     // It is not configurable at the auth-config level — the canonical name is
     // `dnd-notes-tenant-{tenantId}` and is created by ensureClient during
     // provisioning.
+    //
+    // Tenant pods always sit behind nginx ingress, so express must trust the
+    // X-Forwarded-For chain — otherwise express-rate-limit buckets every
+    // ingress-fronted visitor under the proxy IP and innocent visitors get
+    // 429 on a fresh share-link page load (#322).
+    configMapData.TRUST_PROXY = 'true'
     configMapData.KEYCLOAK_URL = options.tenantRuntimeAuth.keycloakUrl
     configMapData.KEYCLOAK_REALM = options.tenantRuntimeAuth.keycloakRealm
     configMapData.KEYCLOAK_TENANT_CLIENT_ID = `dnd-notes-tenant-${options.tenant.id}`

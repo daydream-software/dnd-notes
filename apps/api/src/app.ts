@@ -40,6 +40,7 @@ interface CreateAppOptions {
   tenantId?: string | null
   maintenanceDrainGraceMs?: number
   controlState?: ControlState
+  trustProxy?: boolean | number
 }
 
 export function createApp({
@@ -56,8 +57,14 @@ export function createApp({
   tenantId = null,
   maintenanceDrainGraceMs = defaultMaintenanceDrainGraceMs,
   controlState = createControlState(),
+  trustProxy = false,
 }: CreateAppOptions): Express {
   const app = express()
+  // When the tenant API runs behind nginx ingress (k3d, hosted), `trustProxy`
+  // must be set so express resolves req.ip from `X-Forwarded-For` instead of
+  // the proxy hop's IP. Without it, express-rate-limit groups every request
+  // under one key and innocent visitors hit 429 on a fresh page load (#322).
+  app.set('trust proxy', trustProxy)
   const noteStore = initialNoteStore
   const publicWebUrl = normalizePublicWebUrl(configuredPublicWebUrl)
   const spaFallbackReadLimiter = createReadLimiter()

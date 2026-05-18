@@ -9,6 +9,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react'
 import {
@@ -69,6 +70,12 @@ function App() {
 
   const [sharedCampaign, setSharedCampaign] = useState<CampaignSummary | null>(null)
   const [shareLink, setShareLink] = useState<CampaignShareLink | null>(null)
+  // Keep a ref to the latest shareLink so the loadSharedWorkspace callback
+  // does not depend on shareLink identity — otherwise setShareLink inside
+  // useGuestSession.bootstrapSharedSession would re-create the callback,
+  // re-fire the effect, re-fetch /session, and loop until 429 (#322).
+  const shareLinkRef = useRef<CampaignShareLink | null>(shareLink)
+  useEffect(() => { shareLinkRef.current = shareLink }, [shareLink])
   const [error, setError] = useState<string | null>(null)
   const [narrowWorkspacePanel, setNarrowWorkspacePanel] = useState<NarrowWorkspacePanel>('browse')
   const [wantsSplitNoteWorkspace, setWantsSplitNoteWorkspace] = useState(false)
@@ -94,14 +101,14 @@ function App() {
 
   const loadSharedWorkspace = useCallback(
     async (activeGuestToken: string, preferredNoteId?: string | null, accessLevel?: CampaignShareLink['accessLevel']): Promise<boolean | 'stale'> => {
-      const ok = await loadSharedWorkspaceHook(shareToken as string, activeGuestToken, preferredNoteId, accessLevel, shareLink,
+      const ok = await loadSharedWorkspaceHook(shareToken as string, activeGuestToken, preferredNoteId, accessLevel, shareLinkRef.current,
         (campaign) => { setSharedCampaign(campaign); setSelectedCampaignId(campaign.id); setCampaigns([campaign]) },
         (message) => setError(message),
       )
       if (ok === true) setError(null)
       return ok
     },
-    [loadSharedWorkspaceHook, setCampaigns, setSelectedCampaignId, shareLink, shareToken],
+    [loadSharedWorkspaceHook, setCampaigns, setSelectedCampaignId, shareToken],
   )
 
   const loadCampaigns = useCallback(
