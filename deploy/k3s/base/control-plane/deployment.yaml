@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnd-notes-control-plane
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: dnd-notes-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dnd-notes-control-plane
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dnd-notes-control-plane
+        app.kubernetes.io/component: control-plane
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      serviceAccountName: dnd-notes-control-plane
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: control-plane
+          image: ghcr.io/daydream-software/dnd-notes-control-plane
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3001
+          envFrom:
+            - configMapRef:
+                name: dnd-notes-control-plane-config
+            - secretRef:
+                name: dnd-notes-control-plane-secrets
+          # Backup env vars (Issue #330). Values come from a k8s Secret applied
+          # separately at deploy time — see deploy/k3s/base/control-plane/secret.example.yaml.
+          env:
+            - name: BACKUP_DESTINATION
+              valueFrom:
+                secretKeyRef:
+                  name: dnd-notes-backup-config
+                  key: BACKUP_DESTINATION
+                  optional: true
+            - name: AZURE_STORAGE_ACCOUNT
+              valueFrom:
+                secretKeyRef:
+                  name: dnd-notes-backup-config
+                  key: AZURE_STORAGE_ACCOUNT
+                  optional: true
+            - name: AZURE_STORAGE_CONTAINER
+              valueFrom:
+                secretKeyRef:
+                  name: dnd-notes-backup-config
+                  key: AZURE_STORAGE_CONTAINER
+                  optional: true
+            - name: AZURE_STORAGE_SAS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: dnd-notes-backup-config
+                  key: AZURE_STORAGE_SAS_TOKEN
+                  optional: true
+            - name: BACKUP_SCHEDULE_CRON
+              valueFrom:
+                secretKeyRef:
+                  name: dnd-notes-backup-config
+                  key: BACKUP_SCHEDULE_CRON
+                  optional: true
+            - name: BACKUP_RETENTION_DAYS
+              valueFrom:
+                secretKeyRef:
+                  name: dnd-notes-backup-config
+                  key: BACKUP_RETENTION_DAYS
+                  optional: true
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
