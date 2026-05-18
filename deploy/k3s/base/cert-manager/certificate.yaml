@@ -1,0 +1,32 @@
+# Multi-SAN wildcard TLS certificate for daydreamsoftware.ca.
+# Issued via Let's Encrypt DNS-01 using the Cloudflare solver.
+#
+# This single certificate covers:
+#   - *.daydreamsoftware.ca  (auth, operator, and any future subdomains)
+#   - *.notes.daydreamsoftware.ca  (tenant subdomains: t-<id>.notes.daydreamsoftware.ca)
+#
+# Note: notes.daydreamsoftware.ca (apex, customer portal) is NOT a wildcard match for
+# *.daydreamsoftware.ca in TLS — it is covered separately only if added explicitly.
+# The customer portal ingress uses the same secret and the *.daydreamsoftware.ca SAN
+# does NOT match the apex. For notes.daydreamsoftware.ca, Traefik will present the
+# wildcard cert which browsers accept because the SAN includes *.daydreamsoftware.ca.
+# Browsers validate *.daydreamsoftware.ca as covering notes.daydreamsoftware.ca.
+#
+# The resulting TLS secret (daydreamsoftware-wildcard-tls) is referenced by all
+# Ingress resources in the dnd-notes-platform namespace. cert-manager issues it
+# into the same namespace (dnd-notes-platform) so all services can reference it.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: daydreamsoftware-wildcard
+  namespace: dnd-notes-platform
+spec:
+  secretName: daydreamsoftware-wildcard-tls
+  issuerRef:
+    name: letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+    - "*.daydreamsoftware.ca"
+    - "*.notes.daydreamsoftware.ca"
+  duration: 2160h   # 90 days (LE default)
+  renewBefore: 360h # Renew 15 days before expiry

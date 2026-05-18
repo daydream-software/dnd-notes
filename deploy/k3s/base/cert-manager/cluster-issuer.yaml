@@ -1,0 +1,31 @@
+# cert-manager ClusterIssuer for Let's Encrypt production using Cloudflare DNS-01.
+#
+# Prerequisites (apply before this manifest):
+#   1. cert-manager v1.16.x installed:
+#        kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.3/cert-manager.yaml
+#      Wait for webhook ready:
+#        kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=120s
+#
+#   2. Cloudflare API token secret (DNS:Edit scope for daydreamsoftware.ca only):
+#        kubectl create secret generic cloudflare-api-token \
+#          -n cert-manager \
+#          --from-literal=api-token='<your-cloudflare-dns-edit-token>'
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: ops@daydreamsoftware.ca
+    privateKeySecretRef:
+      name: letsencrypt-prod-account-key
+    solvers:
+      - dns01:
+          cloudflare:
+            apiTokenSecretRef:
+              name: cloudflare-api-token
+              key: api-token
+        selector:
+          dnsZones:
+            - daydreamsoftware.ca
