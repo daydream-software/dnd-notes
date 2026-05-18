@@ -67,6 +67,8 @@ When reporting status, always report the effective config, not the persisted sta
 
 Team update (2026-05-16T00:00:00Z): Use `!= null` (loose null check) when guarding reads on results from `response.json()` casts in api.ts — catches both undefined (missing field) and null (explicit null). Any read from a `.json()` cast without a runtime guard is unsafe regardless of TypeScript type annotation. Zod validation at the api.ts boundary is a valid follow-up for future hardening. — decided by Chunk + Mikey (#308 fix)
 
+Team update (2026-05-17T22:00:00Z): Dispatched to worktree for apps/control-plane cutover in PR #320 (Keycloak-only auth phase 2 exit). Commits 6801aea + c170b78 cherry-picked: dropped `/portal/{signup,login,logout}`, removed auth-mode switches, added migration `0005_remove_local_auth.sql` with pg-mem DROP COLUMN quirk helper `wrapPoolForPgMem()`, aligned docs/env/configmaps. Merged as part of PR #320 phase-2-exit session. — decided by Coordinator
+
 
 
 
