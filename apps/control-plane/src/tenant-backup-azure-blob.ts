@@ -2,11 +2,11 @@
  * Azure Blob Storage implementation of TenantBackupArtifactStore.
  *
  * Auth precedence (evaluated at construction time):
- *   1. SAS token  — pass sasToken to the constructor. The SDK builds a
- *      SAS-authenticated BlobServiceClient from the account name + token.
- *   2. Connection string — pass connectionString. The SDK parses the key.
- *   3. Pre-built BlobServiceClient — pass blobServiceClient directly (test
+ *   1. Pre-built BlobServiceClient — pass blobServiceClient directly (test
  *      injection and managed-identity paths).
+ *   2. SAS token  — pass sasToken to the constructor. The SDK builds a
+ *      SAS-authenticated BlobServiceClient from the account name + token.
+ *   3. Connection string — pass connectionString. The SDK parses the key.
  *
  * Never include the SAS token or account key in error messages — they are
  * extracted from credentials and must stay out of logs.
@@ -325,20 +325,22 @@ function sanitizeAzureError(error: unknown): Error {
     return new Error(String(error))
   }
 
-  // Replace any query strings from URLs in the message to avoid leaking SAS tokens.
-  const sanitizedMessage = error.message.replace(
-    /https?:\/\/[^\s]+\?[^\s]*/g,
-    '<azure-url-redacted>',
-  )
+  // Replace any query strings from URLs to avoid leaking SAS tokens.
+  // Applied to both .message and .stack — Node stack traces often embed the
+  // message, so an unsanitized URL with a SAS query could appear in either.
+  const urlRedactPattern = /https?:\/\/[^\s]+\?[^\s]*/g
+  const sanitizedMessage = error.message.replace(urlRedactPattern, '<azure-url-redacted>')
 
   const sanitized = new Error(sanitizedMessage)
   sanitized.name = error.name
-  sanitized.stack = error.stack
+  if (error.stack) {
+    sanitized.stack = error.stack.replace(urlRedactPattern, '<azure-url-redacted>')
+  }
   return sanitized
 }
 
 /** Exported for tests only. */
-export { buildBlobName, extractBlobNameFromUrl }
+export { buildBlobName, extractBlobNameFromUrl, sanitizeAzureError }
 
 export interface TempFileHandle {
   path: string

@@ -11,6 +11,7 @@ import {
   AzureBlobUploadError,
   buildBlobName,
   extractBlobNameFromUrl,
+  sanitizeAzureError,
 } from '../src/tenant-backup-azure-blob.js'
 import { TenantBackupValidationError } from '../src/tenant-backup-runner.js'
 
@@ -499,5 +500,42 @@ describe('extractBlobNameFromUrl', () => {
       'https://account.blob.core.windows.net/tenant-backups/tenant-abc/2026-05-18.dump?sv=2024&sig=abc',
     )
     assert.equal(name, 'tenant-abc/2026-05-18.dump')
+  })
+})
+
+describe('sanitizeAzureError', () => {
+  it('redacts SAS query parameters from error message', () => {
+    const original = new Error(
+      'Upload failed: https://foo.blob.core.windows.net/container/blob?sv=secret&sig=abc123',
+    )
+    const sanitized = sanitizeAzureError(original)
+    assert.doesNotMatch(sanitized.message, /sv=secret/)
+    assert.match(sanitized.message, /<azure-url-redacted>/)
+  })
+
+  it('redacts SAS query parameters from error stack', () => {
+    const original = new Error('Upload failed')
+    // Embed a SAS URL in the stack to simulate what Node appends.
+    original.stack =
+      'Error: Upload failed\n' +
+      '    at https://foo.blob.core.windows.net/x?sv=secret&sig=abc at line 1\n' +
+      '    at Object.<anonymous> (/app/src/tenant-backup-azure-blob.ts:42:5)'
+    const sanitized = sanitizeAzureError(original)
+    assert.ok(sanitized.stack !== undefined)
+    assert.doesNotMatch(sanitized.stack ?? '', /[?&]sv=/)
+    assert.match(sanitized.stack ?? '', /<azure-url-redacted>/)
+  })
+
+  it('preserves error name', () => {
+    const original = new Error('some message')
+    original.name = 'StorageError'
+    const sanitized = sanitizeAzureError(original)
+    assert.equal(sanitized.name, 'StorageError')
+  })
+
+  it('wraps non-Error values', () => {
+    const sanitized = sanitizeAzureError('plain string error')
+    assert.ok(sanitized instanceof Error)
+    assert.equal(sanitized.message, 'plain string error')
   })
 })
