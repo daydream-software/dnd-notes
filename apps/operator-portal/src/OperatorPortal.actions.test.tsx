@@ -125,7 +125,6 @@ function createFleetStatus() {
           slug: 'moonshae-ledger',
           subdomain: 'moonshae-ledger',
           ownerId: 'owner-1',
-          initialAdminEmail: 'admin@moonshae.example',
           desiredState: 'ready' as const,
           currentState: 'ready' as const,
           version: '1.0.0',
@@ -203,7 +202,6 @@ describe('operator portal lifecycle actions', () => {
               slug: 'candlekeep',
               subdomain: 't-candlekeep',
               ownerId: 'owner-99',
-              initialAdminEmail: 'keeper@candlekeep.example',
               desiredState: 'ready' as const,
               currentState: 'ready' as const,
               version: '2.1.0',
@@ -238,7 +236,6 @@ describe('operator portal lifecycle actions', () => {
     const createRequests: Array<{
       id: string
       ownerId: string
-      initialAdminEmail?: string
       slug: string
       version: string
     }> = []
@@ -271,11 +268,16 @@ describe('operator portal lifecycle actions', () => {
         return createJsonResponse(fleetResponses.shift() ?? createFleetStatus())
       }
 
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        return createJsonResponse([
+          { id: 'owner-99', email: 'keeper@candlekeep.example', username: 'keeper' },
+        ])
+      }
+
       if (path === '/operator-api/internal/tenants' && method === 'POST') {
         const request = readMockJsonBody<{
           id: string
           ownerId: string
-          initialAdminEmail?: string
           slug: string
           version: string
         }>(init)
@@ -292,7 +294,6 @@ describe('operator portal lifecycle actions', () => {
               slug: request.slug,
               subdomain: null,
               ownerId: request.ownerId,
-              initialAdminEmail: request.initialAdminEmail ?? null,
               desiredState: 'provisioning',
               currentState: 'provisioning',
               version: request.version,
@@ -324,7 +325,6 @@ describe('operator portal lifecycle actions', () => {
             slug: 'candlekeep',
             subdomain: 't-candlekeep',
             ownerId: 'owner-99',
-            initialAdminEmail: 'keeper@candlekeep.example',
             desiredState: 'ready',
             currentState: 'ready',
             version: '2.1.0',
@@ -356,11 +356,11 @@ describe('operator portal lifecycle actions', () => {
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText(/tenant slug/i), 'candlekeep')
-    await user.type(screen.getByLabelText(/owner id/i), 'owner-99')
-    await user.type(
-      screen.getByLabelText(/initial admin email/i),
-      'keeper@candlekeep.example',
-    )
+
+    // Owner picker: type into the Autocomplete, wait for option, select it.
+    await user.type(screen.getByRole('combobox', { name: /Search for owner/i }), 'owner-99')
+    await user.click(await screen.findByRole('option', { hidden: true }))
+
     await user.clear(screen.getByLabelText(/tenant version/i))
     await user.type(screen.getByLabelText(/tenant version/i), '2.1.0')
     await user.type(
@@ -381,7 +381,6 @@ describe('operator portal lifecycle actions', () => {
       {
         id: 'candlekeep',
         ownerId: 'owner-99',
-        initialAdminEmail: 'keeper@candlekeep.example',
         slug: 'candlekeep',
         version: '2.1.0',
       },
@@ -399,7 +398,6 @@ describe('operator portal lifecycle actions', () => {
       ),
     ).toBeTruthy()
     expect(screen.getByText('candlekeep')).toBeTruthy()
-    expect(screen.getByText('Initial admin keeper@candlekeep.example')).toBeTruthy()
     expect(screen.getByText('Launch the customer-facing demo tenant')).toBeTruthy()
   })
 
@@ -422,7 +420,6 @@ describe('operator portal lifecycle actions', () => {
     const createRequests: Array<{
       id: string
       ownerId: string
-      initialAdminEmail?: string
       slug: string
       version: string
     }> = []
@@ -451,11 +448,16 @@ describe('operator portal lifecycle actions', () => {
         return createJsonResponse(fleetResponses.shift() ?? fleetResponses[0] ?? createFleetStatus())
       }
 
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        return createJsonResponse([
+          { id: 'owner-99', email: 'keeper@candlekeep.example', username: 'keeper' },
+        ])
+      }
+
       if (path === '/operator-api/internal/tenants' && method === 'POST') {
         const request = readMockJsonBody<{
           id: string
           ownerId: string
-          initialAdminEmail?: string
           slug: string
           version: string
         }>(init)
@@ -494,11 +496,11 @@ describe('operator portal lifecycle actions', () => {
 
     const user = userEvent.setup()
     await user.type(screen.getByLabelText(/tenant slug/i), 'candlekeep')
-    await user.type(screen.getByLabelText(/owner id/i), 'owner-99')
-    await user.type(
-      screen.getByLabelText(/initial admin email/i),
-      'keeper@candlekeep.example',
-    )
+
+    // Owner picker: type into the Autocomplete, wait for option, select it.
+    await user.type(screen.getByRole('combobox', { name: /Search for owner/i }), 'owner-99')
+    await user.click(await screen.findByRole('option', { hidden: true }))
+
     await user.clear(screen.getByLabelText(/tenant version/i))
     await user.type(screen.getByLabelText(/tenant version/i), '2.1.0')
     await user.type(
@@ -692,7 +694,6 @@ describe('operator portal lifecycle actions', () => {
             slug: 'stormwatch',
             subdomain: null,
             ownerId: 'owner-2',
-            initialAdminEmail: null,
             desiredState: 'ready' as const,
             currentState: 'failed' as const,
             version: '2.0.0',

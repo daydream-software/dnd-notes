@@ -2,10 +2,12 @@ import AddCircleOutlineRoundedIcon from '@mui/icons-material/AddCircleOutlineRou
 import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Card,
   CardContent,
+  CircularProgress,
   Dialog,
   DialogActions,
   DialogContent,
@@ -17,10 +19,11 @@ import {
 import { useTheme } from '@mui/material/styles'
 import useMediaQuery from '@mui/material/useMediaQuery'
 import * as React from 'react'
-import { ApiError, createTenant, provisionTenant } from '../control-plane-api'
+import { ApiError, createTenant, provisionTenant, searchKeycloakUsers } from '../control-plane-api'
+import type { KeycloakUserSummary } from '../control-plane-api'
 import type { CreateTenantRequest } from '../types'
 
-const { useEffect, useMemo, useState } = React
+const { useCallback, useEffect, useMemo, useRef, useState } = React
 
 interface ProvisionTenantPanelProps {
   actor: string
@@ -37,7 +40,6 @@ interface ProvisionDraft {
   id: string
   slug: string
   ownerId: string
-  initialAdminEmail: string
   version: string
   reason: string
 }
@@ -47,7 +49,6 @@ function createInitialDraft(suggestedVersion: string): ProvisionDraft {
     id: '',
     slug: '',
     ownerId: '',
-    initialAdminEmail: '',
     version: suggestedVersion,
     reason: '',
   }
@@ -70,33 +71,26 @@ function normalizeDraft(draft: ProvisionDraft, suggestedVersion: string): Provis
     id: draft.id.trim().length > 0 ? draft.id.trim() : normalizedSlug,
     slug: normalizedSlug,
     ownerId: draft.ownerId.trim(),
-    initialAdminEmail: draft.initialAdminEmail.trim(),
     version: draft.version.trim().length > 0 ? draft.version.trim() : suggestedVersion,
     reason: draft.reason.trim(),
   }
 }
 
 function getValidationMessage(draft: ProvisionDraft) {
-  if (
-    !draft.id ||
-    !draft.slug ||
-    !draft.ownerId ||
-    !draft.initialAdminEmail ||
-    !draft.version ||
-    !draft.reason
-  ) {
-    return 'Fill tenant ID, slug, owner ID, initial admin email, version, and operator reason before provisioning.'
+  if (!draft.id || !draft.slug || !draft.ownerId || !draft.version || !draft.reason) {
+    return 'Fill tenant ID, slug, owner, version, and operator reason before provisioning.'
   }
 
   if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(draft.slug)) {
     return 'Tenant slug must use lowercase letters, numbers, and hyphens only.'
   }
 
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(draft.initialAdminEmail)) {
-    return 'Initial admin email must be a valid email address.'
-  }
-
   return null
+}
+
+function formatUserLabel(user: KeycloakUserSummary): string {
+  const name = [user.firstName, user.lastName].filter(Boolean).join(' ')
+  return name.length > 0 ? name : (user.username ?? user.id)
 }
 
 export default function ProvisionTenantPanel({
@@ -114,6 +108,85 @@ export default function ProvisionTenantPanel({
   const [draft, setDraft] = useState(() => createInitialDraft(suggestedVersion))
   const [isReviewOpen, setIsReviewOpen] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+
+  // Autocomplete state
+  const [ownerOptions, setOwnerOptions] = useState<KeycloakUserSummary[]>([])
+  const [ownerInputValue, setOwnerInputValue] = useState('')
+  const [selectedOwner, setSelectedOwner] = useState<KeycloakUserSummary | null>(null)
+  const [ownerLoading, setOwnerLoading] = useState(false)
+  const [ownerError, setOwnerError] = useState<string | null>(null)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const abortRef = useRef<AbortController | null>(null)
+
+  const runOwnerSearch = useCallback(
+    (query: string) => {
+      if (abortRef.current) {
+        abortRef.current.abort()
+      }
+
+      const trimmed = query.trim()
+
+      if (trimmed.length === 0) {
+        setOwnerOptions([])
+        setOwnerLoading(false)
+        setOwnerError(null)
+        return
+      }
+
+      const controller = new AbortController()
+      abortRef.current = controller
+      setOwnerLoading(true)
+      setOwnerError(null)
+
+      searchKeycloakUsers(authToken, trimmed, controller.signal)
+        .then((results) => {
+          setOwnerOptions(results)
+          setOwnerLoading(false)
+        })
+        .catch((err: unknown) => {
+          if (err instanceof Error && err.name === 'AbortError') {
+            return
+          }
+          setOwnerLoading(false)
+          setOwnerError('Could not reach Keycloak — try again')
+        })
+    },
+    [authToken],
+  )
+
+  const handleOwnerInputChange = useCallback(
+    (_event: React.SyntheticEvent, value: string) => {
+      setOwnerInputValue(value)
+
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current)
+      }
+
+      debounceRef.current = setTimeout(() => {
+        runOwnerSearch(value)
+      }, 300)
+    },
+    [runOwnerSearch],
+  )
+
+  const handleOwnerChange = useCallback(
+    (_event: React.SyntheticEvent, value: KeycloakUserSummary | null) => {
+      setSelectedOwner(value)
+      setDraft((currentDraft) => ({
+        ...currentDraft,
+        ownerId: value?.id ?? '',
+      }))
+    },
+    [],
+  )
+
+  // Clean up on unmount
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+      if (abortRef.current) abortRef.current.abort()
+    }
+  }, [])
 
   useEffect(() => {
     setDraft((currentDraft) =>
@@ -167,9 +240,6 @@ export default function ProvisionTenantPanel({
         id: normalizedDraft.id,
         slug: normalizedDraft.slug,
         ownerId: normalizedDraft.ownerId,
-        ...(normalizedDraft.initialAdminEmail
-          ? { initialAdminEmail: normalizedDraft.initialAdminEmail }
-          : {}),
         version: normalizedDraft.version,
       } satisfies CreateTenantRequest
 
@@ -194,6 +264,9 @@ export default function ProvisionTenantPanel({
 
       await onRefresh()
       setDraft(createInitialDraft(suggestedVersion))
+      setSelectedOwner(null)
+      setOwnerInputValue('')
+      setOwnerOptions([])
       setIsReviewOpen(false)
       onProvisioned(
         tenantAlreadyExisted
@@ -291,31 +364,62 @@ export default function ProvisionTenantPanel({
               </Stack>
 
               <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
-                <TextField
-                  label="Owner ID"
-                  value={draft.ownerId}
-                  onChange={(event) =>
-                    setDraft((currentDraft) => ({
-                      ...currentDraft,
-                      ownerId: event.target.value,
-                    }))
+                <Autocomplete<KeycloakUserSummary>
+                  options={ownerOptions}
+                  value={selectedOwner}
+                  inputValue={ownerInputValue}
+                  onInputChange={handleOwnerInputChange}
+                  onChange={handleOwnerChange}
+                  loading={ownerLoading}
+                  filterOptions={(x) => x}
+                  getOptionLabel={(option) => option.email ?? option.username ?? option.id}
+                  isOptionEqualToValue={(option, value) => option.id === value.id}
+                  noOptionsText={
+                    ownerError
+                      ? 'Could not reach Keycloak — try again'
+                      : ownerInputValue.trim().length === 0
+                        ? 'Type to search for a user'
+                        : 'No users match'
                   }
+                  renderOption={(props, option) => {
+                    const { key, ...rest } = props as { key?: React.Key } & React.HTMLAttributes<HTMLLIElement>
+                    return (
+                      <li key={key ?? option.id} {...rest}>
+                        <Stack spacing={0}>
+                          <Typography variant="body2">
+                            {option.email ?? option.id}
+                          </Typography>
+                          <Typography variant="caption" color="text.secondary">
+                            {formatUserLabel(option)}
+                          </Typography>
+                        </Stack>
+                      </li>
+                    )
+                  }}
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Search for owner"
+                      required
+                      error={Boolean(ownerError)}
+                      helperText={ownerError ?? undefined}
+                      slotProps={{
+                        ...params.slotProps,
+                        input: {
+                          ...params.slotProps.input,
+                          endAdornment: (
+                            <>
+                              {ownerLoading ? (
+                                <CircularProgress color="inherit" size={16} />
+                              ) : null}
+                              {params.slotProps.input.endAdornment}
+                            </>
+                          ),
+                        },
+                      }}
+                    />
+                  )}
                   fullWidth
-                  required
-                />
-                <TextField
-                  label="Initial admin email"
-                  type="email"
-                  value={draft.initialAdminEmail}
-                  onChange={(event) =>
-                    setDraft((currentDraft) => ({
-                      ...currentDraft,
-                      initialAdminEmail: event.target.value,
-                    }))
-                  }
-                  helperText="Recorded on the tenant record for later bootstrap work."
-                  fullWidth
-                  required
                 />
                 <TextField
                   label="Tenant version"
@@ -407,9 +511,6 @@ export default function ProvisionTenantPanel({
                 <strong>Owner ID:</strong> {normalizedDraft.ownerId}
               </Typography>
               <Typography variant="body2">
-                <strong>Initial admin email:</strong> {normalizedDraft.initialAdminEmail}
-              </Typography>
-              <Typography variant="body2">
                 <strong>Version:</strong> {normalizedDraft.version}
               </Typography>
               <Typography variant="body2">
@@ -424,8 +525,7 @@ export default function ProvisionTenantPanel({
               If the create call succeeds but provisioning fails, the new tenant stays
               in the fleet list so the operator can retry the existing
               <code> /internal/tenants/:id/provision</code> path instead of losing
-              the audit trail. This slice records the initial admin email for later
-              bootstrap work; it does not create the in-tenant admin account yet.
+              the audit trail.
             </Alert>
 
             {disabledReason ? (

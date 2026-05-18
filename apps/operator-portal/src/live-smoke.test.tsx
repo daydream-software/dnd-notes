@@ -80,7 +80,6 @@ function createFleetStatus() {
           slug: 'moonshae-ledger',
           subdomain: 'moonshae-ledger',
           ownerId: 'owner-1',
-          initialAdminEmail: 'admin@moonshae.example',
           desiredState: 'ready' as const,
           currentState: 'ready' as const,
           version: '1.0.0',
@@ -148,7 +147,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
     const createRequests: Array<{
       id: string
       ownerId: string
-      initialAdminEmail?: string
       slug: string
       version: string
     }> = []
@@ -165,11 +163,16 @@ describe('provisionTenantThroughOperatorPortal', () => {
         return createJsonResponse(fleetResponses.shift() ?? createFleetStatus())
       }
 
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        return createJsonResponse([
+          { id: 'owner-99', email: 'keeper@candlekeep.example', username: 'keeper' },
+        ])
+      }
+
       if (path === '/operator-api/internal/tenants' && method === 'POST') {
         const body = readMockJsonBody<{
           id: string
           ownerId: string
-          initialAdminEmail?: string
           slug: string
           version: string
         }>(init)
@@ -182,7 +185,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
             slug: body!.slug,
             subdomain: `t-${body!.slug}`,
             ownerId: body!.ownerId,
-            initialAdminEmail: body!.initialAdminEmail ?? null,
             desiredState: 'provisioning',
             currentState: 'provisioning',
             version: body!.version,
@@ -208,7 +210,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
             slug: 'candlekeep',
             subdomain: 't-candlekeep',
             ownerId: 'owner-99',
-            initialAdminEmail: 'keeper@candlekeep.example',
             desiredState: 'ready',
             currentState: 'ready',
             version: 'k3d',
@@ -230,7 +231,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
       tenantId: 'candlekeep',
       tenantSlug: 'candlekeep',
       ownerId: 'owner-99',
-      initialAdminEmail: 'keeper@candlekeep.example',
       version: 'k3d',
       reason: 'Launch the full-stack smoke tenant',
     })
@@ -240,7 +240,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
         id: 'candlekeep',
         slug: 'candlekeep',
         ownerId: 'owner-99',
-        initialAdminEmail: 'keeper@candlekeep.example',
         version: 'k3d',
       },
     ])
@@ -272,6 +271,12 @@ describe('provisionTenantThroughOperatorPortal', () => {
         return createJsonResponse(createFleetStatus())
       }
 
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        return createJsonResponse([
+          { id: 'owner-7', email: 'owner@example.com', username: 'owner-7' },
+        ])
+      }
+
       if (path === '/operator-api/internal/tenants' && method === 'POST') {
         return createJsonResponse({
           tenant: {
@@ -279,7 +284,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
             slug: 'slow-fleet',
             subdomain: 'slow-fleet',
             ownerId: 'owner-7',
-            initialAdminEmail: 'owner@example.com',
             desiredState: 'provisioning',
             currentState: 'provisioning',
             version: 'k3d',
@@ -297,7 +301,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
             slug: 'slow-fleet',
             subdomain: 'slow-fleet',
             ownerId: 'owner-7',
-            initialAdminEmail: 'owner@example.com',
             desiredState: 'ready',
             currentState: 'ready',
             version: 'k3d',
@@ -319,7 +322,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
       tenantId: 'slow-fleet',
       tenantSlug: 'slow-fleet',
       ownerId: 'owner-7',
-      initialAdminEmail: 'owner@example.com',
       version: 'k3d',
       reason: 'Wait for fleet health before provisioning',
     })
@@ -339,6 +341,12 @@ describe('provisionTenantThroughOperatorPortal', () => {
         return createJsonResponse(createFleetStatus())
       }
 
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        return createJsonResponse([
+          { id: 'owner-8', email: 'owner@example.com', username: 'owner-8' },
+        ])
+      }
+
       if (path === '/operator-api/internal/tenants' && method === 'POST') {
         return createJsonResponse({
           tenant: {
@@ -346,7 +354,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
             slug: 'failed-live-smoke',
             subdomain: 'failed-live-smoke',
             ownerId: 'owner-8',
-            initialAdminEmail: 'owner@example.com',
             desiredState: 'provisioning',
             currentState: 'provisioning',
             version: 'k3d',
@@ -374,7 +381,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
         tenantId: 'failed-live-smoke',
         tenantSlug: 'failed-live-smoke',
         ownerId: 'owner-8',
-        initialAdminEmail: 'owner@example.com',
         version: 'k3d',
         reason: 'Surface the provisioning failure immediately',
       }),
@@ -415,6 +421,12 @@ describe('provisionTenantThroughOperatorPortal', () => {
         })
       }
 
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        return createJsonResponse([
+          { id: 'owner-11', email: 'owner@example.com', username: 'owner-11' },
+        ])
+      }
+
       if (path === '/operator-api/internal/tenants' && method === 'POST') {
         return createJsonResponse({
           tenant: {
@@ -422,7 +434,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
             slug: 'slow-success',
             subdomain: 'slow-success',
             ownerId: 'owner-11',
-            initialAdminEmail: 'owner@example.com',
             desiredState: 'provisioning',
             currentState: 'provisioning',
             version: 'k3d',
@@ -442,7 +453,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
             slug: 'slow-success',
             subdomain: 'slow-success',
             ownerId: 'owner-11',
-            initialAdminEmail: 'owner@example.com',
             desiredState: 'ready',
             currentState: 'ready',
             version: 'k3d',
@@ -464,7 +474,6 @@ describe('provisionTenantThroughOperatorPortal', () => {
       tenantId: 'slow-success',
       tenantSlug: 'slow-success',
       ownerId: 'owner-11',
-      initialAdminEmail: 'owner@example.com',
       version: 'k3d',
       reason: 'Wait for a slow but successful provisioning run',
       provisionTimeoutMs: 20_000,

@@ -301,11 +301,6 @@ export default function FleetStatusPage({
                               Tenant {tenantStatus.tenant.id} · owner{' '}
                               {tenantStatus.tenant.ownerId}
                             </Typography>
-                            {tenantStatus.tenant.initialAdminEmail ? (
-                              <Typography color="text.secondary" variant="body2">
-                                Initial admin {tenantStatus.tenant.initialAdminEmail}
-                              </Typography>
-                            ) : null}
                           </Box>
                           <Stack
                             direction="row"

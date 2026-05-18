@@ -96,7 +96,6 @@ const fleetStatus = {
         slug: 'moonshae-ledger',
         subdomain: 'moonshae-ledger',
         ownerId: 'owner-1',
-        initialAdminEmail: 'admin@moonshae.example',
         desiredState: 'ready',
         currentState: 'ready',
         version: '1.0.0',
@@ -130,7 +129,6 @@ const fleetStatus = {
         slug: 'stormwatch',
         subdomain: null,
         ownerId: 'owner-2',
-        initialAdminEmail: null,
         desiredState: 'ready',
         currentState: 'failed',
         version: '2.0.0',
@@ -264,7 +262,6 @@ describe('operator portal', () => {
     expect(await screen.findByText('Fleet tenants')).toBeTruthy()
     expect(screen.getByText('moonshae-ledger')).toBeTruthy()
     expect(screen.getByText('stormwatch')).toBeTruthy()
-    expect(screen.getByText('Initial admin admin@moonshae.example')).toBeTruthy()
     expect(
       screen
         .getAllByRole('alert')

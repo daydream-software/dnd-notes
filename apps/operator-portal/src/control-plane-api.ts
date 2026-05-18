@@ -10,6 +10,18 @@ import type {
   TenantProvisioningResponse,
 } from './types'
 
+/**
+ * Mirrors KeycloakUserSummary from apps/control-plane/src/keycloak-admin-client.ts.
+ * Duplicated here per the operator-portal convention — no cross-package type imports.
+ */
+export interface KeycloakUserSummary {
+  id: string
+  username?: string
+  email?: string
+  firstName?: string
+  lastName?: string
+}
+
 function createHeaders(authToken?: string, contentType?: string) {
   const headers = new Headers()
 
@@ -129,4 +141,20 @@ export function deprovisionTenant(
     request,
     signal,
   )
+}
+
+export async function searchKeycloakUsers(
+  authToken: string,
+  q: string,
+  signal?: AbortSignal,
+): Promise<KeycloakUserSummary[]> {
+  const response = await fetch(
+    `${operatorApiBasePath}/internal/keycloak-users?q=${encodeURIComponent(q)}`,
+    {
+      headers: createHeaders(authToken),
+      signal,
+    },
+  )
+
+  return readJson<KeycloakUserSummary[]>(response)
 }
