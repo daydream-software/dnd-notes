@@ -1,0 +1,40 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Production overlay for daydreamsoftware.ca on k3s.
+#
+# Prerequisites before applying:
+#   1. cert-manager v1.16.3 installed (see deploy/k3s/base/cert-manager/cluster-issuer.yaml)
+#   2. Cloudflare API token secret in cert-manager namespace
+#   3. platform-postgres-credentials secret in dnd-notes-platform namespace
+#   4. keycloak-bootstrap-env secret in dnd-notes-platform namespace
+#   5. dnd-notes-control-plane-secrets secret in dnd-notes-platform namespace
+#   6. dnd-notes-backup-config secret in dnd-notes-platform namespace (Issue #330)
+#   7. GHCR image pull secret if images are private:
+#        kubectl create secret docker-registry ghcr-pull-secret \
+#          -n dnd-notes-platform \
+#          --docker-server=ghcr.io \
+#          --docker-username=<github-username> \
+#          --docker-password=<github-pat-with-read:packages>
+#
+# Apply:
+#   kubectl kustomize deploy/k3s/overlays/prod | kubectl apply -f -
+
+resources:
+  - ../../base
+
+# Prod-specific ConfigMaps (override base placeholders with real daydreamsoftware.ca values)
+patches:
+  - path: configmap-control-plane.yaml
+  - path: configmap-customer-portal.yaml
+  - path: configmap-operator-portal.yaml
+
+# Pin image tags. Change newTag to a specific SHA or semver for releases.
+# Default 'latest' is set in base deployments; override here for prod pinning.
+images:
+  - name: ghcr.io/daydream-software/dnd-notes-control-plane
+    newTag: latest
+  - name: ghcr.io/daydream-software/dnd-notes-customer-portal
+    newTag: latest
+  - name: ghcr.io/daydream-software/dnd-notes-operator-portal
+    newTag: latest
