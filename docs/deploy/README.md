@@ -345,7 +345,9 @@ kubectl kustomize deploy/k3s/overlays/prod \
 kubectl --context dnd-notes-prod get pods -n dnd-notes-platform -w
 ```
 
-Expected final state: all pods `Running`, all containers `Ready`. Postgres and Keycloak start first; the control-plane waits on them. Allow 3–4 min.
+Postgres and Keycloak start first (~2 min). The control-plane will enter `CrashLoopBackOff` until
+Section 5d (Keycloak client secret patch) is complete — this is expected. Final state after 5d:
+all pods `Running`, all containers `Ready`.
 
 ### 5c. Create additional databases
 
@@ -390,7 +392,7 @@ kubectl --context dnd-notes-prod patch secret dnd-notes-control-plane-secrets \
 Restart the control-plane deployment so it picks up the updated secret:
 
 ```bash
-kubectl --context dnd-notes-prod rollout restart deployment/platform-control-plane \
+kubectl --context dnd-notes-prod rollout restart deployment/dnd-notes-control-plane \
   -n dnd-notes-platform
 ```
 
@@ -493,7 +495,7 @@ Recommendation: 23:00 local time, manual start when testing resumes.
 5. Watch the rollout:
 
    ```bash
-   kubectl --context dnd-notes-prod rollout status deployment/platform-control-plane \
+   kubectl --context dnd-notes-prod rollout status deployment/dnd-notes-control-plane \
      -n dnd-notes-platform
    ```
 
@@ -509,7 +511,7 @@ most recent main pushes is available without re-building.
 kubectl --context dnd-notes-prod rollout restart deployment/<name> -n dnd-notes-platform
 ```
 
-Common names: `platform-control-plane`, `platform-keycloak`, `platform-customer-portal`, `platform-operator-portal`.
+Common names: `dnd-notes-control-plane`, `platform-keycloak`, `customer-portal`, `operator-portal`.
 
 ### Tail logs
 
@@ -554,7 +556,7 @@ rm /tmp/backup-config.env
 Then restart the control-plane to pick up the secret:
 
 ```bash
-kubectl --context dnd-notes-prod rollout restart deployment/platform-control-plane \
+kubectl --context dnd-notes-prod rollout restart deployment/dnd-notes-control-plane \
   -n dnd-notes-platform
 ```
 
@@ -574,7 +576,7 @@ fail at startup with a clear error. The key `azure` (without `-blob`) is not val
 ```bash
 kubectl --context dnd-notes-prod logs \
   -n dnd-notes-platform \
-  -l app.kubernetes.io/name=control-plane \
+  -l app.kubernetes.io/name=dnd-notes-control-plane \
   | grep backup-scheduler
 ```
 
@@ -587,43 +589,62 @@ After the first successful nightly tick, "Backup missing" warning chips on each 
 
 ### Trigger an ad-hoc backup for a tenant
 
-The backup API is authenticated with `CONTROL_PLANE_ADMIN_TOKEN` via the `Authorization: Bearer` header.
+The `/internal/*` API has no external ingress — it is cluster-internal only. Reach it via
+`kubectl port-forward`.
+
+In prod, `CONTROL_PLANE_AUTH_MODE=keycloak`, so the `/internal/*` routes require a workforce bearer
+JWT (not a static token). Obtain one using a workforce user account:
 
 ```bash
-CONTROL_PLANE_URL=https://operator.daydreamsoftware.ca
-ADMIN_TOKEN=<your-control-plane-admin-token>
+# Step 1: get a workforce JWT
+TOKEN=$(curl -fsS \
+  -X POST \
+  -H 'Content-Type: application/x-www-form-urlencoded' \
+  --data-urlencode 'grant_type=password' \
+  --data-urlencode 'client_id=dnd-notes-control-plane' \
+  --data-urlencode 'username=<workforce-username>' \
+  --data-urlencode 'password=<workforce-password>' \
+  'https://auth.daydreamsoftware.ca/realms/dnd-notes-workforce/protocol/openid-connect/token' \
+  | jq -r '.access_token')
+
+# Step 2: open a local port to the control-plane service (run in a separate terminal)
+kubectl --context dnd-notes-prod port-forward \
+  -n dnd-notes-platform \
+  svc/dnd-notes-control-plane 3001:3001
+
+# Step 3: trigger the backup (in the original terminal)
 TENANT_ID=<tenant-uuid>
 
 curl -fsS \
   -X POST \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d '{"triggeredBy":"operator","reason":"manual ad-hoc backup"}' \
-  "${CONTROL_PLANE_URL}/internal/tenants/${TENANT_ID}/backup"
+  "http://localhost:3001/internal/tenants/${TENANT_ID}/backup"
 ```
 
 The response includes a `backupId`. Poll the backup status:
 
 ```bash
 curl -fsS \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
-  "${CONTROL_PLANE_URL}/internal/tenants/${TENANT_ID}/backups" \
+  -H "Authorization: Bearer ${TOKEN}" \
+  "http://localhost:3001/internal/tenants/${TENANT_ID}/backups" \
   | jq '.backups[0]'
 ```
 
 ### Restore a backup
 
-To restore a backup by its ID:
+To restore a backup by its ID (requires the same `kubectl port-forward` from above):
 
 ```bash
 BACKUP_ID=<uuid-from-backup-list>
 
 curl -fsS \
   -X POST \
-  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H "Authorization: Bearer ${TOKEN}" \
   -H "Content-Type: application/json" \
   -d "{\"triggeredBy\":\"operator\",\"reason\":\"restore test\",\"backupId\":\"${BACKUP_ID}\"}" \
-  "${CONTROL_PLANE_URL}/internal/tenants/${TENANT_ID}/restore"
+  "http://localhost:3001/internal/tenants/${TENANT_ID}/restore"
 ```
 
 Alternatively, pass `backupLocation` (the Azure Blob path) instead of `backupId` — provide one or the other, not both.
@@ -662,7 +683,7 @@ The control-plane orchestrates provisioning. Check its logs:
 
 ```bash
 kubectl --context dnd-notes-prod logs -n dnd-notes-platform \
-  -l app.kubernetes.io/name=control-plane --tail=100
+  -l app.kubernetes.io/name=dnd-notes-control-plane --tail=100
 ```
 
 Also verify Keycloak admin REST is reachable from within the cluster:
