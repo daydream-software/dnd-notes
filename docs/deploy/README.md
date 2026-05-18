@@ -62,6 +62,7 @@ Already provisioned:
 
 Required on the operator's machine:
 
+- **Linux or WSL** — section 2c uses GNU `sed -i` syntax. macOS BSD `sed` requires `sed -i ''` instead; operators on macOS should either prefix `gsed` (from `brew install gnu-sed`) or adapt each `sed -i` invocation.
 - `kubectl` (any recent version)
 - `kustomize` v5+ **or** `kubectl` v1.27+ (built-in `kubectl kustomize`)
 - `gh` CLI (for working with GHCR tags)
