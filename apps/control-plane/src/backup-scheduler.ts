@@ -10,8 +10,8 @@
  * Design notes:
  * - Uses a setTimeout-to-next-tick loop (no external deps) matching the
  *   role-sync-retry.ts pattern.
- * - Cron is parsed as "minute hour * * *" (daily at HH:MM UTC). Full cron
- *   expressions with day/month/weekday fields are also supported.
+ * - Cron is parsed as "minute hour * * *" (daily at HH:MM UTC). Only daily
+ *   schedules are supported; fields 3-5 must be '*' and are validated at boot.
  * - One tenant failure never blocks other tenants; errors are logged and the
  *   loop continues.
  * - Catalog write path follows the same sequence as the HTTP backup route
@@ -38,7 +38,8 @@ export interface BackupSchedulerOptions {
   /**
    * Cron expression — only daily schedules are supported:
    *   "minute hour * * *"    e.g. "0 3 * * *" → 03:00 UTC
-   * Other fields are accepted for compatibility but ignored.
+   * Fields 3-5 (day-of-month, month, day-of-week) MUST each be '*'.
+   * A non-wildcard value in those fields throws at startup.
    * Default: "0 3 * * *"
    */
   scheduleExpression?: string
@@ -60,9 +61,11 @@ export interface BackupSchedulerLoop {
  * Parse a "minute hour * * *" cron expression and return the next UTC
  * wall-clock Date on or after `from`.
  *
- * Only the minute and hour fields are consumed; day-of-month, month, and
- * day-of-week are accepted (validated as integers or '*') but otherwise
- * treated as "every day".
+ * Only daily schedules are supported: fields 3-5 (day-of-month, month,
+ * day-of-week) MUST each be '*'. Passing a non-wildcard value in those fields
+ * throws a BackupSchedulerConfigurationError at startup so the misconfiguration
+ * is caught before any backup runs rather than silently producing nightly runs
+ * on the wrong cadence.
  */
 export function nextScheduledTime(
   expression: string,
@@ -76,7 +79,20 @@ export function nextScheduledTime(
     )
   }
 
-  const [minuteField, hourField] = parts
+  const [minuteField, hourField, dayField, monthField, weekdayField] = parts
+
+  // Only daily schedules are supported. Fields 3-5 must be wildcards.
+  for (const [field, label] of [
+    [dayField, 'day-of-month'],
+    [monthField, 'month'],
+    [weekdayField, 'day-of-week'],
+  ] as Array<[string | undefined, string]>) {
+    if (field !== '*') {
+      throw new Error(
+        `Invalid cron expression ${JSON.stringify(expression)}: only daily schedules are supported. Field "${label}" must be '*' (got ${JSON.stringify(field)}). See BACKUP_SCHEDULE_CRON in .env.example.`,
+      )
+    }
+  }
 
   const minute = parseIntCronField(minuteField ?? '', 'minute', 0, 59)
   const hour = parseIntCronField(hourField ?? '', 'hour', 0, 23)
@@ -189,21 +205,38 @@ export function startBackupScheduler(
       `[backup-scheduler] Backing up ${readyTenants.length} ready tenant(s).`,
     )
 
+    // Track prefixes whose backup *succeeded* this tick. Only these are
+    // eligible to allow the retention sweep to delete an older blob for the
+    // same prefix — if the backup failed we must preserve the tenant's last
+    // known blob even if it is past the cutoff.
+    const successfullyBackedUpPrefixes = new Set<string>()
+
     for (const tenant of readyTenants) {
       if (stopped) return
-      await backupOneTenant(tenant)
+      const succeeded = await backupOneTenant(tenant)
+      if (succeeded) {
+        successfullyBackedUpPrefixes.add(
+          tenant.id.replace(/[^A-Za-z0-9._-]+/g, '-').toLowerCase(),
+        )
+      }
     }
 
     // Retention sweep after backup pass completes.
     if (artifactStore && retentionDays > 0) {
-      await runRetentionSweep(readyTenants)
+      await runRetentionSweep(successfullyBackedUpPrefixes)
     }
 
     console.log('[backup-scheduler] Backup tick complete.')
     scheduleNext()
   }
 
-  async function backupOneTenant(tenant: Tenant): Promise<void> {
+  /**
+   * Attempt a backup for a single tenant.
+   * Returns `true` if the backup was written and the catalog row marked
+   * completed; `false` in all failure paths (createBackupRun error, executor
+   * throw, markBackupRunCompleted error, etc.).
+   */
+  async function backupOneTenant(tenant: Tenant): Promise<boolean> {
     const backupId = randomUUID()
 
     try {
@@ -218,7 +251,7 @@ export function startBackupScheduler(
         `[backup-scheduler] Failed to create backup run for tenant "${tenant.id}":`,
         createError,
       )
-      return
+      return false
     }
 
     try {
@@ -262,6 +295,7 @@ export function startBackupScheduler(
       console.log(
         `[backup-scheduler] Backup succeeded for tenant "${tenant.id}" → ${artifact.location}`,
       )
+      return true
     } catch (backupError) {
       const failureReason = formatUnknownError(backupError)
 
@@ -289,10 +323,24 @@ export function startBackupScheduler(
         `[backup-scheduler] Backup failed for tenant "${tenant.id}":`,
         backupError,
       )
+      return false
     }
   }
 
-  async function runRetentionSweep(backedUpTenants: Tenant[]): Promise<void> {
+  /**
+   * Delete blobs older than the retention cutoff.
+   *
+   * `successfullyBackedUpPrefixes` is the set of blob-name prefixes (sanitized
+   * tenant IDs) for which a fresh backup *succeeded* this tick. A prefix in
+   * this set means a new blob was written; it is safe to let the sweep delete
+   * the stale blob that was previously the last copy. A prefix NOT in this set
+   * means the backup either failed or was never attempted — we must retain the
+   * last-known blob for that prefix even if it is past the cutoff, because
+   * deleting it would leave the tenant with no recoverable backup.
+   */
+  async function runRetentionSweep(
+    successfullyBackedUpPrefixes: Set<string>,
+  ): Promise<void> {
     if (!artifactStore) return
 
     const cutoffDate = new Date(now())
@@ -312,17 +360,6 @@ export function startBackupScheduler(
       )
       return
     }
-
-    // Build a set of tenant ID prefixes for tenants that were backed up this
-    // tick, so we can protect the very-last blob per tenant even when it
-    // is technically older than the cutoff. This is a safety guard only —
-    // once retention is running normally the most-recent blob will always be
-    // within the window.
-    const protectedPrefixes = new Set(
-      backedUpTenants.map((t) =>
-        t.id.replace(/[^A-Za-z0-9._-]+/g, '-').toLowerCase(),
-      ),
-    )
 
     // Group blobs by tenant prefix and find the newest per tenant.
     const newestByPrefix = new Map<string, { name: string; lastModified: Date }>()
@@ -349,12 +386,11 @@ export function startBackupScheduler(
 
       // Protect the newest blob within the stale list for each prefix.
       if (newestByPrefix.get(prefix)?.name === blob.name) {
-        // Only skip if there is no blob newer than the cutoff for this prefix.
-        // Blobs newer than the cutoff are not in the stale list, so if the
-        // stale list's newest is the overall newest, protect it.
-        // We can't know this without an extra list — so we protect it unless
-        // the prefix is in protectedPrefixes (meaning a fresh backup exists).
-        if (!protectedPrefixes.has(prefix)) {
+        // Only delete this blob if a *successful* fresh backup was written for
+        // the same prefix this tick. Without a fresh backup, this stale blob
+        // may be the tenant's only recoverable copy — deleting it would leave
+        // zero backups.
+        if (!successfullyBackedUpPrefixes.has(prefix)) {
           console.log(
             `[backup-scheduler] Retaining last known backup for prefix "${prefix}": ${blob.name}`,
           )

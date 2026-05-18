@@ -216,6 +216,9 @@ describe('AzureBlobTenantBackupArtifactStore', () => {
           `Expected Azure blob URL, got: ${result.location}`,
         )
 
+        // SAS token must be stripped before persisting the URL.
+        assert.doesNotMatch(result.location, /[?&]sv=/, 'SAS token must be stripped from stored URL')
+
         // Verify the blob was actually stored.
         const blobEntries = fakeClient.getBlobEntries()
         const stored = [...blobEntries.values()][0]

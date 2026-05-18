@@ -399,4 +399,90 @@ describe('startBackupScheduler', () => {
       void cleanup()
     }
   })
+
+  it('throws at startup when cron has non-wildcard day/month/weekday fields', () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      const dispatcher = new FakeDispatcher()
+      // "0 3 * * 0" is Sunday-only intent — must be rejected at boot.
+      assert.throws(
+        () =>
+          startBackupScheduler({
+            tenantRegistry,
+            tenantBackupDispatcher: dispatcher,
+            scheduleExpression: '0 3 * * 0',
+            now: () => new Date(),
+          }),
+        /only daily schedules are supported/i,
+      )
+    } finally {
+      void cleanup()
+    }
+  })
+
+  it('retains the last-known blob when the backup for that tenant fails', async () => {
+    // Regression for the inverted protectedPrefixes bug: readyTenants was used
+    // to build protectedPrefixes, so a failed backup still "protected" the
+    // prefix — which caused the retention sweep to delete the stale blob,
+    // leaving the tenant with zero recoverable backups.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.whenReady()
+
+      await tenantRegistry.createTenant({
+        id: 'tenant-failret',
+        slug: 'tenant-failret',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference('tenant-failret', 'tenant_failret')
+      await tenantRegistry.updateTenantState('tenant-failret', 'ready', 'test')
+
+      const dispatcher = new FakeDispatcher()
+      // Simulate a backup failure for this tenant.
+      dispatcher.errors.set('tenant-failret', new Error('pg_dump timeout'))
+
+      const fakeStore = new FakeArtifactStore()
+      // The tenant's only blob is past the retention cutoff.
+      fakeStore.blobs.push({
+        name: 'tenant-failret/only-backup.dump',
+        lastModified: new Date('2026-01-01T00:00:00.000Z'),
+      })
+
+      let callCountFailRet = 0
+      const loop = startBackupScheduler({
+        tenantRegistry,
+        tenantBackupDispatcher: dispatcher,
+        artifactStore: fakeStore as never,
+        scheduleExpression: '0 3 * * *',
+        retentionDays: 14,
+        now: () =>
+          callCountFailRet++ < 2
+            ? new Date('2026-05-18T02:59:59.950Z')
+            : new Date('2026-05-18T04:00:00.000Z'),
+      })
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 300))
+      loop.stop()
+
+      // The stale blob MUST NOT be deleted: the backup failed, so deleting
+      // it would leave the tenant with zero recoverable backups.
+      assert.ok(
+        !fakeStore.deletedBlobs.includes('tenant-failret/only-backup.dump'),
+        'Stale blob must be retained when the backup for that tenant failed',
+      )
+      assert.ok(
+        fakeStore.blobs.some((b) => b.name === 'tenant-failret/only-backup.dump'),
+        'Stale blob must still be present in the store after a failed backup tick',
+      )
+
+      // The backup run should be marked failed in the catalog.
+      const backups = await tenantRegistry.listTenantBackups('tenant-failret')
+      assert.equal(backups[0]?.status, 'failed')
+    } finally {
+      await cleanup()
+    }
+  })
 })
