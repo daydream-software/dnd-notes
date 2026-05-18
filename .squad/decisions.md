@@ -8549,3 +8549,32 @@ The hosted-reference overlay mounts Keycloak themes (operator-login, customer-lo
 ### 6. Backup env vars are optional
 
 The 6 backup env vars (`BACKUP_DESTINATION`, `AZURE_STORAGE_ACCOUNT`, etc.) are wired from a separate `dnd-notes-backup-config` Secret with `optional: true` so the control-plane pod starts even if the backup secret has not been applied yet. Issue #330 (Data) will populate those values.
+
+---
+
+### 2026-05-18: PR #335 CodeRabbit batch — design choices
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-05-18  
+**PR:** #335 (`feat/328-k8s-prod-manifests`)  
+**Commit:** d5c69ea
+
+#### Critical 2 — Keycloak admin client secret
+
+Dropped the `"secret": "replace-with-managed-secret"` field entirely from `dnd-notes-keycloak-admin` client in `realm-config.yaml`. Keycloak 26 auto-generates a client secret on realm import when no `secret` field is present with `clientAuthenticatorType: client-secret`. The ConfigMap annotation now documents the retrieval + wiring flow (kcadm.sh get clients → kubectl patch dnd-notes-control-plane-secrets → restart control-plane).
+
+#### Major 1 — ClusterRole secrets permissions
+
+Removed `list` and `watch` verbs on secrets. Confirmed by reading `apps/control-plane/src/provisioning.ts`: the control-plane accesses secrets only by known name (get), never lists them. Kept `create`, `get`, `update`, `patch`, `delete`.
+
+#### Major 3/4 — Portal security context: readOnlyRootFilesystem omitted
+
+Portal containers (`customer-portal`, `operator-portal`) use an nginx-based image. `readOnlyRootFilesystem: true` was NOT set because nginx writes to `/var/cache/nginx`, `/tmp`, and `/var/run` at runtime. Setting it would cause the container to crash without additional `emptyDir` volume mounts. This can be revisited once the Dockerfile internals are confirmed.
+
+#### Major 7 — Image tags stay :latest
+
+Kept `:latest` with an explanatory comment in `overlays/prod/kustomization.yaml` pointing to Issue #331 (GHCR push pipeline not merged) and Issue #329 runbook §4 for pinning instructions. A sentinel like `image-tag-required` was rejected as a behavior change.
+
+#### Major 6 — POSTGRES_DB changed to keycloak
+
+Changed example DB name from `postgres` to `keycloak` to match `KC_DB_URL=...jdbc:postgresql://.../keycloak` in `keycloak/deployment.yaml`. Added runbook comment documenting that `control_plane` DB must be created manually post-bootstrap (`kubectl exec ... psql ... CREATE DATABASE control_plane`).
