@@ -1,0 +1,185 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-keycloak
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-keycloak
+    app.kubernetes.io/component: identity
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-keycloak
+        app.kubernetes.io/component: identity
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.2.4
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            - --import-realm
+            - --http-port=8080
+            - --proxy-headers=xforwarded
+            - --hostname-strict=false
+          envFrom:
+            - secretRef:
+                name: keycloak-bootstrap-env
+          env:
+            - name: KC_HOSTNAME
+              value: https://auth.daydreamsoftware.ca
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://platform-postgres.dnd-notes-platform.svc.cluster.local:5432/keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: platform-postgres-credentials
+                  key: POSTGRES_USER
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: platform-postgres-credentials
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: realm-import-workforce
+              mountPath: /opt/keycloak/data/import/dnd-notes-workforce-realm.json
+              subPath: dnd-notes-workforce-realm.json
+            - name: realm-import-tenant
+              mountPath: /opt/keycloak/data/import/dnd-notes-realm.json
+              subPath: dnd-notes-realm.json
+            # operator-login theme text files
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/theme.properties
+              subPath: op-theme.properties
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/messages/messages_en.properties
+              subPath: op-messages_en.properties
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/template.ftl
+              subPath: op-template.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/login.ftl
+              subPath: op-login.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/login-reset-password.ftl
+              subPath: op-login-reset-password.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/login-otp.ftl
+              subPath: op-login-otp.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/resources/css/login.css
+              subPath: op-login.css
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/operator-login/login/resources/img/daydream-mark.svg
+              subPath: op-daydream-mark.svg
+            # operator-login fonts
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/operator-login/login/resources/fonts/Geist-Variable.woff2
+              subPath: Geist-Variable.woff2
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/operator-login/login/resources/fonts/GeistMono-Variable.woff2
+              subPath: GeistMono-Variable.woff2
+            # customer-login theme text files
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/theme.properties
+              subPath: cu-theme.properties
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/messages/messages_en.properties
+              subPath: cu-messages_en.properties
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/template.ftl
+              subPath: cu-template.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/login.ftl
+              subPath: cu-login.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/login-reset-password.ftl
+              subPath: cu-login-reset-password.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/login-otp.ftl
+              subPath: cu-login-otp.ftl
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/resources/css/login.css
+              subPath: cu-login.css
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/customer-login/login/resources/img/dnd-notes-mark.svg
+              subPath: cu-dnd-notes-mark.svg
+            # customer-login fonts
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/customer-login/login/resources/fonts/Geist-Variable.woff2
+              subPath: Geist-Variable.woff2
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/customer-login/login/resources/fonts/GeistMono-Variable.woff2
+              subPath: GeistMono-Variable.woff2
+            # account-console theme text files
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/account-console/account/theme.properties
+              subPath: ac-theme.properties
+            - name: themes-text
+              mountPath: /opt/keycloak/themes/account-console/account/resources/css/account.css
+              subPath: ac-account.css
+            # account-console fonts (shared with login themes)
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/account-console/account/resources/fonts/Geist-Variable.woff2
+              subPath: Geist-Variable.woff2
+            - name: themes-fonts
+              mountPath: /opt/keycloak/themes/account-console/account/resources/fonts/GeistMono-Variable.woff2
+              subPath: GeistMono-Variable.woff2
+      volumes:
+        - name: realm-import-workforce
+          configMap:
+            name: keycloak-workforce-realm
+        - name: realm-import-tenant
+          configMap:
+            name: keycloak-tenant-realm
+        - name: themes-text
+          configMap:
+            name: keycloak-themes-text
+        - name: themes-fonts
+          configMap:
+            name: keycloak-themes-fonts

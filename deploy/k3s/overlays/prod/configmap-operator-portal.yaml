@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: operator-portal-config
+  namespace: dnd-notes-platform
+data:
+  API_BASE_PATH: "/operator-api"
+  CONTROL_PLANE_URL: "http://dnd-notes-control-plane.dnd-notes-platform.svc.cluster.local:3001"
+  KEYCLOAK_URL: "https://auth.daydreamsoftware.ca"
+  KEYCLOAK_REALM: "dnd-notes-workforce"
+  KEYCLOAK_CLIENT_ID: "dnd-notes-control-plane"
+  KEYCLOAK_REQUIRED_ROLES: "control-plane-admin,control-plane-workforce"
+  CUSTOMER_PORTAL_URL: "https://notes.daydreamsoftware.ca"

@@ -1,0 +1,72 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: platform-postgres
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  serviceName: platform-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-postgres
+        app.kubernetes.io/component: database
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      securityContext:
+        fsGroup: 999
+        fsGroupChangePolicy: OnRootMismatch
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: postgres
+          image: postgres:17.9-bookworm
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: postgres
+              containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: platform-postgres-credentials
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 6
+          livenessProbe:
+            tcpSocket:
+              port: postgres
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 999
+            runAsGroup: 999
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: postgres-data
+        labels:
+          app.kubernetes.io/name: platform-postgres
+          app.kubernetes.io/part-of: dnd-notes
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: local-path
+        resources:
+          requests:
+            storage: 20Gi

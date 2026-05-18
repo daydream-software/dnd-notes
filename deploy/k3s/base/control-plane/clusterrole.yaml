@@ -1,0 +1,34 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dnd-notes-control-plane
+  labels:
+    app.kubernetes.io/name: dnd-notes-control-plane
+    app.kubernetes.io/component: control-plane
+    app.kubernetes.io/part-of: dnd-notes
+rules:
+  # Manage tenant namespaces and all resources within them
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["configmaps", "services"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # Secrets: no cluster-wide list/watch — control-plane accesses secrets by
+  # known name only (tenant runtime secrets, imagePullSecrets)
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create", "get", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+  # Read pod status for readiness checks
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
