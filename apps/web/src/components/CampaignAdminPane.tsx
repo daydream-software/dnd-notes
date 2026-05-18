@@ -37,14 +37,10 @@ export interface CampaignAdminPaneProps {
   owner: OwnerAccount | null
   authToken: string | null
   isSharedMode: boolean
-  isKeycloakMode: boolean
   // Shared membership claim card
   resolvedMembership: CampaignMembership | null
   accountNotice: string | null
   isLinkingAccount: boolean
-  isRegisterMode: boolean
-  registerDraft: { email: string; password: string; displayName: string }
-  loginDraft: { email: string; password: string }
 
   // Campaign form
   campaignFormMode: 'create' | 'edit' | 'closed'
@@ -94,9 +90,6 @@ export interface CampaignAdminPaneProps {
   onRevokeShareLink: (shareLinkId: string) => void
 
   // Handlers — shared membership claim
-  onRegisterDraftChange: (field: 'email' | 'password' | 'displayName', value: string) => void
-  onLoginDraftChange: (field: 'email' | 'password', value: string) => void
-  onToggleRegisterMode: () => void
   onLinkSharedMembership: () => void
 }
 
@@ -104,13 +97,9 @@ export default function CampaignAdminPane({
   owner,
   authToken,
   isSharedMode,
-  isKeycloakMode,
   resolvedMembership,
   accountNotice,
   isLinkingAccount,
-  isRegisterMode,
-  registerDraft,
-  loginDraft,
   campaignFormMode,
   campaignDraft,
   selectedCampaignTemplateId,
@@ -146,9 +135,6 @@ export default function CampaignAdminPane({
   onToggleShareLinkVisibility,
   onCopyShareLink,
   onRevokeShareLink,
-  onRegisterDraftChange,
-  onLoginDraftChange,
-  onToggleRegisterMode,
   onLinkSharedMembership,
 }: CampaignAdminPaneProps) {
   const selectedCampaignTemplate = getCampaignStarterTemplate(selectedCampaignTemplateId)
@@ -166,9 +152,7 @@ export default function CampaignAdminPane({
               <Box>
                 <Typography variant="h5">Link this guest membership</Typography>
                 <Typography color="text.secondary" sx={{ mt: 0.75 }}>
-                  {isKeycloakMode
-                    ? 'Sign in with your tenant account to attach this guest history to a real account. The claim still has to happen from the same browser session that joined the campaign.'
-                    : 'Create or connect a real account without changing the membership that already owns your shared note history. For this first release, the claim must happen from the same browser that joined the campaign.'}
+                  Sign in with your workspace account to attach this guest history to a real account. The claim still has to happen from the same browser session that joined the campaign.
                 </Typography>
               </Box>
 
@@ -178,75 +162,13 @@ export default function CampaignAdminPane({
                 </Alert>
               ) : null}
 
-              {!isKeycloakMode && isRegisterMode ? (
-                <TextField
-                  label="Account display name"
-                  value={registerDraft.displayName}
-                  onChange={(event) =>
-                    onRegisterDraftChange('displayName', event.target.value)
-                  }
-                />
-              ) : null}
-
-              {!isKeycloakMode ? (
-                <>
-                  <TextField
-                    label="Email"
-                    type="email"
-                    value={isRegisterMode ? registerDraft.email : loginDraft.email}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (isRegisterMode) {
-                        onRegisterDraftChange('email', value)
-                      } else {
-                        onLoginDraftChange('email', value)
-                      }
-                    }}
-                  />
-
-                  <TextField
-                    label="Password"
-                    type="password"
-                    value={isRegisterMode ? registerDraft.password : loginDraft.password}
-                    onChange={(event) => {
-                      const value = event.target.value
-                      if (isRegisterMode) {
-                        onRegisterDraftChange('password', value)
-                      } else {
-                        onLoginDraftChange('password', value)
-                      }
-                    }}
-                  />
-                </>
-              ) : null}
-
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
-                <Button variant="contained" onClick={onLinkSharedMembership} disabled={isLinkingAccount}>
-                  {isLinkingAccount
-                    ? isKeycloakMode
-                      ? 'Signing in…'
-                      : isRegisterMode
-                        ? 'Creating and linking…'
-                        : 'Linking account…'
-                    : isKeycloakMode
-                      ? authToken
-                        ? 'Link this guest membership'
-                        : 'Sign in to link'
-                      : isRegisterMode
-                        ? 'Create and link account'
-                        : 'Sign in and link account'}
-                </Button>
-                {!isKeycloakMode ? (
-                  <Button
-                    variant="text"
-                    onClick={onToggleRegisterMode}
-                  >
-                    {isRegisterMode
-                      ? 'Already have an account? Sign in'
-                      : 'Need an account? Create one'}
-                  </Button>
-                ) : null}
-              </Stack>
+              <Button variant="contained" onClick={onLinkSharedMembership} disabled={isLinkingAccount} sx={{ alignSelf: 'flex-start' }}>
+                {isLinkingAccount
+                  ? 'Signing in…'
+                  : authToken
+                    ? 'Link this guest membership'
+                    : 'Sign in to link'}
+              </Button>
             </Stack>
           </CardContent>
         </Card>

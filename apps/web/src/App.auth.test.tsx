@@ -1,14 +1,31 @@
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('./keycloak-client', () => ({
+  createRuntimeKeycloakClient: () => ({
+    init: async (stored: { accessToken: string; refreshToken: string } | null) => stored,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: async () => {
+      const raw = localStorage.getItem('dnd-notes:keycloak-auth-tokens')
+      return raw ? JSON.parse(raw) : null
+    },
+    clear: vi.fn(),
+  }),
+  isKeycloakAuthConfig: (authConfig: { keycloak?: { url?: string; realm?: string; clientId?: string } } | null) => {
+    const kc = authConfig?.keycloak
+    return (
+      typeof kc?.url === 'string' && kc.url.length > 0 &&
+      typeof kc?.realm === 'string' && kc.realm.length > 0 &&
+      typeof kc?.clientId === 'string' && kc.clientId.length > 0
+    )
+  },
+}))
+
 import {
-  authTokenStorageKey,
-  campaign,
   cleanupAppTestHarness,
   getVisibleNotes,
-  registerOwnerAndLoadWorkspace,
-  renderApp,
-  selectedCampaignStorageKey,
+  renderOwnerAndLoadWorkspace,
   setupAppFetchMock,
 } from './app-test-helpers'
 
@@ -21,19 +38,8 @@ describe('App owner auth and bootstrap', () => {
     cleanupAppTestHarness()
   })
 
-  it('renders owner onboarding before authentication', async () => {
-    renderApp()
-
-    expect(await screen.findByLabelText('Owner display name')).toBeTruthy()
-    expect(screen.getByLabelText('Email')).toBeTruthy()
-    expect(screen.getByLabelText('Password')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Create owner account' })).toBeTruthy()
-  })
-
-  it('loads the workspace after owner registration', async () => {
-    const user = userEvent.setup()
-
-    await registerOwnerAndLoadWorkspace(user)
+  it('loads the workspace after Keycloak session restore', async () => {
+    await renderOwnerAndLoadWorkspace()
 
     expect(screen.getByLabelText('Search notes')).toBeTruthy()
     expect(screen.getAllByText('Moonshae Ledger').length).toBeGreaterThan(0)
@@ -41,15 +47,12 @@ describe('App owner auth and bootstrap', () => {
     expect(screen.getAllByRole('button', { name: 'New note' }).length).toBeGreaterThan(0)
   })
 
-  it('restores a saved owner session into the selected campaign workspace', async () => {
-    localStorage.setItem(authTokenStorageKey, 'smoke-token')
-    localStorage.setItem(selectedCampaignStorageKey, campaign.id)
+  it('restores a saved Keycloak session into the selected campaign workspace', async () => {
+    // setupAppFetchMock already seeds Keycloak tokens; bootstrapAuth reads them and
+    // calls fetchOwnerSession without a login redirect.
+    await renderOwnerAndLoadWorkspace()
 
-    renderApp()
-
-    await screen.findByText('Storm ledger updated')
-
-    expect(screen.queryByLabelText('Owner display name')).toBeNull()
+    expect(screen.queryByText('Sign in to your workspace')).toBeNull()
     expect(screen.getByLabelText('Search notes')).toBeTruthy()
     expect(screen.getAllByText('Moonshae Ledger').length).toBeGreaterThan(0)
     expect(getVisibleNotes()).toHaveLength(2)

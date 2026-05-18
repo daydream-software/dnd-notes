@@ -1,9 +1,30 @@
 import { screen } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('./keycloak-client', () => ({
+  createRuntimeKeycloakClient: () => ({
+    init: async (stored: { accessToken: string; refreshToken: string } | null) => stored,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: async () => {
+      const raw = localStorage.getItem('dnd-notes:keycloak-auth-tokens')
+      return raw ? JSON.parse(raw) : null
+    },
+    clear: vi.fn(),
+  }),
+  isKeycloakAuthConfig: (authConfig: { keycloak?: { url?: string; realm?: string; clientId?: string } } | null) => {
+    const kc = authConfig?.keycloak
+    return (
+      typeof kc?.url === 'string' && kc.url.length > 0 &&
+      typeof kc?.realm === 'string' && kc.realm.length > 0 &&
+      typeof kc?.clientId === 'string' && kc.clientId.length > 0
+    )
+  },
+}))
+
 import {
   cleanupAppTestHarness,
-  registerOwnerAndLoadWorkspace,
+  renderOwnerAndLoadWorkspace,
   setupAppFetchMock,
   siteAdminOwner,
 } from './app-test-helpers'
@@ -21,9 +42,7 @@ describe('App site admin flows', () => {
   })
 
   it('shows the site admin panel for site admins without backup controls', async () => {
-    const user = userEvent.setup()
-
-    await registerOwnerAndLoadWorkspace(user)
+    await renderOwnerAndLoadWorkspace()
 
     expect(await screen.findByRole('heading', { name: 'Site admin panel' })).toBeTruthy()
     expect(screen.getByText('Site admins 1')).toBeTruthy()

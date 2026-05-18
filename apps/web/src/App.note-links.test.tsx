@@ -1,9 +1,31 @@
 import { screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('./keycloak-client', () => ({
+  createRuntimeKeycloakClient: () => ({
+    init: async (stored: { accessToken: string; refreshToken: string } | null) => stored,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: async () => {
+      const raw = localStorage.getItem('dnd-notes:keycloak-auth-tokens')
+      return raw ? JSON.parse(raw) : null
+    },
+    clear: vi.fn(),
+  }),
+  isKeycloakAuthConfig: (authConfig: { keycloak?: { url?: string; realm?: string; clientId?: string } } | null) => {
+    const kc = authConfig?.keycloak
+    return (
+      typeof kc?.url === 'string' && kc.url.length > 0 &&
+      typeof kc?.realm === 'string' && kc.realm.length > 0 &&
+      typeof kc?.clientId === 'string' && kc.clientId.length > 0
+    )
+  },
+}))
+
 import {
   cleanupAppTestHarness,
-  registerOwnerAndLoadWorkspace,
+  renderOwnerAndLoadWorkspace,
   setupAppFetchMock,
 } from './app-test-helpers'
 
@@ -19,7 +41,7 @@ describe('App note relationship flows', () => {
   it('shows inline body references in the backlinks panel', async () => {
     const user = userEvent.setup()
 
-    await registerOwnerAndLoadWorkspace(user)
+    await renderOwnerAndLoadWorkspace()
     const stormLedgerHeading = within(
       screen.getByRole('list', { name: 'Notes list' }),
     ).getByText('Storm ledger updated')
@@ -38,7 +60,7 @@ describe('App note relationship flows', () => {
   it('shows inline link qualifiers in the linked notes panel', async () => {
     const user = userEvent.setup()
 
-    await registerOwnerAndLoadWorkspace(user)
+    await renderOwnerAndLoadWorkspace()
     const vaultSigilsHeading = within(
       screen.getByRole('list', { name: 'Notes list' }),
     ).getByText('Vault sigils mapped')
@@ -56,7 +78,7 @@ describe('App note relationship flows', () => {
   it('keeps the followed linked note selected while search is active', async () => {
     const user = userEvent.setup()
 
-    await registerOwnerAndLoadWorkspace(user)
+    await renderOwnerAndLoadWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'vault')
 
     await user.click(
@@ -79,7 +101,7 @@ describe('App note relationship flows', () => {
   it('keeps the followed linked note selected while tag filters are active', async () => {
     const user = userEvent.setup()
 
-    await registerOwnerAndLoadWorkspace(user)
+    await renderOwnerAndLoadWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'vault')
     await user.click(screen.getAllByRole('button', { name: /sigils/ })[0])
     await user.click(

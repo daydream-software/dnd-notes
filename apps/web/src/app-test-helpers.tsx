@@ -1,10 +1,10 @@
 import { cleanup, render, screen, within } from '@testing-library/react'
-import userEvent from '@testing-library/user-event'
 import { vi } from 'vitest'
 import App from './App'
 import { createJsonResponse, readMockRequest } from './test-helpers'
 
 export const authTokenStorageKey = 'dnd-notes:owner-auth-token'
+export const keycloakTokensStorageKey = 'dnd-notes:keycloak-auth-tokens'
 export const selectedCampaignStorageKey = 'dnd-notes:selected-campaign-id'
 
 export const owner = {
@@ -137,28 +137,38 @@ export function renderApp() {
   return render(<App />)
 }
 
-export async function registerOwnerAndLoadWorkspace(user: ReturnType<typeof userEvent.setup>) {
+/**
+ * Render the app and wait for the workspace to load.
+ * Requires setupAppFetchMock() to have been called beforehand (seeds Keycloak tokens).
+ */
+export async function renderOwnerAndLoadWorkspace() {
   renderApp()
-
-  await user.type(await screen.findByLabelText('Owner display name'), owner.displayName)
-  await user.type(screen.getByLabelText('Email'), owner.email)
-  await user.type(screen.getByLabelText('Password'), 'smoke-password')
-  await user.click(screen.getByRole('button', { name: 'Create owner account' }))
-
   await screen.findByText('Storm ledger updated')
 }
 
 export function setupAppFetchMock() {
   let activeOwner = owner
+
+  // Seed Keycloak tokens so bootstrapAuth restores the session without a login redirect.
+  localStorage.clear()
+  localStorage.setItem(
+    keycloakTokensStorageKey,
+    JSON.stringify({ accessToken: 'smoke-token', refreshToken: 'smoke-refresh' }),
+  )
+  localStorage.setItem(authTokenStorageKey, 'smoke-token')
+  window.history.replaceState({}, '', '/')
+
   const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const { path, method } = readMockRequest(input, init)
 
-    if (path === '/api/auth/register' && method === 'POST') {
-      return createJsonResponse({ owner: activeOwner, token: 'smoke-token' }, 201)
-    }
-
     if (path === '/api/auth/config' && method === 'GET') {
-      return createJsonResponse({ mode: 'local', keycloak: null })
+      return createJsonResponse({
+        keycloak: {
+          url: 'https://auth.example.com',
+          realm: 'dnd-notes',
+          clientId: 'dnd-notes-web',
+        },
+      })
     }
 
     if (path === '/api/auth/session' && method === 'GET') {
@@ -215,9 +225,6 @@ export function setupAppFetchMock() {
 
     return createJsonResponse({ error: 'Unhandled ' + method + ' ' + path }, 500)
   })
-
-  localStorage.clear()
-  window.history.replaceState({}, '', '/')
 
   return {
     setActiveOwner(nextOwner = owner) {

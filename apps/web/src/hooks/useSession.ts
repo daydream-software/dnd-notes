@@ -2,9 +2,6 @@ import { useCallback, useRef, useState } from 'react'
 import {
   fetchAuthConfig,
   fetchOwnerSession,
-  loginOwner,
-  logoutOwner,
-  registerOwner,
 } from '../api'
 import {
   createRuntimeKeycloakClient,
@@ -13,17 +10,6 @@ import {
   type StoredKeycloakTokens,
 } from '../keycloak-client'
 import type { AuthConfigResponse, OwnerAccount } from '../types'
-
-export interface OwnerRegistrationDraft {
-  displayName: string
-  email: string
-  password: string
-}
-
-export interface OwnerLoginDraft {
-  email: string
-  password: string
-}
 
 export const authTokenStorageKey = 'dnd-notes:owner-auth-token'
 export const keycloakTokensStorageKey = 'dnd-notes:keycloak-auth-tokens'
@@ -71,9 +57,6 @@ export interface UseSessionResult {
   owner: OwnerAccount | null
   authConfig: AuthConfigResponse | null
   isAuthReady: boolean
-  isRegisterMode: boolean
-  registerDraft: OwnerRegistrationDraft
-  loginDraft: OwnerLoginDraft
   isSubmittingAuth: boolean
   isLinkingAccount: boolean
   accountNotice: string | null
@@ -82,9 +65,6 @@ export interface UseSessionResult {
   setOwner: React.Dispatch<React.SetStateAction<OwnerAccount | null>>
   setAuthConfig: React.Dispatch<React.SetStateAction<AuthConfigResponse | null>>
   setIsAuthReady: React.Dispatch<React.SetStateAction<boolean>>
-  setIsRegisterMode: React.Dispatch<React.SetStateAction<boolean>>
-  setRegisterDraft: React.Dispatch<React.SetStateAction<OwnerRegistrationDraft>>
-  setLoginDraft: React.Dispatch<React.SetStateAction<OwnerLoginDraft>>
   setIsSubmittingAuth: React.Dispatch<React.SetStateAction<boolean>>
   setIsLinkingAccount: React.Dispatch<React.SetStateAction<boolean>>
   setAccountNotice: React.Dispatch<React.SetStateAction<string | null>>
@@ -122,16 +102,6 @@ export function useSession(): UseSessionResult {
   const [owner, setOwner] = useState<OwnerAccount | null>(null)
   const [authConfig, setAuthConfig] = useState<AuthConfigResponse | null>(null)
   const [isAuthReady, setIsAuthReady] = useState(false)
-  const [isRegisterMode, setIsRegisterMode] = useState(true)
-  const [registerDraft, setRegisterDraft] = useState<OwnerRegistrationDraft>({
-    displayName: '',
-    email: '',
-    password: '',
-  })
-  const [loginDraft, setLoginDraft] = useState<OwnerLoginDraft>({
-    email: '',
-    password: '',
-  })
   const [isSubmittingAuth, setIsSubmittingAuth] = useState(false)
   const [isLinkingAccount, setIsLinkingAccount] = useState(false)
   const [accountNotice, setAccountNotice] = useState<string | null>(null)
@@ -162,7 +132,7 @@ export function useSession(): UseSessionResult {
 
   const handleSubmitAuth = useCallback(
     async (
-      onCampaignsReady: (token: string) => Promise<void>,
+      _onCampaignsReady: (token: string) => Promise<void>,
       onError: (message: string) => void,
     ): Promise<void> => {
       setIsSubmittingAuth(true)
@@ -178,14 +148,6 @@ export function useSession(): UseSessionResult {
           await keycloakClient.login(window.location.href)
           return
         }
-
-        if (isRegisterMode) {
-          const session = await registerOwner(registerDraft)
-          await completeAuthentication(session.token, session.owner, onCampaignsReady)
-        } else {
-          const session = await loginOwner(loginDraft)
-          await completeAuthentication(session.token, session.owner, onCampaignsReady)
-        }
       } catch (authError) {
         onError(
           authError instanceof Error
@@ -197,7 +159,7 @@ export function useSession(): UseSessionResult {
         setIsAuthReady(true)
       }
     },
-    [authConfig, completeAuthentication, isRegisterMode, loginDraft, registerDraft],
+    [authConfig],
   )
 
   const handleLogout = useCallback(
@@ -215,16 +177,6 @@ export function useSession(): UseSessionResult {
       }
 
       if (isSharedMode) {
-        const storedAuthToken = localStorage.getItem(authTokenStorageKey)
-
-        if (storedAuthToken) {
-          try {
-            await logoutOwner(storedAuthToken)
-          } catch {
-            // Intentionally ignore logout failures because local sign-out should still work.
-          }
-        }
-
         localStorage.removeItem(authTokenStorageKey)
         localStorage.removeItem('dnd-notes:selected-campaign-id')
         if (guestStorageKey) {
@@ -234,18 +186,9 @@ export function useSession(): UseSessionResult {
         return
       }
 
-      if (authToken) {
-        try {
-          await logoutOwner(authToken)
-        } catch {
-          // Intentionally ignore logout failures because local sign-out should still work.
-        }
-      }
-
       onClearSession()
-      setIsRegisterMode(false)
     },
-    [authConfig, authToken],
+    [authConfig],
   )
 
   const handleFetchOwnerSession = useCallback(
@@ -303,29 +246,6 @@ export function useSession(): UseSessionResult {
           if (!isSharedMode) {
             await loadCampaigns(tokens.accessToken)
           }
-
-          return
-        }
-
-        const storedToken = localStorage.getItem(authTokenStorageKey)
-
-        if (!storedToken) {
-          setAuthToken(null)
-          setOwner(null)
-          return
-        }
-
-        const session = await fetchOwnerSession(storedToken)
-
-        if (isCancelled()) {
-          return
-        }
-
-        setAuthToken(storedToken)
-        setOwner(session.owner)
-
-        if (!isSharedMode) {
-          await loadCampaigns(storedToken)
         }
       } catch (bootstrapError) {
         if (!isCancelled()) {
@@ -387,9 +307,6 @@ export function useSession(): UseSessionResult {
     owner,
     authConfig,
     isAuthReady,
-    isRegisterMode,
-    registerDraft,
-    loginDraft,
     isSubmittingAuth,
     isLinkingAccount,
     accountNotice,
@@ -398,9 +315,6 @@ export function useSession(): UseSessionResult {
     setOwner,
     setAuthConfig,
     setIsAuthReady,
-    setIsRegisterMode,
-    setRegisterDraft,
-    setLoginDraft,
     setIsSubmittingAuth,
     setIsLinkingAccount,
     setAccountNotice,

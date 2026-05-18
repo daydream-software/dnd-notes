@@ -1,9 +1,32 @@
 import { screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('./keycloak-client', () => ({
+  createRuntimeKeycloakClient: () => ({
+    init: async (stored: { accessToken: string; refreshToken: string } | null) => stored,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: async () => {
+      const raw = localStorage.getItem('dnd-notes:keycloak-auth-tokens')
+      return raw ? JSON.parse(raw) : null
+    },
+    clear: vi.fn(),
+  }),
+  isKeycloakAuthConfig: (authConfig: { keycloak?: { url?: string; realm?: string; clientId?: string } } | null) => {
+    const kc = authConfig?.keycloak
+    return (
+      typeof kc?.url === 'string' && kc.url.length > 0 &&
+      typeof kc?.realm === 'string' && kc.realm.length > 0 &&
+      typeof kc?.clientId === 'string' && kc.clientId.length > 0
+    )
+  },
+}))
+
 import {
   campaign,
   cleanupAppTestHarness,
+  keycloakTokensStorageKey,
   membership,
   owner,
   renderApp,
@@ -33,6 +56,7 @@ interface FirstRunMockOptions {
 /**
  * Minimal fetch mock for the first-run flow (no campaigns).
  * Returns an empty campaigns list so the app renders the first-run hero form.
+ * Seeds Keycloak tokens so bootstrapAuth restores the session without a login redirect.
  */
 function setupFirstRunFetchMock(options: FirstRunMockOptions = {}) {
   const { notesAfterCreation = [] } = options
@@ -45,15 +69,26 @@ function setupFirstRunFetchMock(options: FirstRunMockOptions = {}) {
 
   const noteRequests: Array<{ title: string }> = []
 
+  // Seed Keycloak tokens so bootstrapAuth restores the session without a login redirect.
+  localStorage.clear()
+  localStorage.setItem(
+    keycloakTokensStorageKey,
+    JSON.stringify({ accessToken: 'smoke-token', refreshToken: 'smoke-refresh' }),
+  )
+  localStorage.setItem('dnd-notes:owner-auth-token', 'smoke-token')
+  window.history.replaceState({}, '', '/')
+
   const fetchSpy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const { path, method } = readMockRequest(input, init)
 
     if (path === '/api/auth/config' && method === 'GET') {
-      return createJsonResponse({ mode: 'local', keycloak: null })
-    }
-
-    if (path === '/api/auth/register' && method === 'POST') {
-      return createJsonResponse({ owner, token: 'smoke-token' }, 201)
+      return createJsonResponse({
+        keycloak: {
+          url: 'https://auth.example.com',
+          realm: 'dnd-notes',
+          clientId: 'dnd-notes-web',
+        },
+      })
     }
 
     if (path === '/api/auth/session' && method === 'GET') {
@@ -119,21 +154,16 @@ function setupFirstRunFetchMock(options: FirstRunMockOptions = {}) {
     return createJsonResponse({ error: 'Unhandled ' + method + ' ' + path }, 500)
   })
 
-  localStorage.clear()
-  window.history.replaceState({}, '', '/')
-
   return { noteRequests, fetchSpy }
 }
 
-async function registerOwnerFirstRun(user: ReturnType<typeof userEvent.setup>) {
+/**
+ * Render the app and wait for the first-run hero form to appear.
+ * Requires setupFirstRunFetchMock() to have been called beforehand (seeds Keycloak tokens
+ * and returns empty campaigns list).
+ */
+async function bootstrapFirstRun() {
   renderApp()
-
-  await user.type(await screen.findByLabelText('Owner display name'), owner.displayName)
-  await user.type(screen.getByLabelText('Email'), owner.email)
-  await user.type(screen.getByLabelText('Password'), 'smoke-password')
-  await user.click(screen.getByRole('button', { name: 'Create owner account' }))
-
-  // Wait for first-run hero to appear
   await screen.findByText('Create your first campaign')
 }
 
@@ -150,15 +180,13 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
 
   describe('Campaign starter template picker on first-run form', () => {
     it('renders the campaign starter select on the first-run hero form', async () => {
-      const user = userEvent.setup()
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       expect(screen.getByLabelText('Campaign starter')).toBeTruthy()
     })
 
     it('shows no preview chips when "Blank campaign" is selected', async () => {
-      const user = userEvent.setup()
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       // Default is blank — no starter preview chips should be visible
       expect(screen.queryByText('NPC roster')).toBeNull()
@@ -169,7 +197,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
 
     it('shows starter note chips when "Starter pack" is selected', async () => {
       const user = userEvent.setup()
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       await user.click(screen.getByLabelText('Campaign starter'))
       await user.click(await screen.findByRole('option', { name: 'Starter pack' }))
@@ -184,7 +212,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
     it('seeds starter notes when the campaign is created with "Starter pack"', async () => {
       const user = userEvent.setup()
       const { noteRequests } = firstRunMock
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       await user.click(screen.getByLabelText('Campaign starter'))
       await user.click(await screen.findByRole('option', { name: 'Starter pack' }))
@@ -206,7 +234,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
     it('does not seed any notes when "Blank campaign" is kept', async () => {
       const user = userEvent.setup()
       const { noteRequests } = firstRunMock
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
       await user.click(screen.getByRole('button', { name: 'Create campaign' }))
@@ -220,7 +248,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
   describe('Empty notes CTA in browse pane', () => {
     it('renders the "New note" CTA button when there are no notes', async () => {
       const user = userEvent.setup()
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       // Create the campaign (blank) to enter the workspace
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
@@ -238,7 +266,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
 
     it('clicking the "New note" CTA opens the note editor', async () => {
       const user = userEvent.setup()
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
       await user.click(screen.getByRole('button', { name: 'Create campaign' }))
@@ -272,7 +300,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
       firstRunMock = setupFirstRunFetchMock({ notesAfterCreation: [taggedNote] })
 
       const user = userEvent.setup()
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
       await user.click(screen.getByRole('button', { name: 'Create campaign' }))
@@ -299,7 +327,7 @@ describe('First-run UX — empty notes CTA + campaign template picker', () => {
   describe('within NotesBrowsePane — aria-label on New note header button', () => {
     it('the New note icon button in the workspace header carries its aria-label', async () => {
       const user = userEvent.setup()
-      await registerOwnerFirstRun(user)
+      await bootstrapFirstRun()
 
       await user.type(screen.getByLabelText('Campaign name'), 'My Campaign')
       await user.click(screen.getByRole('button', { name: 'Create campaign' }))

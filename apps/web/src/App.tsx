@@ -16,7 +16,6 @@ import {
   fetchCampaignShareLinks,
   fetchCampaignMemberships,
 } from './api'
-import { isKeycloakAuthConfig } from './keycloak-client'
 import { getNoteStarterTemplate } from './templates'
 import type { CampaignShareLink, CampaignSummary } from './types'
 import CampaignDetailPage from './pages/CampaignDetailPage'
@@ -129,9 +128,8 @@ function App() {
   const guest = useGuestSession({
     shareToken, guestStorageKey, isSharedMode, setSharedCampaign, setShareLink,
     authToken: sess.authToken, authConfig: sess.authConfig, owner: sess.owner,
-    isRegisterMode: sess.isRegisterMode, registerDraft: sess.registerDraft, loginDraft: sess.loginDraft,
     keycloakClientRef: sess.keycloakClientRef,
-    setRegisterDraft: sess.setRegisterDraft, setAccountNotice: sess.setAccountNotice,
+    setAccountNotice: sess.setAccountNotice,
     setIsLinkingAccount: sess.setIsLinkingAccount,
     setSelectedCampaignId, setCampaigns,
     setNoteBrowseMode, setSelectedSessionName, setSelectedActivityMembershipId,
@@ -151,7 +149,6 @@ function App() {
     : notes.overview?.membership ?? null
   const canEditWorkspace = isSharedMode ? shareLink?.accessLevel === 'editor' : true
   const canManageSelectedCampaign = (notes.overview?.membership ?? null)?.role === 'owner'
-  const isKeycloakMode = isKeycloakAuthConfig(sess.authConfig)
 
   // Clear stale tag filter when active tag is removed
   useEffect(() => {
@@ -216,13 +213,8 @@ function App() {
   if (!isSharedMode && (!sess.owner || !sess.authToken)) {
     return (
       <LoginPage
-        isKeycloakMode={isKeycloakMode} isRegisterMode={sess.isRegisterMode}
-        registerDraft={sess.registerDraft} loginDraft={sess.loginDraft}
         isSubmittingAuth={sess.isSubmittingAuth} error={error}
         surfaceRadius={surfaceRadius} heroCardRadius={heroCardRadius}
-        onRegisterDraftChange={(f, v) => sess.setRegisterDraft((d) => ({ ...d, [f]: v }))}
-        onLoginDraftChange={(f, v) => sess.setLoginDraft((d) => ({ ...d, [f]: v }))}
-        onToggleRegisterMode={() => { setError(null); sess.setIsRegisterMode((x) => !x) }}
         onSubmit={async () => { setError(null); await sess.handleSubmitAuth(loadCampaigns, setError) }}
       />
     )
@@ -255,7 +247,7 @@ function App() {
   return (
     <CampaignDetailPage
       sess={sess} camp={camp} sl={sl} notes={notes} guest={guest}
-      isSharedMode={isSharedMode} isKeycloakMode={isKeycloakMode}
+      isSharedMode={isSharedMode}
       canEditWorkspace={canEditWorkspace} canManageSelectedCampaign={canManageSelectedCampaign}
       canSplitNoteWorkspace={canSplitNoteWorkspace}
       showSplitNoteWorkspace={showSplitNoteWorkspace}

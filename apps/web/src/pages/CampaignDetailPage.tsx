@@ -34,7 +34,6 @@ export interface CampaignDetailPageProps {
 
   // App-level derived values
   isSharedMode: boolean
-  isKeycloakMode: boolean
   canEditWorkspace: boolean
   canManageSelectedCampaign: boolean
   canSplitNoteWorkspace: boolean
@@ -60,7 +59,7 @@ export interface CampaignDetailPageProps {
 
 export default function CampaignDetailPage({
   sess, camp, sl, notes, guest,
-  isSharedMode, isKeycloakMode, canEditWorkspace, canManageSelectedCampaign,
+  isSharedMode, canEditWorkspace, canManageSelectedCampaign,
   canSplitNoteWorkspace, showSplitNoteWorkspace, narrowWorkspacePanel,
   resolvedCampaign, resolvedMembership,
   selectedNoteTemplate, selectedCampaign, error,
@@ -236,13 +235,9 @@ export default function CampaignDetailPage({
             owner={sess.owner}
             authToken={sess.authToken}
             isSharedMode={isSharedMode}
-            isKeycloakMode={isKeycloakMode}
             resolvedMembership={resolvedMembership}
             accountNotice={sess.accountNotice}
             isLinkingAccount={sess.isLinkingAccount}
-            isRegisterMode={sess.isRegisterMode}
-            registerDraft={sess.registerDraft}
-            loginDraft={sess.loginDraft}
             campaignFormMode={camp.campaignFormMode}
             campaignDraft={camp.campaignDraft}
             selectedCampaignTemplateId={camp.selectedCampaignTemplateId}
@@ -278,9 +273,6 @@ export default function CampaignDetailPage({
             onToggleShareLinkVisibility={sl.handleToggleShareLinkVisibility}
             onCopyShareLink={(id) => { setError(null); void sl.handleCopyShareLink(id, setError) }}
             onRevokeShareLink={(id) => void handleRevokeShareLink(id)}
-            onRegisterDraftChange={(f, v) => sess.setRegisterDraft((d) => ({ ...d, [f]: v }))}
-            onLoginDraftChange={(f, v) => sess.setLoginDraft((d) => ({ ...d, [f]: v }))}
-            onToggleRegisterMode={() => { sess.setAccountNotice(null); setError(null); sess.setIsRegisterMode((x) => !x) }}
             onLinkSharedMembership={() => void guest.handleLinkSharedMembership()}
           />
 

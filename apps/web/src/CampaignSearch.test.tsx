@@ -1,6 +1,28 @@
 import { cleanup, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+vi.mock('./keycloak-client', () => ({
+  createRuntimeKeycloakClient: () => ({
+    init: async (stored: { accessToken: string; refreshToken: string } | null) => stored,
+    login: vi.fn(),
+    logout: vi.fn(),
+    refresh: async () => {
+      const raw = localStorage.getItem('dnd-notes:keycloak-auth-tokens')
+      return raw ? JSON.parse(raw) : null
+    },
+    clear: vi.fn(),
+  }),
+  isKeycloakAuthConfig: (authConfig: { keycloak?: { url?: string; realm?: string; clientId?: string } } | null) => {
+    const kc = authConfig?.keycloak
+    return (
+      typeof kc?.url === 'string' && kc.url.length > 0 &&
+      typeof kc?.realm === 'string' && kc.realm.length > 0 &&
+      typeof kc?.clientId === 'string' && kc.clientId.length > 0
+    )
+  },
+}))
+
 import App from './App'
 import { createJsonResponse, readMockRequest } from './test-helpers'
 
@@ -141,14 +163,12 @@ function getVisibleNoteButtons() {
   return within(screen.getByRole('list', { name: 'Notes list' })).getAllByRole('button')
 }
 
-async function registerAndOpenWorkspace(user: ReturnType<typeof userEvent.setup>) {
+/**
+ * Render the app and wait for the workspace to load.
+ * Relies on Keycloak tokens seeded by beforeEach.
+ */
+async function openWorkspace() {
   render(<App />)
-
-  await user.type(await screen.findByLabelText('Owner display name'), owner.displayName)
-  await user.type(screen.getByLabelText('Email'), owner.email)
-  await user.type(screen.getByLabelText('Password'), 'test-password')
-  await user.click(screen.getByRole('button', { name: 'Create owner account' }))
-
   await screen.findByText('Dragon Encounter')
 }
 
@@ -159,14 +179,30 @@ describe('Campaign note search regressions', () => {
   })
 
   beforeEach(() => {
+    // Seed Keycloak tokens so bootstrapAuth restores the session without a login redirect.
     localStorage.clear()
+    localStorage.setItem(
+      'dnd-notes:keycloak-auth-tokens',
+      JSON.stringify({ accessToken: 'smoke-token', refreshToken: 'smoke-refresh' }),
+    )
+    localStorage.setItem('dnd-notes:owner-auth-token', 'smoke-token')
     window.history.replaceState({}, '', '/')
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const { path, method } = readMockRequest(input, init)
 
-      if (path === '/api/auth/register' && method === 'POST') {
-        return createJsonResponse({ owner, token: 'test-token' }, 201)
+      if (path === '/api/auth/config' && method === 'GET') {
+        return createJsonResponse({
+          keycloak: {
+            url: 'https://auth.example.com',
+            realm: 'dnd-notes',
+            clientId: 'dnd-notes-web',
+          },
+        })
+      }
+
+      if (path === '/api/auth/session' && method === 'GET') {
+        return createJsonResponse({ owner })
       }
 
       if (path === '/api/campaigns' && method === 'GET') {
@@ -216,7 +252,7 @@ describe('Campaign note search regressions', () => {
   it('filters notes by title search (case-insensitive)', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'dragon')
 
     await waitFor(() => {
@@ -232,7 +268,7 @@ describe('Campaign note search regressions', () => {
   it('filters notes by body content', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'goblin')
 
     await waitFor(() => {
@@ -245,7 +281,7 @@ describe('Campaign note search regressions', () => {
   it('filters notes by inline reference labels stored in the markdown body', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'dragon encounter')
 
     await waitFor(() => {
@@ -259,7 +295,7 @@ describe('Campaign note search regressions', () => {
   it('filters notes by inline reference qualifiers stored in the markdown body', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'searching for')
 
     await waitFor(() => {
@@ -272,7 +308,7 @@ describe('Campaign note search regressions', () => {
   it('filters notes by session name', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'session 4')
 
     await waitFor(() => {
@@ -285,7 +321,7 @@ describe('Campaign note search regressions', () => {
   it('filters notes by collaborator name', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'mara')
 
     await waitFor(() => {
@@ -298,7 +334,7 @@ describe('Campaign note search regressions', () => {
   it('can clear search with clear button', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'goblin')
 
     await waitFor(() => {
@@ -318,7 +354,7 @@ describe('Campaign note search regressions', () => {
   it('combines search with tag filter', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'dragon')
 
     await waitFor(() => {
@@ -337,7 +373,7 @@ describe('Campaign note search regressions', () => {
   it('shows the expanded search-scope description', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'dragon')
 
     await waitFor(() => {
@@ -352,7 +388,7 @@ describe('Campaign note search regressions', () => {
   it('clears search when starting a new note', async () => {
     const user = userEvent.setup()
 
-    await registerAndOpenWorkspace(user)
+    await openWorkspace()
     await user.type(screen.getByLabelText('Search notes'), 'dragon')
 
     await waitFor(() => {

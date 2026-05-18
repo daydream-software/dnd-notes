@@ -1,6 +1,6 @@
 /**
  * Regression tests for the centralized readJson<T> error-handling contract
- * in api.ts:75-93 (issue #144, slice 7 — final slice).
+ * in api.ts (issue #144, slice 7 — final slice).
  *
  * readJson<T> is not exported; tests exercise it through representative public
  * endpoints. All five code paths are covered:
@@ -11,7 +11,7 @@
  *   Path D — non-2xx with malformed/missing JSON body: throws `Request failed with status N`
  *   Path E — fetch rejects (network / abort): TypeError or DOMException propagates unchanged
  *
- * Additionally covers logoutOwner's special !ok-only invocation of readJson
+ * Additionally covers deleteNote's special !ok-only invocation of readJson
  * (side-effect discard on 2xx, rethrow on non-2xx).
  *
  * Bug fix (issue #308): non-conforming 4xx JSON body (e.g. `{}` without an
@@ -22,8 +22,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchOwnerSession,
-  loginOwner,
-  logoutOwner,
+  deleteNote,
 } from './api'
 
 // ---------------------------------------------------------------------------
@@ -65,16 +64,16 @@ function makeResponse({
 }
 
 // ---------------------------------------------------------------------------
-// Path A — 2xx happy path (loginOwner)
+// Path A — 2xx happy path (fetchOwnerSession)
 // ---------------------------------------------------------------------------
 
 describe('readJson — Path A: 2xx returns parsed body', () => {
-  it('loginOwner resolves with the parsed AuthSessionResponse on 200', async () => {
-    const sessionData = { token: 'tok-abc', user: { id: 'u1', email: 'a@example.com' } }
+  it('fetchOwnerSession resolves with the parsed CurrentOwnerResponse on 200', async () => {
+    const sessionData = { owner: { id: 'u1', email: 'a@example.com', displayName: 'Alice', isSiteAdmin: false, createdAt: '', updatedAt: '' } }
     const mockResponse = makeResponse({ ok: true, body: sessionData })
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
-    const result = await loginOwner({ email: 'a@example.com', password: 'pw' })
+    const result = await fetchOwnerSession('tok', undefined)
 
     expect(result).toEqual(sessionData)
     // json must have been called to parse the body
@@ -96,7 +95,7 @@ describe('readJson — Path B: non-2xx with { error, details }', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: '', password: '' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Invalid input email missing password too short')
   })
 
@@ -109,7 +108,7 @@ describe('readJson — Path B: non-2xx with { error, details }', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: '', password: '' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Invalid input email missing')
   })
 })
@@ -127,7 +126,7 @@ describe('readJson — Path C: non-2xx with { error } and no details', () => {
     })
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
-    const rejection = loginOwner({ email: 'a@example.com', password: 'bad' })
+    const rejection = fetchOwnerSession('tok', undefined)
     await expect(rejection).rejects.toThrow('Not authorized')
     // No trailing space — message must be exactly the error string
     await expect(rejection).rejects.toSatisfy((e: Error) => e.message === 'Not authorized')
@@ -143,7 +142,7 @@ describe('readJson — Path C: non-2xx with { error } and no details', () => {
 
     // details.join(' ') === '' which is falsy — must take the no-details branch
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toSatisfy((e: Error) => e.message === 'Validation failed')
   })
 
@@ -156,7 +155,7 @@ describe('readJson — Path C: non-2xx with { error } and no details', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Internal server error')
   })
 })
@@ -175,7 +174,7 @@ describe('readJson — Path D: non-2xx with malformed JSON body', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Request failed with status 400')
   })
 
@@ -198,19 +197,19 @@ describe('readJson — Path D: non-2xx with malformed JSON body', () => {
 // ---------------------------------------------------------------------------
 
 describe('readJson — Path E: fetch rejection propagates unchanged', () => {
-  it('network failure (TypeError) propagates from loginOwner unchanged', async () => {
+  it('network failure (TypeError) propagates from fetchOwnerSession unchanged', async () => {
     const networkError = new TypeError('Failed to fetch')
     vi.mocked(fetch).mockRejectedValueOnce(networkError)
 
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Failed to fetch')
 
     // The propagated error must be the exact same instance (no wrapping)
     await expect(
       (async () => {
         vi.mocked(fetch).mockRejectedValueOnce(networkError)
-        return loginOwner({ email: 'a@example.com', password: 'pw' })
+        return fetchOwnerSession('tok', undefined)
       })(),
     ).rejects.toBe(networkError)
   })
@@ -229,18 +228,18 @@ describe('readJson — Path E: fetch rejection propagates unchanged', () => {
 })
 
 // ---------------------------------------------------------------------------
-// logoutOwner special contract
+// deleteNote special contract — !ok-only readJson invocation
 // ---------------------------------------------------------------------------
 
-describe('logoutOwner — !ok-only readJson invocation', () => {
+describe('deleteNote — !ok-only readJson invocation', () => {
   it('2xx: resolves to undefined and does NOT call response.json()', async () => {
     const mockResponse = makeResponse({ ok: true, status: 204, body: undefined })
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
-    const result = await logoutOwner('auth-token')
+    const result = await deleteNote('auth-token', 'note-id')
 
     expect(result).toBeUndefined()
-    // Critical: json must NOT have been called — readJson is skipped on 2xx logout
+    // Critical: json must NOT have been called — readJson is skipped on 2xx delete
     expect((mockResponse.json as ReturnType<typeof vi.fn>)).not.toHaveBeenCalled()
   })
 
@@ -252,7 +251,7 @@ describe('logoutOwner — !ok-only readJson invocation', () => {
     })
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
-    await expect(logoutOwner('stale-token')).rejects.toThrow('Token expired')
+    await expect(deleteNote('stale-token', 'note-id')).rejects.toThrow('Token expired')
   })
 
   it('4xx with malformed JSON falls back to status-based message', async () => {
@@ -263,7 +262,7 @@ describe('logoutOwner — !ok-only readJson invocation', () => {
     })
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
-    await expect(logoutOwner('auth-token')).rejects.toThrow('Request failed with status 500')
+    await expect(deleteNote('auth-token', 'note-id')).rejects.toThrow('Request failed with status 500')
   })
 })
 
@@ -277,7 +276,7 @@ describe('readJson — bug fix #308: non-conformant body shapes', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Request failed with status 400')
   })
 
@@ -292,7 +291,7 @@ describe('readJson — bug fix #308: non-conformant body shapes', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Request failed with status 401')
   })
 
@@ -307,7 +306,7 @@ describe('readJson — bug fix #308: non-conformant body shapes', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Request failed with status 400')
   })
 
@@ -323,7 +322,7 @@ describe('readJson — bug fix #308: non-conformant body shapes', () => {
     vi.mocked(fetch).mockResolvedValueOnce(mockResponse)
 
     await expect(
-      loginOwner({ email: 'a@example.com', password: 'pw' }),
+      fetchOwnerSession('tok', undefined),
     ).rejects.toThrow('Request failed with status 400')
   })
 })

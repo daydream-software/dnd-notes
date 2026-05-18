@@ -2,7 +2,6 @@ import type {
   AdminAccountsResponse,
   AuthConfigResponse,
   AdminOverviewResponse,
-  AuthSessionResponse,
   CampaignInput,
   CampaignMembershipsResponse,
   CampaignShareLinkCreateResponse,
@@ -21,8 +20,6 @@ import type {
   NoteResponse,
   NotesOverview,
   NotesResponse,
-  OwnerLoginInput,
-  OwnerRegistrationInput,
   SessionsResponse,
   SharedJoinResponse,
   SharedMembershipClaimResponse,
@@ -99,26 +96,6 @@ export async function fetchAuthConfig() {
   return readJson<AuthConfigResponse>(response)
 }
 
-export async function registerOwner(input: OwnerRegistrationInput) {
-  const response = await fetch(`${apiBaseUrl}/api/auth/register`, {
-    method: 'POST',
-    headers: createHeaders(undefined, true),
-    body: JSON.stringify(input),
-  })
-
-  return readJson<AuthSessionResponse>(response)
-}
-
-export async function loginOwner(input: OwnerLoginInput) {
-  const response = await fetch(`${apiBaseUrl}/api/auth/login`, {
-    method: 'POST',
-    headers: createHeaders(undefined, true),
-    body: JSON.stringify(input),
-  })
-
-  return readJson<AuthSessionResponse>(response)
-}
-
 export async function fetchOwnerSession(authToken: string, signal?: AbortSignal) {
   const response = await fetch(`${apiBaseUrl}/api/auth/session`, {
     headers: createHeaders(authToken),
@@ -126,17 +103,6 @@ export async function fetchOwnerSession(authToken: string, signal?: AbortSignal)
   })
 
   return readJson<CurrentOwnerResponse>(response)
-}
-
-export async function logoutOwner(authToken: string) {
-  const response = await fetch(`${apiBaseUrl}/api/auth/logout`, {
-    method: 'POST',
-    headers: createHeaders(authToken),
-  })
-
-  if (!response.ok) {
-    await readJson(response)
-  }
 }
 
 export async function fetchCampaigns(authToken: string, signal?: AbortSignal) {
