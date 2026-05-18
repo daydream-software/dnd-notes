@@ -157,7 +157,16 @@ export class AzureBlobTenantBackupArtifactStore
       )
     }
 
-    return { location: blockBlobClient.url }
+    // Strip any SAS token query string before returning the location.
+    // blockBlobClient.url includes the SAS token when the client was built
+    // from a SAS URL — persisting it to backup_catalog would leak credentials.
+    // materializeBackup re-derives the signed URL from this.client at restore
+    // time, so the bare https://<account>.blob.core.windows.net/<container>/<blob>
+    // path is sufficient.
+    const rawUrl = new URL(blockBlobClient.url)
+    const bareLocation = `${rawUrl.origin}${rawUrl.pathname}`
+
+    return { location: bareLocation }
   }
 
   /**
