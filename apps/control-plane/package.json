@@ -16,6 +16,7 @@
   },
   "license": "FSL-1.1-MIT",
   "dependencies": {
+    "@azure/storage-blob": "^12.31.0",
     "@dnd-notes/keycloak-jwt": "*",
     "@dnd-notes/postgres-migrations": "*",
     "@kubernetes/client-node": "^1.4.0",
