@@ -1,3 +1,10 @@
 # Fingerprint-based allowlist (gitleaks).
 # Path-based exclusions are in .gitleaks.toml — add fingerprints here only for
 # one-off findings in committed application code.
+
+# Phase 2 exit (#318): test fixture `kc-sub-alyx-409` in commit bbe6987
+# trips the `generic-api-key` rule (entropy 3.59) — it's a Keycloak
+# `sub` test fixture, not a real secret. HEAD renames the fixture to
+# `kc-sub-alyx`; the fingerprint below silences the historical commit.
+bbe6987a25656c34ee1d57516546ce29abf9743f:apps/control-plane/test/app.test.ts:generic-api-key:388
+6801aea68ddc1b8d0dd54a94b7c5bf4935269057:apps/control-plane/test/app.test.ts:generic-api-key:388

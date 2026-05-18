@@ -382,14 +382,14 @@ describe('Control Plane API', () => {
 
     it('returns 409 when tenant creation hits a postgres unique constraint race', async () => {
       await tenantRegistry.createPortalAccount({
-        id: 'acct-alyx-409',
+        id: 'acct-alyx',
         email: 'owner@example.com',
         displayName: 'Alyx',
-        keycloakSub: 'kc-sub-alyx-409',
+        keycloakSub: 'kc-sub-alyx',
       })
 
       const token = issuePortalToken({
-        sub: 'kc-sub-alyx-409',
+        sub: 'kc-sub-alyx',
         email: 'owner@example.com',
       })
       const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
