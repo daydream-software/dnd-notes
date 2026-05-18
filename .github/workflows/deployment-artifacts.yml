@@ -184,20 +184,11 @@ jobs:
           docker push "${IMAGE_PREFIX}/dnd-notes-operator-portal:latest"
 
       # --- retention cleanup: keep latest + 10 most recent sha-* per image ---
-      # latest is a pointer on the newest version digest, not an extra slot.
-      # min-versions-to-keep: 10 keeps the 10 most recent versions, which means
-      # exactly 10 sha-* tags remain (the newest one is also tagged latest).
-      # A second pass with delete-only-untagged-versions and min-versions-to-keep: 0
-      # removes all orphaned untagged layers.
-
-      - name: Cleanup old tenant versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+      # Order matters: untagged layers are purged first so that they are not
+      # counted toward the min-versions-to-keep quota. If the tagged cap ran
+      # first, the action would count untagged versions as "kept" slots, then
+      # the untagged pass would remove them — leaving fewer than 10 tagged
+      # rollback images. Untagged-first guarantees exactly 10 sha-* tags remain.
 
       - name: Cleanup untagged tenant layers
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
@@ -209,11 +200,11 @@ jobs:
           min-versions-to-keep: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cleanup old control-plane versions
+      - name: Cleanup old tenant versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
         with:
           owner: daydream-software
-          package-name: dnd-notes-control-plane
+          package-name: dnd-notes
           package-type: container
           min-versions-to-keep: 10
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -228,11 +219,11 @@ jobs:
           min-versions-to-keep: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cleanup old customer-portal versions
+      - name: Cleanup old control-plane versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
         with:
           owner: daydream-software
-          package-name: dnd-notes-customer-portal
+          package-name: dnd-notes-control-plane
           package-type: container
           min-versions-to-keep: 10
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -247,11 +238,11 @@ jobs:
           min-versions-to-keep: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Cleanup old operator-portal versions
+      - name: Cleanup old customer-portal versions
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
         with:
           owner: daydream-software
-          package-name: dnd-notes-operator-portal
+          package-name: dnd-notes-customer-portal
           package-type: container
           min-versions-to-keep: 10
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -264,4 +255,13 @@ jobs:
           package-type: container
           delete-only-untagged-versions: 'true'
           min-versions-to-keep: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old operator-portal versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-operator-portal
+          package-type: container
+          min-versions-to-keep: 10
           token: ${{ secrets.GITHUB_TOKEN }}
