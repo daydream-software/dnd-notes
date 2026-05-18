@@ -6,7 +6,7 @@
 **Decided by:** Coordinator (chore/remove-local-auth-mode-318)
 **Date:** 2026-05-17
 **Type:** Auth & Provisioning — cutover
-**PR:** TBD (this branch)
+**PR:** #320
 
 **Context:** The Phase 2 exit row in this file (line 2495) and three repeated Release B plans (lines 1822, 3182, 3315) all called for removing `AUTH_PROVIDER=local` (renamed `AUTH_MODE=local` during Phase 2a) once Keycloak coexistence was stable. Coexistence shipped, the cutover never did; the 2026-05-09 KeycloakAdminClient decision (line 7030) explicitly preserved `CUSTOMER_PORTAL_AUTH_MODE=local` as an escape hatch. The drift was flagged during a repo-wide audit on 2026-05-17 and FFMikha confirmed dev-only state with no data migration concern.
 

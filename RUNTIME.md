@@ -72,7 +72,7 @@ The tenant runtime is Keycloak-only as of the Phase 2 exit (#318). All authentic
   Example (k3d tenant pod): `http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 
 - **`KEYCLOAK_REALM`** (required)  
-  Keycloak realm name for tenant users and control-plane admins.  
+  Keycloak realm name for tenant users. The control-plane admin API uses its own `CONTROL_PLANE_KEYCLOAK_REALM` variable (see `platform/control-plane/README.md`).  
   Example: `dnd-notes-dev` (k3d), `dnd-notes-prod` (hosted)
 
 - **`KEYCLOAK_TENANT_CLIENT_ID`** (required)  

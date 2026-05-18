@@ -288,7 +288,8 @@ export default function App({
       inFlight = true
 
       try {
-        const currentToken = await keycloakClientRef.current?.freshToken().catch(() => null)
+        const client = keycloakClientRef.current
+        const currentToken = client ? await client.freshToken().catch(() => null) : null
 
         if (!currentToken || cancelled) {
           return
