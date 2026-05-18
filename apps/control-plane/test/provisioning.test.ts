@@ -69,7 +69,6 @@ class FakeDatabaseManager {
 class FakeInfrastructureManager {
   bundles: Array<{
     resources: TenantProvisioningResources
-    authMode: string | undefined
     deploymentReadinessPath: string | undefined
     ingressBackendServiceName: string | undefined
     ingressClassName: string | undefined
@@ -95,7 +94,6 @@ class FakeInfrastructureManager {
     resources: TenantProvisioningResources
     configMap?: {
       data?: {
-        AUTH_MODE?: string
         KEYCLOAK_JWKS_URL?: string
         KEYCLOAK_REALM?: string
         KEYCLOAK_TENANT_CLIENT_ID?: string
@@ -159,7 +157,6 @@ class FakeInfrastructureManager {
   }) {
     this.bundles.push({
       resources: bundle.resources,
-      authMode: bundle.configMap?.data?.AUTH_MODE,
       deploymentReadinessPath:
         bundle.deployment.spec?.template?.spec?.containers?.[0]?.readinessProbe
           ?.httpGet?.path,
@@ -505,7 +502,6 @@ describe('TenantProvisioningService', () => {
       })
 
       assert.equal(infrastructureManager.bundles.length, 1)
-      assert.equal(infrastructureManager.bundles[0].authMode, 'keycloak')
       assert.equal(
         infrastructureManager.bundles[0].keycloakUrl,
         'https://auth.example.com',
@@ -1891,7 +1887,6 @@ describe('TenantProvisioningService', () => {
         id: 'owner-1',
         email: 'creator@example.com',
         displayName: 'Tenant Creator',
-        authProvider: 'keycloak',
         keycloakSub: 'creator-keycloak-sub',
       })
       await tenantRegistry.createTenant({
@@ -1944,8 +1939,8 @@ describe('TenantProvisioningService', () => {
         id: 'owner-1',
         email: 'creator@example.com',
         displayName: 'Tenant Creator',
-        // No keycloakSub.
-        authProvider: 'local',
+        // No keycloakSub — pre-Phase-2-exit legacy account that the
+        // /portal/me auto-link sweep hasn't claimed yet.
       })
       await tenantRegistry.createTenant({
         id: 'tenant-demo',

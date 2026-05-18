@@ -305,14 +305,13 @@ postgres_forward_pid=$!
 wait_for_tcp "${POSTGRES_LOCAL_PORT}" 30
 
 database_url="$(localize_postgres_url "${raw_database_url}" "${POSTGRES_LOCAL_PORT}")"
-auth_mode="$(json_get data.AUTH_MODE <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_url="$(json_get data.KEYCLOAK_URL <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_realm="$(json_get data.KEYCLOAK_REALM <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_client_id="$(json_get data.KEYCLOAK_TENANT_CLIENT_ID <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_jwks_url="$(json_get data.KEYCLOAK_JWKS_URL <"${WORK_DIR}/tenant-configmap.json" 2>/dev/null || true)"
 keycloak_jwks_url_for_local_api="$(normalize_local_keycloak_jwks_url "${keycloak_jwks_url}")"
 
-if [[ "${auth_mode}" == "keycloak" && -z "${keycloak_client_id}" ]]; then
+if [[ -z "${keycloak_client_id}" ]]; then
   log "Missing KEYCLOAK_TENANT_CLIENT_ID in ConfigMap dnd-notes-runtime for namespace ${tenant_namespace}. Re-provision the tenant or update its runtime ConfigMap."
   exit 1
 fi
@@ -322,7 +321,6 @@ env \
   DATABASE_URL="${database_url}" \
   PUBLIC_WEB_URL="${proxy_origin}" \
   ALLOWED_ORIGINS="${proxy_origin}" \
-  AUTH_MODE="${auth_mode}" \
   KEYCLOAK_URL="${keycloak_url}" \
   KEYCLOAK_REALM="${keycloak_realm}" \
   KEYCLOAK_TENANT_CLIENT_ID="${keycloak_client_id}" \
