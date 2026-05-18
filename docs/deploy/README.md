@@ -318,10 +318,10 @@ The overlay patches three images. The fourth GHCR package — `ghcr.io/daydream-
 control-plane at tenant provisioning time via `TENANT_IMAGE_REPOSITORY` in the ConfigMap. It uses the
 same `sha-XXXXX` tag and does not need a separate `kustomize edit` call here.
 
-Commit the change:
+Commit the change (you are still in `deploy/k3s/overlays/prod` from the `cd` above):
 
 ```bash
-git add deploy/k3s/overlays/prod/kustomization.yaml
+git add kustomization.yaml
 git commit -m "chore(deploy): pin images to ${TAG}"
 ```
 
