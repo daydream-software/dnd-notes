@@ -285,12 +285,14 @@ Environment variables:
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID` — Keycloak client ID accepted for `/internal` JWTs
 - `CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES` — comma-separated allowed workforce/admin roles (defaults to `control-plane-admin,control-plane-workforce`)
 - `CONTROL_PLANE_TRUST_PROXY` — `true`, `false`, or a trusted hop count for Express `trust proxy`; set this when `/portal` traffic arrives through an ingress/load balancer so per-client rate limiting uses forwarded client IPs
-- `CUSTOMER_PORTAL_AUTH_MODE` — `local` (default) or `keycloak` for the public `/portal` contract; only `local` is implemented in this slice
+- `CUSTOMER_PORTAL_KEYCLOAK_URL` — Keycloak base URL for customer-portal JWT validation (required; the portal is Keycloak-only since #318)
+- `CUSTOMER_PORTAL_KEYCLOAK_REALM` — Keycloak realm for customer-portal JWTs (required)
+- `CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID` — Keycloak client ID accepted for portal JWTs (required)
+- `CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL` — optional server-side JWKS endpoint override for portal JWTs
 - `CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION` — optional default version assigned to portal-created tenants (defaults to the control-plane package version)
 - `CONTROL_PLANE_ENABLE_PROVISIONING` — enables live Kubernetes/Postgres provisioning
-- `TENANT_AUTH_MODE` — `local` (default) or `keycloak` for provisioned tenant pods
-- `TENANT_KEYCLOAK_URL` — Keycloak base URL injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
-- `TENANT_KEYCLOAK_REALM` — tenant realm injected into tenant pods when `TENANT_AUTH_MODE=keycloak`
+- `TENANT_KEYCLOAK_URL` — Keycloak base URL injected into provisioned tenant pods (required when provisioning is enabled; tenants are Keycloak-only since #318)
+- `TENANT_KEYCLOAK_REALM` — tenant realm injected into provisioned tenant pods (required when provisioning is enabled)
 - `TENANT_BASE_DOMAIN` — base domain for generated tenant hosts
 - `TENANT_INGRESS_CLASS_NAME` — ingress class used for generated tenant Ingress resources (`nginx` by default)
 - `TENANT_IMAGE_REPOSITORY` — tenant image repository used in generated Deployments

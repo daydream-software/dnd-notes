@@ -1149,7 +1149,6 @@ export function buildTenantInfrastructureBundle(
     // It is not configurable at the auth-config level — the canonical name is
     // `dnd-notes-tenant-{tenantId}` and is created by ensureClient during
     // provisioning.
-    configMapData.AUTH_MODE = 'keycloak'
     configMapData.KEYCLOAK_URL = options.tenantRuntimeAuth.keycloakUrl
     configMapData.KEYCLOAK_REALM = options.tenantRuntimeAuth.keycloakRealm
     configMapData.KEYCLOAK_TENANT_CLIENT_ID = `dnd-notes-tenant-${options.tenant.id}`

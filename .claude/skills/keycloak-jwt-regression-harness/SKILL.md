@@ -16,7 +16,7 @@ Use this when backend auth code validates Keycloak JWTs through JWKS and you nee
 - Issue tokens with realistic `iss`, `aud`, `azp`, `sub`, `email`, and optional role claims so auth code sees the same shape it will get from Keycloak.
 - Give each harness run a **unique `kid`**. Reusing the same key ID across tests can poison in-memory JWKS caches and create false 401s after the first test rotates keys.
 - Cover both the happy path and the boundary cases: wrong client/audience, expired token, missing roles, and guest/share-token coexistence.
-- For provisioning flows, assert the ConfigMap wiring that actually reaches the pod (`AUTH_MODE`, Keycloak URL/realm/client ID) instead of only validating the app-layer JWT tests.
+- For provisioning flows, assert the ConfigMap wiring that actually reaches the pod (Keycloak URL/realm/client ID) instead of only validating the app-layer JWT tests.
 
 ## Examples
 

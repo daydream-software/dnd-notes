@@ -3,7 +3,7 @@
 **Issue:** #148 (spike for epic #139)
 **Date:** 2026-05-12
 **Author:** Data (backend)
-**Status:** Complete — most decisions implemented across #176–#201. Open questions listed in §9; two technical questions resolved in-spike (OQ-2, OQ-3).
+**Status:** Complete — implemented across #176–#201. **Superseded by Phase 2 exit (#320 / #318) on 2026-05-17.** The dual-mode `CUSTOMER_PORTAL_AUTH_MODE=local|keycloak` switch this spike describes (notably §5 "Stage 1 — Keycloak enabled, local auth still works" and §6 OQ-1 "Hard cutover") no longer exists; the portal is Keycloak-only with no local fallback. The rest of the doc — flow shape (§1, §3), token storage (§4), code structure (§7), test plan (§8) — remains the canonical record of the implemented design. Read with the cutover in mind.
 
 ---
 
