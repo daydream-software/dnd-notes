@@ -11,6 +11,16 @@ import {
 import { startRoleSyncRetryLoop } from './role-sync-retry.js'
 import { createShutdownController } from './shutdown.js'
 import {
+  AzureBlobConfigurationError,
+  AzureBlobTenantBackupArtifactStore,
+} from './tenant-backup-azure-blob.js'
+import { startBackupScheduler, type BackupSchedulerLoop } from './backup-scheduler.js'
+import {
+  createPostgresTenantBackupDispatcher,
+  type TenantBackupDispatcher,
+} from './tenant-backup-dispatcher.js'
+import { PostgresTenantBackupRunner } from './tenant-backup-runner.js'
+import {
   createHttpTenantControlClient,
   type TenantControlClient,
 } from './tenant-control-client.js'
@@ -297,11 +307,101 @@ if (ENABLE_TENANT_PROVISIONING) {
   })
 }
 
+// ---------------------------------------------------------------------------
+// Backup dispatcher wiring (#330)
+// ---------------------------------------------------------------------------
+
+const BACKUP_DESTINATION =
+  process.env.BACKUP_DESTINATION?.trim().toLowerCase() ?? 'disabled'
+
+const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT?.trim()
+const rawAzureContainer = process.env.AZURE_STORAGE_CONTAINER?.trim()
+const AZURE_STORAGE_CONTAINER =
+  rawAzureContainer && rawAzureContainer.length > 0 ? rawAzureContainer : 'tenant-backups'
+const AZURE_STORAGE_SAS_TOKEN = process.env.AZURE_STORAGE_SAS_TOKEN?.trim()
+const AZURE_STORAGE_CONNECTION_STRING =
+  process.env.AZURE_STORAGE_CONNECTION_STRING?.trim()
+const rawBackupCron = process.env.BACKUP_SCHEDULE_CRON?.trim()
+const BACKUP_SCHEDULE_CRON =
+  rawBackupCron && rawBackupCron.length > 0 ? rawBackupCron : '0 3 * * *'
+const rawRetentionDays = process.env.BACKUP_RETENTION_DAYS?.trim()
+const BACKUP_RETENTION_DAYS = rawRetentionDays
+  ? parseInt(rawRetentionDays, 10)
+  : 14
+
+if (BACKUP_DESTINATION === 'azure-blob') {
+  if (!AZURE_STORAGE_ACCOUNT) {
+    throw new Error(
+      'AZURE_STORAGE_ACCOUNT is required when BACKUP_DESTINATION=azure-blob.',
+    )
+  }
+
+  if (!AZURE_STORAGE_SAS_TOKEN && !AZURE_STORAGE_CONNECTION_STRING) {
+    throw new Error(
+      'BACKUP_DESTINATION=azure-blob requires either AZURE_STORAGE_SAS_TOKEN or AZURE_STORAGE_CONNECTION_STRING.',
+    )
+  }
+
+  if (
+    !Number.isInteger(BACKUP_RETENTION_DAYS) ||
+    BACKUP_RETENTION_DAYS < 1
+  ) {
+    throw new Error(
+      `Invalid BACKUP_RETENTION_DAYS value: ${rawRetentionDays}. Expected a positive integer.`,
+    )
+  }
+}
+
+let tenantBackupDispatcher: TenantBackupDispatcher | undefined
+let azureBlobArtifactStore: AzureBlobTenantBackupArtifactStore | undefined
+
+if (BACKUP_DESTINATION === 'azure-blob') {
+  try {
+    azureBlobArtifactStore = new AzureBlobTenantBackupArtifactStore({
+      accountName: AZURE_STORAGE_ACCOUNT,
+      sasToken: AZURE_STORAGE_SAS_TOKEN && AZURE_STORAGE_SAS_TOKEN.length > 0
+        ? AZURE_STORAGE_SAS_TOKEN
+        : undefined,
+      connectionString: AZURE_STORAGE_CONNECTION_STRING && AZURE_STORAGE_CONNECTION_STRING.length > 0
+        ? AZURE_STORAGE_CONNECTION_STRING
+        : undefined,
+      containerName: AZURE_STORAGE_CONTAINER,
+    })
+  } catch (error) {
+    if (error instanceof AzureBlobConfigurationError) {
+      throw new Error(
+        `Backup configuration error: ${error.message}`,
+        { cause: error },
+      )
+    }
+    throw error
+  }
+
+  const tenantDatabaseAdminUrl = TENANT_DATABASE_ADMIN_URL
+
+  if (!tenantDatabaseAdminUrl) {
+    throw new Error(
+      'TENANT_DATABASE_ADMIN_URL is required when BACKUP_DESTINATION=azure-blob.',
+    )
+  }
+
+  const backupRunner = new PostgresTenantBackupRunner({
+    adminDatabaseUrl: tenantDatabaseAdminUrl,
+    artifactStore: azureBlobArtifactStore,
+  })
+
+  tenantBackupDispatcher = createPostgresTenantBackupDispatcher(backupRunner)
+  console.log(
+    `Backup dispatcher: azure-blob (account=${AZURE_STORAGE_ACCOUNT}, container=${AZURE_STORAGE_CONTAINER})`,
+  )
+}
+
 const app = createApp({
   tenantRegistry,
   adminToken: ADMIN_TOKEN,
   adminAuth,
   tenantProvisioningService,
+  tenantBackupDispatcher,
   trustProxy: CONTROL_PLANE_TRUST_PROXY,
   portalKeycloakAuth,
   portalDefaultTenantVersion: CUSTOMER_PORTAL_DEFAULT_TENANT_VERSION,
@@ -323,10 +423,15 @@ const serverRef: { current?: Server } = {}
 // before the process exits.
 let roleSyncRetryLoop: ReturnType<typeof startRoleSyncRetryLoop> | undefined
 
+// Nightly backup scheduler (#330). Active only when BACKUP_DESTINATION is
+// not 'disabled'. Stopped during graceful shutdown.
+let backupSchedulerLoop: BackupSchedulerLoop | undefined
+
 const shutdownController = createShutdownController({
   getServer: () => serverRef.current,
   closeResources: async () => {
     roleSyncRetryLoop?.stop()
+    backupSchedulerLoop?.stop()
 
     if (tenantProvisioningService) {
       await tenantProvisioningService.close()
@@ -422,6 +527,20 @@ if (keycloakAdminClient) {
     keycloakAdminClient,
   })
   console.log('Role-sync retry loop started (60 s base interval, 5 min cap).')
+}
+
+// Start nightly backup scheduler after the server is listening (#330).
+if (tenantBackupDispatcher && BACKUP_DESTINATION !== 'disabled') {
+  backupSchedulerLoop = startBackupScheduler({
+    tenantRegistry,
+    tenantBackupDispatcher,
+    artifactStore: azureBlobArtifactStore,
+    scheduleExpression: BACKUP_SCHEDULE_CRON,
+    retentionDays: BACKUP_RETENTION_DAYS,
+  })
+  console.log(
+    `Backup scheduler started (schedule="${BACKUP_SCHEDULE_CRON}", retention=${BACKUP_RETENTION_DAYS} days).`,
+  )
 }
 
 const shutdown = () => {
