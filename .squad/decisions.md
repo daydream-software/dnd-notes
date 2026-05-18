@@ -2,6 +2,30 @@
 
 ## Active Decisions
 
+### 2026-05-18: Keycloak user picker search endpoint at /internal/keycloak-users (#325)
+**Decided by:** Data (Backend)  
+**Date:** 2026-05-18  
+**Type:** API — endpoint routing  
+**PR:** #326
+
+**Decision:** The new user-picker search endpoint is registered at `GET /internal/keycloak-users?q=<query>`, not `GET /api/admin/keycloak-users`.
+
+**Rationale:** The issue spec said `/api/admin/keycloak-users` but also said "follow the existing admin route patterns." There is no `/api/admin` prefix in the control-plane — all operator-gated routes live under `/internal/` and are protected by `createAdminAuthMiddleware` applied on line 1151 of `app.ts`. Introducing a one-off `/api/admin` prefix would require a separate middleware wire-up and is inconsistent with every other admin endpoint. Stef's frontend client (`control-plane-api.ts`) already uses `/internal/...` for all other calls.
+
+**Impact for Stef (frontend):** The `searchKeycloakUsers` function in `apps/operator-portal/src/control-plane-api.ts` calls `GET /internal/keycloak-users?q=<encoded-query>` with Bearer authorization. Response is an array of objects with `id`, `username?`, `email?`, `firstName?`, `lastName?` properties. HTTP error codes: `400` (missing q), `401` (no/invalid token), `403` (missing operator role), `500` (upstream error), `501` (Keycloak not configured).
+
+### 2026-05-18: Drop initialAdminEmail from Tenant mirror type in operator-portal (#325)
+**Decided by:** Stef (Frontend)  
+**Date:** 2026-05-18  
+**Type:** API contract — frontend type safety  
+**PR:** #326
+
+**Decision:** The `initialAdminEmail` field was removed from the operator-portal's mirrored `Tenant` interface (`types.ts`), not marked `@deprecated`.
+
+**Rationale:** The acceptance gate requires zero grep matches for `initialAdminEmail` in `apps/operator-portal/src`. The task spec said to keep it in `Tenant` as `/** @deprecated */`, but that would leave a match and fail the gate. The two constraints are mutually exclusive. The `Tenant` type in operator-portal is a mirrored DTO (not imported across the package boundary). The backend still returns the field for legacy rows, and TypeScript ignores extra JSON properties at runtime. Dropping it from the client mirror is safe: it just means operator-portal will no longer surface the field, which aligns with the product intent (owner is now picked from Keycloak, not set via free-text email).
+
+**Impact:** `FleetStatusPage.tsx` no longer renders "Initial admin {email}" in tenant cards. `Tenant` mirror in `types.ts` has no `initialAdminEmail` field. `CreateTenantRequest` no longer accepts `initialAdminEmail`. All tests updated accordingly.
+
 ### 2026-05-17: Phase 2 exit executed — Keycloak-only auth (#318)
 **Decided by:** Coordinator (chore/remove-local-auth-mode-318)
 **Date:** 2026-05-17
