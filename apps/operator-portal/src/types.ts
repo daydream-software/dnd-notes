@@ -15,7 +15,6 @@ export interface Tenant {
   slug: string
   subdomain: string | null
   ownerId: string
-  initialAdminEmail: string | null
   desiredState: TenantState
   currentState: TenantState
   version: string
@@ -39,7 +38,6 @@ export interface CreateTenantRequest {
   id: string
   slug: string
   ownerId: string
-  initialAdminEmail?: string
   version: string
 }
 

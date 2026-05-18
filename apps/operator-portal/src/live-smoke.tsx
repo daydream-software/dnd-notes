@@ -9,7 +9,6 @@ export interface OperatorPortalSmokeOptions extends StoredKeycloakTokens {
   tenantId: string
   tenantSlug: string
   ownerId: string
-  initialAdminEmail: string
   version: string
   reason: string
   provisionTimeoutMs?: number
@@ -73,7 +72,7 @@ function readPortalAlerts(view: ReturnType<typeof render>) {
     'Portal writes stay on the existing /internal/tenants control-plane contract. Provisioning creates real Kubernetes and database resources, while deprovisioning deletes live resources and requires explicit confirmation.',
     'Confirmation creates a real tenant record immediately, then asks the control plane to create the namespace, deployment, service, PVC, runtime secret, and database. Failures after creation stay visible in the fleet list for retry/triage.',
     'This will create the tenant record and trigger real platform work.',
-    'If the create call succeeds but provisioning fails, the new tenant stays in the fleet list so the operator can retry the existing /internal/tenants/:id/provision path instead of losing the audit trail. This slice records the initial admin email for later bootstrap work; it does not create the in-tenant admin account yet.',
+    'If the create call succeeds but provisioning fails, the new tenant stays in the fleet list so the operator can retry the existing /internal/tenants/:id/provision path instead of losing the audit trail.',
   ])
 
   return view
@@ -125,10 +124,7 @@ export async function provisionTenantThroughOperatorPortal(
     )) as HTMLButtonElement
     const tenantIdInput = view.getByRole('textbox', { name: /Tenant ID/i })
     const tenantSlugInput = view.getByRole('textbox', { name: /Tenant slug/i })
-    const ownerIdInput = view.getByRole('textbox', { name: /Owner ID/i })
-    const initialAdminEmailInput = view.getByRole('textbox', {
-      name: /Initial admin email/i,
-    })
+    const ownerSearchInput = view.getByRole('combobox', { name: /Search for owner/i })
     const tenantVersionInput = view.getByRole('textbox', {
       name: /Tenant version/i,
     })
@@ -138,11 +134,12 @@ export async function provisionTenantThroughOperatorPortal(
 
     await user.type(tenantIdInput, options.tenantId)
     await user.type(tenantSlugInput, options.tenantSlug)
-    await user.type(ownerIdInput, options.ownerId)
-    await user.type(
-      initialAdminEmailInput,
-      options.initialAdminEmail,
-    )
+    await user.type(ownerSearchInput, options.ownerId)
+
+    // Wait for the Autocomplete to show at least one option, then pick the first.
+    const firstOption = await view.findByRole('option', { hidden: true }, { timeout: 5_000 })
+    await user.click(firstOption)
+
     await user.clear(tenantVersionInput)
     await user.type(tenantVersionInput, options.version)
     await user.type(operatorReasonInput, options.reason)

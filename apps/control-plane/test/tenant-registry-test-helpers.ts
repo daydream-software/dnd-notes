@@ -12,15 +12,26 @@ export interface RegisterPgMemTenantRegistrySupportOptions {
  * This wrapper intercepts the migration SQL for 0005_remove_local_auth and
  * emits an explicit DROP CONSTRAINT before the DROP COLUMN so pg-mem can
  * keep up with the real migration.
+ *
+ * pg-mem also does not support COMMENT ON COLUMN; those statements are
+ * stripped (they are metadata-only and safe to omit in tests).
  */
 function rewriteSqlForPgMem(sql: string): string {
-  return sql.replace(
-    /ALTER TABLE portal_accounts\s+DROP COLUMN IF EXISTS auth_provider/gi,
-    [
-      'ALTER TABLE portal_accounts DROP CONSTRAINT IF EXISTS portal_accounts_constraint_1',
-      'ALTER TABLE portal_accounts DROP COLUMN IF EXISTS auth_provider',
-    ].join(';\n  '),
-  )
+  return sql
+    .replace(
+      /ALTER TABLE portal_accounts\s+DROP COLUMN IF EXISTS auth_provider/gi,
+      [
+        'ALTER TABLE portal_accounts DROP CONSTRAINT IF EXISTS portal_accounts_constraint_1',
+        'ALTER TABLE portal_accounts DROP COLUMN IF EXISTS auth_provider',
+      ].join(';\n  '),
+    )
+    // Strip COMMENT ON COLUMN — pg-mem does not implement it.
+    // Use a multiline match so the value string (which may span lines) is captured.
+    // FRAGILITY: each COMMENT ON COLUMN match is replaced with a standalone SELECT 1.
+    // If a future migration contains multiple COMMENT ON COLUMN statements in a single
+    // SQL file, the replacements will be joined without semicolons between them.
+    // Fix if that happens: replace the trailing comment token with 'SELECT 1;' (with semicolon).
+    .replace(/COMMENT\s+ON\s+COLUMN\s+[\s\S]*?;/gi, 'SELECT 1 /* pg-mem: COMMENT ON COLUMN stripped */')
 }
 
 export function wrapPoolForPgMem(pool: TenantRegistryPoolLike): TenantRegistryPoolLike {

@@ -16,6 +16,7 @@ const expectedControlPlaneMigrations = [
   '0003_drop_backup_metadata.sql',
   '0004_portal_account_role_sync_status.sql',
   '0005_remove_local_auth.sql',
+  '0006_deprecate_initial_admin_email.sql',
 ]
 
 test('control-plane migrations seed schema metadata and use a namespaced ledger', async () => {
