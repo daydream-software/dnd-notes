@@ -593,19 +593,16 @@ The `/internal/*` API has no external ingress — it is cluster-internal only. R
 `kubectl port-forward`.
 
 In prod, `CONTROL_PLANE_AUTH_MODE=keycloak`, so the `/internal/*` routes require a workforce bearer
-JWT (not a static token). Obtain one using a workforce user account:
+JWT (not a static token). Obtain one from the operator portal:
+
+1. Log into `https://operator.daydreamsoftware.ca` in your browser.
+2. Open DevTools (F12) and go to the Network tab.
+3. Click any request in the list; copy the `Authorization` header value — it starts with `Bearer`.
+4. Paste only the token part (the long string after `Bearer`) into the shell variable below.
 
 ```bash
-# Step 1: get a workforce JWT
-TOKEN=$(curl -fsS \
-  -X POST \
-  -H 'Content-Type: application/x-www-form-urlencoded' \
-  --data-urlencode 'grant_type=password' \
-  --data-urlencode 'client_id=dnd-notes-control-plane' \
-  --data-urlencode 'username=<workforce-username>' \
-  --data-urlencode 'password=<workforce-password>' \
-  'https://auth.daydreamsoftware.ca/realms/dnd-notes-workforce/protocol/openid-connect/token' \
-  | jq -r '.access_token')
+# Step 1: set the JWT from the operator portal DevTools
+TOKEN=<paste-bearer-token-here>
 
 # Step 2: open a local port to the control-plane service (run in a separate terminal)
 kubectl --context dnd-notes-prod port-forward \
