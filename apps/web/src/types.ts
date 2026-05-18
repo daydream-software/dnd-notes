@@ -78,17 +78,6 @@ export interface AuthConfigResponse {
   }
 }
 
-export interface OwnerRegistrationInput {
-  displayName: string
-  email: string
-  password: string
-}
-
-export interface OwnerLoginInput {
-  email: string
-  password: string
-}
-
 export interface NoteAttribution {
   membershipId: string
   displayName: string
@@ -190,11 +179,6 @@ export interface AdminAccountSummary extends OwnerAccount {
 
 export interface AdminAccountsResponse {
   accounts: AdminAccountSummary[]
-}
-
-export interface AuthSessionResponse {
-  token: string
-  owner: OwnerAccount
 }
 
 export interface CurrentOwnerResponse {

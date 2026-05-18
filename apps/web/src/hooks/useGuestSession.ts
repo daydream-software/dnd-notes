@@ -3,12 +3,9 @@ import {
   claimSharedMembership,
   fetchSharedSession,
   joinSharedCampaign,
-  loginOwner,
-  registerOwner,
 } from '../api'
 import { isKeycloakAuthConfig } from '../keycloak-client'
 import {
-  authTokenStorageKey,
   missingKeycloakClientErrorMessage,
 } from './useSession'
 import { selectedCampaignStorageKey } from './useCampaign'
@@ -23,7 +20,6 @@ import type {
 } from '../types'
 import type { RuntimeKeycloakClient } from '../keycloak-client'
 import type { NoteDraft, NoteBrowseMode } from './useNotes'
-import type { OwnerRegistrationDraft, OwnerLoginDraft } from './useSession'
 
 export interface UseGuestSessionParams {
   shareToken: string | null
@@ -36,11 +32,7 @@ export interface UseGuestSessionParams {
   authToken: string | null
   authConfig: AuthConfigResponse | null
   owner: { displayName: string } | null
-  isRegisterMode: boolean
-  registerDraft: OwnerRegistrationDraft
-  loginDraft: OwnerLoginDraft
   keycloakClientRef: React.RefObject<RuntimeKeycloakClient | null>
-  setRegisterDraft: React.Dispatch<React.SetStateAction<OwnerRegistrationDraft>>
   setAccountNotice: React.Dispatch<React.SetStateAction<string | null>>
   setIsLinkingAccount: React.Dispatch<React.SetStateAction<boolean>>
   // From useCampaign
@@ -87,11 +79,7 @@ export function useGuestSession({
   authToken,
   authConfig,
   owner,
-  isRegisterMode,
-  registerDraft,
-  loginDraft,
   keycloakClientRef,
-  setRegisterDraft,
   setAccountNotice,
   setIsLinkingAccount,
   setSelectedCampaignId,
@@ -141,14 +129,6 @@ export function useGuestSession({
 
         if (session.membership && storedGuestToken) {
           setGuestToken(storedGuestToken)
-          setRegisterDraft((currentDraft) =>
-            currentDraft.displayName.trim().length > 0
-              ? currentDraft
-              : {
-                  ...currentDraft,
-                  displayName: session.membership?.displayName ?? '',
-                },
-          )
           await loadSharedWorkspace(storedGuestToken, undefined, session.shareLink.accessLevel)
         } else {
           localStorage.removeItem(guestStorageKey)
@@ -192,7 +172,6 @@ export function useGuestSession({
     setIsCreating,
     setNotes,
     setOverview,
-    setRegisterDraft,
     setSelectedCampaignId,
     setSelectedNoteId,
     setShareLink,
@@ -222,14 +201,6 @@ export function useGuestSession({
       setNoteBrowseMode('notes')
       setSelectedSessionName(null)
       setSelectedActivityMembershipId(null)
-      setRegisterDraft((currentDraft) =>
-        currentDraft.displayName.trim().length > 0
-          ? currentDraft
-          : {
-              ...currentDraft,
-              displayName: response.membership.displayName,
-            },
-      )
       await loadSharedWorkspace(response.guestToken, undefined, response.shareLink.accessLevel)
     } catch (joinError) {
       setError(
@@ -246,7 +217,6 @@ export function useGuestSession({
     setCampaigns,
     setError,
     setNoteBrowseMode,
-    setRegisterDraft,
     setSelectedActivityMembershipId,
     setSelectedCampaignId,
     setSelectedSessionName,
@@ -293,29 +263,7 @@ export function useGuestSession({
         setAccountNotice(
           owner ? `Linked to ${owner.displayName}.` : 'Linked this guest membership.',
         )
-        return
       }
-
-      const session = isRegisterMode
-        ? await registerOwner(registerDraft)
-        : await loginOwner(loginDraft)
-
-      localStorage.setItem(authTokenStorageKey, session.token)
-
-      const claimedMembership = await claimSharedMembership(shareToken, session.token, guestToken)
-
-      if (claimedMembership.guestToken) {
-        localStorage.setItem(guestStorageKey, claimedMembership.guestToken)
-        setGuestToken(claimedMembership.guestToken)
-      }
-
-      localStorage.setItem(selectedCampaignStorageKey, claimedMembership.membership.campaignId)
-      setSharedMembership(claimedMembership.membership)
-      setAccountNotice(
-        isRegisterMode
-          ? `Account created and linked to ${session.owner.displayName}.`
-          : `Linked to ${session.owner.displayName}.`,
-      )
     } catch (linkError) {
       setError(
         linkError instanceof Error
@@ -330,11 +278,8 @@ export function useGuestSession({
     authToken,
     guestStorageKey,
     guestToken,
-    isRegisterMode,
     keycloakClientRef,
-    loginDraft,
     owner,
-    registerDraft,
     setAccountNotice,
     setError,
     setIsLinkingAccount,
