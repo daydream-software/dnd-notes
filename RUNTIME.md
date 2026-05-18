@@ -60,26 +60,22 @@ above. The variables below tune that Postgres connection.
 
 ### Keycloak Runtime Authentication
 
-When `AUTH_MODE=keycloak`, the tenant runtime validates Keycloak JWTs for authenticated requests. Guest/share-link flows remain local and anonymous. The control-plane uses its own prefixed variables (`CONTROL_PLANE_AUTH_MODE`, `CONTROL_PLANE_KEYCLOAK_*`, `TENANT_AUTH_MODE`, `TENANT_KEYCLOAK_*`) to keep admin auth and tenant-runtime injection separate.
+The tenant runtime is Keycloak-only as of the Phase 2 exit (#318). All authenticated requests must carry a Keycloak-issued JWT; guest/share-link flows remain unauthenticated. The control-plane uses its own prefixed variables (`CONTROL_PLANE_AUTH_MODE` — `static|keycloak`, `CONTROL_PLANE_KEYCLOAK_*`, `TENANT_KEYCLOAK_*`) to keep admin auth and tenant-runtime injection separate.
 
-- **`AUTH_MODE`** (default: `local`)  
-  Authentication provider mode. Options: `local` (legacy email/password + sessions) or `keycloak` (OIDC/JWT).  
-  **Note:** When set to `local`, all other `KEYCLOAK_*` variables are ignored and tenant apps use the traditional session-token flow.
-
-- **`KEYCLOAK_URL`** (required when `AUTH_MODE=keycloak`)  
+- **`KEYCLOAK_URL`** (required)  
   Base URL of the Keycloak instance.  
   Example (k3d): `http://keycloak.127.0.0.1.nip.io:8080`  
   Example (hosted): `https://auth.example.com`
 
-- **`KEYCLOAK_JWKS_URL`** (optional when `AUTH_MODE=keycloak`)  
+- **`KEYCLOAK_JWKS_URL`** (optional)  
   Server-side override for the JWKS endpoint used to validate bearer tokens. Leave it unset when the runtime can reach `{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs` directly.  
   Example (k3d tenant pod): `http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 
-- **`KEYCLOAK_REALM`** (required when `AUTH_MODE=keycloak`)  
-  Keycloak realm name for tenant users and control-plane admins.  
+- **`KEYCLOAK_REALM`** (required)  
+  Keycloak realm name for tenant users. The control-plane admin API uses its own `CONTROL_PLANE_KEYCLOAK_REALM` variable (see `platform/control-plane/README.md`).  
   Example: `dnd-notes-dev` (k3d), `dnd-notes-prod` (hosted)
 
-- **`KEYCLOAK_TENANT_CLIENT_ID`** (required when `AUTH_MODE=keycloak` for tenant apps)  
+- **`KEYCLOAK_TENANT_CLIENT_ID`** (required)  
   Keycloak client ID for tenant app OIDC flows.  
   Example: `dnd-notes-tenant-app`
 
@@ -105,16 +101,6 @@ Service hostname, so the local `apps/api` process falls back to the public
 6. Guest/share-link flows bypass auth and remain anonymous (no JWT required)
 
 **Control-plane admin API:** see `platform/control-plane/README.md` for the prefixed `CONTROL_PLANE_*` and `TENANT_*` environment contract that the control-plane process uses.
-
-#### Local Auth Flow (Legacy mode, `AUTH_MODE=local`)
-
-When `AUTH_MODE=local`:
-
-- Tenant app login uses traditional `/api/auth/register` and `/api/auth/login` endpoints
-- Session tokens (database-backed) are used instead of JWTs
-- Guest/share-link flows remain unchanged
-- Control-plane uses static bearer token from `CONTROL_PLANE_ADMIN_TOKEN` environment variable
-- No Keycloak instance required for local development
 
 ### Container Behavior
 

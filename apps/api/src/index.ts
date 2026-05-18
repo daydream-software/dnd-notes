@@ -13,7 +13,6 @@ const keycloakJwksUrl =
     ? undefined
     : rawKeycloakJwksUrl
 const runtimeAuth = createTenantRuntimeAuth({
-  mode: process.env.AUTH_MODE,
   keycloakUrl: process.env.KEYCLOAK_URL,
   keycloakRealm: process.env.KEYCLOAK_REALM,
   clientId: process.env.KEYCLOAK_TENANT_CLIENT_ID,

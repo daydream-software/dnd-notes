@@ -11,7 +11,12 @@ import {
 } from '../src/note-store.js'
 import { runTenantApiMigrations } from '../src/migrations.js'
 import type { PostgresPoolLike } from '../src/note-store-database.js'
-import { registerOwner, registerPgMemMigrationSupport, withAuth } from './test-helpers.js'
+import {
+  createTestRuntimeAuth,
+  registerOwner,
+  registerPgMemMigrationSupport,
+  withAuth,
+} from './test-helpers.js'
 
 function createPostgresMemDb() {
   const db = newDb({
@@ -44,8 +49,9 @@ test('postgres-backed app supports owner auth and note CRUD workflows', async (t
   const { noteStore, cleanup } = await createPostgresTestStore()
   t.after(cleanup)
 
-  const app = createApp({ noteStore })
-  const { token } = await registerOwner(request(app))
+  const { runtimeAuth, issueToken } = createTestRuntimeAuth()
+  const app = createApp({ noteStore, runtimeAuth })
+  const { token } = await registerOwner(request(app), issueToken)
   const authed = withAuth(request(app), token)
 
   const createResponse = await authed.post('/api/notes').send({

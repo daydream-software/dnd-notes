@@ -26,7 +26,7 @@ npm run dev
 
 `seed:data` loads sample campaigns and notes into a local Postgres database. Copy `apps/api/.env.example` to `apps/api/.env` and set `DATABASE_URL` before running.
 
-Auth defaults to local mode (username/password). Set `AUTH_MODE=keycloak` in `apps/api/.env` and configure the Keycloak environment variables to use an external identity provider.
+Auth is Keycloak-only. The k3d platform loop runs Keycloak as part of the cluster — see `npm run k3d:up` below. Local-only auth (username/password without Keycloak) is no longer supported as of the Phase 2 exit (#318).
 
 ## k3d platform loop
 

@@ -280,11 +280,9 @@ class FakeKeycloakAdminClient {
 
 /**
  * Default `tenantRuntimeAuth` for provisioning tests that exercise the
- * Keycloak path. Mirrors the shape consumed by `TenantProvisioningService`
- * — every field that is required when mode === 'keycloak'.
+ * Keycloak path.
  */
 const keycloakTenantRuntimeAuth = {
-  mode: 'keycloak' as const,
   keycloakUrl: 'https://auth.example.com',
   keycloakJwksUrl:
     'http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-prod/protocol/openid-connect/certs',
@@ -485,7 +483,6 @@ describe('TenantProvisioningService', () => {
         databaseManager,
         infrastructureManager,
         tenantRuntimeAuth: {
-          mode: 'keycloak',
           keycloakUrl: 'https://auth.example.com',
           keycloakJwksUrl: 'http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-prod/protocol/openid-connect/certs',
           keycloakRealm: 'dnd-notes-prod',
@@ -2127,53 +2124,6 @@ describe('TenantProvisioningService', () => {
     }
   })
 
-  it('skips per-tenant Keycloak provisioning when tenant runtime auth is local (CodeRabbit #200)', async () => {
-    // When tenantRuntimeAuth.mode === 'local' the tenant API does not
-    // enforce Keycloak roles, so the provisioner has no reason to depend
-    // on Keycloak admin availability. A Keycloak admin client may still
-    // be configured globally (control-plane uses Keycloak even though some
-    // tenants stay on local auth) — the provisioner must skip the per-
-    // tenant KC steps in that case.
-    const { tenantRegistry, cleanup } = createTestTenantRegistry()
-    const databaseManager = new FakeDatabaseManager()
-    const infrastructureManager = new FakeInfrastructureManager()
-    const keycloakAdminClient = new FakeKeycloakAdminClient()
-
-    const provisioningService = new TenantProvisioningService({
-      tenantRegistry,
-      databaseManager,
-      infrastructureManager,
-      keycloakAdminClient,
-      // mode: 'local' → no per-tenant Keycloak operations expected.
-      tenantRuntimeAuth: { mode: 'local' },
-      baseDomain: 'dnd-notes.test',
-      imageRepository: 'ghcr.io/daydream-software/dnd-notes',
-    })
-
-    try {
-      await tenantRegistry.createTenant({
-        id: 'tenant-demo',
-        slug: 'demo',
-        ownerId: 'owner-1',
-        initialAdminEmail: 'irrelevant@example.com',
-        version: '1.0.0',
-      })
-
-      const result = await provisioningService.provisionTenant({
-        tenantId: 'tenant-demo',
-        triggeredBy: 'control-plane',
-      })
-
-      assert.equal(result.tenant.currentState, 'ready')
-      assert.equal(keycloakAdminClient.ensureCalls.length, 0)
-      assert.equal(keycloakAdminClient.ensureClientRoleCalls.length, 0)
-      assert.equal(keycloakAdminClient.assignClientRoleCalls.length, 0)
-      assert.equal(keycloakAdminClient.findUserByEmailCalls.length, 0)
-    } finally {
-      await provisioningService.close()
-      await cleanup()
-    }
-  })
 })
 
 function extractQuotedIdentifier(sql: string) {

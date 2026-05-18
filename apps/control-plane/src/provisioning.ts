@@ -190,7 +190,6 @@ export class TenantProvisioningConflictError extends Error {
 }
 
 interface TenantRuntimeAuthConfig {
-  mode: 'local' | 'keycloak'
   keycloakJwksUrl?: string
   keycloakRealm?: string
   keycloakUrl?: string
@@ -222,7 +221,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly tenantRegistry: TenantRegistry
   private readonly infrastructureManager: TenantInfrastructureManager
   private readonly databaseManager: TenantDatabaseManager
-  private readonly tenantRuntimeAuth: TenantRuntimeAuthConfig
+  private readonly tenantRuntimeAuth: TenantRuntimeAuthConfig | undefined
   private readonly keycloakAdminClient?: KeycloakAdminClient
   private readonly baseDomain: string
   private readonly ingressClassName: string
@@ -238,7 +237,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.tenantRegistry = options.tenantRegistry
     this.infrastructureManager = options.infrastructureManager
     this.databaseManager = options.databaseManager
-    this.tenantRuntimeAuth = options.tenantRuntimeAuth ?? { mode: 'local' }
+    this.tenantRuntimeAuth = options.tenantRuntimeAuth
     this.keycloakAdminClient = options.keycloakAdminClient
     this.baseDomain = options.baseDomain
     this.ingressClassName = options.ingressClassName ?? 'nginx'
@@ -442,14 +441,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         // when the pod first initialises. Failure here is intentionally fatal for
         // provisioning — the tenant SPA cannot authenticate without it.
         //
-        // Skip entirely when tenantRuntimeAuth.mode === 'local': the tenant API
-        // does not enforce Keycloak roles in local mode, so there's no reason to
-        // make provisioning depend on Keycloak admin availability for that path
-        // (CodeRabbit #200).
-        if (
-          this.keycloakAdminClient &&
-          this.tenantRuntimeAuth.mode === 'keycloak'
-        ) {
+        if (this.keycloakAdminClient) {
           const hostname = bundle.resources.hostname
           const tenantClientId = `dnd-notes-tenant-${refreshedTenant.id}`
           await this.keycloakAdminClient.ensureClient({
@@ -683,8 +675,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
    * the same as any other provisioning failure.
    *
    * Caller is expected to have already verified that
-   * `this.keycloakAdminClient` is defined and that
-   * `this.tenantRuntimeAuth.mode === 'keycloak'`. The `registryClient`
+   * `this.keycloakAdminClient` is defined. The `registryClient`
    * argument MUST be the lock-scoped client passed into `withTenantLock`,
    * so the portal-account read participates in the same locked transaction
    * as the rest of provisioning (no fresh registry connection while the
@@ -1144,7 +1135,7 @@ export function buildTenantInfrastructureBundle(
   }
 
   configMapData.TENANT_ID = options.tenant.id
-  if (options.tenantRuntimeAuth?.mode === 'keycloak') {
+  if (options.tenantRuntimeAuth) {
     if (
       !options.tenantRuntimeAuth.keycloakUrl ||
       !options.tenantRuntimeAuth.keycloakRealm

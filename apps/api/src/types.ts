@@ -83,25 +83,15 @@ export interface KeycloakOwnerIdentity {
 }
 
 export interface AuthConfigResponse {
-  mode: 'local' | 'keycloak'
-  keycloak:
-    | {
-        url: string
-        realm: string
-        clientId: string
-      }
-    | null
+  keycloak: {
+    url: string
+    realm: string
+    clientId: string
+  }
 }
 
-export interface OwnerRegistrationInput {
-  displayName: string
-  email: string
-  password: string
-}
-
-export interface OwnerLoginInput {
-  email: string
-  password: string
+export interface CurrentOwnerResponse {
+  owner: OwnerAccount
 }
 
 export interface NoteAttribution {
@@ -210,15 +200,6 @@ export interface AdminAccountSummary extends OwnerAccount {
 
 export interface AdminAccountsResponse {
   accounts: AdminAccountSummary[]
-}
-
-export interface AuthSessionResponse {
-  token: string
-  owner: OwnerAccount
-}
-
-export interface CurrentOwnerResponse {
-  owner: OwnerAccount
 }
 
 export interface CampaignsResponse {

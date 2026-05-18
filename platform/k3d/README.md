@@ -199,7 +199,6 @@ The k3d overlay ConfigMap automatically injects:
 - `CONTROL_PLANE_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-dev`
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
-- `TENANT_AUTH_MODE=keycloak`
 - `TENANT_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
 - `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 - `TENANT_KEYCLOAK_REALM=dnd-notes-dev`

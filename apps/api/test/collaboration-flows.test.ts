@@ -16,10 +16,10 @@ function findNoteById(notes: Array<{ id: string }>, noteId: string) {
 }
 
 test('recent activity returns collaborator summaries, supports filters, and rejects foreign memberships', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const RealDate = Date
@@ -188,10 +188,10 @@ test('recent activity returns collaborator summaries, supports filters, and reje
 })
 
 test('claimed collaborators can load recent activity for accessible campaigns', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const shareLinkResponse = await authed
@@ -222,7 +222,7 @@ test('claimed collaborators can load recent activity for accessible campaigns', 
   })
   assert.equal(guestCreateResponse.status, 201)
 
-  const claimant = await registerOwner(request(app), {
+  const claimant = await registerOwner(request(app), issueToken!, {
     displayName: 'Mira Vale',
     email: 'mira.activity@example.com',
     password: 'mira-activity-claim',
@@ -250,10 +250,10 @@ test('claimed collaborators can load recent activity for accessible campaigns', 
 })
 
 test('shared links support guest join, scoped access, and editor note workflow', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const shareLinkResponse = await authed
@@ -366,10 +366,10 @@ test('shared links support guest join, scoped access, and editor note workflow',
 })
 
 test('shared guest joins are rate limited per link after repeated attempts', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
   const shareLinkResponse = await authed
     .post(`/api/campaigns/${defaultCampaignId}/share-links`)
@@ -403,10 +403,10 @@ test('shared guest joins are rate limited per link after repeated attempts', asy
 })
 
 test('guests can claim an existing membership with a real account without losing attribution', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const shareLinkResponse = await authed
@@ -441,7 +441,7 @@ test('guests can claim an existing membership with a real account without losing
   const noteId = createNoteResponse.body.note.id as string
   const membershipId = createNoteResponse.body.note.createdBy.membershipId as string
 
-  const claimant = await registerOwner(request(app), {
+  const claimant = await registerOwner(request(app), issueToken!, {
     displayName: 'Mira Vale',
     email: 'mira@example.com',
     password: 'mira-claims-history',
@@ -535,10 +535,10 @@ test('guests can claim an existing membership with a real account without losing
 })
 
 test('shared membership claims are rate limited after repeated attempts', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
   const shareLinkResponse = await authed
     .post(`/api/campaigns/${defaultCampaignId}/share-links`)
@@ -555,7 +555,7 @@ test('shared membership claims are rate limited after repeated attempts', async 
   })
   assert.equal(joinResponse.status, 201)
 
-  const claimant = await registerOwner(request(app), {
+  const claimant = await registerOwner(request(app), issueToken!, {
     displayName: 'Claimant',
     email: 'claim-rate-limit@example.com',
     password: 'claim-rate-limit-password',
@@ -590,10 +590,10 @@ test('shared membership claims are rate limited after repeated attempts', async 
 })
 
 test('owners can preview and consolidate note attribution onto another membership', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const shareLinkResponse = await authed
@@ -807,10 +807,10 @@ test('owners can preview and consolidate note attribution onto another membershi
 })
 
 test('linked guest accounts cannot consolidate memberships through the owner-only route', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const ownerAuthed = withAuth(request(app), token)
 
   const ownerMembershipsResponse = await ownerAuthed.get(
@@ -834,7 +834,7 @@ test('linked guest accounts cannot consolidate memberships through the owner-onl
   })
   assert.equal(joinResponse.status, 201)
 
-  const claimant = await registerOwner(request(app), {
+  const claimant = await registerOwner(request(app), issueToken!, {
     displayName: 'Mira Vale',
     email: 'mira-non-owner@example.com',
     password: 'mira-cannot-consolidate',
@@ -880,10 +880,10 @@ test('linked guest accounts cannot consolidate memberships through the owner-onl
 })
 
 test('membership consolidations reject membership IDs from another campaign', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const defaultMembershipsResponse = await authed.get(
@@ -934,10 +934,10 @@ test('membership consolidations reject membership IDs from another campaign', as
 })
 
 test('role-changing membership consolidations require explicit confirmation', async (t) => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
   t.after(cleanup)
 
-  const { token } = await registerOwner(request(app))
+  const { token } = await registerOwner(request(app), issueToken!)
   const authed = withAuth(request(app), token)
 
   const membershipsResponse = await authed.get(

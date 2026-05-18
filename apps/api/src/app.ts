@@ -3,7 +3,7 @@ import express, { type Express, type Request, type Response } from 'express'
 import { fileURLToPath } from 'node:url'
 import { dirname, extname, join } from 'node:path'
 import {
-  createTenantRuntimeAuth,
+  createStubTenantRuntimeAuth,
   type TenantRuntimeAuth,
 } from './keycloak-auth.js'
 import type { NoteStore } from './note-store.js'
@@ -46,7 +46,7 @@ export function createApp({
   noteStore: initialNoteStore,
   publicWebUrl: configuredPublicWebUrl,
   allowedOrigins: configuredAllowedOrigins,
-  runtimeAuth = createTenantRuntimeAuth({ mode: 'local' }),
+  runtimeAuth = createStubTenantRuntimeAuth(),
   isShuttingDown = () => false,
   serveWeb = false,
   webDistPath,

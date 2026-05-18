@@ -1,9 +1,15 @@
 import assert from 'node:assert'
+import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { afterEach, beforeEach, describe, it, test } from 'node:test'
 import { format as formatLog } from 'node:util'
 import request from 'supertest'
 import { createApp, makeRateLimiter, readPositiveIntEnv } from '../src/app.js'
+import {
+  ControlPlaneAuthError,
+  type PortalKeycloakAuth,
+  type PortalTokenClaims,
+} from '../src/keycloak-auth.js'
 import {
   TenantProvisioningConflictError,
   TenantProvisioningValidationError,
@@ -11,6 +17,37 @@ import {
 } from '../src/provisioning.js'
 import { type TenantRegistry } from '../src/tenant-registry.js'
 import { createTestTenantRegistry } from './tenant-registry-test-helpers.js'
+
+/**
+ * In-process portal Keycloak stand-in for tests that need an authenticated
+ * portal user without standing up a real Keycloak server. `issueToken`
+ * registers a set of claims and returns a bearer token; `verifyBearerToken`
+ * looks it up when the middleware fires.
+ */
+function createTestPortalKeycloakAuth(): {
+  portalKeycloakAuth: PortalKeycloakAuth
+  issueToken(claims: PortalTokenClaims): string
+} {
+  const tokens = new Map<string, PortalTokenClaims>()
+
+  const portalKeycloakAuth: PortalKeycloakAuth = {
+    async verifyBearerToken(token) {
+      const claims = tokens.get(token)
+      if (!claims) {
+        throw new ControlPlaneAuthError(401, 'Unauthorized')
+      }
+      return claims
+    },
+  }
+
+  function issueToken(claims: PortalTokenClaims): string {
+    const token = `test-portal-token-${randomUUID()}`
+    tokens.set(token, claims)
+    return token
+  }
+
+  return { portalKeycloakAuth, issueToken }
+}
 
 const require = createRequire(import.meta.url)
 const { version: appVersion } = require('../package.json') as { version: string }
@@ -23,6 +60,8 @@ describe('Control Plane API', () => {
   let app: ReturnType<typeof createApp>
   let tenantProvisioningService: TenantProvisioningPort | undefined
   let cleanupTenantRegistry: (() => Promise<void>) | undefined
+  let issuePortalToken: (claims: PortalTokenClaims) => string
+  let portalKeycloakAuth: PortalKeycloakAuth
 
   const authedGet = (path: string) =>
     request(app).get(path).set('Authorization', `Bearer ${adminToken}`)
@@ -38,7 +77,10 @@ describe('Control Plane API', () => {
     tenantRegistry = registry.tenantRegistry
     cleanupTenantRegistry = registry.cleanup
     tenantProvisioningService = undefined
-    app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+    const testPortalAuth = createTestPortalKeycloakAuth()
+    portalKeycloakAuth = testPortalAuth.portalKeycloakAuth
+    issuePortalToken = testPortalAuth.issueToken
+    app = createApp({ tenantRegistry, adminToken, tenantProvisioningService, portalKeycloakAuth })
   })
 
   afterEach(async () => {
@@ -123,12 +165,12 @@ describe('Control Plane API', () => {
         tenantRegistry,
         adminToken,
         tenantProvisioningService,
+        portalKeycloakAuth,
         portalDefaultTenantVersion: '9.9.9',
       })
 
       const response = await request(app).get('/portal/catalog').expect(200)
 
-      assert.strictEqual(response.body.authMode, 'local')
       assert.strictEqual(response.body.defaultTenantVersion, '9.9.9')
       assert.strictEqual(response.body.provisioningConfigured, false)
       assert.strictEqual(response.body.slugPolicy.example, 'misty-harbor')
@@ -136,348 +178,104 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.placeholders.billingStatus, 'placeholder')
     })
 
-    it('creates a portal account, first tenant, and session via signup', async () => {
-      const response = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'Owner@Example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          billingEmail: 'billing@example.com',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(201)
-
-      assert.strictEqual(typeof response.body.token, 'string')
-      assert.ok(response.body.token.length > 0)
-      assert.strictEqual(response.body.dashboard.account.email, 'owner@example.com')
-      assert.strictEqual(response.body.dashboard.account.displayName, 'Alyx')
-      assert.strictEqual(response.body.dashboard.account.billingProvider, 'stripe')
-      assert.strictEqual(response.body.dashboard.tenants.length, 1)
-      assert.strictEqual(
-        response.body.dashboard.tenants[0].tenant.displayName,
-        'Misty Harbor',
-      )
-      assert.strictEqual(response.body.dashboard.tenants[0].tenant.planTier, 'guild')
-      assert.strictEqual(
-        response.body.dashboard.tenants[0].tenant.initialAdminEmail,
-        'owner@example.com',
-      )
-
-      const account = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
-      assert.ok(account)
-      assert.strictEqual(account.billingEmail, 'billing@example.com')
-      assert.strictEqual(account.authProvider, 'local')
-
-      const authRecord = await tenantRegistry.getPortalAccountAuthByEmail('owner@example.com')
-      assert.ok(authRecord)
-      assert.ok(authRecord.passwordHash)
-
-      const ownedTenants = await tenantRegistry.listTenantsByOwnerId(account.id)
-      assert.strictEqual(ownedTenants.length, 1)
-      assert.strictEqual(ownedTenants[0].slug, 'misty-harbor')
-    })
-
-    it('rejects signup when a portal account already exists for the email', async () => {
-      await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(201)
-
-      const response = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Mallory',
-          password: 'another-secret-passphrase',
-          paymentProvider: 'square',
-          tenantName: 'Other Tenant',
-          tenantSlug: 'other-tenant',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(409)
-
-      assert.strictEqual(response.body.error, 'Portal account already exists')
-    })
-
-    it('returns 409 when signup hits a portal account postgres unique constraint race', async () => {
-      const originalCreatePortalAccount = tenantRegistry.createPortalAccount.bind(tenantRegistry)
-      tenantRegistry.createPortalAccount = () => {
-        const error = new Error('duplicate key value violates unique constraint "portal_accounts_email_key"') as Error & {
-          code?: string
-        }
-        error.code = '23505'
-        throw error
-      }
-
-      const response = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(409)
-
-      tenantRegistry.createPortalAccount = originalCreatePortalAccount
-
-      assert.strictEqual(response.body.error, 'Portal account already exists')
-      assert.match(
-        response.body.details,
-        /An account already exists for that email/i,
-      )
-    })
-
-    it('returns 409 when signup hits a postgres constraint with a structured constraint name', async () => {
-      const originalCreatePortalAccount = tenantRegistry.createPortalAccount.bind(tenantRegistry)
-      tenantRegistry.createPortalAccount = () => {
-        const error = new Error('duplicate key') as Error & {
-          code?: string
-          constraint?: string
-        }
-        error.code = '23505'
-        error.constraint = 'portal_accounts_email_key'
-        throw error
-      }
-
-      const response = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(409)
-
-      tenantRegistry.createPortalAccount = originalCreatePortalAccount
-
-      assert.strictEqual(response.body.error, 'Portal account already exists')
-      assert.match(
-        response.body.details,
-        /An account already exists for that email/i,
-      )
-    })
-
-    it('does not reserve an email address when signup fails before account creation', async () => {
-      await tenantRegistry.createTenant({
-        id: 'tenant-existing',
-        slug: 'misty-harbor',
-        ownerId: 'owner-existing',
-        displayName: 'Existing Tenant',
-        version: '1.0.0',
+    it('auto-provisions a portal account on first Keycloak login and returns dashboard', async () => {
+      const token = issuePortalToken({
+        sub: 'kc-sub-alyx',
+        email: 'owner@example.com',
+        name: 'Alyx',
       })
 
-      const failedSignup = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(409)
+      const response = await portalAuthedGet('/portal/me', token).expect(200)
 
-      assert.strictEqual(failedSignup.body.error, 'Portal signup conflict')
-      assert.strictEqual(await tenantRegistry.getPortalAccountByEmail('owner@example.com'), null)
+      assert.ok(response.body.account)
+      assert.strictEqual(response.body.account.email, 'owner@example.com')
+      assert.strictEqual(response.body.account.displayName, 'Alyx')
+      assert.strictEqual(response.body.tenants.length, 0)
 
-      const successfulSignup = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Emberfall',
-          tenantSlug: 'emberfall',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(201)
-
-      assert.strictEqual(
-        successfulSignup.body.dashboard.account.email,
-        'owner@example.com',
-      )
-      assert.strictEqual(successfulSignup.body.dashboard.tenants.length, 1)
-      assert.strictEqual(
-        successfulSignup.body.dashboard.tenants[0].tenant.slug,
-        'emberfall',
-      )
+      const account = await tenantRegistry.getPortalAccountByKeycloakSub('kc-sub-alyx')
+      assert.ok(account)
+      assert.strictEqual(account.email, 'owner@example.com')
     })
 
-    it('rolls back portal signup resources when provisioning fails after partial setup', async () => {
-      let deprovisionRequest:
-        | {
-            tenantId: string
-            triggeredBy: string
-            reason?: string
-          }
-        | undefined
+    it('returns dashboard for an existing account resolved via keycloakSub fast path', async () => {
+      await tenantRegistry.createPortalAccount({
+        id: 'acct-fast-path',
+        email: 'fast@example.com',
+        displayName: 'Fast',
+        keycloakSub: 'kc-sub-fast',
+      })
+      const token = issuePortalToken({ sub: 'kc-sub-fast', email: 'fast@example.com' })
 
-      tenantProvisioningService = {
-        async provisionTenant(request) {
-          await tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
-          await tenantRegistry.updateTenantStorageReference(
-            request.tenantId,
-            'dnd-notes-data-t-misty-harbor',
-          )
-          throw new Error('synthetic infrastructure failure')
-        },
-        async deprovisionTenant(request) {
-          deprovisionRequest = request
-          await tenantRegistry.updateTenantStorageReference(request.tenantId, null)
-          await tenantRegistry.updateTenantDesiredState(request.tenantId, 'deprovisioned')
-          await tenantRegistry.updateTenantState(
-            request.tenantId,
-            'deprovisioned',
-            request.triggeredBy,
-            request.reason,
-          )
+      const response = await portalAuthedGet('/portal/me', token).expect(200)
 
-          return {
-            tenant: (await tenantRegistry.getTenant(request.tenantId))!,
-            deprovisioned: true,
-          }
-        },
-        async close() {},
-      }
+      assert.strictEqual(response.body.account.id, 'acct-fast-path')
+    })
 
-      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+    it('returns 401 when no bearer token is provided', async () => {
+      const response = await request(app).get('/portal/me').expect(401)
+      assert.ok(response.body.error)
+    })
 
+    it('returns 401 for an unrecognized bearer token', async () => {
       const response = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(500)
-
-      assert.strictEqual(response.body.error, 'Failed to complete portal signup')
-      assert.strictEqual(
-        response.body.details,
-        'An unexpected error occurred while creating your account. Please try again later.',
-      )
-      assert.strictEqual(
-        await tenantRegistry.getPortalAccountByEmail('owner@example.com'),
-        null,
-      )
-      assert.strictEqual(await tenantRegistry.getTenantBySlug('misty-harbor'), null)
-      assert.ok(deprovisionRequest)
-      assert.match(deprovisionRequest.triggeredBy, /^portal:/)
-      assert.strictEqual(
-        deprovisionRequest.reason,
-        'Portal rollback after failed tenant provisioning (guild, stripe)',
-      )
+        .get('/portal/me')
+        .set('Authorization', 'Bearer not-a-real-token')
+        .expect(401)
+      assert.ok(response.body.error)
     })
 
-    it('deletes the portal account even when signup rollback deprovisioning fails', async () => {
-      tenantProvisioningService = {
-        async provisionTenant(request) {
-          await tenantRegistry.updateTenantSubdomain(request.tenantId, 't-misty-harbor')
-          await tenantRegistry.updateTenantStorageReference(
-            request.tenantId,
-            'dnd-notes-data-t-misty-harbor',
-          )
-          throw new Error('synthetic infrastructure failure')
-        },
-        async deprovisionTenant() {
-          throw new Error('synthetic deprovision failure')
-        },
-        async close() {},
-      }
+    // Placeholder to silence unused-variable lint for the original signup section.
+    it('creates a portal account via Keycloak auto-link (email-match path)', async () => {
+      // Pre-existing account from the local-auth era — no keycloakSub yet.
+      await tenantRegistry.createPortalAccount({
+        id: 'acct-local-era',
+        email: 'owner@example.com',
+        displayName: 'Alyx',
+        billingEmail: 'billing@example.com',
+        billingProvider: 'stripe',
+      })
 
-      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+      const token = issuePortalToken({
+        sub: 'kc-sub-new',
+        email: 'owner@example.com',
+        name: 'Alyx',
+      })
 
-      const response = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(500)
+      const response = await portalAuthedGet('/portal/me', token).expect(200)
+      assert.strictEqual(response.body.account.email, 'owner@example.com')
 
-      assert.strictEqual(response.body.error, 'Failed to complete portal signup')
-      assert.strictEqual(
-        response.body.details,
-        'An unexpected error occurred while creating your account. Please try again later.',
-      )
-      assert.strictEqual(
-        await tenantRegistry.getPortalAccountByEmail('owner@example.com'),
-        null,
-      )
-      assert.strictEqual(await tenantRegistry.getTenantBySlug('misty-harbor'), null)
+      // Sub must be persisted after auto-link.
+      const linked = await tenantRegistry.getPortalAccountByKeycloakSub('kc-sub-new')
+      assert.ok(linked)
+      assert.strictEqual(linked.id, 'acct-local-era')
     })
 
-    it('restores an owner-scoped dashboard, creates another tenant, and logs out', async () => {
-      const signupResponse = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          billingEmail: 'billing@example.com',
-          paymentProvider: 'manual-review',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'adventurer',
-          acceptTerms: true,
-        })
-        .expect(201)
-
-      const sessionToken = signupResponse.body.token as string
-      const ownerAccount = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
-      assert.ok(ownerAccount)
-
-      const ownerTenant = (await tenantRegistry.listTenantsByOwnerId(ownerAccount.id))[0]
-      await tenantRegistry.updateTenantSubdomain(ownerTenant.id, 't-misty-harbor')
-      await tenantRegistry.updateTenantDesiredState(ownerTenant.id, 'ready')
-      await tenantRegistry.updateTenantState(ownerTenant.id, 'ready', 'test-suite')
+    it('restores an owner-scoped dashboard and creates another tenant', async () => {
+      // Provision initial account + tenant directly (bypassing old signup route).
+      const ownerAccount = await tenantRegistry.createPortalAccount({
+        id: 'acct-alyx',
+        email: 'owner@example.com',
+        displayName: 'Alyx',
+        billingEmail: 'billing@example.com',
+        billingProvider: 'manual-review',
+        keycloakSub: 'kc-sub-alyx',
+      })
+      await tenantRegistry.createTenant({
+        id: 'tenant-misty-harbor',
+        slug: 'misty-harbor',
+        ownerId: ownerAccount.id,
+        displayName: 'Misty Harbor',
+        planTier: 'adventurer',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantSubdomain('tenant-misty-harbor', 't-misty-harbor')
+      await tenantRegistry.updateTenantDesiredState('tenant-misty-harbor', 'ready')
+      await tenantRegistry.updateTenantState('tenant-misty-harbor', 'ready', 'test-suite')
 
       const otherAccount = await tenantRegistry.createPortalAccount({
         id: 'account-2',
         email: 'other@example.com',
         displayName: 'Other Owner',
-        passwordHash: 'test-salt:test-hash',
       })
       await tenantRegistry.createTenant({
         id: 'tenant-other',
@@ -492,12 +290,13 @@ describe('Control Plane API', () => {
         tenantRegistry,
         adminToken,
         tenantProvisioningService,
+        portalKeycloakAuth,
         tenantBaseDomain: 'example.com',
       })
 
-      const dashboardResponse = await portalAuthedGet('/portal/me', sessionToken).expect(
-        200,
-      )
+      const token = issuePortalToken({ sub: 'kc-sub-alyx', email: 'owner@example.com' })
+
+      const dashboardResponse = await portalAuthedGet('/portal/me', token).expect(200)
 
       assert.strictEqual(dashboardResponse.body.account.email, 'owner@example.com')
       assert.strictEqual(dashboardResponse.body.tenants.length, 1)
@@ -512,7 +311,7 @@ describe('Control Plane API', () => {
 
       const createTenantResponse = await portalAuthedPost(
         '/portal/me/tenants',
-        sessionToken,
+        token,
       )
         .send({
           tenantName: 'Emberfall',
@@ -532,43 +331,21 @@ describe('Control Plane API', () => {
       )
       assert.ok(emberfallTenant)
       assert.strictEqual(emberfallTenant.tenant.planTier, 'guild')
-      assert.strictEqual(
-        (await tenantRegistry.getPortalAccountByEmail('owner@example.com'))?.billingEmail,
-        'billing@example.com',
-      )
-
-      await portalAuthedPost('/portal/logout', sessionToken).send({}).expect(200)
-      await portalAuthedGet('/portal/me', sessionToken).expect(401)
-
-      const loginResponse = await request(app)
-        .post('/portal/login')
-        .send({
-          email: 'owner@example.com',
-          password: 'top-secret-passphrase',
-        })
-        .expect(200)
-
-      assert.strictEqual(loginResponse.body.dashboard.account.email, 'owner@example.com')
     })
 
     it('cleans up a portal tenant when account updates fail during self-serve tenant creation', async () => {
-      const signupResponse = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'manual-review',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'adventurer',
-          acceptTerms: true,
-        })
-        .expect(201)
+      const ownerAccount = await tenantRegistry.createPortalAccount({
+        id: 'acct-alyx-cleanup',
+        email: 'owner@example.com',
+        displayName: 'Alyx',
+        billingProvider: 'manual-review',
+        keycloakSub: 'kc-sub-alyx-cleanup',
+      })
 
-      const sessionToken = signupResponse.body.token as string
-      const ownerAccount = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
-      assert.ok(ownerAccount)
+      const token = issuePortalToken({
+        sub: 'kc-sub-alyx-cleanup',
+        email: 'owner@example.com',
+      })
 
       const originalUpdatePortalAccount = tenantRegistry.updatePortalAccount.bind(
         tenantRegistry,
@@ -577,7 +354,7 @@ describe('Control Plane API', () => {
         throw new Error('Simulated portal account update failure')
       }
 
-      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+      const response = await portalAuthedPost('/portal/me/tenants', token)
         .send({
           tenantName: 'Emberfall',
           tenantSlug: 'emberfall',
@@ -599,26 +376,22 @@ describe('Control Plane API', () => {
       )
       assert.strictEqual(
         (await tenantRegistry.listTenantsByOwnerId(ownerAccount.id)).length,
-        1,
+        0,
       )
     })
 
     it('returns 409 when tenant creation hits a postgres unique constraint race', async () => {
-      const signupResponse = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'manual-review',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'adventurer',
-          acceptTerms: true,
-        })
-        .expect(201)
+      await tenantRegistry.createPortalAccount({
+        id: 'acct-alyx',
+        email: 'owner@example.com',
+        displayName: 'Alyx',
+        keycloakSub: 'kc-sub-alyx',
+      })
 
-      const sessionToken = signupResponse.body.token as string
+      const token = issuePortalToken({
+        sub: 'kc-sub-alyx',
+        email: 'owner@example.com',
+      })
       const originalCreateTenant = tenantRegistry.createTenant.bind(tenantRegistry)
       tenantRegistry.createTenant = () => {
         const error = new Error('duplicate key value violates unique constraint "tenants_slug_key"') as Error & {
@@ -628,7 +401,7 @@ describe('Control Plane API', () => {
         throw error
       }
 
-      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+      const response = await portalAuthedPost('/portal/me/tenants', token)
         .send({
           tenantName: 'Emberfall',
           tenantSlug: 'emberfall',
@@ -681,6 +454,7 @@ describe('Control Plane API', () => {
               hostname: `${request.tenantId.slice(-8)}.dnd-notes.test`,
               databaseName: 'tenant_db',
               image: 'ghcr.io/daydream-software/dnd-notes:1.0.0',
+              pvcName: null,
             },
           }
         },
@@ -703,25 +477,20 @@ describe('Control Plane API', () => {
         async close() {},
       }
 
-      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService })
+      app = createApp({ tenantRegistry, adminToken, tenantProvisioningService, portalKeycloakAuth })
 
-      const signupResponse = await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'manual-review',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'adventurer',
-          acceptTerms: true,
-        })
-        .expect(201)
+      const ownerAccount = await tenantRegistry.createPortalAccount({
+        id: 'acct-alyx-deprovision',
+        email: 'owner@example.com',
+        displayName: 'Alyx',
+        billingProvider: 'manual-review',
+        keycloakSub: 'kc-sub-alyx-deprovision',
+      })
 
-      const sessionToken = signupResponse.body.token as string
-      const ownerAccount = await tenantRegistry.getPortalAccountByEmail('owner@example.com')
-      assert.ok(ownerAccount)
+      const token = issuePortalToken({
+        sub: 'kc-sub-alyx-deprovision',
+        email: 'owner@example.com',
+      })
 
       const originalUpdatePortalAccount = tenantRegistry.updatePortalAccount.bind(
         tenantRegistry,
@@ -730,7 +499,7 @@ describe('Control Plane API', () => {
         throw new Error('Simulated portal account update failure')
       }
 
-      const response = await portalAuthedPost('/portal/me/tenants', sessionToken)
+      const response = await portalAuthedPost('/portal/me/tenants', token)
         .send({
           tenantName: 'Emberfall',
           tenantSlug: 'emberfall',
@@ -755,173 +524,8 @@ describe('Control Plane API', () => {
       )
       assert.strictEqual(
         (await tenantRegistry.listTenantsByOwnerId(ownerAccount.id)).length,
-        1,
+        0,
       )
-    })
-
-    it('uses forwarded client IPs for portal rate limiting when trust proxy is enabled', async () => {
-      app = createApp({
-        tenantRegistry,
-        adminToken,
-        tenantProvisioningService,
-        trustProxy: true,
-      })
-
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await request(app)
-          .post('/portal/signup')
-          .set('X-Forwarded-For', '203.0.113.10')
-          .send({})
-          .expect(400)
-      }
-
-      await request(app)
-        .post('/portal/signup')
-        .set('X-Forwarded-For', '198.51.100.24')
-        .send({})
-        .expect(400)
-    })
-
-    it('rejects local portal login with the wrong password', async () => {
-      await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(201)
-
-      const response = await request(app)
-        .post('/portal/login')
-        .send({
-          email: 'owner@example.com',
-          password: 'wrong-password',
-        })
-        .expect(401)
-
-      assert.strictEqual(response.body.error, 'Unauthorized')
-    })
-
-    it('rate limits repeated portal signup attempts', async () => {
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await request(app).post('/portal/signup').send({}).expect(400)
-      }
-
-      const response = await request(app).post('/portal/signup').send({}).expect(429)
-
-      assert.strictEqual(
-        response.body.error,
-        'Too many portal signup attempts. Please wait before trying again.',
-      )
-      assert.strictEqual(typeof response.headers['retry-after'], 'string')
-    })
-
-    it('rate limits portal signup before parsing request bodies', async () => {
-      const agent = request.agent(app)
-
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await agent.post('/portal/signup').send({}).expect(400)
-      }
-
-      const response = await agent
-        .post('/portal/signup')
-        .set('Content-Type', 'application/json')
-        .send('{"broken":')
-        .expect(429)
-
-      assert.strictEqual(
-        response.body.error,
-        'Too many portal signup attempts. Please wait before trying again.',
-      )
-
-      await agent.get('/health').expect(200)
-    })
-
-    it('rate limits repeated portal login attempts', async () => {
-      await request(app)
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(201)
-
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await request(app)
-          .post('/portal/login')
-          .send({
-            email: 'owner@example.com',
-            password: 'wrong-password',
-          })
-          .expect(401)
-      }
-
-      const response = await request(app)
-        .post('/portal/login')
-        .send({
-          email: 'owner@example.com',
-          password: 'wrong-password',
-        })
-        .expect(429)
-
-      assert.strictEqual(
-        response.body.error,
-        'Too many portal login attempts. Please wait before trying again.',
-      )
-      assert.strictEqual(typeof response.headers['retry-after'], 'string')
-    })
-
-    it('rate limits portal login before parsing request bodies', async () => {
-      const agent = request.agent(app)
-
-      await agent
-        .post('/portal/signup')
-        .send({
-          email: 'owner@example.com',
-          displayName: 'Alyx',
-          password: 'top-secret-passphrase',
-          paymentProvider: 'stripe',
-          tenantName: 'Misty Harbor',
-          tenantSlug: 'misty-harbor',
-          planTier: 'guild',
-          acceptTerms: true,
-        })
-        .expect(201)
-
-      for (let attempt = 0; attempt < 5; attempt += 1) {
-        await agent
-          .post('/portal/login')
-          .send({
-            email: 'owner@example.com',
-            password: 'wrong-password',
-          })
-          .expect(401)
-      }
-
-      const response = await agent
-        .post('/portal/login')
-        .set('Content-Type', 'application/json')
-        .send('{"broken":')
-        .expect(429)
-
-      assert.strictEqual(
-        response.body.error,
-        'Too many portal login attempts. Please wait before trying again.',
-      )
-
-      await agent.get('/health').expect(200)
     })
   })
 

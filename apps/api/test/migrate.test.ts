@@ -26,7 +26,7 @@ test('tenant API migrations keep the .sql filename and use a namespaced ledger',
     )
     assert.deepEqual(
       migrations.rows.map((row) => row.name),
-      ['0001_baseline.sql'],
+      ['0001_baseline.sql', '0002_remove_local_auth.sql'],
     )
 
     const legacyLedger = await pool.query<{ table_name: string }>(`
@@ -48,14 +48,14 @@ test('tenant API migrations keep the .sql filename and use a namespaced ledger',
       ledgerColumns.rows.map((row) => row.column_name),
       ['name', 'applied_at'],
     )
-    await pool.query(`INSERT INTO ${tenantApiMigrationLedgerTable} (name) VALUES ('0002_manual.sql')`)
+    await pool.query(`INSERT INTO ${tenantApiMigrationLedgerTable} (name) VALUES ('9999_manual.sql')`)
     await assert.rejects(
-      pool.query(`INSERT INTO ${tenantApiMigrationLedgerTable} (name) VALUES ('0002_manual.sql')`),
+      pool.query(`INSERT INTO ${tenantApiMigrationLedgerTable} (name) VALUES ('9999_manual.sql')`),
       /duplicate|already exists|unique|primary key/i,
     )
 
     const migrationsOnDisk = await listTenantApiMigrations()
-    assert.deepEqual(migrationsOnDisk, ['0001_baseline.sql'])
+    assert.deepEqual(migrationsOnDisk, ['0001_baseline.sql', '0002_remove_local_auth.sql'])
     assert.equal(
       tenantApiSchemaVersion,
       migrationsOnDisk.at(-1)?.replace(/\.sql$/i, ''),

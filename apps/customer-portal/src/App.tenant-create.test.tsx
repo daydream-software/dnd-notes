@@ -1,19 +1,18 @@
 /**
- * Error-path tests for the customer portal tenant creation flow (local-auth mode).
+ * Tenant-creation flow tests (Keycloak-authenticated dashboard).
  *
  * Covered:
- *   1. Empty tenant name (HTML5 required) — fetch not called for POST /portal/me/tenants.
- *   2. Slug auto-normalizes on tenant name input (no separate slug entry needed).
- *   3. API 422 with structured error body — error alert shown, form data preserved.
- *   4. API 500 — generic error alert, modal stays open with draft preserved.
+ *   1. Empty tenant name (HTML5 required) — fetch not called for POST /portal/me/tenants
+ *   2. Slug auto-normalizes on tenant name input
+ *   3. API 422 with structured error body — error alert shown, form data preserved
+ *   4. API 500 — generic error alert, modal stays open with draft preserved
+ *   5. Plan dropdown default (first catalog plan) is sent in the request body
+ *   6. Plan dropdown selection change updates the planTier in the request body
  *
- * Deferred:
- *   - "Invalid slug pattern → validation error": App.tsx normalizeSlug() is
- *     applied on every onChange keystroke; there is no pattern-based client-side
- *     validation error rendered in the UI. The slug is always silently normalized.
- *   - "Plan field omitted → validation error": the Plan <TextField select> has no
- *     `required` attribute and auto-defaults to catalog.plans[0].id. There is no
- *     plan-required validation path.
+ * Replaces the deleted local-auth equivalents (App.tenant-create-errors.test.tsx
+ * and App.plan-selection.test.tsx in #316) post-Phase 2 exit (#318). The
+ * create-tenant form is the only place the plan dropdown still surfaces now
+ * that the pre-auth signup flow is gone.
  */
 import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
@@ -21,12 +20,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { createJsonResponse, readMockRequest } from './test-helpers'
 import type { CustomerKeycloakClient } from './keycloak-client'
-import type { PortalCatalogResponse, PortalDashboardResponse } from './types'
-
-const sessionTokenStorageKey = 'dnd-notes:customer-portal:session-token'
+import type {
+  PortalCatalogResponse,
+  PortalDashboardResponse,
+  PortalPlan,
+} from './types'
 
 const catalog: PortalCatalogResponse = {
-  authMode: 'local',
   defaultTenantVersion: '0.1.0',
   provisioningConfigured: true,
   slugPolicy: {
@@ -57,6 +57,10 @@ const catalog: PortalCatalogResponse = {
   },
 }
 
+function makeCatalog(plans: PortalPlan[]): PortalCatalogResponse {
+  return { ...catalog, plans }
+}
+
 const baseDashboard: PortalDashboardResponse = {
   account: {
     id: 'account-1',
@@ -64,8 +68,7 @@ const baseDashboard: PortalDashboardResponse = {
     displayName: 'Alyx',
     billingEmail: 'billing@example.com',
     billingProvider: 'stripe',
-    authProvider: 'local',
-    keycloakSub: null,
+    keycloakSub: 'sub-123',
     createdAt: '2026-04-22T20:00:00.000Z',
     updatedAt: '2026-04-22T20:00:00.000Z',
   },
@@ -103,11 +106,19 @@ const baseDashboard: PortalDashboardResponse = {
   ],
 }
 
-function makeKeycloakStub(
+/**
+ * Returns a Keycloak stub primed for an already-authenticated dashboard load:
+ * init() resolves tokens, freshToken() resolves a stable access token used
+ * for the /portal/me Authorization header.
+ */
+function makeAuthenticatedKeycloakStub(
   overrides: Partial<CustomerKeycloakClient> = {},
 ): CustomerKeycloakClient {
   return {
-    init: vi.fn().mockResolvedValue(null),
+    init: vi.fn().mockResolvedValue({
+      accessToken: 'kc-access-token',
+      refreshToken: 'kc-refresh-token',
+    }),
     login: vi.fn().mockResolvedValue(undefined),
     logout: vi.fn().mockResolvedValue(undefined),
     freshToken: vi.fn().mockResolvedValue('kc-access-token'),
@@ -115,10 +126,9 @@ function makeKeycloakStub(
   }
 }
 
-describe('customer portal — tenant creation errors', () => {
+describe('customer portal — tenant creation (Keycloak)', () => {
   beforeEach(() => {
     sessionStorage.clear()
-    sessionStorage.setItem(sessionTokenStorageKey, 'portal-session-token')
   })
 
   afterEach(() => {
@@ -138,24 +148,20 @@ describe('customer portal — tenant creation errors', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    const stub = makeKeycloakStub()
+    const stub = makeAuthenticatedKeycloakStub()
     render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
-    // Wait for the dashboard to render (session token is seeded).
     expect(await screen.findByRole('heading', { name: 'Add another tenant' })).toBeTruthy()
 
-    // Submit without touching the tenant name (it's empty by default).
     await user.click(screen.getByRole('button', { name: 'Create tenant request' }))
 
-    // The create-tenant POST must not fire.
     const createCalls = vi.mocked(fetchSpy).mock.calls.filter(([input, init]) => {
       const { path, method } = readMockRequest(input, init)
       return path === '/portal-api/portal/me/tenants' && method === 'POST'
     })
     expect(createCalls).toHaveLength(0)
 
-    // The success notice must not appear.
     expect(
       screen.queryByText('Tenant request submitted. The dashboard now reflects the latest instance list.'),
     ).toBeNull()
@@ -173,17 +179,15 @@ describe('customer portal — tenant creation errors', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    const stub = makeKeycloakStub()
+    const stub = makeAuthenticatedKeycloakStub()
     render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
     expect(await screen.findByRole('heading', { name: 'Add another tenant' })).toBeTruthy()
 
-    // Typing a name with uppercase and spaces should produce a normalized slug.
     await user.type(screen.getByLabelText('Tenant name'), 'Ember Falls Campaign')
 
     const slugInput = screen.getByLabelText('Tenant slug') as HTMLInputElement
-    // Normalized slug: lowercase, spaces → hyphens.
     expect(slugInput.value).toBe('ember-falls-campaign')
   })
 
@@ -205,7 +209,7 @@ describe('customer portal — tenant creation errors', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    const stub = makeKeycloakStub()
+    const stub = makeAuthenticatedKeycloakStub()
     render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
@@ -214,16 +218,12 @@ describe('customer portal — tenant creation errors', () => {
     await user.type(screen.getByLabelText('Tenant name'), 'Emberfall')
     await user.click(screen.getByRole('button', { name: 'Create tenant request' }))
 
-    // Error alert must appear with the server message.
     await waitFor(() => {
       expect(screen.getByRole('alert')).toBeTruthy()
     })
     expect(screen.getByRole('alert').textContent).toContain('Slug already taken')
 
-    // The create form must still be visible (dashboard heading still present).
     expect(screen.getByRole('heading', { name: 'Add another tenant' })).toBeTruthy()
-
-    // The form data must be preserved — tenant name field retains its value.
     expect((screen.getByLabelText('Tenant name') as HTMLInputElement).value).toBe('Emberfall')
   })
 
@@ -242,7 +242,7 @@ describe('customer portal — tenant creation errors', () => {
       return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
     })
 
-    const stub = makeKeycloakStub()
+    const stub = makeAuthenticatedKeycloakStub()
     render(<App keycloakClientFactory={() => stub} />)
 
     const user = userEvent.setup()
@@ -256,12 +256,120 @@ describe('customer portal — tenant creation errors', () => {
     })
     expect(screen.getByRole('alert').textContent).toContain('Internal server error')
 
-    // Form must still be present.
     expect(screen.getByRole('button', { name: 'Create tenant request' })).toBeTruthy()
-
-    // Positive assertion: no success notice appeared.
     expect(
       screen.queryByText('Tenant request submitted. The dashboard now reflects the latest instance list.'),
     ).toBeNull()
+  })
+
+  it('sends the first catalog plan as the default planTier when the dropdown is left untouched', async () => {
+    const multiPlanCatalog = makeCatalog([
+      {
+        id: 'adventurer',
+        name: 'Adventurer',
+        priceLabel: '$9/mo placeholder',
+        description: 'Single campaign tenant',
+        features: ['One tenant instance'],
+      },
+      {
+        id: 'guild',
+        name: 'Guild',
+        priceLabel: '$29/mo placeholder',
+        description: 'Multiple groups',
+        features: ['Expanded collaboration headroom'],
+      },
+    ])
+    const dashboardWithCatalog: PortalDashboardResponse = {
+      ...baseDashboard,
+      catalog: multiPlanCatalog,
+    }
+
+    let capturedPlanTier: string | undefined
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(multiPlanCatalog)
+      }
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse(dashboardWithCatalog)
+      }
+      if (path === '/portal-api/portal/me/tenants' && method === 'POST') {
+        const body = JSON.parse(init?.body as string) as { planTier?: string }
+        capturedPlanTier = body.planTier
+        return createJsonResponse({ error: 'Create blocked in default-plan test' }, 500)
+      }
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeAuthenticatedKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
+
+    const user = userEvent.setup()
+    expect(await screen.findByRole('heading', { name: 'Add another tenant' })).toBeTruthy()
+
+    await user.type(screen.getByLabelText('Tenant name'), 'Default Plan Tenant')
+    await user.click(screen.getByRole('button', { name: 'Create tenant request' }))
+
+    await screen.findByRole('alert')
+
+    expect(capturedPlanTier).toBe('adventurer')
+  })
+
+  it('updates the planTier in the request body when a different plan is selected', async () => {
+    const multiPlanCatalog = makeCatalog([
+      {
+        id: 'adventurer',
+        name: 'Adventurer',
+        priceLabel: '$9/mo placeholder',
+        description: 'Single campaign tenant',
+        features: ['One tenant instance'],
+      },
+      {
+        id: 'guild',
+        name: 'Guild',
+        priceLabel: '$29/mo placeholder',
+        description: 'Multiple groups',
+        features: ['Expanded collaboration headroom'],
+      },
+    ])
+    const dashboardWithCatalog: PortalDashboardResponse = {
+      ...baseDashboard,
+      catalog: multiPlanCatalog,
+    }
+
+    let capturedPlanTier: string | undefined
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+      if (path === '/portal-api/portal/catalog' && method === 'GET') {
+        return createJsonResponse(multiPlanCatalog)
+      }
+      if (path === '/portal-api/portal/me' && method === 'GET') {
+        return createJsonResponse(dashboardWithCatalog)
+      }
+      if (path === '/portal-api/portal/me/tenants' && method === 'POST') {
+        const body = JSON.parse(init?.body as string) as { planTier?: string }
+        capturedPlanTier = body.planTier
+        return createJsonResponse({ error: 'Create intentionally blocked' }, 500)
+      }
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const stub = makeAuthenticatedKeycloakStub()
+    render(<App keycloakClientFactory={() => stub} />)
+
+    const user = userEvent.setup()
+    expect(await screen.findByRole('heading', { name: 'Add another tenant' })).toBeTruthy()
+
+    await user.click(screen.getByLabelText('Plan'))
+    await user.click(await screen.findByRole('option', { name: 'Guild' }))
+
+    await user.type(screen.getByLabelText('Tenant name'), 'Emberfall')
+    await user.click(screen.getByRole('button', { name: 'Create tenant request' }))
+
+    await screen.findByRole('alert')
+
+    expect(capturedPlanTier).toBe('guild')
   })
 })

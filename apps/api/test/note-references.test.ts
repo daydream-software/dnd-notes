@@ -157,7 +157,6 @@ test('note store rejects malformed, missing, and cross-campaign inline reference
   const owner = await noteStore.createOwnerAccount({
     displayName: 'Data',
     email: 'data@example.com',
-    password: 'moonlit-secret',
   })
 
   assert.ok(owner)

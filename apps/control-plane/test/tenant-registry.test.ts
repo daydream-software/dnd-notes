@@ -84,22 +84,22 @@ describe('TenantRegistry', () => {
         portalAccountColumns.rows.some(
           (column) => column.column_name === 'password_hash',
         ),
-        true,
-      )
-
-      const portalSessionTable = db.public.getTable('portal_sessions')
-      const restoreLogTable = db.public.getTable('restore_log')
-
-      assert.equal(
-        portalSessionTable.constraintsByName.has('idx_portal_sessions_expires_at'),
-        true,
-      )
-      assert.equal(
-        portalSessionTable.constraintsByName.has(
-          'idx_portal_sessions_expires_at_datetime',
-        ),
         false,
       )
+      assert.equal(
+        portalAccountColumns.rows.some(
+          (column) => column.column_name === 'keycloak_sub',
+        ),
+        true,
+      )
+
+      assert.throws(
+        () => db.public.getTable('portal_sessions'),
+        'portal_sessions table should not exist after migration 0005',
+      )
+
+      const restoreLogTable = db.public.getTable('restore_log')
+
       assert.equal(
         restoreLogTable.constraintsByName.has('idx_restore_log_tenant_requested_at'),
         true,
@@ -513,8 +513,6 @@ describe('TenantRegistry', () => {
           FROM information_schema.columns
           WHERE table_name = 'portal_accounts'
         `)
-        const portalSessionTable = db.public.getTable('portal_sessions')
-
         assert.equal(
           tenantColumns.rows.some((column) => column.column_name === 'subdomain'),
           true,
@@ -527,17 +525,17 @@ describe('TenantRegistry', () => {
           portalAccountColumns.rows.some(
             (column) => column.column_name === 'password_hash',
           ),
-          true,
+          false,
         )
         assert.equal(
-          portalSessionTable.constraintsByName.has('idx_portal_sessions_expires_at'),
-          true,
-        )
-        assert.equal(
-          portalSessionTable.constraintsByName.has(
-            'idx_portal_sessions_expires_at_datetime',
+          portalAccountColumns.rows.some(
+            (column) => column.column_name === 'auth_provider',
           ),
           false,
+        )
+        assert.throws(
+          () => db.public.getTable('portal_sessions'),
+          'portal_sessions table should have been dropped by migration 0005',
         )
       } finally {
         await tenantRegistry.close()
@@ -1290,7 +1288,7 @@ describe('TenantRegistry', () => {
     assert.equal(singleConnectionConfig.max, 1)
   })
 
-  it('persists portal accounts and bearer-token sessions while purging expired sessions', async () => {
+  it('persists and deletes portal accounts (Keycloak-only auth, no session table)', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
@@ -1298,48 +1296,20 @@ describe('TenantRegistry', () => {
         id: 'account-1',
         email: 'owner@example.com',
         displayName: 'Alyx',
-        passwordHash: 'salt:hash',
         billingEmail: 'billing@example.com',
         billingProvider: 'stripe',
-      })
-
-      await tenantRegistry.createPortalSession({
-        id: 'session-expired',
-        accountId: account.id,
-        tokenHash: 'expired-token',
-        expiresAt: '2000-01-01T00:00:00.000Z',
-      })
-      await tenantRegistry.createPortalSession({
-        id: 'session-1',
-        accountId: account.id,
-        tokenHash: 'hashed-token',
-        expiresAt: '2999-01-01T00:00:00.000Z',
+        keycloakSub: 'kc-sub-alyx',
       })
 
       const storedAccount = await tenantRegistry.getPortalAccountByEmail(
         'owner@example.com',
       )
-      const authRecord = await tenantRegistry.getPortalAccountAuthByEmail(
-        'owner@example.com',
-      )
-      const storedSession = await tenantRegistry.getPortalSessionByTokenHash(
-        'hashed-token',
-      )
 
       assert.ok(storedAccount)
+      assert.equal(storedAccount.id, account.id)
       assert.equal(storedAccount.displayName, 'Alyx')
       assert.equal(storedAccount.billingProvider, 'stripe')
-      assert.ok(authRecord)
-      assert.equal(authRecord.passwordHash, 'salt:hash')
-      assert.equal(await tenantRegistry.getPortalSessionByTokenHash('expired-token'), null)
-      assert.ok(storedSession)
-      assert.equal(storedSession.accountId, account.id)
-
-      await tenantRegistry.deletePortalSessionByTokenHash('hashed-token')
-      assert.equal(
-        await tenantRegistry.getPortalSessionByTokenHash('hashed-token'),
-        null,
-      )
+      assert.equal(storedAccount.keycloakSub, 'kc-sub-alyx')
 
       await tenantRegistry.deletePortalAccount(account.id)
       assert.equal(await tenantRegistry.getPortalAccount(account.id), null)

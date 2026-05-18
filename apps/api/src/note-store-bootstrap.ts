@@ -2,7 +2,6 @@ import type { NoteStoreDatabase } from './note-store-database.js'
 
 const requiredPostgresTableNames = [
   'owner_accounts',
-  'owner_sessions',
   'campaigns',
   'campaign_memberships',
   'campaign_share_links',

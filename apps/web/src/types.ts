@@ -71,14 +71,11 @@ export interface OwnerAccount {
 }
 
 export interface AuthConfigResponse {
-  mode: 'local' | 'keycloak'
-  keycloak:
-    | {
-        url: string
-        realm: string
-        clientId: string
-      }
-    | null
+  keycloak: {
+    url: string
+    realm: string
+    clientId: string
+  }
 }
 
 export interface OwnerRegistrationInput {

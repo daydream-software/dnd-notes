@@ -17,15 +17,16 @@ export interface RuntimeKeycloakClient {
 
 export function isKeycloakAuthConfig(
   authConfig: AuthConfigResponse | null,
-): authConfig is AuthConfigResponse & {
-  mode: 'keycloak'
-  keycloak: {
-    url: string
-    realm: string
-    clientId: string
-  }
-} {
-  return authConfig?.mode === 'keycloak' && authConfig.keycloak !== null
+): authConfig is AuthConfigResponse {
+  const keycloak = authConfig?.keycloak
+  return (
+    typeof keycloak?.url === 'string' &&
+    keycloak.url.length > 0 &&
+    typeof keycloak.realm === 'string' &&
+    keycloak.realm.length > 0 &&
+    typeof keycloak.clientId === 'string' &&
+    keycloak.clientId.length > 0
+  )
 }
 
 function readTokens(client: Keycloak): StoredKeycloakTokens | null {

@@ -5,10 +5,6 @@ import type {
   PortalCatalogResponse,
   PortalCreateTenantRequest,
   PortalDashboardResponse,
-  PortalLoginRequest,
-  PortalLogoutResponse,
-  PortalSessionResponse,
-  PortalSignupRequest,
 } from './types'
 
 function createHeaders(authToken?: string, contentType?: string) {
@@ -77,17 +73,6 @@ export async function fetchPortalCatalog(signal?: AbortSignal) {
   return readJson<PortalCatalogResponse>(response)
 }
 
-export function signupPortalAccount(
-  request: PortalSignupRequest,
-  signal?: AbortSignal,
-) {
-  return postJson<PortalSessionResponse>('/portal/signup', request, undefined, signal)
-}
-
-export function loginPortalAccount(request: PortalLoginRequest, signal?: AbortSignal) {
-  return postJson<PortalSessionResponse>('/portal/login', request, undefined, signal)
-}
-
 export async function fetchPortalDashboard(
   authToken: string,
   signal?: AbortSignal,
@@ -113,6 +98,3 @@ export function createPortalTenant(
   )
 }
 
-export function logoutPortal(authToken: string, signal?: AbortSignal) {
-  return postJson<PortalLogoutResponse>('/portal/logout', {}, authToken, signal)
-}

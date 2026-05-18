@@ -66,10 +66,10 @@ test('API Hardening: Security headers are present on all responses', async () =>
 })
 
 test('API Hardening: Shared routes override X-Frame-Options with CSP', async () => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
 
   try {
-    const owner = await registerOwner(request(app))
+    const owner = await registerOwner(request(app), issueToken!)
     const shareLinkResponse = await withAuth(request(app), owner.token)
       .post(`/api/campaigns/${defaultCampaignId}/share-links`)
       .send({
@@ -105,34 +105,20 @@ test('API Hardening: Shared routes override X-Frame-Options with CSP', async () 
 })
 
 test('API Hardening: Auth flows work unchanged with new CORS config', async () => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
 
   try {
-    const registerResponse = await request(app)
-      .post('/api/auth/register')
+    const configResponse = await request(app)
+      .get('/api/auth/config')
       .set('Origin', 'http://localhost:5173')
-      .send({
-        displayName: 'Test User',
-        email: 'test@example.com',
-        password: 'secure-password-123',
-      })
 
-    assert.equal(registerResponse.status, 201)
-    assert.ok(registerResponse.body.token)
-    assert.ok(registerResponse.body.owner)
+    assert.equal(configResponse.status, 200)
+    assert.ok(configResponse.body.keycloak)
 
-    const token = registerResponse.body.token
-
-    const loginResponse = await request(app)
-      .post('/api/auth/login')
-      .set('Origin', 'http://localhost:5173')
-      .send({
-        email: 'test@example.com',
-        password: 'secure-password-123',
-      })
-
-    assert.equal(loginResponse.status, 200)
-    assert.ok(loginResponse.body.token)
+    const { token } = await registerOwner(request(app), issueToken!, {
+      email: 'test@example.com',
+      displayName: 'Test User',
+    })
 
     const sessionResponse = await request(app)
       .get('/api/auth/session')
@@ -143,11 +129,7 @@ test('API Hardening: Auth flows work unchanged with new CORS config', async () =
     assert.equal(sessionResponse.body.owner.email, 'test@example.com')
 
     assert.equal(
-      registerResponse.headers['access-control-allow-origin'],
-      'http://localhost:5173',
-    )
-    assert.equal(
-      loginResponse.headers['access-control-allow-origin'],
+      configResponse.headers['access-control-allow-origin'],
       'http://localhost:5173',
     )
     assert.equal(
@@ -160,10 +142,10 @@ test('API Hardening: Auth flows work unchanged with new CORS config', async () =
 })
 
 test('API Hardening: Guest auth flows work unchanged with new CORS config', async () => {
-  const { app, cleanup } = await createTestApp()
+  const { app, cleanup, issueToken } = await createTestApp()
 
   try {
-    const owner = await registerOwner(request(app))
+    const owner = await registerOwner(request(app), issueToken!)
     const shareLinkResponse = await withAuth(request(app), owner.token)
       .post(`/api/campaigns/${defaultCampaignId}/share-links`)
       .send({

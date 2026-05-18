@@ -12,7 +12,6 @@ data:
   CONTROL_PLANE_KEYCLOAK_REALM: dnd-notes-dev
   CONTROL_PLANE_KEYCLOAK_CLIENT_ID: dnd-notes-control-plane
   CONTROL_PLANE_KEYCLOAK_REQUIRED_ROLES: control-plane-admin,control-plane-workforce
-  TENANT_AUTH_MODE: keycloak
   TENANT_KEYCLOAK_URL: https://keycloak.127.0.0.1.nip.io
   TENANT_KEYCLOAK_JWKS_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs
   TENANT_KEYCLOAK_REALM: dnd-notes-dev
@@ -20,7 +19,6 @@ data:
   TENANT_TLS_CLUSTER_ISSUER: dev-ca
   KEYCLOAK_ADMIN_BASE_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080
   KEYCLOAK_ADMIN_REALM: dnd-notes-dev
-  CUSTOMER_PORTAL_AUTH_MODE: keycloak
   CUSTOMER_PORTAL_KEYCLOAK_URL: https://keycloak.127.0.0.1.nip.io
   CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs
   CUSTOMER_PORTAL_KEYCLOAK_REALM: dnd-notes-dev

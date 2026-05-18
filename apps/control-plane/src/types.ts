@@ -188,19 +188,10 @@ export interface PortalAccount {
   displayName: string
   billingEmail: string | null
   billingProvider: PortalBillingProvider | null
-  authProvider: 'local' | 'keycloak'
   keycloakSub: string | null
   roleSyncStatus: RoleSyncStatus
   createdAt: string
   updatedAt: string
-}
-
-export interface PortalSession {
-  id: string
-  accountId: string
-  tokenHash: string
-  expiresAt: string
-  createdAt: string
 }
 
 export interface PortalPlan {
@@ -212,7 +203,6 @@ export interface PortalPlan {
 }
 
 export interface PortalCatalogResponse {
-  authMode: 'local' | 'keycloak'
   defaultTenantVersion: string
   provisioningConfigured: boolean
   slugPolicy: {
@@ -240,28 +230,6 @@ export interface PortalDashboardResponse {
   account: PortalAccount
   catalog: PortalCatalogResponse
   tenants: PortalTenantSummary[]
-}
-
-export interface PortalSessionResponse {
-  token: string
-  dashboard: PortalDashboardResponse
-}
-
-export interface PortalSignupRequest {
-  email: string
-  displayName: string
-  password: string
-  billingEmail?: string
-  paymentProvider: PortalBillingProvider
-  tenantName: string
-  tenantSlug: string
-  planTier: string
-  acceptTerms: true
-}
-
-export interface PortalLoginRequest {
-  email: string
-  password: string
 }
 
 export interface PortalCreateTenantRequest {

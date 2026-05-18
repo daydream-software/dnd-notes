@@ -198,48 +198,6 @@ describe('Portal Keycloak auth', () => {
     cleanupTenantRegistry = undefined
   })
 
-  it('rejects portal/signup when auth mode is keycloak', async () => {
-    const portalKeycloakAuth = createPortalKeycloakAuth({ mode: 'local' })
-    const app = createApp({
-      tenantRegistry,
-      adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
-      portalKeycloakAuth,
-    })
-
-    const response = await request(app)
-      .post('/portal/signup')
-      .send({
-        email: 'user@example.com',
-        password: 'password',
-        displayName: 'User',
-        tenantName: 'My Campaign',
-        tenantSlug: 'my-campaign',
-        planTier: 'adventurer',
-        paymentProvider: 'stripe',
-      })
-      .expect(501)
-
-    assert.ok(response.body.error)
-  })
-
-  it('rejects portal/login when auth mode is keycloak', async () => {
-    const portalKeycloakAuth = createPortalKeycloakAuth({ mode: 'local' })
-    const app = createApp({
-      tenantRegistry,
-      adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
-      portalKeycloakAuth,
-    })
-
-    const response = await request(app)
-      .post('/portal/login')
-      .send({ email: 'user@example.com', password: 'password' })
-      .expect(501)
-
-    assert.ok(response.body.error)
-  })
-
   it('verifies a valid portal Keycloak bearer token on /portal/me', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
 
@@ -248,13 +206,11 @@ describe('Portal Keycloak auth', () => {
       id: 'portal-account-1',
       email: 'portal-user@example.com',
       displayName: 'Portal User',
-      passwordHash: null,
       billingEmail: 'portal-user@example.com',
       billingProvider: 'stripe',
     })
 
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -262,7 +218,6 @@ describe('Portal Keycloak auth', () => {
     const app = createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
     })
     const token = keycloak.issueToken({
@@ -281,7 +236,6 @@ describe('Portal Keycloak auth', () => {
   it('rejects an invalid portal Keycloak bearer token on /portal/me', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -289,7 +243,6 @@ describe('Portal Keycloak auth', () => {
     const app = createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
     })
 
@@ -304,7 +257,6 @@ describe('Portal Keycloak auth', () => {
   it('auto-creates a portal account for a brand-new Keycloak user with no local account', async () => {
     keycloak = await startFakeKeycloakServer(keycloakRealm)
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -312,7 +264,6 @@ describe('Portal Keycloak auth', () => {
     const app = createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
     })
     const keycloakSub = 'kc-sub-brand-new'
@@ -360,7 +311,6 @@ describe('Portal Keycloak auth — auto-link by email', () => {
 
   function buildPortalApp() {
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak!.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -368,7 +318,6 @@ describe('Portal Keycloak auth — auto-link by email', () => {
     return createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
     })
   }
@@ -555,7 +504,6 @@ describe('Portal Keycloak auth — auto-create on first login', () => {
 
   function buildPortalApp() {
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak!.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -563,7 +511,6 @@ describe('Portal Keycloak auth — auto-create on first login', () => {
     return createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
     })
   }
@@ -616,7 +563,6 @@ describe('Portal Keycloak auth — auto-create on first login', () => {
       requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
     })
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -624,7 +570,6 @@ describe('Portal Keycloak auth — auto-create on first login', () => {
     const app = createApp({
       tenantRegistry,
       adminAuth,
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
     })
     const token = keycloak.issueToken({
@@ -788,7 +733,6 @@ describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transi
     })
 
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -797,7 +741,6 @@ describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transi
     const app = createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
       // Cast: real `KeycloakAdminClient` carries token-cache state we don't
       // need to model in this test — only the methods called by the sweep.
@@ -842,7 +785,6 @@ describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transi
       email: 'linked@example.com',
       displayName: 'Already Linked',
       keycloakSub,
-      authProvider: 'keycloak',
     })
     await tenantRegistry.createTenant({
       id: 'tenant-already',
@@ -852,7 +794,6 @@ describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transi
     })
 
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -861,7 +802,6 @@ describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transi
     const app = createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
       keycloakAdminClient: fakeKeycloakAdminClient as unknown as Parameters<
         typeof createApp
@@ -900,7 +840,6 @@ describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transi
     })
 
     const portalKeycloakAuth = createPortalKeycloakAuth({
-      mode: 'keycloak',
       keycloakUrl: keycloak.baseUrl,
       keycloakRealm,
       clientId: portalClientId,
@@ -910,7 +849,6 @@ describe('Portal Keycloak auth — per-tenant role assignment sweep (#196 transi
     const app = createApp({
       tenantRegistry,
       adminToken: 'any-token',
-      portalAuthMode: 'keycloak',
       portalKeycloakAuth,
       keycloakAdminClient: fakeKeycloakAdminClient as unknown as Parameters<
         typeof createApp

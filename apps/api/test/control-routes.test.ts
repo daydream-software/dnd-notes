@@ -3,6 +3,7 @@ import http from 'node:http'
 import { once } from 'node:events'
 import test from 'node:test'
 import request from 'supertest'
+import { defaultCampaignId } from '../src/campaign.js'
 import { createTestApp, registerOwner, withAuth } from './test-helpers.js'
 
 const controlPlaneToken = 'test-control-plane-token'
@@ -255,10 +256,17 @@ test('GET /_control/info reports tenant runtime metadata and DB connection state
 })
 
 test('GET /_control/info reports last-write timestamp after a successful write', async () => {
-  const { app, cleanup } = await createTestApp({ controlPlaneToken })
+  const { app, cleanup, issueToken } = await createTestApp({ controlPlaneToken })
 
   try {
-    await registerOwner(request(app))
+    const { token } = await registerOwner(request(app), issueToken!)
+    // POST is required to register a write — provisioning via GET /api/auth/session
+    // does not count even though it inserts an owner row.
+    await request(app)
+      .post('/api/notes')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ campaignId: defaultCampaignId, title: 'seed', body: 'seed' })
+      .expect(201)
 
     const response = await request(app)
       .get('/_control/info')
@@ -480,7 +488,7 @@ test('POST /_control/maintenance rejects invalid mode values', async () => {
 })
 
 test('Maintenance mode causes write endpoints to return 503 with stable error code', async () => {
-  const { app, cleanup } = await createTestApp({
+  const { app, cleanup, issueToken } = await createTestApp({
     controlPlaneToken,
     maintenanceDrainGraceMs: 0,
   })
@@ -488,7 +496,7 @@ test('Maintenance mode causes write endpoints to return 503 with stable error co
   try {
     // Register an owner *before* enabling maintenance so we have an authenticated
     // session for the write attempt below.
-    const { token } = await registerOwner(request(app))
+    const { token } = await registerOwner(request(app), issueToken!)
 
     await request(app)
       .post('/_control/maintenance')

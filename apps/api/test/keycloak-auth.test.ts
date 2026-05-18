@@ -14,7 +14,6 @@ const { startFakeKeycloakServer } = fakeKeycloakModule
 
 function createRuntimeAuth(baseUrl: string, issuer: string) {
   return createTenantRuntimeAuth({
-    mode: 'keycloak',
     keycloakUrl: baseUrl,
     keycloakRealm,
     clientId: keycloakClientId,
@@ -32,30 +31,16 @@ test('GET /api/auth/config reports runtime Keycloak auth settings', async (t) =>
   })
   t.after(cleanup)
 
-  const [configResponse, loginResponse, registerResponse] = await Promise.all([
-    request(app).get('/api/auth/config'),
-    request(app).post('/api/auth/login').send({
-      email: 'owner@example.com',
-      password: 'password',
-    }),
-    request(app).post('/api/auth/register').send({
-      displayName: 'Owner',
-      email: 'owner@example.com',
-      password: 'password',
-    }),
-  ])
+  const configResponse = await request(app).get('/api/auth/config')
 
   assert.equal(configResponse.status, 200)
   assert.deepEqual(configResponse.body, {
-    mode: 'keycloak',
     keycloak: {
       url: keycloak.baseUrl,
       realm: keycloakRealm,
       clientId: keycloakClientId,
     },
   })
-  assert.equal(loginResponse.status, 404)
-  assert.equal(registerResponse.status, 404)
 })
 
 test('tenant routes accept Keycloak JWTs and keep share-link guest flows local', async (t) => {

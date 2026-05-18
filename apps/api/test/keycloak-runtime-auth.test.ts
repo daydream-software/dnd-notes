@@ -18,7 +18,6 @@ const { startFakeKeycloakServer } = fakeKeycloakModule
 
 function createKeycloakRuntimeAuth(baseUrl: string, issuer: string) {
   return createTenantRuntimeAuth({
-    mode: 'keycloak',
     keycloakUrl: baseUrl,
     keycloakRealm: issuer.split('/').at(-1),
     clientId: tenantClientId,
@@ -83,7 +82,6 @@ test('tenant runtime auth preserves the linked owner when a Keycloak email chang
   const collidingOwner = await noteStore.createOwnerAccount({
     displayName: 'Local Site Admin',
     email: claimedEmail,
-    password: 'moonlit-secret',
   })
   assert.ok(collidingOwner)
   assert.equal(collidingOwner.isSiteAdmin, true)
@@ -208,7 +206,7 @@ test('tenant runtime auth maps typed Keycloak link conflicts to 409 without read
   )
 })
 
-test('tenant runtime auth rejects wrong-client, expired, and local-auth requests when Keycloak mode is enabled', async (t) => {
+test('tenant runtime auth rejects wrong-client and expired tokens', async (t) => {
   const keycloak = await startFakeKeycloakServer()
   t.after(() => keycloak.close())
 
@@ -229,20 +227,10 @@ test('tenant runtime auth rejects wrong-client, expired, and local-auth requests
     expiresInSeconds: -30,
   })
 
-  const [wrongClientResponse, expiredResponse, registerResponse, loginResponse] =
-    await Promise.all([
-      withAuth(request(app), wrongClientToken).get('/api/campaigns'),
-      withAuth(request(app), expiredToken).get('/api/campaigns'),
-      request(app).post('/api/auth/register').send({
-        displayName: 'Chunk',
-        email: 'chunk@example.com',
-        password: 'moonlit-secret',
-      }),
-      request(app).post('/api/auth/login').send({
-        email: 'chunk@example.com',
-        password: 'moonlit-secret',
-      }),
-    ])
+  const [wrongClientResponse, expiredResponse] = await Promise.all([
+    withAuth(request(app), wrongClientToken).get('/api/campaigns'),
+    withAuth(request(app), expiredToken).get('/api/campaigns'),
+  ])
 
   assert.equal(wrongClientResponse.status, 401)
   assert.equal(
@@ -253,16 +241,6 @@ test('tenant runtime auth rejects wrong-client, expired, and local-auth requests
   assert.equal(
     expiredResponse.body.error,
     'Owner access token is invalid or expired.',
-  )
-  assert.equal(registerResponse.status, 404)
-  assert.equal(
-    registerResponse.body.error,
-    'Local auth routes are disabled when Keycloak auth is enabled.',
-  )
-  assert.equal(loginResponse.status, 404)
-  assert.equal(
-    loginResponse.body.error,
-    'Local auth routes are disabled when Keycloak auth is enabled.',
   )
 })
 
@@ -377,43 +355,6 @@ test('tenant runtime auth rejects Keycloak tokens that carry an unrelated role w
   assert.equal(response.status, 403)
 })
 
-test('tenant runtime auth in local mode is unaffected by the per-tenant role gate', async (t) => {
-  // Tenant in `local` mode: no Keycloak at all. The role check must not run
-  // (otherwise legacy local-auth tenants would be locked out). Local-session
-  // owners go through the session-token path and get 401, never 403.
-  const { app, cleanup, noteStore } = await createTestApp()
-  t.after(cleanup)
-
-  // Create a local owner and grab a session token via login.
-  await noteStore.createOwnerAccount({
-    displayName: 'Local Owner',
-    email: 'local@example.com',
-    password: 'moonlit-secret',
-  })
-
-  const loginResponse = await request(app).post('/api/auth/login').send({
-    email: 'local@example.com',
-    password: 'moonlit-secret',
-  })
-  assert.equal(loginResponse.status, 200)
-  const sessionToken = loginResponse.body.token as string
-  assert.equal(typeof sessionToken, 'string')
-
-  // The session token has no Keycloak roles. In local mode the role gate is
-  // entirely bypassed — local owner reaches /api/campaigns successfully.
-  const sessionResponse = await withAuth(request(app), sessionToken).get('/api/auth/session')
-  assert.equal(sessionResponse.status, 200)
-  assert.equal(sessionResponse.body.owner.email, 'local@example.com')
-
-  const campaignsResponse = await withAuth(request(app), sessionToken).get('/api/campaigns')
-  assert.equal(campaignsResponse.status, 200)
-
-  // Bogus bearer token in local mode → 401 (invalid session), NOT 403. The
-  // 401/403 split is preserved across modes.
-  const bogusResponse = await withAuth(request(app), 'definitely-not-a-real-token').get('/api/campaigns')
-  assert.equal(bogusResponse.status, 401)
-})
-
 test('tenant runtime auth grants access on the FIRST keycloak login once the role is present (transition path)', async (t) => {
   // Models the local → keycloak transition: a tenant was created in local
   // mode (an owner_account exists with no keycloak_sub). The control-plane
@@ -433,7 +374,6 @@ test('tenant runtime auth grants access on the FIRST keycloak login once the rol
   const legacyOwner = await noteStore.createOwnerAccount({
     displayName: 'Legacy Local Owner',
     email: 'legacy@example.com',
-    password: 'moonlit-secret',
   })
   assert.ok(legacyOwner)
   assert.equal(legacyOwner.keycloakSub, null)
