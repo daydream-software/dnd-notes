@@ -9,16 +9,23 @@ on:
       - '.dockerignore'
       - 'Dockerfile'
       - 'docker/control-plane/**'
+      - 'docker/portal/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
       - 'apps/api/**'
       - 'apps/control-plane/**'
       - 'apps/web/**'
+      - 'apps/customer-portal/**'
+      - 'apps/operator-portal/**'
+      - 'packages/portal-utils/**'
+      - 'packages/theme/**'
+      - 'packages/postgres-migrations/**'
       - 'platform/keycloak-jwt/**'
       - 'platform/control-plane/**'
       - 'scripts/platform/**'
       - 'scripts/prepare.mjs'
+      - 'scripts/build-portal-utils.mjs'
   pull_request:
     branches:
       - main
@@ -27,24 +34,33 @@ on:
       - '.dockerignore'
       - 'Dockerfile'
       - 'docker/control-plane/**'
+      - 'docker/portal/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
       - 'apps/api/**'
       - 'apps/control-plane/**'
       - 'apps/web/**'
+      - 'apps/customer-portal/**'
+      - 'apps/operator-portal/**'
+      - 'packages/portal-utils/**'
+      - 'packages/theme/**'
+      - 'packages/postgres-migrations/**'
       - 'platform/keycloak-jwt/**'
       - 'platform/control-plane/**'
       - 'scripts/platform/**'
       - 'scripts/prepare.mjs'
+      - 'scripts/build-portal-utils.mjs'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
+  # On main, let each push finish rather than cancelling mid-push.
+  # On PRs, cancel in progress to avoid wasting runner time on outdated commits.
   group: deployment-artifacts-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   validate:
@@ -78,3 +94,174 @@ jobs:
 
       - name: Build control-plane image
         run: docker build --file docker/control-plane/Dockerfile --tag dnd-notes-control-plane:test .
+
+      - name: Build customer-portal image
+        run: >
+          docker build
+          --file docker/portal/Dockerfile
+          --build-arg PORTAL_NAME=customer-portal
+          --tag dnd-notes-customer-portal:test
+          .
+
+      - name: Build operator-portal image
+        run: >
+          docker build
+          --file docker/portal/Dockerfile
+          --build-arg PORTAL_NAME=operator-portal
+          --tag dnd-notes-operator-portal:test
+          .
+
+  push:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: validate
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      packages: write
+      contents: read
+    env:
+      DOCKER_BUILDKIT: '1'
+      REGISTRY: ghcr.io
+      IMAGE_PREFIX: ghcr.io/daydream-software
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Compute short SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # --- tenant (combined web + api) ---
+      - name: Build and push tenant image
+        run: |
+          docker build \
+            --tag "${IMAGE_PREFIX}/dnd-notes:sha-${SHORT_SHA}" \
+            --tag "${IMAGE_PREFIX}/dnd-notes:latest" \
+            .
+          docker push "${IMAGE_PREFIX}/dnd-notes:sha-${SHORT_SHA}"
+          docker push "${IMAGE_PREFIX}/dnd-notes:latest"
+
+      # --- control-plane ---
+      - name: Build and push control-plane image
+        run: |
+          docker build \
+            --file docker/control-plane/Dockerfile \
+            --tag "${IMAGE_PREFIX}/dnd-notes-control-plane:sha-${SHORT_SHA}" \
+            --tag "${IMAGE_PREFIX}/dnd-notes-control-plane:latest" \
+            .
+          docker push "${IMAGE_PREFIX}/dnd-notes-control-plane:sha-${SHORT_SHA}"
+          docker push "${IMAGE_PREFIX}/dnd-notes-control-plane:latest"
+
+      # --- customer-portal ---
+      - name: Build and push customer-portal image
+        run: |
+          docker build \
+            --file docker/portal/Dockerfile \
+            --build-arg PORTAL_NAME=customer-portal \
+            --tag "${IMAGE_PREFIX}/dnd-notes-customer-portal:sha-${SHORT_SHA}" \
+            --tag "${IMAGE_PREFIX}/dnd-notes-customer-portal:latest" \
+            .
+          docker push "${IMAGE_PREFIX}/dnd-notes-customer-portal:sha-${SHORT_SHA}"
+          docker push "${IMAGE_PREFIX}/dnd-notes-customer-portal:latest"
+
+      # --- operator-portal ---
+      - name: Build and push operator-portal image
+        run: |
+          docker build \
+            --file docker/portal/Dockerfile \
+            --build-arg PORTAL_NAME=operator-portal \
+            --tag "${IMAGE_PREFIX}/dnd-notes-operator-portal:sha-${SHORT_SHA}" \
+            --tag "${IMAGE_PREFIX}/dnd-notes-operator-portal:latest" \
+            .
+          docker push "${IMAGE_PREFIX}/dnd-notes-operator-portal:sha-${SHORT_SHA}"
+          docker push "${IMAGE_PREFIX}/dnd-notes-operator-portal:latest"
+
+      # --- retention cleanup: keep latest + 10 most recent sha-* per image ---
+      # Order matters: untagged layers are purged first so that they are not
+      # counted toward the min-versions-to-keep quota. If the tagged cap ran
+      # first, the action would count untagged versions as "kept" slots, then
+      # the untagged pass would remove them — leaving fewer than 10 tagged
+      # rollback images. Untagged-first guarantees exactly 10 sha-* tags remain.
+
+      - name: Cleanup untagged tenant layers
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes
+          package-type: container
+          delete-only-untagged-versions: 'true'
+          min-versions-to-keep: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old tenant versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup untagged control-plane layers
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-control-plane
+          package-type: container
+          delete-only-untagged-versions: 'true'
+          min-versions-to-keep: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old control-plane versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-control-plane
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup untagged customer-portal layers
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-customer-portal
+          package-type: container
+          delete-only-untagged-versions: 'true'
+          min-versions-to-keep: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old customer-portal versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-customer-portal
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup untagged operator-portal layers
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-operator-portal
+          package-type: container
+          delete-only-untagged-versions: 'true'
+          min-versions-to-keep: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old operator-portal versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-operator-portal
+          package-type: container
+          min-versions-to-keep: 10
+          token: ${{ secrets.GITHUB_TOKEN }}
