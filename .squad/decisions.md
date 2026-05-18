@@ -8487,3 +8487,65 @@ Never use uppercase for button labels, navigation text, or body copy.
 
 **Session:** 2026-05-16-customer-portal-error-flows-143
 
+# Decision: Azure Blob artifact store for tenant backups (#330)
+
+**Date:** 2026-05-18
+**Author:** Data
+**Status:** pending merge
+
+---
+
+## Decision
+
+Implement the backup artifact store as a concrete `AzureBlobTenantBackupArtifactStore` class behind the existing `TenantBackupArtifactStore` interface, wired at boot via `BACKUP_DESTINATION=azure-blob`. The architectural seam (`TenantBackupArtifactStore` interface + dispatcher pattern) remains the right shape; this decision covers implementation choices.
+
+## Rationale
+
+- Azure Blob is the deployment target; SAS-token auth is time-bounded and fits the operator workflow.
+- Injecting a `BlobServiceClient` into the constructor keeps the class testable without Azure SDK mocks.
+- SAS tokens are stripped from the URL before persisting to `backup_catalog` to avoid credentials leaking into audit logs and restore selections.
+
+## Cron validation (Fix 2, 2026-05-18)
+
+`nextScheduledTime` was updated to hard-validate that fields 3-5 (day-of-month, month, day-of-week) are each `*`. A non-wildcard value now throws at startup with a clear message. Rationale: silent acceptance of `0 3 * * 0` (Sunday-only intent) producing nightly runs is a worse failure mode than a boot-time rejection. The `BACKUP_SCHEDULE_CRON` comment in `.env.example` was updated accordingly.
+
+## Follow-up
+
+Tracked in #333: after the retention sweep deletes a blob, the corresponding `backup_catalog` row is left with a live `location` value pointing to a deleted object. An operator triggering restore against that row gets an `AzureBlobDownloadError`. The fix is to mark `location_deleted=true` on the row after deletion, and filter such rows out of restore selections.
+# Decision: k3s prod manifest layout deviations (Issue #328)
+
+**Decided by:** Brand
+**Date:** 2026-05-18
+**PR:** feat/328-k8s-prod-manifests (not yet pushed)
+
+## Decisions made
+
+### 1. Layout: deploy/k3s/ with flat base (not per-service overlays)
+
+The issue spec proposed `deploy/k3s/base/{service}/` layout. The existing `platform/` tree uses per-service `base/overlays/` but those are strongly coupled to k3d defaults (nginx ingress, nip.io, mkcert CA). Rather than add a second `prod` overlay to each existing per-service tree (which would tangle k3d and prod config), a separate `deploy/k3s/` tree was created. This keeps prod manifests self-contained and avoids mutating the dev loop structure.
+
+**Impact:** `platform/` remains dev-only. `deploy/k3s/` is prod-only. If a base deployment spec changes, both trees must be updated. Acceptable for now; single-VM, low churn.
+
+### 2. No static tenant Deployment/Service/Ingress
+
+The control-plane synthesizes per-tenant namespaces, Deployments, Services, and Ingresses dynamically at provision time (see `apps/control-plane/src/provisioning.ts:buildTenantInfrastructureBundle`). Each tenant ingress stamps `cert-manager.io/cluster-issuer: letsencrypt-prod` on the resource, which causes cert-manager to issue a per-host cert for `t-<id>.notes.daydreamsoftware.ca`. These are covered by the DNS-01 solver since they match `*.notes.daydreamsoftware.ca` at the resolver level. No static wildcard ingress is needed — the pre-issued wildcard cert secret is not used by tenant ingresses (each gets its own cert).
+
+The prod overlay sets `TENANT_TLS_CLUSTER_ISSUER: letsencrypt-prod` and `TENANT_INGRESS_CLASS_NAME: traefik` so the control-plane stamps correct values on runtime-created ingresses.
+
+**Rate limit note:** at >50 new tenants/week, LE rate limits may apply (50 certs/domain/week). Mitigate by pre-issuing the wildcard and syncing it (via reflector) to tenant namespaces — deferred, not needed for test release.
+
+### 3. Single namespace: dnd-notes-platform
+
+Issue spec listed separate `dnd-notes`, `keycloak`, `postgres` namespaces. Existing code colocates everything in `dnd-notes-platform` and all internal service DNS references use that ns. Splitting namespaces would require updating every cross-service DNS reference. Kept `dnd-notes-platform` for all app workloads. Only `cert-manager` gets its own namespace (controller requirement).
+
+### 4. Keycloak themes
+
+The hosted-reference overlay mounts Keycloak themes (operator-login, customer-login, account-console) from ConfigMaps generated from `platform/keycloak/base/themes/`. The prod Keycloak deployment (`deploy/k3s/base/keycloak/deployment.yaml`) does NOT mount these theme ConfigMaps — it only imports realms. This is intentional for now: the default Keycloak login UI is acceptable for the test release. If themes are needed in prod, add the same configMapGenerator + volumeMounts from `platform/keycloak/base/kustomization.yaml` to the deploy/k3s tree.
+
+### 5. cert-manager not vendored
+
+`cert-manager.yaml` (~2MB, 50+ CRDs) is not committed to the repo. Installation is a runbook step: `kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.16.3/cert-manager.yaml`. Only the `ClusterIssuer` and `Certificate` resources live in the kustomization.
+
+### 6. Backup env vars are optional
+
+The 6 backup env vars (`BACKUP_DESTINATION`, `AZURE_STORAGE_ACCOUNT`, etc.) are wired from a separate `dnd-notes-backup-config` Secret with `optional: true` so the control-plane pod starts even if the backup secret has not been applied yet. Issue #330 (Data) will populate those values.
