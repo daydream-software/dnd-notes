@@ -27,7 +27,7 @@ spec:
       containers:
         - name: control-plane
           image: ghcr.io/daydream-software/dnd-notes-control-plane
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 3001

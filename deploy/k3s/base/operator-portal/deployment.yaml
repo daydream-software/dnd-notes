@@ -23,7 +23,7 @@ spec:
       containers:
         - name: portal
           image: ghcr.io/daydream-software/dnd-notes-operator-portal
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 8080
