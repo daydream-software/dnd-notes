@@ -14,6 +14,7 @@ import {
   AzureBlobConfigurationError,
   AzureBlobTenantBackupArtifactStore,
 } from './tenant-backup-azure-blob.js'
+import { parseBackupDestination } from './backup-config.js'
 import { startBackupScheduler, type BackupSchedulerLoop } from './backup-scheduler.js'
 import {
   createPostgresTenantBackupDispatcher,
@@ -311,8 +312,7 @@ if (ENABLE_TENANT_PROVISIONING) {
 // Backup dispatcher wiring (#330)
 // ---------------------------------------------------------------------------
 
-const BACKUP_DESTINATION =
-  process.env.BACKUP_DESTINATION?.trim().toLowerCase() ?? 'disabled'
+const BACKUP_DESTINATION = parseBackupDestination(process.env.BACKUP_DESTINATION)
 
 const AZURE_STORAGE_ACCOUNT = process.env.AZURE_STORAGE_ACCOUNT?.trim()
 const rawAzureContainer = process.env.AZURE_STORAGE_CONTAINER?.trim()
@@ -391,9 +391,7 @@ if (BACKUP_DESTINATION === 'azure-blob') {
   })
 
   tenantBackupDispatcher = createPostgresTenantBackupDispatcher(backupRunner)
-  console.log(
-    `Backup dispatcher: azure-blob (account=${AZURE_STORAGE_ACCOUNT}, container=${AZURE_STORAGE_CONTAINER})`,
-  )
+  console.log('Backup dispatcher: azure-blob configured.')
 }
 
 const app = createApp({
