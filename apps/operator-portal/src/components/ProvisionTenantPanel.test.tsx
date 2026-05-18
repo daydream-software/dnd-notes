@@ -214,6 +214,94 @@ describe('ProvisionTenantPanel', () => {
     )
   })
 
+  it('clears stale owner options when the search request fails', async () => {
+    let callCount = 0
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        callCount++
+        if (callCount === 1) {
+          // First call succeeds — populates the list.
+          return createJsonResponse([
+            { id: 'user-abc', email: 'populateduser@example.com', username: 'populateduser' },
+          ])
+        }
+        // Subsequent calls fail — should wipe the list.
+        return createJsonResponse({ error: 'Service unavailable' }, 503)
+      }
+
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    renderPanel()
+    const user = userEvent.setup()
+    const combobox = screen.getByRole('combobox', { name: /Search for owner/i })
+
+    // First search — list populates.
+    await user.type(combobox, 'pop')
+    await waitFor(
+      () => {
+        expect(screen.queryByRole('option', { hidden: true })).toBeTruthy()
+      },
+      { timeout: 1000 },
+    )
+
+    // Type more so a second debounced search fires and fails.
+    await user.type(combobox, 'x')
+    await waitFor(
+      () => {
+        expect(screen.getAllByText('Could not reach Keycloak — try again').length).toBeGreaterThan(0)
+      },
+      { timeout: 1000 },
+    )
+
+    // The stale option must be gone — no options should remain visible.
+    expect(screen.queryByRole('option', { hidden: true })).toBeNull()
+  })
+
+  it('clears ownerId when user edits the owner input after selecting an owner', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const { path, method } = readMockRequest(input, init)
+      if (path === '/operator-api/internal/keycloak-users' && method === 'GET') {
+        return createJsonResponse([
+          { id: 'user-xyz', email: 'aragon@rivendell.example', username: 'aragon' },
+        ])
+      }
+      return createJsonResponse({ error: `Unhandled ${method} ${path}` }, 500)
+    })
+
+    const onError = vi.fn()
+    renderPanel({ onError })
+
+    const user = userEvent.setup()
+    const combobox = screen.getByRole('combobox', { name: /Search for owner/i })
+
+    // Select an owner.
+    await user.type(combobox, 'aragon')
+    await user.click(await screen.findByRole('option', { hidden: true }))
+
+    // Now type over the input — this should clear the previously-committed ownerId.
+    await user.type(combobox, 'x')
+
+    // Fill other required fields and attempt to submit.
+    await user.type(screen.getByLabelText(/tenant slug/i), 'rivendell-notes')
+    await user.type(screen.getByLabelText(/^operator reason/i), 'New tenant')
+
+    await user.click(screen.getByRole('button', { name: 'Review and provision tenant' }))
+
+    // Because ownerId was cleared, validation must block the submit —
+    // the review dialog must NOT appear and onError must be called.
+    await waitFor(
+      () => {
+        expect(onError).toHaveBeenCalledOnce()
+      },
+      { timeout: 1000 },
+    )
+    expect(screen.queryByText('Confirm tenant provisioning')).toBeNull()
+  })
+
   it('submitted create-tenant payload contains only id, slug, ownerId, and version', async () => {
     const createRequests: Array<Record<string, unknown>> = []
 

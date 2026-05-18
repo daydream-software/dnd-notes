@@ -147,6 +147,7 @@ export default function ProvisionTenantPanel({
           if (err instanceof Error && err.name === 'AbortError') {
             return
           }
+          setOwnerOptions([])
           setOwnerLoading(false)
           setOwnerError('Could not reach Keycloak — try again')
         })
@@ -155,7 +156,15 @@ export default function ProvisionTenantPanel({
   )
 
   const handleOwnerInputChange = useCallback(
-    (_event: React.SyntheticEvent, value: string) => {
+    (_event: React.SyntheticEvent, value: string, reason: string) => {
+      // 'input' = user typed; 'clear' = clear button. 'reset' fires when an
+      // option is selected to sync the input — we must NOT clear in that case,
+      // or we'd immediately wipe the freshly-committed ownerId.
+      if (reason === 'input' || reason === 'clear') {
+        setSelectedOwner(null)
+        setDraft((currentDraft) => ({ ...currentDraft, ownerId: '' }))
+      }
+
       setOwnerInputValue(value)
 
       if (debounceRef.current) {
