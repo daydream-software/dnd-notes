@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: customer-portal-config
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: customer-portal
+    app.kubernetes.io/component: customer-portal
+    app.kubernetes.io/part-of: dnd-notes
+data:
+  API_BASE_PATH: "/portal-api"
+  CONTROL_PLANE_URL: "http://dnd-notes-control-plane.dnd-notes-platform.svc.cluster.local:3001"
+  KEYCLOAK_URL: "https://auth.example.com"
+  KEYCLOAK_REALM: "dnd-notes"
+  KEYCLOAK_CLIENT_ID: "dnd-notes-customer-portal"
