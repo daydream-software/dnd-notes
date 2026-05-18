@@ -173,7 +173,9 @@ cert-manager uses this secret to perform DNS-01 challenges for Let's Encrypt:
 ```bash
 kubectl --context dnd-notes-prod create secret generic cloudflare-api-token \
   -n cert-manager \
-  --from-literal=api-token='<your-cloudflare-dns-edit-token>'
+  --from-literal=api-token='<your-cloudflare-dns-edit-token>' \
+  --dry-run=client -o yaml \
+  | kubectl --context dnd-notes-prod apply -f -
 ```
 
 The token must have `Zone:DNS:Edit` scope on `daydreamsoftware.ca` only.
@@ -220,7 +222,9 @@ EOF
 
 kubectl --context dnd-notes-prod create secret generic platform-postgres-credentials \
   -n dnd-notes-platform \
-  --from-env-file=/tmp/postgres.env
+  --from-env-file=/tmp/postgres.env \
+  --dry-run=client -o yaml \
+  | kubectl --context dnd-notes-prod apply -f -
 
 rm /tmp/postgres.env
 ```
@@ -237,7 +241,9 @@ EOF
 
 kubectl --context dnd-notes-prod create secret generic keycloak-bootstrap-env \
   -n dnd-notes-platform \
-  --from-env-file=/tmp/kc-bootstrap.env
+  --from-env-file=/tmp/kc-bootstrap.env \
+  --dry-run=client -o yaml \
+  | kubectl --context dnd-notes-prod apply -f -
 
 rm /tmp/kc-bootstrap.env
 ```
@@ -258,7 +264,9 @@ EOF
 
 kubectl --context dnd-notes-prod create secret generic dnd-notes-control-plane-secrets \
   -n dnd-notes-platform \
-  --from-env-file=/tmp/control-plane.env
+  --from-env-file=/tmp/control-plane.env \
+  --dry-run=client -o yaml \
+  | kubectl --context dnd-notes-prod apply -f -
 
 rm /tmp/control-plane.env
 ```
@@ -279,7 +287,9 @@ EOF
 
 kubectl --context dnd-notes-prod create secret generic dnd-notes-backup-config \
   -n dnd-notes-platform \
-  --from-env-file=/tmp/backup-config.env
+  --from-env-file=/tmp/backup-config.env \
+  --dry-run=client -o yaml \
+  | kubectl --context dnd-notes-prod apply -f -
 
 rm /tmp/backup-config.env
 ```
@@ -549,7 +559,9 @@ EOF
 
 kubectl --context dnd-notes-prod create secret generic dnd-notes-backup-config \
   -n dnd-notes-platform \
-  --from-env-file=/tmp/backup-config.env
+  --from-env-file=/tmp/backup-config.env \
+  --dry-run=client -o yaml \
+  | kubectl --context dnd-notes-prod apply -f -
 
 rm /tmp/backup-config.env
 ```
