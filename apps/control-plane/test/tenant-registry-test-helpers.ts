@@ -27,6 +27,10 @@ function rewriteSqlForPgMem(sql: string): string {
     )
     // Strip COMMENT ON COLUMN — pg-mem does not implement it.
     // Use a multiline match so the value string (which may span lines) is captured.
+    // FRAGILITY: each COMMENT ON COLUMN match is replaced with a standalone SELECT 1.
+    // If a future migration contains multiple COMMENT ON COLUMN statements in a single
+    // SQL file, the replacements will be joined without semicolons between them.
+    // Fix if that happens: replace the trailing comment token with 'SELECT 1;' (with semicolon).
     .replace(/COMMENT\s+ON\s+COLUMN\s+[\s\S]*?;/gi, 'SELECT 1 /* pg-mem: COMMENT ON COLUMN stripped */')
 }
 
