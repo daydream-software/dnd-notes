@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-tenant-realm
+  namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/note: >
+      Tenant realm for production. Covers customer-portal users and per-tenant
+      OIDC clients. Per-tenant clients are provisioned dynamically by the
+      control-plane at tenant-creation time. This seed establishes the realm
+      skeleton and the admin service-account client.
+      Replace redirectUris/webOrigins with actual domain values via overlay.
+data:
+  dnd-notes-realm.json: |
+    {
+      "realm": "dnd-notes",
+      "enabled": true,
+      "displayName": "D&D Notes",
+      "loginTheme": "customer-login",
+      "accountTheme": "account-console",
+      "registrationAllowed": false,
+      "verifyEmail": false,
+      "rememberMe": true,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "users": [
+        {
+          "username": "service-account-dnd-notes-keycloak-admin",
+          "enabled": true,
+          "serviceAccountClientId": "dnd-notes-keycloak-admin",
+          "clientRoles": {
+            "realm-management": [
+              "manage-clients",
+              "view-clients",
+              "view-realm",
+              "view-users",
+              "manage-users"
+            ]
+          }
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "dnd-notes-customer-portal",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "redirectUris": [
+            "https://notes.daydreamsoftware.ca/*"
+          ],
+          "webOrigins": [
+            "https://notes.daydreamsoftware.ca"
+          ],
+          "attributes": {
+            "pkce.code.challenge.method": "S256"
+          }
+        },
+        {
+          "clientId": "dnd-notes-keycloak-admin",
+          "enabled": true,
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "replace-with-managed-secret"
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-workforce-realm
+  namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/note: >
+      Workforce realm for production. Covers operators and control-plane staff.
+      Replace redirectUris/webOrigins with actual domain values via overlay.
+data:
+  dnd-notes-workforce-realm.json: |
+    {
+      "realm": "dnd-notes-workforce",
+      "enabled": true,
+      "displayName": "D&D Notes Workforce",
+      "registrationAllowed": false,
+      "verifyEmail": false,
+      "rememberMe": true,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "accountTheme": "account-console",
+      "clients": [
+        {
+          "clientId": "dnd-notes-control-plane",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "redirectUris": [
+            "https://operator.daydreamsoftware.ca/*"
+          ],
+          "webOrigins": [
+            "https://operator.daydreamsoftware.ca"
+          ],
+          "attributes": {
+            "login_theme": "operator-login"
+          }
+        }
+      ],
+      "roles": {
+        "client": {
+          "dnd-notes-control-plane": [
+            {
+              "name": "control-plane-admin",
+              "clientRole": true
+            },
+            {
+              "name": "control-plane-workforce",
+              "clientRole": true
+            }
+          ]
+        }
+      }
+    }

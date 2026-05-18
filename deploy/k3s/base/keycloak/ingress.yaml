@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: platform-keycloak
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-keycloak
+    app.kubernetes.io/component: identity
+    app.kubernetes.io/part-of: dnd-notes
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - auth.daydreamsoftware.ca
+      secretName: daydreamsoftware-wildcard-tls
+  rules:
+    - host: auth.daydreamsoftware.ca
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: platform-keycloak
+                port:
+                  name: http

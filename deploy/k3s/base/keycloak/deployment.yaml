@@ -1,0 +1,114 @@
+---
+# Keycloak bootstrap credentials — replace via kubectl create secret before apply.
+# Never commit real credentials.
+#
+# kubectl create secret generic keycloak-bootstrap-env \
+#   -n dnd-notes-platform \
+#   --from-literal=KC_BOOTSTRAP_ADMIN_USERNAME=admin \
+#   --from-literal=KC_BOOTSTRAP_ADMIN_PASSWORD='<strong-random-password>'
+apiVersion: v1
+kind: Secret
+metadata:
+  name: keycloak-bootstrap-env
+  namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/note: Replace KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD with real values before apply.
+type: Opaque
+stringData:
+  KC_BOOTSTRAP_ADMIN_USERNAME: replace-with-admin-username
+  KC_BOOTSTRAP_ADMIN_PASSWORD: replace-with-managed-secret
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-keycloak
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: platform-keycloak
+    app.kubernetes.io/component: identity
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: platform-keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: platform-keycloak
+        app.kubernetes.io/component: identity
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: keycloak
+          image: quay.io/keycloak/keycloak:26.2.4
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          imagePullPolicy: IfNotPresent
+          args:
+            - start
+            - --import-realm
+            - --http-port=8080
+            - --proxy-headers=xforwarded
+            - --hostname-strict=false
+          envFrom:
+            - secretRef:
+                name: keycloak-bootstrap-env
+          env:
+            - name: KC_HOSTNAME
+              value: https://auth.daydreamsoftware.ca
+            - name: KC_HOSTNAME_STRICT
+              value: "false"
+            - name: KC_DB
+              value: postgres
+            - name: KC_DB_URL
+              value: jdbc:postgresql://platform-postgres.dnd-notes-platform.svc.cluster.local:5432/keycloak
+            - name: KC_DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: platform-postgres-credentials
+                  key: POSTGRES_USER
+            - name: KC_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: platform-postgres-credentials
+                  key: POSTGRES_PASSWORD
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 6
+          livenessProbe:
+            httpGet:
+              path: /realms/master
+              port: http
+            initialDelaySeconds: 90
+            periodSeconds: 20
+            timeoutSeconds: 5
+          volumeMounts:
+            - name: realm-import-workforce
+              mountPath: /opt/keycloak/data/import/dnd-notes-workforce-realm.json
+              subPath: dnd-notes-workforce-realm.json
+            - name: realm-import-tenant
+              mountPath: /opt/keycloak/data/import/dnd-notes-realm.json
+              subPath: dnd-notes-realm.json
+      volumes:
+        - name: realm-import-workforce
+          configMap:
+            name: keycloak-workforce-realm
+        - name: realm-import-tenant
+          configMap:
+            name: keycloak-tenant-realm
