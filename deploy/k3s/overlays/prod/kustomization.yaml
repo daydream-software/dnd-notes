@@ -23,13 +23,13 @@ kind: Kustomization
 #   kubectl kustomize deploy/k3s/overlays/prod | kubectl apply -f -
 
 resources:
-  - ../../base
+- ../../base
 
 # Prod-specific ConfigMaps (override base placeholders with real daydreamsoftware.ca values)
 patches:
-  - path: configmap-control-plane.yaml
-  - path: configmap-customer-portal.yaml
-  - path: configmap-operator-portal.yaml
+- path: configmap-control-plane.yaml
+- path: configmap-customer-portal.yaml
+- path: configmap-operator-portal.yaml
 
 # Image tags: pinned to an explicit sentinel so applying the overlay without
 # substituting a real tag fails fast (ImagePullBackOff on a nonexistent tag)
@@ -49,9 +49,12 @@ patches:
 # See the runbook in Issue #329, section 4 "Daily ops / Deploy a new image
 # version" for the full deploy procedure.
 images:
-  - name: ghcr.io/daydream-software/dnd-notes-control-plane
-    newTag: pin-before-deploy
-  - name: ghcr.io/daydream-software/dnd-notes-customer-portal
-    newTag: pin-before-deploy
-  - name: ghcr.io/daydream-software/dnd-notes-operator-portal
-    newTag: pin-before-deploy
+- name: ghcr.io/daydream-software/dnd-notes-control-plane
+  newName: ghcr.io/daydream-software/dnd-notes-control-plane
+  newTag: sha-04e3c4a
+- name: ghcr.io/daydream-software/dnd-notes-customer-portal
+  newName: ghcr.io/daydream-software/dnd-notes-customer-portal
+  newTag: sha-04e3c4a
+- name: ghcr.io/daydream-software/dnd-notes-operator-portal
+  newName: ghcr.io/daydream-software/dnd-notes-operator-portal
+  newTag: sha-04e3c4a
