@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dnd-notes-activator-config
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: dnd-notes-activator
+    app.kubernetes.io/component: activator
+    app.kubernetes.io/part-of: dnd-notes
+data:
+  BASE_DOMAIN: "notes.daydreamsoftware.ca"
+  TENANT_PORT: "3000"
+  COLD_START_TIMEOUT_MS: "60000"
+  POD_SCHEDULE_BUDGET_MS: "30000"
+  IDLE_THRESHOLD_MINUTES: "30"

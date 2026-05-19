@@ -1,0 +1,30 @@
+{
+  "name": "@dnd-notes/activator",
+  "version": "0.1.0",
+  "description": "Wake-on-request activator for scale-to-zero tenants",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "tsx watch --clear-screen=false src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint .",
+    "start": "node dist/index.js",
+    "test": "node --import tsx --test test/*.test.ts",
+    "test:ci": "c8 --all --src src --extension .ts --report-dir ../../reports/coverage/activator --reporter text-summary --reporter lcov --reporter json-summary --reporter cobertura node --import tsx --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=junit --test-reporter-destination=../../reports/test-results/activator.junit.xml test/*.test.ts"
+  },
+  "license": "FSL-1.1-MIT",
+  "dependencies": {
+    "@kubernetes/client-node": "^1.4.0",
+    "pg": "^8.20.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.12.4",
+    "@types/pg": "^8.20.0",
+    "eslint": "^10.4.0",
+    "globals": "^17.4.0",
+    "tsx": "^4.22.0",
+    "typescript": "^6.0.0",
+    "typescript-eslint": "^8.59.3"
+  }
+}

@@ -13,7 +13,7 @@ import {
 } from './tenant-registry-test-helpers.js'
 
 const expectedTenantStateSignature =
-  'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+  'provisioning,ready,sleeping,maintenance,upgrading,restoring,failed,deprovisioned'
 const tenantStateCheckSqlList = expectedTenantStateSignature
   .split(',')
   .map((state) => `'${state}'`)

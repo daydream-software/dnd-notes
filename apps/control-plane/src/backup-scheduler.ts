@@ -197,12 +197,15 @@ export function startBackupScheduler(
       return
     }
 
+    // Sleeping tenants (scale-to-zero) must also be backed up: the backup
+    // runner connects directly to Postgres via the admin credential and never
+    // touches the tenant pod, so replica count is irrelevant.
     const readyTenants = tenants.filter(
-      (t) => t.currentState === 'ready' && t.storageReference,
+      (t) => (t.currentState === 'ready' || t.currentState === 'sleeping') && t.storageReference,
     )
 
     console.log(
-      `[backup-scheduler] Backing up ${readyTenants.length} ready tenant(s).`,
+      `[backup-scheduler] Backing up ${readyTenants.length} ready/sleeping tenant(s).`,
     )
 
     // Track prefixes whose backup *succeeded* this tick. Only these are

@@ -1,0 +1,23 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dnd-notes-activator
+  labels:
+    app.kubernetes.io/name: dnd-notes-activator
+    app.kubernetes.io/component: activator
+    app.kubernetes.io/part-of: dnd-notes
+rules:
+  # Watch Deployments in all tenant namespaces to track replica counts.
+  # Patch is required to scale tenants to 1 replica on wake.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "patch"]
+  # Watch Endpoints to detect when a tenant pod's readiness probe passes.
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+  # Read Pod phase for resource-pressure detection
+  # (pod_schedule_deadline_exceeded metric).
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]

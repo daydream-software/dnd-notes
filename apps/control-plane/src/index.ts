@@ -282,6 +282,7 @@ if (ENABLE_TENANT_PROVISIONING) {
     process.env.TENANT_READY_TIMEOUT_MS,
     defaultTenantReadyTimeoutMs,
   )
+  const activatorExternalNameTrimmed = process.env.ACTIVATOR_EXTERNAL_NAME?.trim()
 
   tenantProvisioningService = createLiveTenantProvisioningService({
     tenantRegistry,
@@ -305,6 +306,14 @@ if (ENABLE_TENANT_PROVISIONING) {
     readyTimeoutMs: tenantReadyTimeoutMs,
     controlPlaneToken: TENANT_CONTROL_PLANE_TOKEN,
     tlsClusterIssuer: TENANT_TLS_CLUSTER_ISSUER,
+    // When ACTIVATOR_EXTERNAL_NAME is set (e.g.
+    // "dnd-notes-activator.dnd-notes-platform.svc.cluster.local"), new tenant
+    // IngressRoutes are routed through the activator shim for scale-to-zero
+    // wake-on-request support (Pattern B). Leave unset to disable.
+    activatorExternalName: activatorExternalNameTrimmed !== '' ? activatorExternalNameTrimmed : undefined,
+    activatorPort: process.env.ACTIVATOR_PORT
+      ? Number(process.env.ACTIVATOR_PORT)
+      : undefined,
   })
 }
 

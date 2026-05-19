@@ -9,7 +9,7 @@ import {
 import { registerPgMemTenantRegistrySupport } from './tenant-registry-test-helpers.js'
 
 const expectedTenantStateSignature =
-  'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+  'provisioning,ready,sleeping,maintenance,upgrading,restoring,failed,deprovisioned'
 const expectedControlPlaneMigrations = [
   '0001_baseline.sql',
   '0002_backup_catalog.sql',
@@ -18,6 +18,7 @@ const expectedControlPlaneMigrations = [
   '0005_remove_local_auth.sql',
   '0006_deprecate_initial_admin_email.sql',
   '0007_backup_catalog_location_deleted.sql',
+  '0008_scale_to_zero.sql',
 ]
 
 test('control-plane migrations seed schema metadata and use a namespaced ledger', async () => {
