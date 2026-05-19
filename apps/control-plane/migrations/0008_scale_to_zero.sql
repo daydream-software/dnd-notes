@@ -43,6 +43,17 @@ CREATE TABLE IF NOT EXISTS tenant_activity (
 CREATE INDEX IF NOT EXISTS idx_tenant_activity_last_request_at
   ON tenant_activity(last_request_at);
 
+-- Backfill: seed last_request_at = NOW() for all tenants that are currently
+-- active (ready, maintenance, upgrading, restoring) so the idle scaler does
+-- not treat them as idle-from-epoch on the first CronJob run after this
+-- migration deploys. Tenants in sleeping, provisioning, failed, or
+-- deprovisioned states are intentionally excluded.
+INSERT INTO tenant_activity (tenant_id, last_request_at)
+SELECT id, NOW()
+FROM tenants
+WHERE current_state IN ('ready', 'maintenance', 'upgrading', 'restoring')
+ON CONFLICT (tenant_id) DO NOTHING;
+
 -- Widen tenants.desired_state
 ALTER TABLE tenants
   DROP CONSTRAINT IF EXISTS tenants_desired_state_check; -- @migration:destructive

@@ -33,7 +33,7 @@ export interface RegisterPgMemTenantRegistrySupportOptions {
  * pg-mem also does not support COMMENT ON COLUMN; those statements are
  * stripped (they are metadata-only and safe to omit in tests).
  */
-function rewriteSqlForPgMem(sql: string): string {
+export function rewriteSqlForPgMem(sql: string): string {
   return sql
     .replace(
       /ALTER TABLE portal_accounts\s+DROP COLUMN IF EXISTS auth_provider/gi,
