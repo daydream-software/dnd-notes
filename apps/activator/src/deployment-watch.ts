@@ -35,6 +35,8 @@ import {
   AppsV1Api,
   CoreV1Api,
   KubeConfig,
+  PatchStrategy,
+  setHeaderOptions,
   Watch,
   type V1Deployment,
   type V1Endpoints,
@@ -43,7 +45,7 @@ import {
 /** Structural interface for the AppsV1Api subset used by DeploymentWatcher. */
 export interface AppsV1ApiLike {
   readNamespacedDeployment(args: { name: string; namespace: string }): Promise<{ spec?: { replicas?: number } }>
-  patchNamespacedDeployment(args: { name: string; namespace: string; body: unknown }): Promise<unknown>
+  patchNamespacedDeployment(args: { name: string; namespace: string; body: unknown }, options?: unknown): Promise<unknown>
 }
 
 /** Structural interface for the CoreV1Api subset used by DeploymentWatcher. */
@@ -269,8 +271,10 @@ export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}):
     },
 
     async patchReplicas(namespace: string, deploymentName: string, replicas: number): Promise<void> {
-      // ObjectParamAPI request object; library selects application/merge-patch+json automatically
-      await appsApi.patchNamespacedDeployment({ name: deploymentName, namespace, body: { spec: { replicas } } })
+      await appsApi.patchNamespacedDeployment(
+        { name: deploymentName, namespace, body: { spec: { replicas } } },
+        setHeaderOptions('Content-Type', PatchStrategy.MergePatch),
+      )
       replicaCache.set(resourceKey(namespace, deploymentName), replicas)
     },
 

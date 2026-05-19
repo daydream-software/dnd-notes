@@ -18,7 +18,7 @@
  * Run as a CronJob: exits with code 0 on success, 1 on error.
  */
 
-import { KubeConfig, AppsV1Api } from '@kubernetes/client-node'
+import { KubeConfig, AppsV1Api, PatchStrategy, setHeaderOptions } from '@kubernetes/client-node'
 import { Pool } from 'pg'
 
 const CONTROL_PLANE_DATABASE_URL = process.env['CONTROL_PLANE_DATABASE_URL'] ?? ''
@@ -87,8 +87,10 @@ async function main(): Promise<void> {
           console.log(`[idle-scaler] tenant ${row.subdomain} already at 0 replicas, syncing state`)
         } else {
           console.log(`[idle-scaler] scaling tenant ${row.subdomain} to 0 replicas`)
-          // ObjectParamAPI request object; library selects application/merge-patch+json automatically
-          await appsApi.patchNamespacedDeployment({ name: deploymentName, namespace, body: { spec: { replicas: 0 } } })
+          await appsApi.patchNamespacedDeployment(
+            { name: deploymentName, namespace, body: { spec: { replicas: 0 } } },
+            setHeaderOptions('Content-Type', PatchStrategy.MergePatch),
+          )
         }
 
         // Update currentState to 'sleeping' in the registry
