@@ -12,9 +12,10 @@
  * After a cold-start wake, kube-proxy may still be reconciling its iptables
  * rules even though the Endpoints subset.addresses is already populated. During
  * this ~100–500 ms window the ClusterIP has zero backends and the kernel returns
- * RST, producing ECONNREFUSED. proxyRequest retries up to 3 attempts total on
- * TCP-level connect errors (ECONNREFUSED, ECONNRESET, EHOSTUNREACH) so the
- * request survives the race.
+ * RST, producing ECONNREFUSED or ENETUNREACH depending on how far iptables has
+ * converged. proxyRequest retries up to 3 attempts total on TCP-level connect
+ * errors (ECONNREFUSED, ECONNRESET, EHOSTUNREACH, ENETUNREACH) so the request
+ * survives the race.
  *
  * Retries are restricted to body-less HTTP methods (GET, HEAD) — body-bearing
  * methods (POST, PUT, PATCH, DELETE, …) cannot be safely replayed once the
@@ -33,7 +34,7 @@ export interface ProxyTarget {
 }
 
 /** Error codes that indicate a transient kube-proxy / endpoint-race failure. */
-const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH'])
+const RETRYABLE_CODES = new Set(['ECONNREFUSED', 'ECONNRESET', 'EHOSTUNREACH', 'ENETUNREACH'])
 
 /** HTTP methods that have no request body and are safe to replay. */
 const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE'])
