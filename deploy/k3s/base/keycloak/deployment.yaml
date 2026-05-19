@@ -43,6 +43,9 @@ spec:
             - start
             - --import-realm
             - --http-port=8080
+            # Required when TLS is terminated at the ingress (Traefik) rather than
+            # directly on Keycloak; production mode otherwise refuses to start.
+            - --http-enabled=true
             - --proxy-headers=xforwarded
             - --hostname-strict=false
           envFrom:

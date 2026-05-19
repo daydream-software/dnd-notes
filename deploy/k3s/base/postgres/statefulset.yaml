@@ -24,6 +24,18 @@ spec:
         fsGroup: 999
         fsGroupChangePolicy: OnRootMismatch
       terminationGracePeriodSeconds: 60
+      initContainers:
+        # k3s local-path provisioner creates PVC dirs as root and does not
+        # honor fsGroup, so postgres (UID 999) cannot write on first boot.
+        # This initContainer chowns the data dir before the main container starts.
+        - name: init-data-perms
+          image: busybox:1.36
+          command: ['sh', '-c', 'chown -R 999:999 /var/lib/postgresql/data']
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+          securityContext:
+            runAsUser: 0
       containers:
         - name: postgres
           image: postgres:17.9-bookworm

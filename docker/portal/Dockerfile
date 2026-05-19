@@ -28,14 +28,23 @@ RUN npm run build --workspace packages/theme
 RUN npm run build --workspace apps/${PORTAL_NAME}
 
 # Stage 4: Runtime image
-FROM nginx:alpine AS runtime
+# nginx-unprivileged sets USER 101 at the end of its build. /var/cache/nginx
+# and /etc/nginx are pre-chowned to 101:0 by the base image, but
+# /usr/share/nginx/html is not — it remains root-owned. We need root to clear
+# the default html files, copy in our dist, and chown the directory so that
+# generate-env.sh (which runs as UID 101 at container start) can write env.js.
+# Once chown is done at build time, the container requires no capabilities.
+FROM nginxinc/nginx-unprivileged:alpine AS runtime
 ARG PORTAL_NAME
+USER root
 WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
 COPY --from=build /app/apps/${PORTAL_NAME}/dist ./
+RUN chown -R 101:0 /usr/share/nginx/html
 
 COPY docker/portal/nginx.conf.template /etc/nginx/templates/default.conf.template
 COPY docker/portal/generate-env.sh /docker-entrypoint.d/40-generate-env.sh
 RUN chmod +x /docker-entrypoint.d/40-generate-env.sh
 
+USER 101
 EXPOSE 8080
