@@ -69,6 +69,8 @@ Team update (2026-05-16T00:00:00Z): Use `!= null` (loose null check) when guardi
 
 Team update (2026-05-17T22:00:00Z): Dispatched to worktree for apps/control-plane cutover in PR #320 (Keycloak-only auth phase 2 exit). Commits 6801aea + c170b78 cherry-picked: dropped `/portal/{signup,login,logout}`, removed auth-mode switches, added migration `0005_remove_local_auth.sql` with pg-mem DROP COLUMN quirk helper `wrapPoolForPgMem()`, aligned docs/env/configmaps. Merged as part of PR #320 phase-2-exit session. — decided by Coordinator
 
+Team update (2026-05-19T00:00:00Z): Three-phase provisioning split landed in PR #342 (issue #338). Advisory lock scope reduced from full kubelet rollout wait (~240s) to registry-mutation window only. Phase 2 runs unlocked; Phase 3 re-acquires briefly to write `ready`. Re-entry guard (`fd4fe4b`) protects against concurrent in-progress state; best-effort try/catch around failure-state write (`5f8d28e`) prevents lock-held panic path. Decision recorded in decisions.md. — decided by Data
+
 
 
 

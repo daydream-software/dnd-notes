@@ -2,6 +2,21 @@
 
 ## Active Decisions
 
+### 2026-05-19: Three-phase provisioning split — advisory lock scope reduction (#338, PR #342)
+**Decided by:** Data (Backend)  
+**Date:** 2026-05-19  
+**Type:** Architecture — advisory lock scope, provisioning contract  
+**Issue:** #338  
+**PR:** #342
+
+**Decision:** Split `provisionTenant` into three phases to shrink the advisory lock hold time from the full kubelet rollout wait (~240s) to only the registry-mutation window.
+
+**Rationale:** The original `provisionTenant` function held `pg_advisory_lock` through every phase including the kubelet rollout wait, which could reach ~240s. This serialized all concurrent provisioning attempts for the full duration. The three-phase split confines the lock to the window where the registry state is mutated: Phase 1 acquires the lock, validates preconditions, and writes the initial record; Phase 2 runs without any lock (kubelet wait, namespace creation, secret injection); Phase 3 re-acquires briefly to write `ready`. Concurrent requests during Phase 2 see `in-progress` and return early via a re-entry guard added in `fd4fe4b` (CR catch). A best-effort try/catch around the failure-state write in Phase 3 was added in `5f8d28e` (Mikey catch) to avoid a lock-held panic path on rare DB failures.
+
+**Impact for Data:** `provisionTenant` in `apps/control-plane/src/provisioning.ts` is now three functions (`provisionPhase1`, `provisionPhase2`, `provisionPhase3`). The public entry point orchestrates all three. The `in-progress` status is written by Phase 1 and acts as the concurrency guard for Phase 2. Callers that previously awaited a single promise now await the orchestrator function with the same external contract.
+
+**Note:** Inbox file `data-tenant-lock-scope-338.md` was referenced in the coordinator brief but was absent from `.squad/decisions/inbox/` at merge time. Decision transcribed from coordinator brief.
+
 ### 2026-05-18: Keycloak user picker search endpoint at /internal/keycloak-users (#325)
 **Decided by:** Data (Backend)  
 **Date:** 2026-05-18  

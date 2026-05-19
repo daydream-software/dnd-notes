@@ -77,6 +77,8 @@ Mikey is the Lead for the squad, responsible for architecture alignment, blockin
   3. *Tenant credential isolation gap (CRITICAL)*: Issue #54 provisioning shares admin Postgres URL across all tenants — any compromised tenant container can read/modify other tenant data. Fixed by new #71 (per-tenant Postgres credentials). Blocks Phase 1 production deployment.
   Pattern: Architecture decisions are right (control-plane thin API, per-tenant databases), but operator/customer UX and security hardening require explicit issues.
 
+Team update (2026-05-19T00:00:00Z): Three-phase provisioning split (PR #342, issue #338) — Mikey catch: best-effort try/catch around failure-state write in Phase 3 (`5f8d28e`) to avoid lock-held panic path on rare DB failures. Also: Brand's nginx-unprivileged capability additions (PR #341) corrected to `drop: ["ALL"]` with build-time chown after CR pushback — now PSS-Restricted-compliant. — decided by Data + Brand
+
 
 ---
 - **Issue #76 reviewer gate — Keycloak subject beats mutable email (2026-04-22):** Runtime Keycloak wiring is structurally sound, but owner reconciliation cannot blindly overwrite `owner_accounts.email` after matching on `keycloak_sub`. In `apps/api/src/note-store.ts`, a Keycloak user who changes their IdP email to one already held by another local owner record currently trips the unique email index and turns a normal sign-in into a 500. For IdP-backed auth, treat `sub` as the durable identity key, treat email as a mutable claim, and handle collisions explicitly with a controlled product error or a no-op email update instead of letting the database decide at request time.
