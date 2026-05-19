@@ -30,4 +30,6 @@ data:
   CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID: dnd-notes-customer-portal
   # Traefik sets X-Forwarded-For; Express must be told to trust it or
   # express-rate-limit raises a ValidationError on every request.
-  CONTROL_PLANE_TRUST_PROXY: "true"
+  # "1" trusts exactly one upstream proxy hop (Traefik), preventing IP spoofing
+  # via a forged X-Forwarded-For header on inbound requests.
+  CONTROL_PLANE_TRUST_PROXY: "1"

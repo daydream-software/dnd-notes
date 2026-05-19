@@ -33,9 +33,9 @@ spec:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
-              # nginx-unprivileged entrypoint needs these for its chown dance;
-              # stays compliant with PSS restricted baseline (drop ALL first).
-              add: ["CHOWN", "SETUID", "SETGID", "DAC_OVERRIDE"]
+              # No capabilities needed: /usr/share/nginx/html is chown'd to
+              # 101:0 at image build time (see docker/portal/Dockerfile).
+              # PSS Restricted compliant — drop ALL, add nothing.
           ports:
             - name: http
               containerPort: 8080
