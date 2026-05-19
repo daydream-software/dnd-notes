@@ -12,7 +12,7 @@
  * knows the subdomain at proxy time, so this module resolves subdomain → id via a
  * cached SELECT before each upsert. The cache stores the in-flight Promise so
  * concurrent first-hit requests for the same subdomain share a single SELECT. On
- * DB error the entry is removed so the next call can retry. Slugs are stable
+ * DB error the entry is removed so the next call can retry. Subdomains are stable
  * for a tenant's lifetime, so the lookup runs once per pod restart per tenant.
  */
 
