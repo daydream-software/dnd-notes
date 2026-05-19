@@ -15,8 +15,10 @@
 # Three test scenarios:
 #   1. Warm-path: tenant already running, activator forwards immediately
 #   2. Cold-start (wake path): tenant sleeping, activator wakes and forwards
-#   3. Resource-pressure detection: Deployment PATCH triggers pod_schedule_deadline_exceeded
-#      when pod stays Pending past POD_SCHEDULE_BUDGET_MS
+#   3. Resource-pressure detection: Deployment patched with unschedulable memory
+#      request (64Gi); activator fires pod_schedule_deadline_exceeded after
+#      POD_SCHEDULE_BUDGET_MS, then returns HTTP 503 cold_start_timeout after
+#      COLD_START_TIMEOUT_MS. Patch is reverted before section 6.
 #
 # The script measures cold-start wall time and prints p50/p95 via the
 # /metrics endpoint.
@@ -229,6 +231,123 @@ if [[ "${second_status}" != "200" ]]; then
   echo "Second request returned ${second_status}, expected 200" >&2
   exit 1
 fi
+
+# ---------------------------------------------------------------------------
+# 5b. Resource-pressure detection: pod_schedule_deadline_exceeded
+#
+# Steps:
+#   1. Patch the tenant Deployment with an unschedulable memory request (64Gi)
+#      so any pod the scheduler tries to place stays Pending indefinitely.
+#   2. Scale the Deployment to 0 (ensure the pod is gone before the wake).
+#   3. Send a wake request — the activator patches replicas: 1 and starts
+#      waiting. After POD_SCHEDULE_BUDGET_MS (default 30s) the activator
+#      inspects the pending pod and fires pod_schedule_deadline_exceeded.
+#      After COLD_START_TIMEOUT_MS (default 60s) it returns HTTP 503.
+#   4. Assert: the response is HTTP 503 with error=cold_start_timeout.
+#   5. Assert: /metrics shows pod_schedule_deadline_exceeded_total >= 1.
+#   6. Revert: remove the resource request patch and scale back to 0 so the
+#      cluster is clean for subsequent runs.
+# ---------------------------------------------------------------------------
+echo
+echo "Resource-pressure test: patching tenant with unschedulable memory request..."
+
+# Patch: add an unschedulable memory request to the first container
+kubectl -n "${TENANT_NAMESPACE}" patch deployment/"${DEPLOYMENT_NAME}" \
+  --type=json \
+  -p '[{"op":"add","path":"/spec/template/spec/containers/0/resources","value":{"requests":{"memory":"64Gi"}}}]'
+
+# Scale to 0 so there is no running pod before the wake attempt
+kubectl -n "${TENANT_NAMESPACE}" scale deployment/"${DEPLOYMENT_NAME}" --replicas=0 >/dev/null
+
+echo "Waiting for pod to terminate after patch..."
+kubectl wait -n "${TENANT_NAMESPACE}" \
+  --for=delete pod \
+  --selector=app.kubernetes.io/name=dnd-notes \
+  --timeout=60s 2>/dev/null || true
+
+# The activator's cold-start budget is COLD_START_TIMEOUT_MS (60s default) and
+# we must also allow a few seconds for the curl to collect the 503 body.
+pressure_curl_timeout=$(( COLD_START_TIMEOUT_S + 15 ))
+
+echo "Sending wake request (expect 503 after ~${COLD_START_TIMEOUT_S}s cold-start timeout)..."
+pressure_http_code="$(curl -sS \
+  -o "${WORK_DIR}/pressure-response.json" \
+  -w '%{http_code}' \
+  --max-time "${pressure_curl_timeout}" \
+  -H "Host: ${TENANT_SUBDOMAIN}.${TENANT_BASE_DOMAIN}" \
+  "http://127.0.0.1:${ACTIVATOR_PORT}/ready" 2>/dev/null || echo "curl_failed")"
+
+echo "Resource-pressure result: HTTP ${pressure_http_code}"
+
+if [[ "${pressure_http_code}" != "503" ]]; then
+  echo "Resource-pressure test: expected HTTP 503, got ${pressure_http_code}" >&2
+  if [[ -s "${WORK_DIR}/pressure-response.json" ]]; then
+    echo "Response body:" >&2
+    cat "${WORK_DIR}/pressure-response.json" >&2
+  fi
+  # Revert before exiting
+  kubectl -n "${TENANT_NAMESPACE}" patch deployment/"${DEPLOYMENT_NAME}" \
+    --type=json \
+    -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources"}]' 2>/dev/null || true
+  kubectl -n "${TENANT_NAMESPACE}" scale deployment/"${DEPLOYMENT_NAME}" --replicas=0 2>/dev/null || true
+  exit 1
+fi
+
+# Verify the response body contains error=cold_start_timeout
+pressure_error="$(node -e "
+  const b = require('fs').readFileSync('${WORK_DIR}/pressure-response.json', 'utf8');
+  const j = JSON.parse(b);
+  process.stdout.write(j.error ?? '');
+" 2>/dev/null || true)"
+
+if [[ "${pressure_error}" != "cold_start_timeout" ]]; then
+  echo "Resource-pressure test: expected error=cold_start_timeout in body, got: ${pressure_error}" >&2
+  # Revert before exiting
+  kubectl -n "${TENANT_NAMESPACE}" patch deployment/"${DEPLOYMENT_NAME}" \
+    --type=json \
+    -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources"}]' 2>/dev/null || true
+  kubectl -n "${TENANT_NAMESPACE}" scale deployment/"${DEPLOYMENT_NAME}" --replicas=0 2>/dev/null || true
+  exit 1
+fi
+echo "Resource-pressure 503 body: error=${pressure_error} (correct)"
+
+# Assert pod_schedule_deadline_exceeded_total >= 1 in /metrics
+echo "Checking pod_schedule_deadline_exceeded_total metric..."
+curl -fsS "http://127.0.0.1:${ACTIVATOR_PORT}/metrics" \
+  >"${WORK_DIR}/pressure-metrics.txt"
+
+# Extract the counter value: line format is
+# pod_schedule_deadline_exceeded_total{tenant="..."} <value>
+deadline_count="$(grep -E '^pod_schedule_deadline_exceeded_total' \
+  "${WORK_DIR}/pressure-metrics.txt" \
+  | grep -o '[0-9][0-9]*$' \
+  | awk '{s+=$1} END {print (s == "" ? 0 : s)}')"
+
+echo "pod_schedule_deadline_exceeded_total: ${deadline_count}"
+if (( deadline_count < 1 )); then
+  echo "Resource-pressure test: expected pod_schedule_deadline_exceeded_total >= 1, got ${deadline_count}" >&2
+  # Revert before exiting
+  kubectl -n "${TENANT_NAMESPACE}" patch deployment/"${DEPLOYMENT_NAME}" \
+    --type=json \
+    -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources"}]' 2>/dev/null || true
+  kubectl -n "${TENANT_NAMESPACE}" scale deployment/"${DEPLOYMENT_NAME}" --replicas=0 2>/dev/null || true
+  exit 1
+fi
+
+# Confirm the pod is actually Pending (sanity check)
+pending_count="$(kubectl get pods -n "${TENANT_NAMESPACE}" --no-headers 2>/dev/null \
+  | grep -c 'Pending' || true)"
+echo "Pending pods in ${TENANT_NAMESPACE}: ${pending_count}"
+
+echo "Resource-pressure test passed."
+
+# Revert: remove the unschedulable resource request and scale to 0
+echo "Reverting unschedulable patch..."
+kubectl -n "${TENANT_NAMESPACE}" patch deployment/"${DEPLOYMENT_NAME}" \
+  --type=json \
+  -p '[{"op":"remove","path":"/spec/template/spec/containers/0/resources"}]'
+kubectl -n "${TENANT_NAMESPACE}" scale deployment/"${DEPLOYMENT_NAME}" --replicas=0 >/dev/null
+echo "Revert complete. Tenant ${TENANT_SUBDOMAIN} is back at 0 replicas with normal resource spec."
 
 # ---------------------------------------------------------------------------
 # 6. Metrics scrape
