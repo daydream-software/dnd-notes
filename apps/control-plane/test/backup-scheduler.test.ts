@@ -485,4 +485,159 @@ describe('startBackupScheduler', () => {
       await cleanup()
     }
   })
+
+  it('marks backup_catalog location_deleted after a successful blob delete', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.whenReady()
+
+      await tenantRegistry.createTenant({
+        id: 'tenant-purgemark',
+        slug: 'tenant-purgemark',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-purgemark',
+        'tenant_purgemark',
+      )
+      await tenantRegistry.updateTenantState('tenant-purgemark', 'ready', 'test')
+
+      // Seed a completed backup whose location URL ends with the blob name.
+      const blobName = 'tenant-purgemark/2026-01-01T00-00-00-000Z-backup.dump'
+      const blobUrl = `https://account.blob.core.windows.net/tenant-backups/${blobName}`
+      await tenantRegistry.createBackupRun({
+        id: 'backup-purgemark-stale',
+        tenantId: 'tenant-purgemark',
+        triggeredBy: 'test',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-purgemark-stale', {
+        location: blobUrl,
+      })
+
+      const dispatcher = new FakeDispatcher()
+      // Override the dispatcher location so a new blob from this tick doesn't
+      // collide with the stale blob name above.
+      dispatcher.capturedAt = '2026-05-18T03:00:01.000Z'
+
+      const fakeStore = new FakeArtifactStore()
+      // Register the stale blob as past the retention cutoff.
+      fakeStore.blobs.push({
+        name: blobName,
+        lastModified: new Date('2026-01-01T00:00:00.000Z'),
+      })
+
+      let callCountPm = 0
+      const loop = startBackupScheduler({
+        tenantRegistry,
+        tenantBackupDispatcher: dispatcher,
+        artifactStore: fakeStore as never,
+        scheduleExpression: '0 3 * * *',
+        retentionDays: 14,
+        now: () =>
+          callCountPm++ < 2
+            ? new Date('2026-05-18T02:59:59.950Z')
+            : new Date('2026-05-18T04:00:00.000Z'),
+      })
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 300))
+      loop.stop()
+
+      // The blob was deleted.
+      assert.ok(
+        fakeStore.deletedBlobs.includes(blobName),
+        `Expected blob "${blobName}" to be deleted`,
+      )
+
+      // The catalog row should now have locationDeleted = true.
+      const backups = await tenantRegistry.listTenantBackups('tenant-purgemark')
+      const staleBackup = backups.find((b) => b.id === 'backup-purgemark-stale')
+      assert.ok(staleBackup, 'Stale backup row must exist in the catalog')
+      assert.equal(
+        staleBackup.locationDeleted,
+        true,
+        'location_deleted must be true after the blob was deleted',
+      )
+    } finally {
+      await cleanup()
+    }
+  })
+
+  it('does NOT mark location_deleted when deleteBlob throws', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.whenReady()
+
+      await tenantRegistry.createTenant({
+        id: 'tenant-deletefail',
+        slug: 'tenant-deletefail',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-deletefail',
+        'tenant_deletefail',
+      )
+      await tenantRegistry.updateTenantState('tenant-deletefail', 'ready', 'test')
+
+      const blobName = 'tenant-deletefail/2026-01-01T00-00-00-000Z-backup.dump'
+      const blobUrl = `https://account.blob.core.windows.net/tenant-backups/${blobName}`
+      await tenantRegistry.createBackupRun({
+        id: 'backup-deletefail-stale',
+        tenantId: 'tenant-deletefail',
+        triggeredBy: 'test',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-deletefail-stale', {
+        location: blobUrl,
+      })
+
+      // Dispatcher also fails so no new backup is written (makes the sweep
+      // retain the blob — but in this test we manually override deleteBlob to
+      // throw transient errors instead, using an extended fake store).
+      const dispatcher = new FakeDispatcher()
+      dispatcher.errors.set('tenant-deletefail', new Error('pg_dump failed'))
+
+      class ErroringArtifactStore extends FakeArtifactStore {
+        override async deleteBlob(name: string): Promise<void> {
+          throw new Error(`Transient Azure error deleting ${name}`)
+        }
+      }
+
+      const fakeStore = new ErroringArtifactStore()
+      fakeStore.blobs.push({
+        name: blobName,
+        lastModified: new Date('2026-01-01T00:00:00.000Z'),
+      })
+
+      let callCountDf = 0
+      const loop = startBackupScheduler({
+        tenantRegistry,
+        tenantBackupDispatcher: dispatcher,
+        artifactStore: fakeStore as never,
+        scheduleExpression: '0 3 * * *',
+        retentionDays: 14,
+        now: () =>
+          callCountDf++ < 2
+            ? new Date('2026-05-18T02:59:59.950Z')
+            : new Date('2026-05-18T04:00:00.000Z'),
+      })
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 300))
+      loop.stop()
+
+      // Blob delete threw — the catalog row must NOT be marked deleted.
+      const backups = await tenantRegistry.listTenantBackups('tenant-deletefail')
+      const staleBackup = backups.find((b) => b.id === 'backup-deletefail-stale')
+      assert.ok(staleBackup, 'Stale backup row must exist')
+      assert.equal(
+        staleBackup.locationDeleted,
+        false,
+        'location_deleted must remain false when deleteBlob threw',
+      )
+    } finally {
+      await cleanup()
+    }
+  })
 })

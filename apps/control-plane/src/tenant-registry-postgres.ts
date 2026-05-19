@@ -43,8 +43,8 @@ const portalAccountSelectColumns = `id, email, display_name, billing_email,
   created_at, updated_at`
 const stateTransitionSelectColumns = `id, tenant_id, from_state, to_state,
   triggered_by, reason, created_at`
-const backupCatalogSelectColumns = `id, tenant_id, status, format, location, size_bytes,
-  checksum, failure_reason, triggered_by, reason, requested_at, started_at, completed_at,
+const backupCatalogSelectColumns = `id, tenant_id, status, format, location, location_deleted,
+  size_bytes, checksum, failure_reason, triggered_by, reason, requested_at, started_at, completed_at,
   last_verified_at, last_verification_status, last_verification_details, scratch_target,
   created_at, updated_at`
 const restoreLogSelectColumns = `id, tenant_id, backup_id, backup_location, status,
@@ -134,6 +134,7 @@ interface BackupCatalogRow {
   status: BackupRunStatus
   format: string
   location: string | null
+  location_deleted: boolean
   size_bytes: number | string | null
   checksum: string | null
   failure_reason: string | null
@@ -1439,6 +1440,30 @@ export class TenantRegistry {
     )
   }
 
+  /**
+   * Marks all backup_catalog rows whose `location` ends with `/<blobName>` as
+   * deleted. Called by the retention sweep immediately after deleteBlob()
+   * succeeds for a given blob. Returns the number of rows updated (usually 1;
+   * 0 is a warning-worthy drift between catalog and blob store).
+   *
+   * The match uses `location LIKE '%/' || blobName` so the blob name must be
+   * the full path component (e.g. `tenant-foo/2026-01-01T00-00-00-000Z-backup.dump`).
+   * Only rows with `location_deleted = false` are touched so re-runs are
+   * idempotent and do not bump `updated_at` unnecessarily.
+   */
+  async markBackupCatalogLocationDeletedForBlob(blobName: string): Promise<number> {
+    const result = await this.run(
+      `UPDATE backup_catalog
+       SET location_deleted = true,
+           updated_at = CURRENT_TIMESTAMP
+       WHERE location LIKE '%/' || $1
+         AND location_deleted = false`,
+      [blobName],
+    )
+
+    return result.rowCount ?? 0
+  }
+
   async getBackupRun(id: string): Promise<BackupRun | null> {
     const result = await this.run<BackupCatalogRow>(
       `SELECT ${backupCatalogSelectColumns}
@@ -1485,6 +1510,7 @@ export class TenantRegistry {
         .join(', ')}
        FROM backup_catalog bc
        WHERE bc.status = 'completed'
+         AND bc.location_deleted = false
        ${tenantFilter}
        ORDER BY bc.tenant_id, bc.completed_at DESC NULLS LAST, bc.id DESC`,
       tenantIdValues,
@@ -1737,6 +1763,7 @@ export class TenantRegistry {
       status: row.status,
       format: row.format,
       location: row.location ?? null,
+      locationDeleted: row.location_deleted === true,
       sizeBytes:
         row.size_bytes === null || row.size_bytes === undefined
           ? null

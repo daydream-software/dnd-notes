@@ -407,6 +407,28 @@ export function startBackupScheduler(
           `[backup-scheduler] Failed to delete blob "${blob.name}" during retention:`,
           deleteError,
         )
+        // Blob was not deleted — do not mark the catalog row as deleted.
+        continue
+      }
+
+      // Blob was deleted successfully. Mark matching catalog row(s) as deleted.
+      try {
+        const markedCount = await tenantRegistry.markBackupCatalogLocationDeletedForBlob(
+          blob.name,
+        )
+        if (markedCount === 0) {
+          console.warn(
+            `[backup-scheduler] Blob "${blob.name}" was deleted but no matching backup_catalog row was found to mark as location_deleted. The catalog may have drifted from blob storage.`,
+          )
+        }
+      } catch (catalogError) {
+        // The blob is gone but the DB write failed. The row will stay with
+        // location_deleted = false until a subsequent sweep corrects it.
+        // Log a warning and continue — do not crash the sweep.
+        console.warn(
+          `[backup-scheduler] Blob "${blob.name}" was deleted but failed to mark backup_catalog row as location_deleted:`,
+          catalogError,
+        )
       }
     }
 

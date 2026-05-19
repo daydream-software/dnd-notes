@@ -2033,6 +2033,49 @@ describe('Control Plane API', () => {
         await customRegistry.cleanup()
       }
     })
+
+    it('returns 409 when the referenced backup blob has been deleted by the retention sweep', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-restore-deleted-blob',
+        slug: 'tenant-restore-deleted-blob',
+        ownerId: 'owner-restore-deleted-blob',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference(
+        'tenant-restore-deleted-blob',
+        'pvc-tenant-restore-deleted-blob',
+      )
+      await tenantRegistry.updateTenantState(
+        'tenant-restore-deleted-blob',
+        'ready',
+        'test-suite',
+        'ready',
+      )
+      await tenantRegistry.createBackupRun({
+        id: 'backup-restore-deleted-blob-1',
+        tenantId: 'tenant-restore-deleted-blob',
+        triggeredBy: 'test-suite',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-restore-deleted-blob-1', {
+        location:
+          'https://account.blob.core.windows.net/tenant-backups/tenant-restore-deleted-blob/backup.dump',
+      })
+      // Simulate what the retention sweep does: mark the blob as deleted.
+      await tenantRegistry.markBackupCatalogLocationDeletedForBlob(
+        'tenant-restore-deleted-blob/backup.dump',
+      )
+
+      const response = await authedPost(
+        `${tenantPath('tenant-restore-deleted-blob')}/restore`,
+      )
+        .send({
+          triggeredBy: 'test-suite',
+          backupId: 'backup-restore-deleted-blob-1',
+        })
+        .expect(409)
+
+      assert.match(response.body.error, /blob has been deleted by the retention sweep/i)
+    })
   })
 
   describe('GET /internal/tenants/:tenantId/audit', () => {

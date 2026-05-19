@@ -282,6 +282,11 @@ export interface BackupRun {
   status: BackupRunStatus
   format: string
   location: string | null
+  /**
+   * True when the blob at `location` has been removed by the retention sweep.
+   * The row is kept for audit; a deleted-blob backup cannot be restored.
+   */
+  locationDeleted: boolean
   sizeBytes: number | null
   checksum: string | null
   failureReason: string | null
