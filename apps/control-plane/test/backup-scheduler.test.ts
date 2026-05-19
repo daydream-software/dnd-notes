@@ -565,6 +565,11 @@ describe('startBackupScheduler', () => {
   })
 
   it('does NOT mark location_deleted when deleteBlob throws', async () => {
+    // The backup for the tenant must SUCCEED so the prefix enters
+    // successfullyBackedUpPrefixes and the retention sweep actually calls
+    // deleteBlob (rather than hitting the "retain last known blob" branch).
+    // deleteBlob then throws a transient error, and the catalog row must NOT
+    // be marked location_deleted.
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 
     try {
@@ -593,11 +598,11 @@ describe('startBackupScheduler', () => {
         location: blobUrl,
       })
 
-      // Dispatcher also fails so no new backup is written (makes the sweep
-      // retain the blob — but in this test we manually override deleteBlob to
-      // throw transient errors instead, using an extended fake store).
+      // Backup dispatcher succeeds — this puts the prefix into
+      // successfullyBackedUpPrefixes, which allows the sweep to proceed past
+      // the "retain last known blob" guard and actually call deleteBlob.
       const dispatcher = new FakeDispatcher()
-      dispatcher.errors.set('tenant-deletefail', new Error('pg_dump failed'))
+      dispatcher.capturedAt = '2026-05-18T03:00:01.000Z'
 
       class ErroringArtifactStore extends FakeArtifactStore {
         override async deleteBlob(name: string): Promise<void> {
@@ -606,6 +611,8 @@ describe('startBackupScheduler', () => {
       }
 
       const fakeStore = new ErroringArtifactStore()
+      // Stale blob: past retention cutoff and not the newest for the prefix
+      // after a fresh backup succeeds this tick.
       fakeStore.blobs.push({
         name: blobName,
         lastModified: new Date('2026-01-01T00:00:00.000Z'),
@@ -626,6 +633,14 @@ describe('startBackupScheduler', () => {
 
       await new Promise<void>((resolve) => setTimeout(resolve, 300))
       loop.stop()
+
+      // deleteBlob was called (no "deleted" entry because it threw, but the
+      // blob list is unchanged since the override doesn't remove it).
+      assert.equal(
+        fakeStore.deletedBlobs.length,
+        0,
+        'deleteBlob threw — blob must not appear in deletedBlobs list',
+      )
 
       // Blob delete threw — the catalog row must NOT be marked deleted.
       const backups = await tenantRegistry.listTenantBackups('tenant-deletefail')
