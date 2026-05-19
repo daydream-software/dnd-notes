@@ -283,6 +283,11 @@ if (ENABLE_TENANT_PROVISIONING) {
     defaultTenantReadyTimeoutMs,
   )
   const activatorExternalNameTrimmed = process.env.ACTIVATOR_EXTERNAL_NAME?.trim()
+  const rawActivatorPort = process.env.ACTIVATOR_PORT?.trim()
+  const activatorPort =
+    rawActivatorPort !== undefined && rawActivatorPort !== ''
+      ? parsePortSetting('ACTIVATOR_PORT', rawActivatorPort, 8080)
+      : undefined
 
   tenantProvisioningService = createLiveTenantProvisioningService({
     tenantRegistry,
@@ -311,9 +316,7 @@ if (ENABLE_TENANT_PROVISIONING) {
     // IngressRoutes are routed through the activator shim for scale-to-zero
     // wake-on-request support (Pattern B). Leave unset to disable.
     activatorExternalName: activatorExternalNameTrimmed !== '' ? activatorExternalNameTrimmed : undefined,
-    activatorPort: process.env.ACTIVATOR_PORT
-      ? Number(process.env.ACTIVATOR_PORT)
-      : undefined,
+    activatorPort,
   })
 }
 

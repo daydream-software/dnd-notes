@@ -55,13 +55,14 @@ export function proxyRequest(
       upstreamRes.on('error', reject)
     })
 
+    upstreamReq.setTimeout(30_000, () => {
+      upstreamReq.destroy(new Error('upstream timeout'))
+    })
+
     upstreamReq.on('error', reject)
 
-    // Stream client body to upstream
+    // Stream client body to upstream; pipe() ends upstreamReq automatically.
     clientReq.pipe(upstreamReq)
-    clientReq.on('end', () => {
-      upstreamReq.end()
-    })
     clientReq.on('error', (err) => {
       upstreamReq.destroy(err)
       reject(err)

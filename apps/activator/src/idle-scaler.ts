@@ -23,6 +23,10 @@ import { Pool } from 'pg'
 
 const CONTROL_PLANE_DATABASE_URL = process.env['CONTROL_PLANE_DATABASE_URL'] ?? ''
 const IDLE_THRESHOLD_MINUTES = Number(process.env['IDLE_THRESHOLD_MINUTES'] ?? '30')
+if (!Number.isFinite(IDLE_THRESHOLD_MINUTES) || IDLE_THRESHOLD_MINUTES <= 0) {
+  console.error('[idle-scaler] IDLE_THRESHOLD_MINUTES must be a positive number')
+  process.exit(1)
+}
 
 if (!CONTROL_PLANE_DATABASE_URL) {
   console.error('[idle-scaler] CONTROL_PLANE_DATABASE_URL is required')

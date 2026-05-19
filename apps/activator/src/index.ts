@@ -92,6 +92,8 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
 
   const { namespace, deploymentName, serviceName, upstreamUrl, subdomain } = tenant
 
+  let heldConnection = false
+
   try {
     // Get current replica count (cache miss falls back to API GET)
     const replicas = await watcher.getReplicas(namespace, deploymentName)
@@ -99,7 +101,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     if (replicas >= 1) {
       // Tenant is warm — upsert activity and proxy directly
       void activityStore.recordActivity(subdomain).catch((err: unknown) => {
-        console.warn(`[activator] activity upsert failed for ${subdomain}:`, err instanceof Error ? err.message : String(err))
+        console.warn('[activator] activity upsert failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
       })
       await proxyRequest(req, res, { url: upstreamUrl })
       return
@@ -108,6 +110,7 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     // Tenant is sleeping — coalesce concurrent wake attempts
     metrics.wakeTotal.inc({ tenant: subdomain })
     metrics.heldConnections.inc()
+    heldConnection = true
     const wakeStart = Date.now()
 
     let wakePromise = wakeInProgress.get(namespace)
@@ -136,7 +139,10 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     const ready = await wakePromise
     const durationSeconds = (Date.now() - wakeStart) / 1000
     metrics.coldStartDuration.observe({ tenant: subdomain }, durationSeconds)
-    metrics.heldConnections.dec()
+    if (heldConnection) {
+      metrics.heldConnections.dec()
+      heldConnection = false
+    }
 
     if (!ready) {
       metrics.errorTotal.inc({ tenant: subdomain, reason: 'cold_start_timeout' })
@@ -153,15 +159,17 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
     console.log(`[activator] tenant ${subdomain} cold-start complete in ${durationSeconds.toFixed(1)}s`)
 
     void activityStore.recordActivity(subdomain).catch((err: unknown) => {
-      console.warn(`[activator] activity upsert failed for ${subdomain}:`, err instanceof Error ? err.message : String(err))
+      console.warn('[activator] activity upsert failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
     })
 
     await proxyRequest(req, res, { url: upstreamUrl })
   } catch (err) {
-    metrics.heldConnections.dec()
+    if (heldConnection) {
+      metrics.heldConnections.dec()
+    }
     const reason = err instanceof Error && err.message.includes('ECONNREFUSED') ? 'upstream_refused' : 'internal_error'
     metrics.errorTotal.inc({ tenant: subdomain, reason })
-    console.error(`[activator] error handling request for ${subdomain}:`, err instanceof Error ? err.message : String(err))
+    console.error('[activator] error handling request for %s:', subdomain, err instanceof Error ? err.message : String(err))
     if (!res.headersSent) {
       res.writeHead(502, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify({ error: 'gateway_error', details: 'Activator encountered an error' }))

@@ -143,7 +143,7 @@ export interface DeploymentWatcher {
 
 export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}): DeploymentWatcher {
   const kubeConfig = options.kubeConfig ?? new KubeConfig()
-  if (!options.appsApi && !options.coreApi) {
+  if (!options.appsApi || !options.coreApi) {
     kubeConfig.loadFromDefault()
   }
 
