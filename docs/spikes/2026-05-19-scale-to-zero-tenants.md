@@ -541,10 +541,11 @@ arrives. The new tenant pod is `Pending` indefinitely.
 1. The activator holds the connection for a configurable timeout (proposed: 60 s).
    During this window the user sees a browser loading spinner with no feedback.
 
-2. At the 15 s mark the SPA should detect the hang (the initial request is still open)
-   and inject a client-side overlay: "Waking your workspace..." with a progress
-   indicator. This is a frontend change in the tenant SPA entry point, not an
-   activator change.
+2. For first navigation (initial HTML request), rely on the browser-native loading
+   spinner — SPA overlay logic is not available before boot. For in-app API calls
+   after SPA boot, at the 15 s mark show a client-side overlay: "Waking your
+   workspace..." with a progress indicator. This is a frontend change in the tenant
+   SPA entry point, not an activator change.
 
 3. At the 30 s mark the overlay message switches to: "Still warming up — the server
    is busy, this can take a bit longer than usual."
@@ -588,11 +589,11 @@ credential (see `apps/control-plane/src/tenant-backup-runner.ts`). The backup ne
 touches the tenant pod; it connects directly to Postgres. A tenant scaled to zero
 replicas is fully backed up on the normal schedule.
 
-One nuance: the scheduler filters to `t.currentState === 'ready'`. If a scale-to-zero
-event changes the tenant's recorded `currentState` from `ready` to something like
-`sleeping`, the scheduler would skip it. The PoC must confirm that the tenant's
-`currentState` in the registry remains `ready` while at zero replicas. This is a
-control-plane contract decision, not a backup architecture change.
+One nuance: the scheduler currently filters to `t.currentState === 'ready'`. Because
+the design introduces a `sleeping` state (see integration plan), the scheduler filter
+must be widened to `t.currentState IN ('ready', 'sleeping')`. The backup runs
+regardless of replica count because it connects to Postgres directly — replica count
+is irrelevant to backup correctness.
 
 ---
 
@@ -636,6 +637,10 @@ recommendation. No code is written here.
   valid `currentState` (0 replicas, healthy). The idle scaler writes this; the backup
   scheduler must treat `sleeping` the same as `ready` (backup runs regardless, it
   connects to Postgres directly — OQ-5 resolved).
+
+- **`apps/control-plane/src/backup-scheduler.ts`** — widen the tenant filter from
+  `t.currentState === 'ready'` to `t.currentState IN ('ready', 'sleeping')` so the
+  scheduler selects sleeping tenants for backups.
 
 - **`apps/control-plane/src/app.ts`** — admin endpoints that return tenant status
   surface the `sleeping` state to the operator portal.
