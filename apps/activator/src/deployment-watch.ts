@@ -40,6 +40,25 @@ import {
   type V1Endpoints,
 } from '@kubernetes/client-node'
 
+/** Structural interface for the AppsV1Api subset used by DeploymentWatcher. */
+export interface AppsV1ApiLike {
+  readNamespacedDeployment(args: { name: string; namespace: string }): Promise<{ spec?: { replicas?: number } }>
+  patchNamespacedDeployment(args: { name: string; namespace: string; body: unknown }): Promise<unknown>
+}
+
+/** Structural interface for the CoreV1Api subset used by DeploymentWatcher. */
+export interface CoreV1ApiLike {
+  listNamespacedPod(args: { namespace: string }): Promise<{
+    items: Array<{
+      status?: { phase?: string }
+      metadata?: { labels?: Record<string, string | undefined> }
+    }>
+  }>
+  readNamespacedEndpoints(args: { name: string; namespace: string }): Promise<{
+    subsets?: Array<{ addresses?: unknown[] }>
+  }>
+}
+
 /** Key for caches: "namespace/name" */
 function resourceKey(namespace: string, name: string): string {
   return `${namespace}/${name}`
@@ -47,6 +66,17 @@ function resourceKey(namespace: string, name: string): string {
 
 export interface DeploymentWatcherOptions {
   kubeConfig?: KubeConfig
+  /**
+   * Optional injected AppsV1Api client. When provided, overrides the client
+   * derived from kubeConfig. Intended for testing without importing
+   * @kubernetes/client-node in tests.
+   */
+  appsApi?: AppsV1ApiLike
+  /**
+   * Optional injected CoreV1Api client. When provided, overrides the client
+   * derived from kubeConfig. Intended for testing.
+   */
+  coreApi?: CoreV1ApiLike
   /**
    * Interval in milliseconds between endpoint readiness polls when the Watch
    * is reconnecting or when a direct poll is needed.
@@ -113,10 +143,12 @@ export interface DeploymentWatcher {
 
 export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}): DeploymentWatcher {
   const kubeConfig = options.kubeConfig ?? new KubeConfig()
-  kubeConfig.loadFromDefault()
+  if (!options.appsApi && !options.coreApi) {
+    kubeConfig.loadFromDefault()
+  }
 
-  const appsApi = kubeConfig.makeApiClient(AppsV1Api)
-  const coreApi = kubeConfig.makeApiClient(CoreV1Api)
+  const appsApi: AppsV1ApiLike = options.appsApi ?? kubeConfig.makeApiClient(AppsV1Api)
+  const coreApi: CoreV1ApiLike = options.coreApi ?? kubeConfig.makeApiClient(CoreV1Api)
   const watcher = new Watch(kubeConfig)
 
   const readinessPollIntervalMs = options.readinessPollIntervalMs ?? 500
