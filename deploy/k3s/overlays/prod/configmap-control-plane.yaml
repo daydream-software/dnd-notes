@@ -28,3 +28,6 @@ data:
   CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes/protocol/openid-connect/certs
   CUSTOMER_PORTAL_KEYCLOAK_REALM: dnd-notes
   CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID: dnd-notes-customer-portal
+  # Traefik sets X-Forwarded-For; Express must be told to trust it or
+  # express-rate-limit raises a ValidationError on every request.
+  CONTROL_PLANE_TRUST_PROXY: "true"
