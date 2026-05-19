@@ -1446,8 +1446,12 @@ export class TenantRegistry {
    * succeeds for a given blob. Returns the number of rows updated (usually 1;
    * 0 is a warning-worthy drift between catalog and blob store).
    *
-   * The match uses `location LIKE '%/' || blobName` so the blob name must be
-   * the full path component (e.g. `tenant-foo/2026-01-01T00-00-00-000Z-backup.dump`).
+   * Match is anchored to the suffix `/<blobName>` of `location` using
+   * `right(location, length($1) + 1)` rather than `LIKE`, so blob names
+   * containing SQL wildcard characters (`_`, `%`) cannot accidentally widen
+   * the match. `blobName` must be the full path component, e.g.
+   * `tenant-foo/2026-01-01T00-00-00-000Z-backup.dump`.
+   *
    * Only rows with `location_deleted = false` are touched so re-runs are
    * idempotent and do not bump `updated_at` unnecessarily.
    */
@@ -1456,7 +1460,7 @@ export class TenantRegistry {
       `UPDATE backup_catalog
        SET location_deleted = true,
            updated_at = CURRENT_TIMESTAMP
-       WHERE location LIKE '%/' || $1
+       WHERE right(location, length($1) + 1) = '/' || $1
          AND location_deleted = false`,
       [blobName],
     )
