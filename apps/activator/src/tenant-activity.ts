@@ -10,9 +10,10 @@
  * tenant_activity.tenant_id references tenants.id (the opaque primary key),
  * not tenants.slug (the URL-visible short identifier). The activator only
  * knows the slug at proxy time, so this module resolves slug → id via a
- * cached SELECT before each upsert. The cache is process-local and has no
- * eviction — slugs are stable for a tenant's lifetime, so the lookup only
- * hits the DB once per activator pod restart per tenant.
+ * cached SELECT before each upsert. The cache stores the in-flight Promise so
+ * concurrent first-hit requests for the same slug share a single SELECT. On
+ * DB error the entry is removed so the next call can retry. Slugs are stable
+ * for a tenant's lifetime, so the lookup runs once per pod restart per tenant.
  */
 
 import { Pool } from 'pg'
@@ -43,28 +44,43 @@ export interface TenantActivityStoreOptions {
 export function createTenantActivityStoreWithClient(options: TenantActivityStoreOptions): TenantActivityStore {
   const { db } = options
 
-  // In-memory slug → tenants.id cache. Populated lazily on first lookup.
-  const slugToId = new Map<string, string>()
+  // In-memory slug → tenants.id cache. Stores the in-flight lookup Promise so
+  // concurrent first-hit requests for the same slug share one SELECT instead of
+  // each firing their own. On DB error the entry is deleted so the next call
+  // can retry rather than awaiting a permanently rejected promise.
+  const slugToId = new Map<string, Promise<string | undefined>>()
 
   return {
     async recordActivity(slug: string): Promise<void> {
       // Resolve slug to the tenants.id the FK requires.
-      let tenantId = slugToId.get(slug)
+      let tenantIdPromise = slugToId.get(slug)
 
+      if (tenantIdPromise === undefined) {
+        tenantIdPromise = db
+          .query('SELECT id FROM tenants WHERE slug = $1::text', [slug])
+          .then((result) => {
+            if (result.rows.length === 0) {
+              // Host matched activator routing but no tenant row exists — could be
+              // a race during provisioning or a stale Ingress. Log and skip; do
+              // not crash or reject (caller already fires-and-forgets with .catch).
+              console.warn(`[activator] tenant not found for slug "${slug}", skipping activity upsert`)
+              return undefined
+            }
+            return result.rows[0]['id'] as string
+          })
+          .catch((error: unknown) => {
+            // Remove entry so the next call retries rather than awaiting a
+            // permanently rejected promise.
+            slugToId.delete(slug)
+            throw error
+          })
+        slugToId.set(slug, tenantIdPromise)
+      }
+
+      const tenantId = await tenantIdPromise
       if (tenantId === undefined) {
-        const result = await db.query(
-          'SELECT id FROM tenants WHERE slug = $1::text',
-          [slug],
-        )
-        if (result.rows.length === 0) {
-          // Host matched activator routing but no tenant row exists — could be
-          // a race during provisioning or a stale Ingress. Log and skip; do
-          // not crash or reject (caller already fires-and-forgets with .catch).
-          console.warn(`[activator] tenant not found for slug "${slug}", skipping activity upsert`)
-          return
-        }
-        tenantId = result.rows[0]['id'] as string
-        slugToId.set(slug, tenantId)
+        slugToId.delete(slug)
+        return
       }
 
       // Cast $1 explicitly to text to avoid the null-parameter ambiguity

@@ -97,6 +97,45 @@ describe('TenantActivityStore', () => {
     assert.equal(upsertCalled, false, 'upsert must not be called when tenant is not found')
   })
 
+  it('concurrent first-hit requests for the same slug share a single SELECT', async () => {
+    // Use a manually controlled deferred so we can fire two recordActivity calls
+    // before the SELECT resolves, proving the second one waits on the same Promise
+    // rather than issuing its own query.
+    let resolveSelect!: (value: { rows: Record<string, unknown>[] }) => void
+    const selectDeferred = new Promise<{ rows: Record<string, unknown>[] }>((resolve) => {
+      resolveSelect = resolve
+    })
+
+    let selectCount = 0
+    let upsertCount = 0
+
+    const db: DbClient = {
+      async query(sql) {
+        if (sql.includes('SELECT id FROM tenants')) {
+          selectCount += 1
+          return selectDeferred
+        }
+        upsertCount += 1
+        return { rows: [] }
+      },
+      async end() {},
+    }
+
+    const store = createTenantActivityStoreWithClient({ db })
+
+    // Fire two concurrent calls without awaiting between them.
+    const p1 = store.recordActivity('concurrent-slug')
+    const p2 = store.recordActivity('concurrent-slug')
+
+    // Unblock the SELECT — both outstanding calls should resolve with it.
+    resolveSelect({ rows: [{ id: 'shared-tenant-id' }] })
+
+    await Promise.all([p1, p2])
+
+    assert.equal(selectCount, 1, 'both concurrent calls must share a single SELECT')
+    assert.equal(upsertCount, 2, 'each call must still issue its own upsert')
+  })
+
   it('the upsert uses tenants.id value, not the slug, as tenant_id', async () => {
     const upsertParams: unknown[][] = []
 
