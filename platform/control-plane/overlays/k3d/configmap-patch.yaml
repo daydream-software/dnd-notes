@@ -23,3 +23,5 @@ data:
   CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL: http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs
   CUSTOMER_PORTAL_KEYCLOAK_REALM: dnd-notes-dev
   CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID: dnd-notes-customer-portal
+  ACTIVATOR_EXTERNAL_NAME: "dnd-notes-activator.dnd-notes-platform.svc.cluster.local"
+  ACTIVATOR_PORT: "8080"

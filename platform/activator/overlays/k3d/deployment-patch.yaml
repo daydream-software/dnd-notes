@@ -1,0 +1,11 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnd-notes-activator
+  namespace: dnd-notes-platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: activator
+          imagePullPolicy: IfNotPresent
