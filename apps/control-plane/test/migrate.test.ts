@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import test from 'node:test'
 import { newDb } from 'pg-mem'
 import {
   controlPlaneMigrationLedgerTable,
+  controlPlaneMigrationsDir,
   listControlPlaneMigrations,
   runControlPlaneMigrations,
 } from '../src/migrations.js'
@@ -161,17 +164,19 @@ test('migration 0008 backfill seeds tenant_activity only for active-state tenant
       )
     }
 
-    // Execute the backfill INSERT from 0008 directly.
-    // This is the exact SQL from the migration, verifying the state filter and
-    // ON CONFLICT clause. In production this runs as part of the migration;
-    // here we run it independently against the seeded tenants table.
-    await pool.query(`
-      INSERT INTO tenant_activity (tenant_id, last_request_at)
-      SELECT id, NOW()
-      FROM tenants
-      WHERE current_state IN ('ready', 'maintenance', 'upgrading', 'restoring')
-      ON CONFLICT (tenant_id) DO NOTHING
-    `)
+    // Extract and execute the backfill INSERT directly from the migration file.
+    // This ensures the test exercises the actual SQL in the file — if the INSERT
+    // is ever deleted from 0008_scale_to_zero.sql, the assertion below will fail
+    // rather than silently passing against a hand-typed copy.
+    const migration0008 = readFileSync(
+      path.join(controlPlaneMigrationsDir, '0008_scale_to_zero.sql'),
+      'utf8',
+    )
+    const backfillMatch = migration0008.match(
+      /INSERT INTO tenant_activity[\s\S]*?ON CONFLICT \(tenant_id\) DO NOTHING/,
+    )
+    assert.ok(backfillMatch, '0008_scale_to_zero.sql must contain the backfill INSERT')
+    await pool.query(backfillMatch[0])
 
     // Assert: tenant_activity has rows for active states only
     const activity = await pool.query<{ tenant_id: string; last_request_at: unknown }>(
@@ -181,9 +186,14 @@ test('migration 0008 backfill seeds tenant_activity only for active-state tenant
     const backfilledIds = activity.rows.map((r) => r.tenant_id).sort()
     assert.deepEqual(backfilledIds, ['t-maintenance', 't-ready', 't-restoring', 't-upgrading'])
 
-    // Each row should have a non-null last_request_at (set to NOW() by the backfill)
+    // Each row should have a last_request_at close to NOW() (set by the backfill).
+    // A stale constant like '1970-01-01' would pass a null-check but fail here.
     for (const row of activity.rows) {
-      assert.ok(row.last_request_at !== null, `last_request_at must not be null for ${row.tenant_id}`)
+      const ageMs = Date.now() - new Date(row.last_request_at as string | Date).getTime()
+      assert.ok(
+        ageMs >= 0 && ageMs < 60_000,
+        `last_request_at must be close to NOW() for ${row.tenant_id}, got age ${ageMs}ms`,
+      )
     }
 
     // Inactive states must not appear
