@@ -127,6 +127,7 @@ export interface TenantProvisioningPort {
 export type TenantProvisioningErrorCode =
   | 'invalid_target_version'
   | 'unsupported_target_version'
+  | 'tenant_provisioning_in_progress'
   | 'tenant_rollout_in_progress'
   | 'tenant_rollout_disallowed'
   | 'tenant_rollout_failed'
@@ -280,21 +281,42 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         params.tenantId,
         async (registryClient) => {
           const tenant = await this.getExistingTenant(params.tenantId, registryClient)
+
+          // Reject any re-entry while a provisioning or upgrade run is already in
+          // flight. Phase 1 releases the advisory lock before Phase 2 (rollout wait),
+          // so a second caller can reach this point while the first is still in
+          // Phase 2. Checking currentState here — while holding the lock — gives
+          // a consistent view and prevents concurrent runs from racing on the final
+          // state write.
+          //
+          // 'upgrading' is always written by Phase 1 during a version rollout, so
+          // it unambiguously means a run is in flight.
+          //
+          // 'provisioning' requires a subdomain check: the initial createTenant row
+          // also starts in 'provisioning', so 'provisioning' alone does not indicate
+          // a run is in flight. A subdomain is only set during Phase 1, so
+          // 'provisioning' + subdomain-present means Phase 1 completed and the first
+          // run is currently in Phase 2.
+          const isProvisioningInFlight =
+            tenant.currentState === 'upgrading' ||
+            (tenant.currentState === 'provisioning' && tenant.subdomain != null && tenant.subdomain.length > 0)
+
+          if (isProvisioningInFlight) {
+            throw new TenantProvisioningConflictError(
+              `Tenant ${tenant.id} is already being provisioned (state: ${tenant.currentState}). Wait for the current run to finish before starting another.`,
+              'tenant_provisioning_in_progress',
+            )
+          }
+
+          // Note: 'upgrading' is excluded here because the in-progress guard above
+          // already rejects that state before reaching this point.
           const isExistingRolloutState =
             tenant.currentState === 'ready' ||
-            tenant.currentState === 'upgrading' ||
             tenant.currentState === 'maintenance' ||
             tenant.currentState === 'restoring'
 
           const isVersionRollout =
             requestedVersion !== undefined && requestedVersion !== tenant.version
-
-          if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
-            throw new TenantProvisioningConflictError(
-              `Tenant ${tenant.id} already has a rolling update in progress. Wait for it to return to ready before starting another rollout.`,
-              'tenant_rollout_in_progress',
-            )
-          }
 
           if (isVersionRollout && tenant.currentState !== 'ready' && tenant.currentState !== 'deprovisioned' && tenant.currentState !== 'failed') {
             throw new TenantProvisioningConflictError(

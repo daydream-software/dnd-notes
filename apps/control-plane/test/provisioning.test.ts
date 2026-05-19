@@ -832,8 +832,10 @@ describe('TenantProvisioningService', () => {
         }),
         (error: Error) => {
           assert.ok(error instanceof TenantProvisioningConflictError)
-          assert.equal(error.code, 'tenant_rollout_in_progress')
-          assert.match(error.message, /already has a rolling update in progress/)
+          // The new in-progress guard fires first (before the version-rollout guard)
+          // because upgrading means a run is already in flight — same root condition.
+          assert.equal(error.code, 'tenant_provisioning_in_progress')
+          assert.match(error.message, /already being provisioned/)
           return true
         },
       )
@@ -846,6 +848,87 @@ describe('TenantProvisioningService', () => {
         ).length,
         1,
       )
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('rejects a second concurrent provisionTenant call while the first is in Phase 2 (rollout wait)', async () => {
+    // The three-phase split releases the advisory lock at the end of Phase 1
+    // so that a stuck ImagePullBackOff does not block deprovision (#338). This
+    // opens a window where a second provisionTenant call can enter Phase 1 while
+    // the first is still in Phase 2. The in-progress guard (added in #342 review)
+    // closes that window: it checks currentState inside the Phase 1 lock and
+    // rejects if state is already 'provisioning' or 'upgrading'.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+
+    // Replace waitForTenantReady with a deferred that we control, so the test
+    // is deterministic — no timing-dependent assertions.
+    let resolveWait!: () => void
+    let signalWaitStarted!: () => void
+    const waitStarted = new Promise<void>((r) => {
+      signalWaitStarted = r
+    })
+    infrastructureManager.waitForTenantReady = () => {
+      signalWaitStarted()
+      return new Promise<void>((r) => {
+        resolveWait = r
+      })
+    }
+
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      // Start the first provision — it will advance through Phase 1 (marking state
+      // 'provisioning') and then hang in Phase 2 waiting for the rollout.
+      const firstCall = provisioningService.provisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+
+      // Wait until Phase 1 is complete and Phase 2 has started. At this point the
+      // tenant state is 'provisioning' and the advisory lock has been released.
+      await waitStarted
+
+      // The second call enters Phase 1, acquires the lock, reads currentState =
+      // 'provisioning', and must reject immediately before any mutation.
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+        }),
+        (error: Error) => {
+          assert.ok(error instanceof TenantProvisioningConflictError)
+          assert.equal(error.code, 'tenant_provisioning_in_progress')
+          assert.match(error.message, /already being provisioned/)
+          return true
+        },
+      )
+
+      // Verify the second call did not apply any additional infrastructure.
+      assert.equal(infrastructureManager.bundles.length, 1)
+
+      // Let the first call finish and confirm it reaches ready.
+      resolveWait()
+      const result = await firstCall
+      assert.equal(result.tenant.currentState, 'ready')
     } finally {
       await provisioningService.close()
       await cleanup()
