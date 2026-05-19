@@ -276,13 +276,7 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     // permanent image-pull failure (ImagePullBackOff) does not hold the lock
     // for the entire readyTimeoutMs window and block concurrent operations
     // such as deprovision (#338).
-    let applyOutcome: {
-      tenantId: string
-      resources: TenantProvisioningResources
-    }
-
-    try {
-      applyOutcome = await this.tenantRegistry.withTenantLock(
+    const applyOutcome = await this.tenantRegistry.withTenantLock(
         params.tenantId,
         async (registryClient) => {
           const tenant = await this.getExistingTenant(params.tenantId, registryClient)
@@ -294,7 +288,6 @@ export class TenantProvisioningService implements TenantProvisioningPort {
 
           const isVersionRollout =
             requestedVersion !== undefined && requestedVersion !== tenant.version
-
 
           if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
             throw new TenantProvisioningConflictError(
@@ -558,11 +551,6 @@ export class TenantProvisioningService implements TenantProvisioningPort {
           }
         },
       )
-    } catch (error) {
-      // Validation and pre-apply errors propagate directly to the caller;
-      // the lock has already been released by withTenantLock's finally block.
-      throw error
-    }
 
     // Phase 2: wait for the workload to become ready. The advisory lock is NOT
     // held here so that a stuck ImagePullBackOff does not block concurrent
@@ -573,27 +561,31 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         this.readyTimeoutMs,
       )
     } catch (rolloutError) {
-      // Rollout timed out or the workload failed to become healthy. Re-acquire
-      // the lock to persist the failure state, then re-throw so the caller
-      // sees the original error.
-      await this.tenantRegistry.withTenantLock(
-        applyOutcome.tenantId,
-        async (registryClient) => {
-          const failedTenant = await this.getExistingTenant(
-            applyOutcome.tenantId,
-            registryClient,
-          )
-          if (failedTenant.currentState !== 'failed') {
-            await this.tenantRegistry.updateTenantState(
+      try {
+        await this.tenantRegistry.withTenantLock(
+          applyOutcome.tenantId,
+          async (registryClient) => {
+            const failedTenant = await this.getExistingTenant(
               applyOutcome.tenantId,
-              'failed',
-              params.triggeredBy,
-              params.reason ?? 'Tenant provisioning failed',
               registryClient,
             )
-          }
-        },
-      )
+            if (failedTenant.currentState !== 'failed') {
+              await this.tenantRegistry.updateTenantState(
+                applyOutcome.tenantId,
+                'failed',
+                params.triggeredBy,
+                params.reason ?? 'Tenant provisioning failed',
+                registryClient,
+              )
+            }
+          },
+        )
+      } catch {
+        // Best-effort: if the lock is transiently contended when we try to
+        // persist the failure state, the write is deferred. The original
+        // rollout error still propagates to the caller — it must not be
+        // replaced by a secondary lock-acquire failure.
+      }
       throw rolloutError
     }
 
