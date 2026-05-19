@@ -2,6 +2,48 @@
 
 ## Active Decisions
 
+### 2026-05-19: Scale-to-zero PoC implementation choices (#340)
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-05-19  
+**Type:** Architecture — activator routing, idle scaling, K8s resource management  
+**Issue:** #340  
+**Branch:** feat/340-scale-to-zero-poc  
+**Status:** Implementation complete, Mikey APPROVED, ready for PR
+
+**Decision Summary:** PoC implementation chose home-grown activator (not KEDA, not Knative) with Pattern B routing (activator on hot path), 30-minute idle threshold, 60-second cold-start cap, and ExternalName service shim for cross-namespace Ingress routing.
+
+**Key Implementation Choices:**
+
+1. **Home-grown activator approach:** Spike doc on `feat/340-scale-to-zero-spike` documents full KEDA/Knative/home-grown comparison. Home-grown chosen for transparency, minimal dependencies, and straightforward Pod-watch semantics. No external vendor lock-in.
+
+2. **ExternalName shim for cross-namespace Ingress routing:** Standard K8s `networking.k8s.io/v1 Ingress` backends must live in the same namespace as the Ingress resource. Rather than injecting activator in every tenant namespace (over-engineering), provisioning.ts injects a `dnd-notes-activator-shim` ExternalName Service into each tenant namespace pointing at `dnd-notes-activator.dnd-notes-platform.svc.cluster.local`. Ingress backends target the shim. Backward-compatible: when `ACTIVATOR_EXTERNAL_NAME` is unset, Ingress backend points directly to tenant Service as before. Mikey APPROVED this as required pattern.
+
+3. **Prometheus metrics implemented inline:** `prom-client` not in monorepo; sandbox blocks npm registry during implementation. Counter/Gauge/Histogram implemented directly in `apps/activator/src/metrics.ts` using Prometheus text format v0.0.4. Keeps activator dep tree minimal, removes auditing burden of external prom-client.
+
+4. **K8s ObjectParamAPI for all API calls:** `@kubernetes/client-node` v1.4.0 ObjectParamAPI (`{ name, namespace, body }` request objects) used throughout, not positional strings. Library auto-selects `application/merge-patch+json` for PATCH; no custom Content-Type needed.
+
+5. **Migration 0008: `sleeping` state added to CHECK constraints:** Migration widens 4 CHECK constraints (tenants.desired_state, tenants.current_state, state_transitions.from_state, state_transitions.to_state) to include `sleeping`. pg-mem names anonymous inline CHECKs as `{table}_constraint_{n}`; test helper in `tenant-registry-test-helpers.ts` rewrites Postgres names to pg-mem names before each statement.
+
+6. **Backup scheduler includes sleeping tenants:** Backup connects directly to tenant Postgres (not via HTTP pod). Sleeping tenants (replicas == 0) still have Postgres running. Backup scheduler filter widened to `currentState === 'ready' || currentState === 'sleeping'`.
+
+**Idle & Timeout Parameters:**
+- Idle threshold: 30 minutes
+- Cold-start hard cap: 60 seconds
+- Resource-pressure detection: Direct Pod phase inspection (no metrics aggregation)
+
+**Pattern & Routing:**
+- **Pattern chosen:** Pattern B (activator on hot path)
+- **Pattern A′ failover:** Deferred to follow-up (#340 follow-ups)
+
+**Deferred Follow-ups (not blocking PoC):**
+1. Race window scaler SELECT→PATCH (atomic update needed)
+2. Watch reconnect exponential backoff (resilience improvement)
+3. Documenting ExternalName rationale in spike doc (clarity)
+
+**Smoke test note:** Activator smoke script (`scripts/k3d/activator-smoke.sh`) authored and syntax-checked but not executed (Docker socket unavailable in sandbox). Manual execution requires running k3d cluster with activator deployed and `TENANT_SUBDOMAIN=smoke-sto` tenant provisioned.
+
+---
+
 ### 2026-05-19: Three-phase provisioning split — advisory lock scope reduction (#338, PR #342)
 **Decided by:** Data (Backend)  
 **Date:** 2026-05-19  
