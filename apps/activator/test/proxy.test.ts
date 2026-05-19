@@ -47,7 +47,7 @@ type FakeResHandle = EventEmitter & {
 function makeFakeReq(): FakeReqHandle {
   const fakeReq = Object.assign(new EventEmitter(), {
     setTimeout() {},
-    destroy(_err?: Error) {},
+    destroy() {},
     // write/end are called by stream.pipe() when the source drains/ends.
     write(_chunk: unknown, _enc?: unknown, cb?: () => void) { if (typeof cb === 'function') cb() },
     end(_chunk?: unknown, _enc?: unknown, cb?: () => void) { if (typeof cb === 'function') cb() },
@@ -165,7 +165,7 @@ function makeClientRes(): {
 }
 
 // Zero-delay backoff: makes retry tests instant.
-const ZERO_DELAYS: readonly number[] = [0, 0, 0]
+const ZERO_DELAYS: readonly number[] = [0, 0]
 
 // ---------------------------------------------------------------------------
 // Tests: fake-factory cases (retry count, error discrimination)

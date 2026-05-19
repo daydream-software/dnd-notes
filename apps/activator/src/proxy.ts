@@ -41,8 +41,9 @@ const BODYLESS_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE'])
 /**
  * Backoff schedule in milliseconds. Index 0 = delay before attempt 2,
  * index 1 = delay before attempt 3. Exported for test overriding.
+ * Worst-case additional wait with MAX_ATTEMPTS=3: 100+300 = 400ms.
  */
-export const DEFAULT_RETRY_DELAYS_MS: readonly number[] = [100, 300, 700]
+export const DEFAULT_RETRY_DELAYS_MS: readonly number[] = [100, 300]
 
 const MAX_ATTEMPTS = 3
 
