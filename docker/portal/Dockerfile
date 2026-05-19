@@ -38,6 +38,9 @@ FROM nginxinc/nginx-unprivileged:alpine AS runtime
 ARG PORTAL_NAME
 USER root
 WORKDIR /usr/share/nginx/html
+LABEL org.opencontainers.image.source="https://github.com/daydream-software/dnd-notes"
+LABEL org.opencontainers.image.description="D&D Notes portal (nginx + static SPA; built for customer-portal or operator-portal via PORTAL_NAME)"
+LABEL org.opencontainers.image.licenses="FSL-1.1-MIT"
 RUN rm -rf ./*
 COPY --from=build /app/apps/${PORTAL_NAME}/dist ./
 RUN chown -R 101:0 /usr/share/nginx/html

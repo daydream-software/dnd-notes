@@ -28,6 +28,9 @@ RUN npm run build --workspace apps/control-plane
 
 FROM node:24.15.0-bookworm-slim AS runtime
 WORKDIR /app
+LABEL org.opencontainers.image.source="https://github.com/daydream-software/dnd-notes"
+LABEL org.opencontainers.image.description="D&D Notes control plane (tenant provisioning, registry, backups)"
+LABEL org.opencontainers.image.licenses="FSL-1.1-MIT"
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/platform/keycloak-jwt/dist ./platform/keycloak-jwt/dist
