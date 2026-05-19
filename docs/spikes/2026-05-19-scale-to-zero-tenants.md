@@ -5,10 +5,13 @@
 **Author:** Brand (platform)
 **Status:** Spike complete — pending user approval on open questions before PoC.
 
-> Sources note: KEDA HTTP add-on and Knative Serving behavior below is summarized
-> from training-data knowledge (cutoff August 2025). Neither Context7 nor live docs
-> were available during this spike. Re-verify install footprint, CRD field names,
-> and interceptor placement details against upstream docs as the first step of the PoC.
+> Claims verified post-spike against upstream sources: KEDA HTTP add-on architecture
+> and install footprint verified against `kedacore/http-add-on` manifests and README
+> (<https://github.com/kedacore/http-add-on>). Knative Serving networking requirements
+> and activator behavior verified via Context7 against `knative/docs` and
+> `knative/serving` (<https://github.com/knative/docs>, <https://github.com/knative/serving>).
+> One correction applied: KEDA core ships 3 pods (operator, metrics-apiserver,
+> admission-webhooks), not 2 — total combined footprint is ~6 pods, not ~5.
 
 ---
 
@@ -66,15 +69,15 @@ tenant; when asleep it holds the connection. There is no native Traefik middlewa
 this; the Ingress backend change is the main integration cost.
 
 **Install footprint.**
-KEDA core: two pods (operator + metrics adapter). KEDA HTTP add-on: three components
-(interceptor, scaler, operator). Total: ~5 pods of modest size. No service mesh
-required. No Istio, no Kourier.
+KEDA core: three pods (operator, metrics-apiserver, admission-webhooks). KEDA HTTP
+add-on: three components (interceptor, scaler, operator). Total: ~6 pods of modest
+size. No service mesh required. No Istio, no Kourier.
 
 **Scores:**
 
 | Criterion | Score | Notes |
 |---|---|---|
-| Install footprint | + | ~5 pods, no service mesh; fits on a single node |
+| Install footprint | + | ~6 pods, no service mesh; fits on a single node |
 | Operational complexity | ~ | CRD-per-tenant is manageable; interceptor is new data path |
 | Cold-start budget | + | Interceptor holds connection; request is queued, not rejected |
 | Observability | + | KEDA exposes Prometheus metrics; queue depth per `HTTPScaledObject` |
@@ -110,7 +113,7 @@ manager + wildcard TLS setup is non-trivial; Knative expects to own the ingress 
 | Cold-start budget | + | Activator buffers requests with good implementation maturity |
 | Observability | + | Rich built-in metrics; request concurrency visible |
 | Fit with control-plane | - | Provisioning would create `ksvc` instead of `Deployment`; large rewrite surface in `provisioning.ts` |
-| Future 1..N path | ~ | KPA does it but differently — concurrent-request-based, not CPU/RPS; mixing HPA and KPA is not supported; path is not blocked but requires a mental model shift |
+| Future 1..N path | ~ | KPA does it but differently — concurrent-request-based, not CPU/RPS; HPA class is switchable per-revision (annotation `autoscaling.knative.dev/class: hpa.autoscaling.knative.dev`) but is a per-revision choice, not additive alongside KPA; path is not blocked but requires a mental model shift |
 
 ---
 
@@ -147,7 +150,7 @@ sidecar.
 KEDA's HTTP add-on is the only option that simultaneously (1) does not require
 replacing or bypassing the Traefik ingress, (2) buffers the first wake request
 without rejecting it, and (3) keeps the 1..N HPA path as a clean additive step
-(`ScaledObject` wraps HPA natively). The install footprint (~5 pods, no service mesh)
+(`ScaledObject` wraps HPA natively). The install footprint (~6 pods, no service mesh)
 is proportionate to a single-node k3s install and the operational burden is bounded:
 one CRD per tenant (`HTTPScaledObject`) and one cluster-level interceptor.
 
