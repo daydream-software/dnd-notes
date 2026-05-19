@@ -369,7 +369,10 @@ export class TenantRegistryLockTimeoutError extends Error {
 
   constructor(tenantId: string, timeoutMs: number) {
     super(
-      `Timed out after ${timeoutMs}ms while waiting for the tenant lock for ${tenantId}.`,
+      `Timed out after ${timeoutMs}ms waiting for the advisory lock on tenant ${tenantId}. ` +
+        `Another operation is holding the lock. ` +
+        `If no provisioning or deprovision is actively running, restart the control-plane ` +
+        `to flush the connection pool and release the orphaned lock.`,
     )
     this.name = 'TenantRegistryLockTimeoutError'
     this.tenantId = tenantId
