@@ -28,7 +28,10 @@ RUN npm run build --workspace packages/theme
 RUN npm run build --workspace apps/${PORTAL_NAME}
 
 # Stage 4: Runtime image
-FROM nginx:alpine AS runtime
+# nginx-unprivileged is purpose-built for UID 101: dirs are pre-chowned and the
+# entrypoint runs without needing root. This fixes the "Operation not permitted"
+# errors when the manifest enforces runAsUser: 101 (M3).
+FROM nginxinc/nginx-unprivileged:alpine AS runtime
 ARG PORTAL_NAME
 WORKDIR /usr/share/nginx/html
 RUN rm -rf ./*
