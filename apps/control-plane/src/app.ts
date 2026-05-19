@@ -1778,6 +1778,12 @@ export function createApp({
           })
           return
         }
+        if (resolvedBackup.locationDeleted) {
+          response.status(409).json({
+            error: `Backup ${backupId} blob has been deleted by the retention sweep; choose another backup.`,
+          })
+          return
+        }
       }
 
       const resolvedLocation =

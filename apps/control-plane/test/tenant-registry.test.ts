@@ -1317,4 +1317,61 @@ describe('TenantRegistry', () => {
       await cleanup()
     }
   })
+
+  it('getLatestSuccessfulBackupSummaries excludes rows where location_deleted is true', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-summary-del',
+        slug: 'tenant-summary-del',
+        ownerId: 'owner-summary-del',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantState('tenant-summary-del', 'ready', 'test')
+
+      // Seed a completed backup and mark its blob as deleted.
+      await tenantRegistry.createBackupRun({
+        id: 'backup-summary-del-1',
+        tenantId: 'tenant-summary-del',
+        triggeredBy: 'test',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-summary-del-1', {
+        location:
+          'https://account.blob.core.windows.net/tenant-backups/tenant-summary-del/old-backup.dump',
+        completedAt: '2026-01-01T00:00:00.000Z',
+      })
+      await tenantRegistry.markBackupCatalogLocationDeletedForBlob(
+        'tenant-summary-del/old-backup.dump',
+      )
+
+      // The deleted row should be excluded from the fleet summary.
+      const summaries = await tenantRegistry.getLatestSuccessfulBackupSummaries()
+      assert.equal(
+        summaries.has('tenant-summary-del'),
+        false,
+        'deleted-blob backup must not appear in latest successful summaries',
+      )
+
+      // Seed a second completed backup with an intact blob for the same tenant.
+      await tenantRegistry.createBackupRun({
+        id: 'backup-summary-del-2',
+        tenantId: 'tenant-summary-del',
+        triggeredBy: 'test',
+      })
+      await tenantRegistry.markBackupRunCompleted('backup-summary-del-2', {
+        location:
+          'https://account.blob.core.windows.net/tenant-backups/tenant-summary-del/new-backup.dump',
+        completedAt: '2026-05-18T03:00:00.000Z',
+      })
+
+      // Only the intact backup should surface.
+      const summaries2 = await tenantRegistry.getLatestSuccessfulBackupSummaries()
+      const summary = summaries2.get('tenant-summary-del')
+      assert.ok(summary, 'intact backup must appear in latest successful summaries')
+      assert.equal(summary.backupId, 'backup-summary-del-2')
+    } finally {
+      await cleanup()
+    }
+  })
 })
