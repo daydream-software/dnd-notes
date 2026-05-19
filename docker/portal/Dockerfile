@@ -32,7 +32,7 @@ FROM nginx:alpine AS runtime
 ARG PORTAL_NAME
 WORKDIR /usr/share/nginx/html
 LABEL org.opencontainers.image.source="https://github.com/daydream-software/dnd-notes"
-LABEL org.opencontainers.image.description="D&D Notes operator portal (nginx + static SPA)"
+LABEL org.opencontainers.image.description="D&D Notes portal (nginx + static SPA; built for customer-portal or operator-portal via PORTAL_NAME)"
 LABEL org.opencontainers.image.licenses="FSL-1.1-MIT"
 RUN rm -rf ./*
 COPY --from=build /app/apps/${PORTAL_NAME}/dist ./
