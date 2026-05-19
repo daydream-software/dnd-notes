@@ -71,7 +71,7 @@ Required on the operator's machine:
 - `gh` CLI (for working with GHCR tags)
 - `az` CLI (for VM start/stop and storage operations)
 
-> ⚠️ **Always pass `--context dnd-notes-prod` on every `kubectl` command in this runbook.** If you
+> ⚠️ **Always pass `--context dnd-notes-prod` on every cluster-targeting `kubectl` command in this runbook.** If you
 > have both `dnd-notes-prod` and a local `k3d-*` context in your merged kubeconfig, omitting the
 > flag silently targets your default context. The runbook examples already include the flag — keep
 > it. Alternatively, run `kubectl config use-context dnd-notes-prod` at the start of each deploy or
