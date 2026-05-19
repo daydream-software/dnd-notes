@@ -18,6 +18,8 @@ TENANT_IMAGE_TAG="${TENANT_IMAGE_TAG:-k3d}"
 TENANT_IMAGE_REPOSITORY="${TENANT_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes}"
 CONTROL_PLANE_IMAGE_TAG="${CONTROL_PLANE_IMAGE_TAG:-k3d}"
 CONTROL_PLANE_IMAGE_REPOSITORY="${CONTROL_PLANE_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-control-plane}"
+ACTIVATOR_IMAGE_TAG="${ACTIVATOR_IMAGE_TAG:-k3d}"
+ACTIVATOR_IMAGE_REPOSITORY="${ACTIVATOR_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-activator}"
 IMAGE_IMPORT_MODE="${K3D_IMAGE_IMPORT_MODE:-direct}"
 IMAGE_IMPORT_FALLBACK_MODE="${K3D_IMAGE_IMPORT_FALLBACK_MODE:-tools}"
 IMAGE_IMPORT_TIMEOUT_SECONDS="${K3D_IMAGE_IMPORT_TIMEOUT_SECONDS:-180}"
@@ -80,6 +82,7 @@ Environment overrides:
   POSTGRES_LOCAL_PORT
   TENANT_IMAGE_TAG
   CONTROL_PLANE_IMAGE_TAG
+  ACTIVATOR_IMAGE_TAG
   K3D_IMAGE_IMPORT_MODE
   K3D_IMAGE_IMPORT_FALLBACK_MODE
   K3D_IMAGE_IMPORT_TIMEOUT_SECONDS
@@ -558,10 +561,11 @@ kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 # ---------------------------------------------------------------------------
 tenant_image_ref="${TENANT_IMAGE_REPOSITORY}:${TENANT_IMAGE_TAG}"
 cp_image_ref="${CONTROL_PLANE_IMAGE_REPOSITORY}:${CONTROL_PLANE_IMAGE_TAG}"
+activator_image_ref="${ACTIVATOR_IMAGE_REPOSITORY}:${ACTIVATOR_IMAGE_TAG}"
 op_image_ref="${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-operator-portal}:${OPERATOR_PORTAL_IMAGE_TAG:-k3d}"
 cust_image_ref="${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}:${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}"
 
-log "Building 4 images in parallel..."
+log "Building 5 images in parallel..."
 ensure_image_ready "Tenant" "${tenant_image_ref}" \
   bash "${ROOT}/scripts/k3d/build-image.sh" \
     --name Tenant \
@@ -578,6 +582,14 @@ ensure_image_ready "Control-plane" "${cp_image_ref}" \
     --tag "${CONTROL_PLANE_IMAGE_TAG}" \
   >"${WORK_DIR}/build-control-plane.log" 2>&1 &
 pid_cp=$!
+ensure_image_ready "Activator" "${activator_image_ref}" \
+  bash "${ROOT}/scripts/k3d/build-image.sh" \
+    --name Activator \
+    --dockerfile docker/activator/Dockerfile \
+    --repo "${ACTIVATOR_IMAGE_REPOSITORY}" \
+    --tag "${ACTIVATOR_IMAGE_TAG}" \
+  >"${WORK_DIR}/build-activator.log" 2>&1 &
+pid_activator=$!
 ensure_image_ready "Operator-portal" "${op_image_ref}" \
   bash "${ROOT}/scripts/k3d/build-image.sh" \
     --name Operator-portal \
@@ -598,7 +610,7 @@ ensure_image_ready "Customer-portal" "${cust_image_ref}" \
 pid_cust=$!
 
 _build_fail=0
-for _pid_var in pid_tenant pid_cp pid_op pid_cust; do
+for _pid_var in pid_tenant pid_cp pid_activator pid_op pid_cust; do
   if ! wait "${!_pid_var}"; then
     log "Build failed: ${_pid_var} — see ${WORK_DIR}/build-*.log for details"
     _build_fail=1
@@ -611,12 +623,13 @@ for _log in "${WORK_DIR}"/build-*.log; do
 done
 
 [ "${_build_fail}" -eq 0 ] || exit 1
-log "All 4 images built and imported."
+log "All 5 images built and imported."
 
 # ---------------------------------------------------------------------------
-# Step 3: Deploy control plane and portals
+# Step 3: Deploy control plane, activator, and portals
 # ---------------------------------------------------------------------------
 run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"
+run_visible kubectl apply -k "${ROOT}/platform/activator/overlays/k3d"
 run_visible kubectl apply -k "${ROOT}/platform/operator-portal/overlays/k3d"
 run_visible kubectl apply -k "${ROOT}/platform/customer-portal/overlays/k3d"
 
@@ -631,10 +644,18 @@ kubectl create secret generic dnd-notes-control-plane-secrets \
   --dry-run=client -o yaml \
   | kubectl apply -f - >/dev/null
 
+kubectl create secret generic dnd-notes-activator-secrets \
+  -n "${PLATFORM_NAMESPACE}" \
+  --from-literal=CONTROL_PLANE_DATABASE_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/control_plane" \
+  --dry-run=client -o yaml \
+  | kubectl apply -f - >/dev/null
+
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane
+run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-activator
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/operator-portal
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/customer-portal
 run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane --timeout=240s
+run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-activator --timeout=120s
 run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/operator-portal --timeout=120s
 run_visible kubectl rollout status -n "${PLATFORM_NAMESPACE}" deployment/customer-portal --timeout=120s
 
