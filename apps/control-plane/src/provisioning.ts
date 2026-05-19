@@ -270,270 +270,345 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     version?: string
   }): Promise<TenantProvisioningResponse> {
     const requestedVersion = normalizeTenantVersionOverride(params.version)
-    return this.tenantRegistry.withTenantLock(params.tenantId, async (registryClient) => {
-      const tenant = await this.getExistingTenant(params.tenantId, registryClient)
-      const isExistingRolloutState =
-        tenant.currentState === 'ready' ||
-        tenant.currentState === 'upgrading' ||
-        tenant.currentState === 'maintenance' ||
-        tenant.currentState === 'restoring'
 
-      const isVersionRollout =
-        requestedVersion !== undefined && requestedVersion !== tenant.version
+    // Phase 1: hold the advisory lock only for registry mutations and resource
+    // application. The lock is released before the rollout-wait so that a
+    // permanent image-pull failure (ImagePullBackOff) does not hold the lock
+    // for the entire readyTimeoutMs window and block concurrent operations
+    // such as deprovision (#338).
+    let applyOutcome: {
+      tenantId: string
+      resources: TenantProvisioningResources
+    }
+
+    try {
+      applyOutcome = await this.tenantRegistry.withTenantLock(
+        params.tenantId,
+        async (registryClient) => {
+          const tenant = await this.getExistingTenant(params.tenantId, registryClient)
+          const isExistingRolloutState =
+            tenant.currentState === 'ready' ||
+            tenant.currentState === 'upgrading' ||
+            tenant.currentState === 'maintenance' ||
+            tenant.currentState === 'restoring'
+
+          const isVersionRollout =
+            requestedVersion !== undefined && requestedVersion !== tenant.version
 
 
-      if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
-        throw new TenantProvisioningConflictError(
-          `Tenant ${tenant.id} already has a rolling update in progress. Wait for it to return to ready before starting another rollout.`,
-          'tenant_rollout_in_progress',
-        )
-      }
-
-      if (isVersionRollout && tenant.currentState !== 'ready' && tenant.currentState !== 'deprovisioned' && tenant.currentState !== 'failed') {
-        throw new TenantProvisioningConflictError(
-          `Tenant ${tenant.id} cannot start a rolling update from state ${tenant.currentState}. Rolling updates are only supported for ready tenants.`,
-          'tenant_rollout_disallowed',
-        )
-      }
-
-      if (
-        requestedVersion !== undefined &&
-        requestedVersion === tenant.version &&
-        isExistingRolloutState
-      ) {
-        throw new TenantProvisioningValidationError(
-          `Tenant ${tenant.id} is already running version ${tenant.version}. Choose a different target version for a rolling update.`,
-          'unsupported_target_version',
-        )
-      }
-
-      if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
-        await this.tenantRegistry.updateTenantVersion(
-          tenant.id,
-          requestedVersion,
-          registryClient,
-        )
-      }
-
-      const refreshedTenant = await this.getExistingTenant(tenant.id, registryClient)
-      const hadPersistedSubdomain = refreshedTenant.subdomain != null
-      const shouldMarkUpgrading =
-        isVersionRollout &&
-        hadPersistedSubdomain &&
-        refreshedTenant.currentState === 'ready'
-
-      const shouldMarkProvisioning =
-        !hadPersistedSubdomain ||
-        refreshedTenant.currentState === 'deprovisioned' ||
-        refreshedTenant.currentState === 'failed'
-
-      try {
-        await this.tenantRegistry.updateTenantDesiredState(
-          refreshedTenant.id,
-          'ready',
-          registryClient,
-        )
-        if (shouldMarkUpgrading) {
-          await this.tenantRegistry.updateTenantState(
-            refreshedTenant.id,
-            'upgrading',
-            params.triggeredBy,
-            params.reason ?? 'Tenant rolling update started',
-            registryClient,
-          )
-        } else if (shouldMarkProvisioning) {
-          await this.tenantRegistry.updateTenantState(
-            refreshedTenant.id,
-            'provisioning',
-            params.triggeredBy,
-            params.reason ?? 'Tenant provisioning started',
-            registryClient,
-          )
-        }
-        const subdomain = assertPersistedTenantSubdomain(
-          refreshedTenant.id,
-          await this.tenantRegistry.reserveTenantSubdomain(
-            refreshedTenant.id,
-            () => this.createOpaqueSubdomainCandidate(),
-            10,
-            registryClient,
-          ),
-          'provisioning tenant resources',
-        )
-        const existingResources = buildTenantResourceNames({
-          tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
-          subdomain,
-          baseDomain: this.baseDomain,
-          imageRepository: this.imageRepository,
-        })
-        const existingRuntimeConnectionString = hadPersistedSubdomain
-          ? await this.infrastructureManager.getTenantRuntimeConnectionString(
-              existingResources,
-            )
-          : null
-        const wasSuccessfullyProvisioned =
-          refreshedTenant.currentState === 'ready' ||
-          refreshedTenant.currentState === 'upgrading' ||
-          refreshedTenant.currentState === 'maintenance' ||
-          refreshedTenant.currentState === 'restoring'
-        const database = await this.databaseManager.ensureTenantDatabase(
-          refreshedTenant,
-          subdomain,
-          {
-            existingRuntimeConnectionString,
-            requireExistingRuntimeConnectionString: wasSuccessfullyProvisioned,
-          },
-        )
-
-        const bundle = buildTenantInfrastructureBundle({
-          tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
-          subdomain,
-          database,
-          tenantRuntimeAuth: this.tenantRuntimeAuth,
-          baseDomain: this.baseDomain,
-          ingressClassName: this.ingressClassName,
-          imageRepository: this.imageRepository,
-          imagePullSecretName: this.imagePullSecretName,
-          publicScheme: this.publicScheme,
-          tenantPort: this.tenantPort,
-          controlPlaneToken: this.controlPlaneToken,
-          tlsClusterIssuer: this.tlsClusterIssuer,
-        })
-        const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
-          refreshedTenant.id,
-          registryClient,
-        )
-        if (!currentStorage) {
-          throw new Error(`Tenant ${refreshedTenant.id} not found`)
-        }
-        const nextStorageMode =
-          database.roleName === null
-            ? 'postgres-shared-user'
-            : 'postgres-dedicated-user'
-        const shouldInitializeNotRequiredMigrationStatus =
-          nextStorageMode === 'postgres-dedicated-user' &&
-          currentStorage.mode === 'unknown' &&
-          currentStorage.migrationStatus === 'not-started' &&
-          currentStorage.lastMigrationFailure === null &&
-          refreshedTenant.storageReference === null
-
-        await this.tenantRegistry.updateTenantStorageReference(
-          refreshedTenant.id,
-          database.databaseName,
-          registryClient,
-        )
-        await this.tenantRegistry.updateTenantStorageProfile(
-          refreshedTenant.id,
-          {
-            mode: nextStorageMode,
-            migrationStatus: shouldInitializeNotRequiredMigrationStatus
-              ? 'not-required'
-              : currentStorage.migrationStatus,
-            failureReason: shouldInitializeNotRequiredMigrationStatus
-              ? null
-              : currentStorage.lastMigrationFailure,
-          },
-          registryClient,
-        )
-
-        // Ensure a per-tenant Keycloak client exists before the SPA pod boots.
-        // The KC step runs before applyTenantResources so the client is in place
-        // when the pod first initialises. Failure here is intentionally fatal for
-        // provisioning — the tenant SPA cannot authenticate without it.
-        //
-        if (this.keycloakAdminClient) {
-          const hostname = bundle.resources.hostname
-          const tenantClientId = `dnd-notes-tenant-${refreshedTenant.id}`
-          await this.keycloakAdminClient.ensureClient({
-            clientId: tenantClientId,
-            enabled: true,
-            publicClient: true,
-            standardFlowEnabled: true,
-            implicitFlowEnabled: false,
-            // Direct-access grants stay enabled for local dev tooling (e.g.
-            // manual token inspection) but are not used by the smoke test or the
-            // SPA. The smoke fetches tenant tokens via the auth-code + PKCE flow;
-            // the SPA negotiates PKCE via keycloak-js at runtime. Server-side
-            // PKCE enforcement (pkce.code.challenge.method) is now active — any
-            // token request without a valid code_verifier will be rejected.
-            directAccessGrantsEnabled: true,
-            redirectUris: [
-              `https://${hostname}/*`,
-              `http://${hostname}/*`,
-            ],
-            webOrigins: [
-              `https://${hostname}`,
-              `http://${hostname}`,
-            ],
-            attributes: {
-              'pkce.code.challenge.method': 'S256',
-              // Always include tenant_display_name so that flipping displayName
-              // non-null -> null on re-sync clears the stale Keycloak attribute.
-              // The FTL template guards with `?has_content`, which treats an
-              // empty string as falsy -- the heading falls back to
-              // "Sign in to D&D Notes" when displayName is null (#248).
-              tenant_display_name: refreshedTenant.displayName ?? '',
-            },
-          })
-
-          // Create the per-tenant member role on the per-tenant client. The
-          // tenant API gates access on this role (#196) and the absence of it
-          // for an otherwise valid Keycloak token returns 403. Failure here
-          // is fatal for the same reason ensureClient is fatal — the tenant
-          // is unusable in keycloak mode without it.
-          await this.keycloakAdminClient.ensureClientRole(
-            tenantClientId,
-            tenantMemberRoleName,
-          )
-
-          // Assign the role to the tenant creator's Keycloak user so the
-          // first member can actually access the tenant.
-          //
-          // Resolution order:
-          //   1. portal_account.keycloak_sub — the canonical link, populated
-          //      after the customer signs in through the portal Keycloak
-          //      flow at least once.
-          //   2. tenant.initialAdminEmail — admin-created tenants (control-
-          //      plane API or operator portal) record the intended owner's
-          //      email at create time. We resolve it to a Keycloak user id
-          //      via the admin REST API. This is the path the k3d smoke
-          //      and operator-portal flows depend on, since they create the
-          //      tenant before any portal sign-in has produced a sub.
-          //
-          // If neither resolution yields a user, or if the email lookup
-          // returns more than one Keycloak user (ambiguous match in realms
-          // that allow duplicate emails), the assignment is deferred to the
-          // portal middleware, which retries the sweep on first Keycloak
-          // login (#200 transition path). Skipping is safe — re-provisioning
-          // after the owner has signed in once will pick up the sub via the
-          // canonical portal_account.keycloak_sub link and assign the role.
-          const ownerKeycloakSub = await this.resolveTenantOwnerKeycloakSub(
-            refreshedTenant,
-            registryClient,
-          )
-
-          if (ownerKeycloakSub) {
-            await this.keycloakAdminClient.assignClientRoleToUser(
-              ownerKeycloakSub,
-              tenantClientId,
-              tenantMemberRoleName,
+          if (requestedVersion !== undefined && tenant.currentState === 'upgrading') {
+            throw new TenantProvisioningConflictError(
+              `Tenant ${tenant.id} already has a rolling update in progress. Wait for it to return to ready before starting another rollout.`,
+              'tenant_rollout_in_progress',
             )
           }
-        }
 
-        await this.infrastructureManager.applyTenantResources(bundle)
-        await this.infrastructureManager.waitForTenantReady(
-          bundle.resources,
-          this.readyTimeoutMs,
-        )
+          if (isVersionRollout && tenant.currentState !== 'ready' && tenant.currentState !== 'deprovisioned' && tenant.currentState !== 'failed') {
+            throw new TenantProvisioningConflictError(
+              `Tenant ${tenant.id} cannot start a rolling update from state ${tenant.currentState}. Rolling updates are only supported for ready tenants.`,
+              'tenant_rollout_disallowed',
+            )
+          }
 
+          if (
+            requestedVersion !== undefined &&
+            requestedVersion === tenant.version &&
+            isExistingRolloutState
+          ) {
+            throw new TenantProvisioningValidationError(
+              `Tenant ${tenant.id} is already running version ${tenant.version}. Choose a different target version for a rolling update.`,
+              'unsupported_target_version',
+            )
+          }
+
+          if (requestedVersion !== undefined && requestedVersion !== tenant.version) {
+            await this.tenantRegistry.updateTenantVersion(
+              tenant.id,
+              requestedVersion,
+              registryClient,
+            )
+          }
+
+          const refreshedTenant = await this.getExistingTenant(tenant.id, registryClient)
+          const hadPersistedSubdomain = refreshedTenant.subdomain != null
+          const shouldMarkUpgrading =
+            isVersionRollout &&
+            hadPersistedSubdomain &&
+            refreshedTenant.currentState === 'ready'
+
+          const shouldMarkProvisioning =
+            !hadPersistedSubdomain ||
+            refreshedTenant.currentState === 'deprovisioned' ||
+            refreshedTenant.currentState === 'failed'
+
+          try {
+            await this.tenantRegistry.updateTenantDesiredState(
+              refreshedTenant.id,
+              'ready',
+              registryClient,
+            )
+            if (shouldMarkUpgrading) {
+              await this.tenantRegistry.updateTenantState(
+                refreshedTenant.id,
+                'upgrading',
+                params.triggeredBy,
+                params.reason ?? 'Tenant rolling update started',
+                registryClient,
+              )
+            } else if (shouldMarkProvisioning) {
+              await this.tenantRegistry.updateTenantState(
+                refreshedTenant.id,
+                'provisioning',
+                params.triggeredBy,
+                params.reason ?? 'Tenant provisioning started',
+                registryClient,
+              )
+            }
+            const subdomain = assertPersistedTenantSubdomain(
+              refreshedTenant.id,
+              await this.tenantRegistry.reserveTenantSubdomain(
+                refreshedTenant.id,
+                () => this.createOpaqueSubdomainCandidate(),
+                10,
+                registryClient,
+              ),
+              'provisioning tenant resources',
+            )
+            const existingResources = buildTenantResourceNames({
+              tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
+              subdomain,
+              baseDomain: this.baseDomain,
+              imageRepository: this.imageRepository,
+            })
+            const existingRuntimeConnectionString = hadPersistedSubdomain
+              ? await this.infrastructureManager.getTenantRuntimeConnectionString(
+                  existingResources,
+                )
+              : null
+            const wasSuccessfullyProvisioned =
+              refreshedTenant.currentState === 'ready' ||
+              refreshedTenant.currentState === 'upgrading' ||
+              refreshedTenant.currentState === 'maintenance' ||
+              refreshedTenant.currentState === 'restoring'
+            const database = await this.databaseManager.ensureTenantDatabase(
+              refreshedTenant,
+              subdomain,
+              {
+                existingRuntimeConnectionString,
+                requireExistingRuntimeConnectionString: wasSuccessfullyProvisioned,
+              },
+            )
+
+            const bundle = buildTenantInfrastructureBundle({
+              tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
+              subdomain,
+              database,
+              tenantRuntimeAuth: this.tenantRuntimeAuth,
+              baseDomain: this.baseDomain,
+              ingressClassName: this.ingressClassName,
+              imageRepository: this.imageRepository,
+              imagePullSecretName: this.imagePullSecretName,
+              publicScheme: this.publicScheme,
+              tenantPort: this.tenantPort,
+              controlPlaneToken: this.controlPlaneToken,
+              tlsClusterIssuer: this.tlsClusterIssuer,
+            })
+            const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
+              refreshedTenant.id,
+              registryClient,
+            )
+            if (!currentStorage) {
+              throw new Error(`Tenant ${refreshedTenant.id} not found`)
+            }
+            const nextStorageMode =
+              database.roleName === null
+                ? 'postgres-shared-user'
+                : 'postgres-dedicated-user'
+            const shouldInitializeNotRequiredMigrationStatus =
+              nextStorageMode === 'postgres-dedicated-user' &&
+              currentStorage.mode === 'unknown' &&
+              currentStorage.migrationStatus === 'not-started' &&
+              currentStorage.lastMigrationFailure === null &&
+              refreshedTenant.storageReference === null
+
+            await this.tenantRegistry.updateTenantStorageReference(
+              refreshedTenant.id,
+              database.databaseName,
+              registryClient,
+            )
+            await this.tenantRegistry.updateTenantStorageProfile(
+              refreshedTenant.id,
+              {
+                mode: nextStorageMode,
+                migrationStatus: shouldInitializeNotRequiredMigrationStatus
+                  ? 'not-required'
+                  : currentStorage.migrationStatus,
+                failureReason: shouldInitializeNotRequiredMigrationStatus
+                  ? null
+                  : currentStorage.lastMigrationFailure,
+              },
+              registryClient,
+            )
+
+            // Ensure a per-tenant Keycloak client exists before the SPA pod boots.
+            // The KC step runs before applyTenantResources so the client is in place
+            // when the pod first initialises. Failure here is intentionally fatal for
+            // provisioning — the tenant SPA cannot authenticate without it.
+            //
+            if (this.keycloakAdminClient) {
+              const hostname = bundle.resources.hostname
+              const tenantClientId = `dnd-notes-tenant-${refreshedTenant.id}`
+              await this.keycloakAdminClient.ensureClient({
+                clientId: tenantClientId,
+                enabled: true,
+                publicClient: true,
+                standardFlowEnabled: true,
+                implicitFlowEnabled: false,
+                // Direct-access grants stay enabled for local dev tooling (e.g.
+                // manual token inspection) but are not used by the smoke test or the
+                // SPA. The smoke fetches tenant tokens via the auth-code + PKCE flow;
+                // the SPA negotiates PKCE via keycloak-js at runtime. Server-side
+                // PKCE enforcement (pkce.code.challenge.method) is now active — any
+                // token request without a valid code_verifier will be rejected.
+                directAccessGrantsEnabled: true,
+                redirectUris: [
+                  `https://${hostname}/*`,
+                  `http://${hostname}/*`,
+                ],
+                webOrigins: [
+                  `https://${hostname}`,
+                  `http://${hostname}`,
+                ],
+                attributes: {
+                  'pkce.code.challenge.method': 'S256',
+                  // Always include tenant_display_name so that flipping displayName
+                  // non-null -> null on re-sync clears the stale Keycloak attribute.
+                  // The FTL template guards with `?has_content`, which treats an
+                  // empty string as falsy -- the heading falls back to
+                  // "Sign in to D&D Notes" when displayName is null (#248).
+                  tenant_display_name: refreshedTenant.displayName ?? '',
+                },
+              })
+
+              // Create the per-tenant member role on the per-tenant client. The
+              // tenant API gates access on this role (#196) and the absence of it
+              // for an otherwise valid Keycloak token returns 403. Failure here
+              // is fatal for the same reason ensureClient is fatal — the tenant
+              // is unusable in keycloak mode without it.
+              await this.keycloakAdminClient.ensureClientRole(
+                tenantClientId,
+                tenantMemberRoleName,
+              )
+
+              // Assign the role to the tenant creator's Keycloak user so the
+              // first member can actually access the tenant.
+              //
+              // Resolution order:
+              //   1. portal_account.keycloak_sub — the canonical link, populated
+              //      after the customer signs in through the portal Keycloak
+              //      flow at least once.
+              //   2. tenant.initialAdminEmail — admin-created tenants (control-
+              //      plane API or operator portal) record the intended owner's
+              //      email at create time. We resolve it to a Keycloak user id
+              //      via the admin REST API. This is the path the k3d smoke
+              //      and operator-portal flows depend on, since they create the
+              //      tenant before any portal sign-in has produced a sub.
+              //
+              // If neither resolution yields a user, or if the email lookup
+              // returns more than one Keycloak user (ambiguous match in realms
+              // that allow duplicate emails), the assignment is deferred to the
+              // portal middleware, which retries the sweep on first Keycloak
+              // login (#200 transition path). Skipping is safe — re-provisioning
+              // after the owner has signed in once will pick up the sub via the
+              // canonical portal_account.keycloak_sub link and assign the role.
+              const ownerKeycloakSub = await this.resolveTenantOwnerKeycloakSub(
+                refreshedTenant,
+                registryClient,
+              )
+
+              if (ownerKeycloakSub) {
+                await this.keycloakAdminClient.assignClientRoleToUser(
+                  ownerKeycloakSub,
+                  tenantClientId,
+                  tenantMemberRoleName,
+                )
+              }
+            }
+
+            await this.infrastructureManager.applyTenantResources(bundle)
+
+            // Return just what the rollout-wait phase needs; the lock is
+            // released as soon as this callback returns.
+            return { tenantId: refreshedTenant.id, resources: bundle.resources }
+          } catch (error) {
+            const failedTenant = await this.getExistingTenant(
+              refreshedTenant.id,
+              registryClient,
+            )
+            if (failedTenant.currentState !== 'failed') {
+              await this.tenantRegistry.updateTenantState(
+                refreshedTenant.id,
+                'failed',
+                params.triggeredBy,
+                params.reason ?? 'Tenant provisioning failed',
+                registryClient,
+              )
+            }
+            throw error
+          }
+        },
+      )
+    } catch (error) {
+      // Validation and pre-apply errors propagate directly to the caller;
+      // the lock has already been released by withTenantLock's finally block.
+      throw error
+    }
+
+    // Phase 2: wait for the workload to become ready. The advisory lock is NOT
+    // held here so that a stuck ImagePullBackOff does not block concurrent
+    // registry operations (e.g. deprovision) for the full readyTimeoutMs window.
+    try {
+      await this.infrastructureManager.waitForTenantReady(
+        applyOutcome.resources,
+        this.readyTimeoutMs,
+      )
+    } catch (rolloutError) {
+      // Rollout timed out or the workload failed to become healthy. Re-acquire
+      // the lock to persist the failure state, then re-throw so the caller
+      // sees the original error.
+      await this.tenantRegistry.withTenantLock(
+        applyOutcome.tenantId,
+        async (registryClient) => {
+          const failedTenant = await this.getExistingTenant(
+            applyOutcome.tenantId,
+            registryClient,
+          )
+          if (failedTenant.currentState !== 'failed') {
+            await this.tenantRegistry.updateTenantState(
+              applyOutcome.tenantId,
+              'failed',
+              params.triggeredBy,
+              params.reason ?? 'Tenant provisioning failed',
+              registryClient,
+            )
+          }
+        },
+      )
+      throw rolloutError
+    }
+
+    // Phase 3: re-acquire the lock to persist the ready state and return the
+    // final tenant snapshot.
+    return this.tenantRegistry.withTenantLock(
+      applyOutcome.tenantId,
+      async (registryClient) => {
         const currentTenant = await this.getExistingTenant(
-          refreshedTenant.id,
+          applyOutcome.tenantId,
           registryClient,
         )
         if (currentTenant.currentState !== 'ready') {
           await this.tenantRegistry.updateTenantState(
-            refreshedTenant.id,
+            applyOutcome.tenantId,
             'ready',
             params.triggeredBy,
             params.reason ?? 'Tenant resources provisioned',
@@ -542,26 +617,11 @@ export class TenantProvisioningService implements TenantProvisioningPort {
         }
 
         return {
-          tenant: await this.getExistingTenant(refreshedTenant.id, registryClient),
-          resources: bundle.resources,
+          tenant: await this.getExistingTenant(applyOutcome.tenantId, registryClient),
+          resources: applyOutcome.resources,
         }
-      } catch (error) {
-        const failedTenant = await this.getExistingTenant(
-          refreshedTenant.id,
-          registryClient,
-        )
-        if (failedTenant.currentState !== 'failed') {
-          await this.tenantRegistry.updateTenantState(
-            refreshedTenant.id,
-            'failed',
-            params.triggeredBy,
-            params.reason ?? 'Tenant provisioning failed',
-            registryClient,
-          )
-        }
-        throw error
-      }
-    })
+      },
+    )
   }
 
   async deprovisionTenant(params: {

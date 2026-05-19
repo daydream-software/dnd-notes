@@ -88,6 +88,7 @@ class FakeInfrastructureManager {
   }> = []
   deletedResources: TenantProvisioningResources[] = []
   shouldThrow = false
+  shouldThrowOnWait = false
   runtimeConnectionStrings = new Map<string, string>()
 
   async applyTenantResources(bundle: {
@@ -198,7 +199,11 @@ class FakeInfrastructureManager {
     return this.runtimeConnectionStrings.get(this.secretKey(resources)) ?? null
   }
 
-  async waitForTenantReady() {}
+  async waitForTenantReady() {
+    if (this.shouldThrowOnWait) {
+      throw new Error('synthetic rollout timeout')
+    }
+  }
 
   async deleteTenantResources(resources: TenantProvisioningResources) {
     this.runtimeConnectionStrings.delete(this.secretKey(resources))
@@ -351,7 +356,9 @@ describe('TenantProvisioningService', () => {
       assert.equal(storage.mode, 'postgres-dedicated-user')
       assert.equal(storage.migrationStatus, 'not-required')
       assert.equal(storage.lastMigrationFailure, null)
-      assert.deepEqual(tenantLockCalls, ['tenant-demo'])
+      // Phase 1 (registry mutations + apply) and phase 3 (mark ready) each
+      // acquire the lock once. Phase 2 (rollout wait) runs without the lock.
+      assert.deepEqual(tenantLockCalls, ['tenant-demo', 'tenant-demo'])
       assert.equal(infrastructureManager.bundles.length, 1)
       assert.equal(infrastructureManager.bundles[0].deploymentReadinessPath, '/ready')
       assert.equal(infrastructureManager.bundles[0].ingressClassName, 'nginx')
@@ -462,7 +469,10 @@ describe('TenantProvisioningService', () => {
       })
 
       assert.equal(result.tenant.currentState, 'ready')
-      assert.equal(connectCount, 1)
+      // Phase 1 (registry mutations + applyTenantResources) and phase 3
+      // (mark ready) each check out one pool client. The rollout-wait in
+      // phase 2 holds no connection, so the total is 2.
+      assert.equal(connectCount, 2)
     } finally {
       await provisioningService.close()
       await tenantRegistry.close()
@@ -934,6 +944,144 @@ describe('TenantProvisioningService', () => {
       assert.equal(tenant?.currentState, 'failed')
       assert.equal(tenant?.desiredState, 'ready')
       assert.ok(tenant?.subdomain)
+    } finally {
+      await provisioningService.close()
+      await cleanup()
+    }
+  })
+
+  it('marks tenant failed when the rollout wait times out and releases the lock before waiting', async () => {
+    const db = newDb({
+      autoCreateForeignKeyIndices: true,
+    })
+    db.public.registerFunction({
+      name: 'pg_try_advisory_lock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    db.public.registerFunction({
+      name: 'pg_advisory_unlock',
+      args: [DataType.integer, DataType.integer],
+      returns: DataType.bool,
+      implementation: () => true,
+    })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    let connectCount = 0
+    const wrappedPool = {
+      async query(text: string, values?: readonly unknown[]) {
+        return pool.query(text, values as unknown[])
+      },
+      async connect() {
+        connectCount += 1
+        const client = await pool.connect()
+        return {
+          async query(text: string, values?: readonly unknown[]) {
+            return client.query(text, values as unknown[])
+          },
+          release(error?: Error) {
+            client.release(error)
+          },
+        }
+      },
+      async end() {
+        await pool.end()
+      },
+    }
+    const tenantRegistry = new TenantRegistry(
+      'postgres://control-plane.test/tenant-registry',
+      { pool: wrappedPool },
+    )
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    infrastructureManager.shouldThrowOnWait = true
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      connectCount = 0
+
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+        }),
+        /synthetic rollout timeout/,
+      )
+
+      const tenant = await tenantRegistry.getTenant('tenant-demo')
+      assert.equal(tenant?.currentState, 'failed')
+      assert.equal(tenant?.desiredState, 'ready')
+      assert.ok(tenant?.subdomain)
+
+      // Phase 1 (apply resources) releases the lock, then phase 2 (rollout
+      // wait) throws without holding a pool connection, then phase 2's error
+      // handler acquires the lock to mark failed. Total: 2 pool connections.
+      // This proves the lock was not held during the wait.
+      assert.equal(connectCount, 2)
+    } finally {
+      await provisioningService.close()
+      await tenantRegistry.close()
+      await pool.end()
+    }
+  })
+
+  it('allows deprovision to proceed after a rollout-wait failure releases the advisory lock', async () => {
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+    const databaseManager = new FakeDatabaseManager()
+    const infrastructureManager = new FakeInfrastructureManager()
+    infrastructureManager.shouldThrowOnWait = true
+    const provisioningService: TenantProvisioningPort =
+      new TenantProvisioningService({
+        tenantRegistry,
+        databaseManager,
+        infrastructureManager,
+        baseDomain: 'dnd-notes.test',
+        imageRepository: 'ghcr.io/daydream-software/dnd-notes',
+      })
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-demo',
+        slug: 'demo',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      // Simulate ImagePullBackOff: provision starts, applies resources, then
+      // rollout wait times out.
+      await assert.rejects(
+        provisioningService.provisionTenant({
+          tenantId: 'tenant-demo',
+          triggeredBy: 'control-plane',
+        }),
+        /synthetic rollout timeout/,
+      )
+
+      const failedTenant = await tenantRegistry.getTenant('tenant-demo')
+      assert.equal(failedTenant?.currentState, 'failed')
+
+      // The lock must be free now — deprovision should succeed without timing out.
+      infrastructureManager.shouldThrowOnWait = false
+      const deprovisionResult = await provisioningService.deprovisionTenant({
+        tenantId: 'tenant-demo',
+        triggeredBy: 'control-plane',
+      })
+      assert.equal(deprovisionResult.deprovisioned, true)
+      assert.equal(deprovisionResult.tenant.currentState, 'deprovisioned')
     } finally {
       await provisioningService.close()
       await cleanup()
