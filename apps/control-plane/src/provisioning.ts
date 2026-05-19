@@ -91,6 +91,15 @@ interface TenantInfrastructureBundle {
   secret: V1Secret
   podDisruptionBudget?: V1PodDisruptionBudget
   service: V1Service
+  /**
+   * ExternalName Service shim that proxies cross-namespace to the activator
+   * (dnd-notes-activator.dnd-notes-platform). Required because standard
+   * networking.k8s.io/v1 Ingress backends must reside in the same namespace
+   * as the Ingress object. When present, the Ingress backend points to this
+   * shim instead of the tenant Service directly (Pattern B routing).
+   * When absent, the Ingress backend points to the tenant Service (pre-activator mode).
+   */
+  activatorShim?: V1Service
   ingress: V1Ingress
   deployment: V1Deployment
   resources: TenantProvisioningResources
@@ -149,6 +158,16 @@ interface TenantProvisioningServiceOptions {
   controlPlaneToken?: string
   /** cert-manager ClusterIssuer name for TLS on tenant ingresses (e.g. 'dev-ca' in k3d, 'letsencrypt-prod' in hosted). When undefined, no TLS annotation or spec.tls block is added (back-compat with setups without cert-manager). */
   tlsClusterIssuer?: string
+  /**
+   * In-cluster DNS name for the activator Service (e.g.
+   * "dnd-notes-activator.dnd-notes-platform.svc.cluster.local"). When set,
+   * each new tenant IngressRoute backend is pointed at the activator via an
+   * ExternalName shim (Pattern B routing for scale-to-zero). When absent,
+   * the Ingress backend points directly to the tenant Service.
+   */
+  activatorExternalName?: string
+  /** Port the activator listens on. Default: 8080 */
+  activatorPort?: number
 }
 
 interface BuildTenantInfrastructureBundleOptions {
@@ -165,6 +184,17 @@ interface BuildTenantInfrastructureBundleOptions {
   controlPlaneToken?: string
   /** cert-manager ClusterIssuer name for TLS on the tenant ingress. When undefined, no TLS configuration is applied. */
   tlsClusterIssuer?: string
+  /**
+   * When provided, an ExternalName Service shim is added to the tenant namespace
+   * pointing to this in-cluster DNS name (e.g.
+   * "dnd-notes-activator.dnd-notes-platform.svc.cluster.local"). The Ingress
+   * backend is then pointed at the shim instead of the tenant Service so that
+   * all traffic flows through the activator (Pattern B routing for scale-to-zero).
+   * When absent, the Ingress backend points directly to the tenant Service.
+   */
+  activatorExternalName?: string
+  /** Port the activator Service listens on. Default: 8080 */
+  activatorPort?: number
 }
 
 export class TenantProvisioningValidationError extends Error {
@@ -233,6 +263,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
   private readonly readyTimeoutMs: number
   private readonly controlPlaneToken?: string
   private readonly tlsClusterIssuer?: string
+  private readonly activatorExternalName?: string
+  private readonly activatorPort?: number
 
   constructor(options: TenantProvisioningServiceOptions) {
     this.tenantRegistry = options.tenantRegistry
@@ -249,6 +281,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
     this.readyTimeoutMs = options.readyTimeoutMs ?? defaultTenantReadyTimeoutMs
     this.controlPlaneToken = options.controlPlaneToken
     this.tlsClusterIssuer = options.tlsClusterIssuer
+    this.activatorExternalName = options.activatorExternalName
+    this.activatorPort = options.activatorPort
   }
 
   getTenantResources(tenant: Tenant): TenantProvisioningResources {
@@ -427,6 +461,8 @@ export class TenantProvisioningService implements TenantProvisioningPort {
               tenantPort: this.tenantPort,
               controlPlaneToken: this.controlPlaneToken,
               tlsClusterIssuer: this.tlsClusterIssuer,
+              activatorExternalName: this.activatorExternalName,
+              activatorPort: this.activatorPort,
             })
             const currentStorage = await this.tenantRegistry.getTenantStorageSnapshot(
               refreshedTenant.id,
@@ -1008,6 +1044,9 @@ export class KubernetesTenantInfrastructureManager
       await upsertKubernetesObject(this.client, bundle.podDisruptionBudget)
     }
     await upsertKubernetesObject(this.client, bundle.service)
+    if (bundle.activatorShim) {
+      await upsertKubernetesObject(this.client, bundle.activatorShim)
+    }
     await upsertKubernetesObject(this.client, bundle.ingress)
     await upsertKubernetesObject(this.client, bundle.deployment)
   }
@@ -1157,6 +1196,9 @@ export function createLiveTenantProvisioningService(params: {
   readyTimeoutMs?: number
   controlPlaneToken?: string
   tlsClusterIssuer?: string
+  /** When set, enables Pattern B routing: tenant Ingress backends flow through the activator. */
+  activatorExternalName?: string
+  activatorPort?: number
 }): TenantProvisioningService {
   return new TenantProvisioningService({
     tenantRegistry: params.tenantRegistry,
@@ -1176,6 +1218,8 @@ export function createLiveTenantProvisioningService(params: {
     readyTimeoutMs: params.readyTimeoutMs,
     controlPlaneToken: params.controlPlaneToken,
     tlsClusterIssuer: params.tlsClusterIssuer,
+    activatorExternalName: params.activatorExternalName,
+    activatorPort: params.activatorPort,
   })
 }
 
@@ -1303,6 +1347,36 @@ export function buildTenantInfrastructureBundle(
         ],
       },
     },
+    // ExternalName shim for activator cross-namespace routing (Pattern B).
+    // Standard networking.k8s.io/v1 Ingress backends must reside in the same
+    // namespace as the Ingress object. This shim lives in the tenant namespace
+    // and forwards to the activator in dnd-notes-platform via ExternalName DNS.
+    // When activatorExternalName is absent, no shim is created and the Ingress
+    // backend points directly to the tenant Service (pre-activator mode).
+    ...(options.activatorExternalName
+      ? {
+          activatorShim: {
+            apiVersion: 'v1' as const,
+            kind: 'Service',
+            metadata: {
+              name: 'dnd-notes-activator-shim',
+              namespace: resources.namespace,
+              labels: namespaceLabels,
+            },
+            spec: {
+              type: 'ExternalName',
+              externalName: options.activatorExternalName,
+              ports: [
+                {
+                  name: 'http',
+                  port: options.activatorPort ?? 8080,
+                  targetPort: options.activatorPort ?? 8080,
+                } as V1ServicePort,
+              ],
+            },
+          } as V1Service,
+        }
+      : {}),
     ingress: {
       apiVersion: 'networking.k8s.io/v1',
       kind: 'Ingress',
@@ -1336,9 +1410,18 @@ export function buildTenantInfrastructureBundle(
                   pathType: 'Prefix',
                   backend: {
                     service: {
-                      name: resources.serviceName,
+                      // When the activator shim is present, route Ingress traffic
+                      // to the shim (which forwards to the activator) so that all
+                      // tenant requests are proxied through the activator for
+                      // scale-to-zero wake-on-request support (Pattern B).
+                      // When absent, route directly to the tenant Service.
+                      name: options.activatorExternalName
+                        ? 'dnd-notes-activator-shim'
+                        : resources.serviceName,
                       port: {
-                        name: 'http',
+                        number: options.activatorExternalName
+                          ? (options.activatorPort ?? 8080)
+                          : options.tenantPort,
                       },
                     },
                   },

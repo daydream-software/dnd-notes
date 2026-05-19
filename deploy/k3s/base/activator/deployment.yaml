@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnd-notes-activator
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: dnd-notes-activator
+    app.kubernetes.io/component: activator
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: dnd-notes-activator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: dnd-notes-activator
+        app.kubernetes.io/component: activator
+        app.kubernetes.io/part-of: dnd-notes
+    spec:
+      serviceAccountName: dnd-notes-activator
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        fsGroup: 10001
+        fsGroupChangePolicy: OnRootMismatch
+      containers:
+        - name: activator
+          image: ghcr.io/daydream-software/dnd-notes-activator
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+          env:
+            - name: PORT
+              value: "8080"
+            - name: BASE_DOMAIN
+              valueFrom:
+                configMapKeyRef:
+                  name: dnd-notes-activator-config
+                  key: BASE_DOMAIN
+            - name: TENANT_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: dnd-notes-activator-config
+                  key: TENANT_PORT
+                  optional: true
+            - name: COLD_START_TIMEOUT_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: dnd-notes-activator-config
+                  key: COLD_START_TIMEOUT_MS
+                  optional: true
+            - name: POD_SCHEDULE_BUDGET_MS
+              valueFrom:
+                configMapKeyRef:
+                  name: dnd-notes-activator-config
+                  key: POD_SCHEDULE_BUDGET_MS
+                  optional: true
+            - name: CONTROL_PLANE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dnd-notes-activator-secrets
+                  key: CONTROL_PLANE_DATABASE_URL
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 2
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001

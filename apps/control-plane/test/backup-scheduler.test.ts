@@ -293,6 +293,47 @@ describe('startBackupScheduler', () => {
     }
   })
 
+  it('backs up sleeping (scale-to-zero) tenants the same as ready tenants', async () => {
+    // The backup runner connects directly to Postgres via the admin credential
+    // and never touches the tenant pod, so a tenant scaled to zero replicas
+    // (currentState === 'sleeping') must receive its nightly backup.
+    const { tenantRegistry, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.whenReady()
+
+      await tenantRegistry.createTenant({
+        id: 'tenant-sleeping',
+        slug: 'tenant-sleeping',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantStorageReference('tenant-sleeping', 'tenant_sleeping_t_sl')
+      await tenantRegistry.updateTenantState('tenant-sleeping', 'ready', 'test')
+      await tenantRegistry.updateTenantState('tenant-sleeping', 'sleeping', 'idle-scaler')
+
+      const dispatcher = new FakeDispatcher()
+      let callCountSleep = 0
+      const loop = startBackupScheduler({
+        tenantRegistry,
+        tenantBackupDispatcher: dispatcher,
+        scheduleExpression: '0 3 * * *',
+        now: () =>
+          callCountSleep++ < 2
+            ? new Date('2026-05-18T02:59:59.950Z')
+            : new Date('2026-05-18T04:00:00.000Z'),
+      })
+
+      await new Promise<void>((resolve) => setTimeout(resolve, 300))
+      loop.stop()
+
+      assert.equal(dispatcher.calls.length, 1)
+      assert.equal(dispatcher.calls[0]?.tenantId, 'tenant-sleeping')
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('stop() prevents subsequent ticks from firing', async () => {
     const { tenantRegistry, cleanup } = createTestTenantRegistry()
 

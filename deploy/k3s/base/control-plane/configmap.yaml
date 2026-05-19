@@ -26,6 +26,10 @@ data:
   TENANT_APP_PORT: "3000"
   TENANT_READY_TIMEOUT_MS: "240000"
   TENANT_TLS_CLUSTER_ISSUER: letsencrypt-prod
+  # Scale-to-zero: route tenant Ingress backends through the activator (Pattern B).
+  # Set to the activator's in-cluster DNS name to enable; leave unset to disable.
+  ACTIVATOR_EXTERNAL_NAME: "dnd-notes-activator.dnd-notes-platform.svc.cluster.local"
+  ACTIVATOR_PORT: "8080"
   KEYCLOAK_ADMIN_BASE_URL: https://auth.example.com
   KEYCLOAK_ADMIN_REALM: dnd-notes
   CUSTOMER_PORTAL_KEYCLOAK_URL: https://auth.example.com

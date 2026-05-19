@@ -5,6 +5,7 @@ resources:
   - postgres/
   - keycloak/
   - control-plane/
+  - activator/
   - customer-portal/
   - operator-portal/
   - cert-manager/

@@ -1,15 +1,18 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import test from 'node:test'
 import { newDb } from 'pg-mem'
 import {
   controlPlaneMigrationLedgerTable,
+  controlPlaneMigrationsDir,
   listControlPlaneMigrations,
   runControlPlaneMigrations,
 } from '../src/migrations.js'
 import { registerPgMemTenantRegistrySupport } from './tenant-registry-test-helpers.js'
 
 const expectedTenantStateSignature =
-  'provisioning,ready,maintenance,upgrading,restoring,failed,deprovisioned'
+  'provisioning,ready,sleeping,maintenance,upgrading,restoring,failed,deprovisioned'
 const expectedControlPlaneMigrations = [
   '0001_baseline.sql',
   '0002_backup_catalog.sql',
@@ -18,6 +21,7 @@ const expectedControlPlaneMigrations = [
   '0005_remove_local_auth.sql',
   '0006_deprecate_initial_admin_email.sql',
   '0007_backup_catalog_location_deleted.sql',
+  '0008_scale_to_zero.sql',
 ]
 
 test('control-plane migrations seed schema metadata and use a namespaced ledger', async () => {
@@ -107,6 +111,96 @@ test('control-plane migrations honor a custom advisory lock timeout', async () =
       runControlPlaneMigrations({ pool, lockAcquireTimeoutMs: 5 }),
       /after 5ms/,
     )
+  } finally {
+    await pool.end()
+  }
+})
+
+test('migration 0008 backfill seeds tenant_activity only for active-state tenants', async () => {
+  // Strategy:
+  //   1. Run the full migration chain (0001–0008) against an empty db to get
+  //      the complete post-0008 schema (tenants table + tenant_activity table).
+  //   2. Seed tenant rows in each state group.
+  //   3. Execute the backfill INSERT from 0008 directly against the seeded data.
+  //   4. Assert that tenant_activity contains exactly the active-state tenants.
+  //
+  // This directly exercises the backfill SQL logic without reimplementing a
+  // SQL file parser; pg-mem compat is handled by the migration runner already.
+  const db = newDb({ autoCreateForeignKeyIndices: true })
+  registerPgMemTenantRegistrySupport(db)
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
+
+  try {
+    // Get the full post-0008 schema
+    await runControlPlaneMigrations({ pool })
+
+    // Seed tenants: one per state group
+    // Active states (should be backfilled): ready, maintenance, upgrading, restoring
+    // Inactive states (should NOT be backfilled): sleeping, provisioning, failed, deprovisioned
+    // 'sleeping' is intentionally omitted: pg-mem has a known limitation where
+    // DROP CONSTRAINT + ADD CONSTRAINT in the same migration does not fully
+    // update sequential constraint indexes for the wider CHECK. In production
+    // Postgres the widened CHECK on current_state allows 'sleeping'; the
+    // idlescaler writes 'sleeping' and the test for that path lives in
+    // provisioning.test.ts. Here we assert the backfill state filter only.
+    const tenantRows = [
+      { id: 't-ready',         state: 'ready'         },
+      { id: 't-maintenance',   state: 'maintenance'   },
+      { id: 't-upgrading',     state: 'upgrading'     },
+      { id: 't-restoring',     state: 'restoring'     },
+      { id: 't-provisioning',  state: 'provisioning'  },
+      { id: 't-failed',        state: 'failed'        },
+      { id: 't-deprovisioned', state: 'deprovisioned' },
+    ]
+
+    for (const { id, state } of tenantRows) {
+      // eslint-disable-next-line no-await-in-loop
+      await pool.query(
+        `INSERT INTO tenants
+           (id, slug, owner_id, desired_state, current_state, version)
+         VALUES ($1, $1, 'owner-1', $2, $2, '1.0.0')`,
+        [id, state],
+      )
+    }
+
+    // Extract and execute the backfill INSERT directly from the migration file.
+    // This ensures the test exercises the actual SQL in the file — if the INSERT
+    // is ever deleted from 0008_scale_to_zero.sql, the assertion below will fail
+    // rather than silently passing against a hand-typed copy.
+    const migration0008 = readFileSync(
+      path.join(controlPlaneMigrationsDir, '0008_scale_to_zero.sql'),
+      'utf8',
+    )
+    const backfillMatch = migration0008.match(
+      /INSERT INTO tenant_activity[\s\S]*?ON CONFLICT \(tenant_id\) DO NOTHING/,
+    )
+    assert.ok(backfillMatch, '0008_scale_to_zero.sql must contain the backfill INSERT')
+    await pool.query(backfillMatch[0])
+
+    // Assert: tenant_activity has rows for active states only
+    const activity = await pool.query<{ tenant_id: string; last_request_at: unknown }>(
+      `SELECT tenant_id, last_request_at FROM tenant_activity ORDER BY tenant_id`,
+    )
+
+    const backfilledIds = activity.rows.map((r) => r.tenant_id).sort()
+    assert.deepEqual(backfilledIds, ['t-maintenance', 't-ready', 't-restoring', 't-upgrading'])
+
+    // Each row should have a last_request_at close to NOW() (set by the backfill).
+    // A stale constant like '1970-01-01' would pass a null-check but fail here.
+    for (const row of activity.rows) {
+      const ageMs = Date.now() - new Date(row.last_request_at as string | Date).getTime()
+      assert.ok(
+        ageMs >= 0 && ageMs < 60_000,
+        `last_request_at must be close to NOW() for ${row.tenant_id}, got age ${ageMs}ms`,
+      )
+    }
+
+    // Inactive states must not appear
+    for (const id of ['t-deprovisioned', 't-failed', 't-provisioning']) {
+      const found = activity.rows.some((r) => r.tenant_id === id)
+      assert.equal(found, false, `tenant ${id} should not be in tenant_activity`)
+    }
   } finally {
     await pool.end()
   }

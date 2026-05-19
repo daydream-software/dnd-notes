@@ -1,0 +1,65 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dnd-notes-idle-scaler
+  namespace: dnd-notes-platform
+  labels:
+    app.kubernetes.io/name: dnd-notes-idle-scaler
+    app.kubernetes.io/component: idle-scaler
+    app.kubernetes.io/part-of: dnd-notes
+spec:
+  # Run every 5 minutes. Override IDLE_THRESHOLD_MINUTES for testing.
+  schedule: "*/5 * * * *"
+  # Prevent overlapping runs in case the previous job is still finishing.
+  concurrencyPolicy: Forbid
+  # Keep the last 3 successful and 3 failed job pods for debugging.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      # Fail fast if the job takes too long (e.g. API outage).
+      activeDeadlineSeconds: 240
+      backoffLimit: 1
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: dnd-notes-idle-scaler
+            app.kubernetes.io/component: idle-scaler
+            app.kubernetes.io/part-of: dnd-notes
+        spec:
+          serviceAccountName: dnd-notes-activator
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+          containers:
+            - name: idle-scaler
+              image: ghcr.io/daydream-software/dnd-notes-activator
+              imagePullPolicy: Always
+              command: ["node", "apps/activator/dist/idle-scaler.js"]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  cpu: 100m
+                  memory: 128Mi
+              env:
+                - name: IDLE_THRESHOLD_MINUTES
+                  valueFrom:
+                    configMapKeyRef:
+                      name: dnd-notes-activator-config
+                      key: IDLE_THRESHOLD_MINUTES
+                      optional: true
+                - name: CONTROL_PLANE_DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: dnd-notes-activator-secrets
+                      key: CONTROL_PLANE_DATABASE_URL
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop:
+                    - ALL
+                readOnlyRootFilesystem: true

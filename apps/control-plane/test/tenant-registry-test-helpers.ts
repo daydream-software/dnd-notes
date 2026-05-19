@@ -9,14 +9,31 @@ export interface RegisterPgMemTenantRegistrySupportOptions {
 /**
  * pg-mem does not fully handle DROP COLUMN when the column has a named CHECK
  * constraint — the constraint is not removed and subsequent INSERTs fail.
- * This wrapper intercepts the migration SQL for 0005_remove_local_auth and
- * emits an explicit DROP CONSTRAINT before the DROP COLUMN so pg-mem can
- * keep up with the real migration.
+ * This wrapper intercepts migration SQL and translates real Postgres auto-named
+ * CHECK constraint names to pg-mem's sequential naming scheme so that DROP
+ * CONSTRAINT statements succeed in the in-memory database.
+ *
+ * Real Postgres names anonymous inline CHECK constraints as {table}_{column}_check.
+ * pg-mem names them {table}_constraint_{n} where n is sequential within the table.
+ * Constraint ordinals for the baseline schema (0001_baseline.sql):
+ *
+ *   tenants table:
+ *     constraint_1 = desired_state check   (tenants_desired_state_check in Postgres)
+ *     constraint_2 = current_state check   (tenants_current_state_check in Postgres)
+ *     constraint_3 = storage_mode check    (not widened here)
+ *     constraint_4 = storage_migration_status check  (not widened here)
+ *
+ *   state_transitions table:
+ *     constraint_1 = from_state check      (state_transitions_from_state_check in Postgres)
+ *     constraint_2 = to_state check        (state_transitions_to_state_check in Postgres)
+ *
+ *   portal_accounts table:
+ *     constraint_1 = auth_provider check   (handled by the DROP COLUMN rewrite below)
  *
  * pg-mem also does not support COMMENT ON COLUMN; those statements are
  * stripped (they are metadata-only and safe to omit in tests).
  */
-function rewriteSqlForPgMem(sql: string): string {
+export function rewriteSqlForPgMem(sql: string): string {
   return sql
     .replace(
       /ALTER TABLE portal_accounts\s+DROP COLUMN IF EXISTS auth_provider/gi,
@@ -24,6 +41,23 @@ function rewriteSqlForPgMem(sql: string): string {
         'ALTER TABLE portal_accounts DROP CONSTRAINT IF EXISTS portal_accounts_constraint_1',
         'ALTER TABLE portal_accounts DROP COLUMN IF EXISTS auth_provider',
       ].join(';\n  '),
+    )
+    // 0008_scale_to_zero: remap real Postgres CHECK constraint names to pg-mem sequential names
+    .replace(
+      /DROP CONSTRAINT IF EXISTS tenants_desired_state_check/gi,
+      'DROP CONSTRAINT IF EXISTS tenants_constraint_1',
+    )
+    .replace(
+      /DROP CONSTRAINT IF EXISTS tenants_current_state_check/gi,
+      'DROP CONSTRAINT IF EXISTS tenants_constraint_2',
+    )
+    .replace(
+      /DROP CONSTRAINT IF EXISTS state_transitions_from_state_check/gi,
+      'DROP CONSTRAINT IF EXISTS state_transitions_constraint_1',
+    )
+    .replace(
+      /DROP CONSTRAINT IF EXISTS state_transitions_to_state_check/gi,
+      'DROP CONSTRAINT IF EXISTS state_transitions_constraint_2',
     )
     // Strip COMMENT ON COLUMN — pg-mem does not implement it.
     // Use a multiline match so the value string (which may span lines) is captured.
