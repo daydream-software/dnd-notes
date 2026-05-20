@@ -39,7 +39,7 @@
     "k3d:operator-portal-override": "bash ./scripts/k3d/operator-portal-override.sh",
     "k3d:customer-portal-override": "bash ./scripts/k3d/customer-portal-override.sh",
     "platform:validate": "bash ./scripts/platform/validate-manifests.sh",
-    "validate:keycloak-themes": "bash ./scripts/platform/validate-keycloak-theme-sync.sh",
+    "platform:render-parity": "bash ./scripts/platform/validate-render-parity.sh",
     "lint:web": "npm run lint --workspace apps/web",
     "lint:operator-portal": "npm run lint --workspace apps/operator-portal",
     "lint:customer-portal": "npm run lint --workspace apps/customer-portal",
@@ -97,6 +97,7 @@
     "c8": "^11.0.0",
     "concurrently": "^9.2.1",
     "husky": "^9.1.7",
+    "js-yaml": "^4.1.0",
     "markdownlint-cli2": "^0.22.1"
   }
 }

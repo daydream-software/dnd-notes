@@ -42,8 +42,20 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate keycloak theme sync
-        run: bash ./scripts/platform/validate-keycloak-theme-sync.sh
+      - name: Install kubectl (for kustomize render checks)
+        env:
+          KUBECTL_VERSION: v1.35.4
+        run: |
+          curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          chmod +x kubectl
+          sudo mv kubectl /usr/local/bin/kubectl
+          kubectl version --client
+
+      - name: Validate unified deploy manifests
+        run: npm run platform:validate
+
+      - name: Validate render parity (k3d vs prod)
+        run: npm run platform:render-parity
 
       - name: Lint
         run: npm run lint

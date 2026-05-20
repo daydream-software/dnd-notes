@@ -16,9 +16,10 @@ on:
       - 'apps/control-plane/**'
       - 'apps/web/**'
       - 'platform/keycloak-jwt/**'
-      - 'platform/k3d/**'
+      - 'deploy/k3s/**'
       - 'scripts/prepare.mjs'
       - 'scripts/k3d/**'
+      - 'scripts/platform/**'
   pull_request:
     branches:
       - main
@@ -34,9 +35,10 @@ on:
       - 'apps/control-plane/**'
       - 'apps/web/**'
       - 'platform/keycloak-jwt/**'
-      - 'platform/k3d/**'
+      - 'deploy/k3s/**'
       - 'scripts/prepare.mjs'
       - 'scripts/k3d/**'
+      - 'scripts/platform/**'
   schedule:
     - cron: '0 6 * * *'
   workflow_dispatch:
