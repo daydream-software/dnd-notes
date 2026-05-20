@@ -1,9 +1,11 @@
-# One-shot Job that creates dnd-notes-keycloak-admin in the dnd-notes-dev
-# realm using the bootstrap-admin credentials from platform-keycloak-bootstrap-env.
+# One-shot Job that creates dnd-notes-keycloak-admin in the dnd-notes tenant
+# realm using the bootstrap-admin credentials from keycloak-bootstrap-env.
+# The tenant realm is where the dnd-notes-keycloak-admin service-account client
+# lives, mirroring the prod topology (deploy/k3s/base/keycloak/realm-config.yaml).
 #
 # Run once per cluster between keycloak-ready and control-plane startup:
 #   kubectl delete job -n dnd-notes-platform keycloak-admin-bootstrap --ignore-not-found
-#   kubectl apply  -f platform/k3d/keycloak-admin-bootstrap-job.yaml
+#   kubectl apply  -f scripts/k3d/manifests/keycloak-admin-bootstrap-job.yaml
 #   kubectl wait  --for=condition=complete --timeout=120s \
 #                  -n dnd-notes-platform job/keycloak-admin-bootstrap
 #
@@ -45,12 +47,12 @@ spec:
           # and are never written to logs.
           envFrom:
             - secretRef:
-                name: platform-keycloak-bootstrap-env
+                name: keycloak-bootstrap-env
           env:
             - name: KC_BASE_URL
               value: "http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080"
             - name: KC_REALM
-              value: "dnd-notes-dev"
+              value: "dnd-notes"
             - name: ADMIN_CLIENT_ID
               value: "dnd-notes-keycloak-admin"
             - name: ADMIN_CLIENT_SECRET

@@ -15,7 +15,7 @@
  *   "controlPlanePort": 3101,
  *   "keycloak": {
  *     "url": "https://keycloak.127.0.0.1.nip.io",
- *     "realm": "dnd-notes-dev",
+ *     "realm": "dnd-notes-workforce",
  *     "controlPlaneClientId": "dnd-notes-control-plane",
  *     "tenantClientId": "dnd-notes-tenant-app"
  *   },

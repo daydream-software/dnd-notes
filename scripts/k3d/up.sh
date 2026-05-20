@@ -26,7 +26,11 @@ IMAGE_IMPORT_TIMEOUT_SECONDS="${K3D_IMAGE_IMPORT_TIMEOUT_SECONDS:-180}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
 TENANT_PUBLIC_SCHEME="${TENANT_PUBLIC_SCHEME:-https}"
 CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-https://keycloak.127.0.0.1.nip.io}"
-CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-dev}"
+CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-workforce}"
+# Tenant-side auth lives in the dnd-notes tenant realm (separate from the
+# dnd-notes-workforce control-plane realm). Per-tenant Keycloak clients are
+# created by the control-plane in this realm (KEYCLOAK_ADMIN_REALM=dnd-notes).
+TENANT_KEYCLOAK_REALM="${TENANT_KEYCLOAK_REALM:-dnd-notes}"
 CONTROL_PLANE_KEYCLOAK_CLIENT_ID="${CONTROL_PLANE_KEYCLOAK_CLIENT_ID:-dnd-notes-control-plane}"
 CONTROL_PLANE_KEYCLOAK_USERNAME="${CONTROL_PLANE_KEYCLOAK_USERNAME:-site-admin@example.com}"
 CONTROL_PLANE_KEYCLOAK_PASSWORD="${CONTROL_PLANE_KEYCLOAK_PASSWORD:-password}"
@@ -90,6 +94,7 @@ Environment overrides:
   TENANT_PUBLIC_SCHEME
   CONTROL_PLANE_KEYCLOAK_URL
   CONTROL_PLANE_KEYCLOAK_REALM
+  TENANT_KEYCLOAK_REALM
   CONTROL_PLANE_KEYCLOAK_CLIENT_ID
   CONTROL_PLANE_KEYCLOAK_USERNAME
   CONTROL_PLANE_KEYCLOAK_PASSWORD
@@ -350,7 +355,7 @@ write_state() {
     local raw_snippet
     raw_snippet="$(build_token_snippet \
       "${CONTROL_PLANE_KEYCLOAK_URL}" \
-      "${CONTROL_PLANE_KEYCLOAK_REALM}" \
+      "${TENANT_KEYCLOAK_REALM}" \
       "${tenant_client_id}" \
       "${TENANT_KEYCLOAK_USERNAME}" \
       "${TENANT_KEYCLOAK_PASSWORD}")"
@@ -626,15 +631,16 @@ done
 log "All 5 images built and imported."
 
 # ---------------------------------------------------------------------------
-# Step 3: Deploy control plane, activator, and portals
+# Step 3: Deploy the whole platform via the unified k3d overlay
 # ---------------------------------------------------------------------------
-run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"
-run_visible kubectl apply -k "${ROOT}/platform/activator/overlays/k3d"
-run_visible kubectl apply -k "${ROOT}/platform/operator-portal/overlays/k3d"
-run_visible kubectl apply -k "${ROOT}/platform/customer-portal/overlays/k3d"
+# Single umbrella apply (mirrors prod's deploy/k3s/overlays/prod). Idempotent —
+# re-applied every run to pick up manifest changes; the rollout restarts below
+# pick up freshly imported images on the fixed :k3d tag.
+run_visible kubectl apply -k "${ROOT}/deploy/k3s/overlays/k3d"
 
-# The k3d overlay keeps placeholder Secret values in source control; replace the
-# rendered Secret after apply before waiting on the deployment.
+# The app Deployments reference Secret names that are provisioned imperatively
+# here (secret-provisioning unification is a separate later PR). Create them
+# before waiting on the deployments.
 kubectl create secret generic dnd-notes-control-plane-secrets \
   -n "${PLATFORM_NAMESPACE}" \
   --from-literal=CONTROL_PLANE_ADMIN_TOKEN='local-admin-token' \

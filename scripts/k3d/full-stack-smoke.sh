@@ -14,12 +14,14 @@ K3D_HTTP_PORT="${K3D_HTTP_PORT:-80}"
 K3D_HTTPS_PORT="${K3D_HTTPS_PORT:-443}"
 CONTROL_PLANE_PORT="${CONTROL_PLANE_PORT:-3101}"
 CONTROL_PLANE_KEYCLOAK_URL="${CONTROL_PLANE_KEYCLOAK_URL:-https://keycloak.127.0.0.1.nip.io}"
-CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-dev}"
+CONTROL_PLANE_KEYCLOAK_REALM="${CONTROL_PLANE_KEYCLOAK_REALM:-dnd-notes-workforce}"
 CONTROL_PLANE_KEYCLOAK_CLIENT_ID="${CONTROL_PLANE_KEYCLOAK_CLIENT_ID:-dnd-notes-control-plane}"
 CONTROL_PLANE_KEYCLOAK_USERNAME="${CONTROL_PLANE_KEYCLOAK_USERNAME:-site-admin@example.com}"
 CONTROL_PLANE_KEYCLOAK_PASSWORD="${CONTROL_PLANE_KEYCLOAK_PASSWORD:-password}"
 TENANT_KEYCLOAK_URL="${TENANT_KEYCLOAK_URL:-${CONTROL_PLANE_KEYCLOAK_URL}}"
-TENANT_KEYCLOAK_REALM="${TENANT_KEYCLOAK_REALM:-${CONTROL_PLANE_KEYCLOAK_REALM}}"
+# Tenant auth lives in the dnd-notes tenant realm, distinct from the
+# dnd-notes-workforce control-plane realm (2-realm topology, unified with prod).
+TENANT_KEYCLOAK_REALM="${TENANT_KEYCLOAK_REALM:-dnd-notes}"
 TENANT_KEYCLOAK_USERNAME="${TENANT_KEYCLOAK_USERNAME:-owner@example.com}"
 TENANT_KEYCLOAK_PASSWORD="${TENANT_KEYCLOAK_PASSWORD:-password}"
 TENANT_BASE_DOMAIN="${TENANT_BASE_DOMAIN:-127.0.0.1.nip.io}"
@@ -432,10 +434,15 @@ run_visible bash "${ROOT}/scripts/k3d/build-image.sh" \
 
 kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 
-run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"
+# Unified k3d overlay (bootstrap already applied it; re-applying is idempotent).
+# This smoke only builds the tenant + control-plane images, so the portal /
+# activator Deployments may crashloop for lack of images — the smoke only waits
+# on the control-plane below, so that does not block it.
+run_visible kubectl apply -k "${ROOT}/deploy/k3s/overlays/k3d"
 
-# The k3d overlay keeps placeholder Secret values in source control, so replace the
-# rendered Secret after apply before waiting on the deployment.
+# App Deployment Secret names are provisioned imperatively here (secret
+# unification is a separate later PR). Create the control-plane secret before
+# waiting on the deployment.
 kubectl create secret generic dnd-notes-control-plane-secrets \
   -n "${PLATFORM_NAMESPACE}" \
   --from-literal=CONTROL_PLANE_ADMIN_TOKEN='local-admin-token' \
