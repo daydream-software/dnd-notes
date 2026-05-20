@@ -1,7 +1,0 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: dnd-notes-activator-config
-  namespace: dnd-notes-platform
-data:
-  BASE_DOMAIN: "127.0.0.1.nip.io"

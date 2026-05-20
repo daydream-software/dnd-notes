@@ -72,8 +72,8 @@ The tenant runtime is Keycloak-only as of the Phase 2 exit (#318). All authentic
   Example (k3d tenant pod): `http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
 
 - **`KEYCLOAK_REALM`** (required)  
-  Keycloak realm name for tenant users. The control-plane admin API uses its own `CONTROL_PLANE_KEYCLOAK_REALM` variable (see `platform/control-plane/README.md`).  
-  Example: `dnd-notes-dev` (k3d), `dnd-notes-prod` (hosted)
+  Keycloak realm name for tenant users. The control-plane admin API uses its own `CONTROL_PLANE_KEYCLOAK_REALM` variable (see `apps/control-plane/README.md`).  
+  Example: `dnd-notes` (tenant realm, both k3d and prod)
 
 - **`KEYCLOAK_TENANT_CLIENT_ID`** (required)  
   Keycloak client ID for tenant app OIDC flows.  
@@ -100,7 +100,7 @@ Service hostname, so the local `apps/api` process falls back to the public
 5. If valid, extracts user identity (`keycloak_sub`, email) and looks up owner account
 6. Guest/share-link flows bypass auth and remain anonymous (no JWT required)
 
-**Control-plane admin API:** see `platform/control-plane/README.md` for the prefixed `CONTROL_PLANE_*` and `TENANT_*` environment contract that the control-plane process uses.
+**Control-plane admin API:** see `apps/control-plane/README.md` for the prefixed `CONTROL_PLANE_*` and `TENANT_*` environment contract that the control-plane process uses.
 
 ### Container Behavior
 
