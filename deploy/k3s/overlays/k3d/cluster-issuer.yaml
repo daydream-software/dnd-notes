@@ -1,0 +1,11 @@
+# Local-dev CA ClusterIssuer. Signs ingress certificates from the mkcert root
+# CA, which the developer trusts in their browser. The mkcert-ca secret is
+# created imperatively by scripts/k3d/bootstrap.sh from CAROOT before the
+# overlay is applied. Prod uses letsencrypt-prod (ACME/Cloudflare) instead.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: dev-ca
+spec:
+  ca:
+    secretName: mkcert-ca

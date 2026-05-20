@@ -1,0 +1,197 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-tenant-realm
+  namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/warning: >
+      Development-only realm seed for local k3d. Mirrors the prod tenant realm
+      (deploy/k3s/base/keycloak/realm-config.yaml) but with nip.io redirect URIs,
+      a seeded dev owner user, and an explicit dnd-notes-keycloak-admin client
+      secret. Never reuse these credentials outside local k3d.
+data:
+  dnd-notes-realm.json: |
+    {
+      "realm": "dnd-notes",
+      "enabled": true,
+      "displayName": "D&D Notes",
+      "loginTheme": "customer-login",
+      "accountTheme": "account-console",
+      "registrationAllowed": false,
+      "verifyEmail": false,
+      "rememberMe": true,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "users": [
+        {
+          "username": "owner@example.com",
+          "email": "owner@example.com",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Owner",
+          "lastName": "User",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "password",
+              "temporary": false
+            }
+          ]
+        },
+        {
+          "username": "service-account-dnd-notes-keycloak-admin",
+          "enabled": true,
+          "serviceAccountClientId": "dnd-notes-keycloak-admin",
+          "clientRoles": {
+            "realm-management": [
+              "manage-clients",
+              "view-clients",
+              "view-realm",
+              "view-users",
+              "manage-users"
+            ]
+          }
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "dnd-notes-customer-portal",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "redirectUris": [
+            "https://portal.127.0.0.1.nip.io/*",
+            "http://portal.127.0.0.1.nip.io/*",
+            "http://localhost:5175/*"
+          ],
+          "webOrigins": [
+            "https://portal.127.0.0.1.nip.io",
+            "http://portal.127.0.0.1.nip.io",
+            "http://localhost:5175"
+          ],
+          "attributes": {
+            "pkce.code.challenge.method": "S256",
+            "login_theme": "customer-login"
+          }
+        },
+        {
+          "clientId": "dnd-notes-keycloak-admin",
+          "enabled": true,
+          "publicClient": false,
+          "standardFlowEnabled": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": false,
+          "serviceAccountsEnabled": true,
+          "clientAuthenticatorType": "client-secret",
+          "secret": "dev-admin-client-secret"
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-workforce-realm
+  namespace: dnd-notes-platform
+  annotations:
+    dnd-notes.dev/warning: >
+      Development-only workforce realm seed for local k3d. Mirrors the prod
+      workforce realm (deploy/k3s/base/keycloak/realm-config.yaml) but with
+      nip.io + localhost redirect URIs and seeded dev operator users
+      (ops@ and site-admin@). Never reuse these credentials outside local k3d.
+data:
+  dnd-notes-workforce-realm.json: |
+    {
+      "realm": "dnd-notes-workforce",
+      "enabled": true,
+      "displayName": "D&D Notes Workforce",
+      "registrationAllowed": false,
+      "verifyEmail": false,
+      "rememberMe": true,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "accountTheme": "account-console",
+      "users": [
+        {
+          "username": "ops@example.com",
+          "email": "ops@example.com",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Ops",
+          "lastName": "User",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "password",
+              "temporary": false
+            }
+          ],
+          "clientRoles": {
+            "dnd-notes-control-plane": ["control-plane-workforce"]
+          }
+        },
+        {
+          "username": "site-admin@example.com",
+          "email": "site-admin@example.com",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Site",
+          "lastName": "Admin",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "password",
+              "temporary": false
+            }
+          ],
+          "clientRoles": {
+            "dnd-notes-control-plane": ["control-plane-admin", "control-plane-workforce"]
+          }
+        }
+      ],
+      "clients": [
+        {
+          "clientId": "dnd-notes-control-plane",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "bearerOnly": false,
+          "implicitFlowEnabled": false,
+          "directAccessGrantsEnabled": true,
+          "redirectUris": [
+            "https://operator.127.0.0.1.nip.io/*",
+            "http://operator.127.0.0.1.nip.io/*",
+            "http://localhost:5173/*",
+            "http://localhost:5174/*"
+          ],
+          "webOrigins": [
+            "https://operator.127.0.0.1.nip.io",
+            "http://operator.127.0.0.1.nip.io",
+            "http://localhost:5173",
+            "http://localhost:5174"
+          ],
+          "attributes": {
+            "login_theme": "operator-login"
+          }
+        }
+      ],
+      "roles": {
+        "client": {
+          "dnd-notes-control-plane": [
+            {
+              "name": "control-plane-admin",
+              "clientRole": true
+            },
+            {
+              "name": "control-plane-workforce",
+              "clientRole": true
+            }
+          ]
+        }
+      }
+    }
