@@ -8635,3 +8635,45 @@ Kept `:latest` with an explanatory comment in `overlays/prod/kustomization.yaml`
 #### Major 6 — POSTGRES_DB changed to keycloak
 
 Changed example DB name from `postgres` to `keycloak` to match `KC_DB_URL=...jdbc:postgresql://.../keycloak` in `keycloak/deployment.yaml`. Added runbook comment documenting that `control_plane` DB must be created manually post-bootstrap (`kubectl exec ... psql ... CREATE DATABASE control_plane`).
+
+---
+
+### 2026-05-19: Fix — activator tenant_activity FK violation (#351)
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-05-19  
+**PR:** #351  
+**Branch:** fix/340-activator-tenant-id-lookup
+
+Added a slug-to-id cache inside `TenantActivityStore` (cache in `tenant-activity.ts`, not in the resolver). The resolver remains a pure synchronous URL parser with no DB dependency.
+
+**Rationale:** The resolver has no pool and is synchronous. Adding a DB dependency would require making `resolve()` async and threading the pool through, affecting all three call sites in `index.ts`. The activity store already owns the control-plane pool; the slug-to-id concern belongs next to the upsert that needs it.
+
+**Behaviour:**
+- `recordActivity(slug)` signature unchanged; call sites in `index.ts` unmodified.
+- On first call for a slug: `SELECT id FROM tenants WHERE slug = $1::text`, cache result, then upsert.
+- Subsequent calls: cache hit, upsert directly.
+- Unknown slug: log warning, skip upsert, do not throw.
+
+**Tests:** 16/16 pass (was 12/12 before; 4 new tests in `apps/activator/test/tenant-activity.test.ts`).
+
+---
+
+### 2026-05-19: Decision — proxy retry restricted to body-less HTTP methods (#352)
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-05-19  
+**PR:** #352  
+**Branch:** fix/340-activator-proxy-retry
+
+The activator's proxyRequest needed bounded retries to absorb the kube-proxy iptables reconciliation gap (~100–500 ms) between Endpoints update and ClusterIP becoming routable. Retries on body-bearing methods (POST, PUT, PATCH) risk partial body replay — once pipe() starts reading from the IncomingMessage stream, the bytes are gone.
+
+**Decision:** Retries are gated on `BODYLESS_METHODS = { GET, HEAD, OPTIONS, TRACE }`. Body-bearing methods get a single attempt regardless of error code. This is documented in the PR and in the proxy module's JSDoc.
+
+**Alternatives considered and rejected:**
+- Pausing clientReq until the upstream socket connects: more complex, requires tracking the 'socket'+'connect' events before starting pipe.
+- Retrying only when no 'data' event yet fired: fragile; a body could arrive immediately.
+
+The body-less gate is honest about the constraint and covers the real customer pain (cold-start wakes are always initiated by a browser GET navigation).
+
+**Retryable error codes:** ECONNREFUSED (primary), ECONNRESET (RST during slow kube-proxy convergence), EHOSTUNREACH (no route to ClusterIP before iptables are installed). ETIMEDOUT and ENOTFOUND are not retried — those indicate structural misconfig, not a transient race.
