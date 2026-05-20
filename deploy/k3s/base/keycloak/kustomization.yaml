@@ -1,12 +1,52 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  # Theme ConfigMaps (keycloak-themes-text + keycloak-themes-fonts) are generated
-  # from the canonical source files at platform/keycloak/base/themes/.
-  # Kustomize resolves the configMapGenerator file paths relative to that directory,
-  # so the single source of truth is preserved.
-  - ../../../../platform/keycloak/base
   - realm-config.yaml
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+
+# Theme ConfigMaps (keycloak-themes-text + keycloak-themes-fonts) generated from
+# the canonical login-theme source tree under themes/ (single source of truth).
+# Both overlays (prod + k3d) inherit these unchanged — login themes do not vary
+# by environment. configMapGenerator file paths resolve relative to this
+# kustomization directory.
+#
+# Key naming convention:
+#   op-* = operator-login theme files
+#   cu-* = customer-login theme files
+#   ac-* = account-console theme files
+configMapGenerator:
+  - name: keycloak-themes-text
+    namespace: dnd-notes-platform
+    options:
+      annotations:
+        dnd-notes.dev/purpose: Keycloak login theme text files — operator-login, customer-login, and account-console
+    files:
+      - op-theme.properties=themes/operator-login/login/theme.properties
+      - op-messages_en.properties=themes/operator-login/login/messages/messages_en.properties
+      - op-template.ftl=themes/operator-login/login/template.ftl
+      - op-login.ftl=themes/operator-login/login/login.ftl
+      - op-login-reset-password.ftl=themes/operator-login/login/login-reset-password.ftl
+      - op-login-otp.ftl=themes/operator-login/login/login-otp.ftl
+      - op-login.css=themes/operator-login/login/resources/css/login.css
+      - op-daydream-mark.svg=themes/operator-login/login/resources/img/daydream-mark.svg
+      - cu-theme.properties=themes/customer-login/login/theme.properties
+      - cu-messages_en.properties=themes/customer-login/login/messages/messages_en.properties
+      - cu-template.ftl=themes/customer-login/login/template.ftl
+      - cu-login.ftl=themes/customer-login/login/login.ftl
+      - cu-login-reset-password.ftl=themes/customer-login/login/login-reset-password.ftl
+      - cu-login-otp.ftl=themes/customer-login/login/login-otp.ftl
+      - cu-login.css=themes/customer-login/login/resources/css/login.css
+      - cu-dnd-notes-mark.svg=themes/customer-login/login/resources/img/dnd-notes-mark.svg
+      - ac-theme.properties=themes/account-console/account/theme.properties
+      - ac-account.css=themes/account-console/account/resources/css/account.css
+
+  - name: keycloak-themes-fonts
+    namespace: dnd-notes-platform
+    options:
+      annotations:
+        dnd-notes.dev/purpose: Self-hosted Geist variable fonts for Keycloak login themes and account-console
+    files:
+      - Geist-Variable.woff2=themes/operator-login/login/resources/fonts/Geist-Variable.woff2
+      - GeistMono-Variable.woff2=themes/operator-login/login/resources/fonts/GeistMono-Variable.woff2
