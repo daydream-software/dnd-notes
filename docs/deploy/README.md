@@ -636,6 +636,11 @@ package — GitHub does not propagate repo visibility to packages automatically.
 > Note: `dnd-notes-activator` is a new package created by the CI workflow added in PR #375.
 > It requires the same visibility flip and repository link as the other four packages. Perform
 > these steps the first time the push workflow runs after that PR merges.
+>
+> **Maintainer note:** adding a new package requires updating three places: (1) the prod overlay
+> (`deploy/k3s/overlays/prod/kustomization.yaml` — add an `images:` entry), (2) the CI workflow
+> (`.github/workflows/deployment-artifacts.yml` — add build/push and cleanup steps), and (3) this
+> runbook (Section 4 "5 images" wording and Section 6 package list).
 
 ---
 
@@ -687,8 +692,16 @@ The full procedure is in Section 4. Summary:
    ```bash
    PROD_TAG=prod-20260521
 
-   sed -i "s/newTag:.*/newTag: ${PROD_TAG}/" \
+   # Capture current tag for rollback reference before rewriting.
+   PREV_TAG=$(grep 'newTag:' deploy/k3s/overlays/prod/kustomization.yaml | head -1 | awk '{print $2}')
+   echo "Previous tag: ${PREV_TAG}"
+
+   # Anchor the substitution to the current tag to avoid clobbering unrelated newTag: lines.
+   sed -i "s/newTag: ${PREV_TAG}/newTag: ${PROD_TAG}/g" \
      deploy/k3s/overlays/prod/kustomization.yaml
+
+   # Verify all entries updated — confirm no stale tags remain.
+   grep newTag deploy/k3s/overlays/prod/kustomization.yaml
 
    git add deploy/k3s/overlays/prod/kustomization.yaml
    git commit -m "chore(deploy): promote images to ${PROD_TAG}"

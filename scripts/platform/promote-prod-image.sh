@@ -2,12 +2,19 @@
 # promote-prod-image.sh — retag a sha-<commit> build to a prod-<date> protected tag
 #
 # Usage:
-#   promote-prod-image.sh <sha-TAG> [<prod-TAG>]
+#   promote-prod-image.sh [--force] <sha-TAG> [<prod-TAG>]
+#
+#   --force     Optional. Overwrite an existing destination tag even when it
+#               points to a different digest than the source. Without this flag
+#               the script aborts if the destination tag already exists and
+#               resolves to a different digest (safety guard against silently
+#               repointing a live prod tag).
 #
 #   <sha-TAG>   Required. The source sha-* build tag (e.g. sha-e570cc1).
 #   <prod-TAG>  Optional. The destination prod-* tag to create.
 #               Defaults to prod-YYYYMMDD (UTC). Use prod-YYYYMMDD-HHMMSSZ
 #               when promoting more than once on the same calendar day.
+#               Must match ^prod-[0-9]{8}(-[0-9]{6}z)?$
 #
 # What this does:
 #   Retags all 5 GHCR images from <sha-TAG> to <prod-TAG> using
@@ -15,6 +22,15 @@
 #   the same layers are referenced under the new tag. The prod-* tag is then
 #   excluded from sha-* retention cleanup (see deployment-artifacts.yml) and
 #   will not be deleted by CI churn.
+#
+# Safety behaviour:
+#   Before tagging each image the script checks whether the destination tag
+#   already exists. Three outcomes:
+#     - DEST absent              -> proceed (normal first promotion).
+#     - DEST present, same digest as SRC -> no-op (already promoted, safe).
+#     - DEST present, different digest   -> abort with an error unless --force
+#       is passed. This prevents silently moving a live prod tag to a
+#       different build.
 #
 # After running this script, update deploy/k3s/overlays/prod/kustomization.yaml
 # to pin the images to the new prod-* tag and commit.
@@ -24,8 +40,8 @@
 #   - Logged in to GHCR: `docker login ghcr.io` or via GITHUB_TOKEN
 #
 # The script fails loudly if any source tag is absent. It never echoes
-# credentials. All operations are idempotent — re-running with the same
-# arguments is safe.
+# credentials. Re-running with the same arguments is safe (already-promoted
+# images are skipped as no-ops).
 
 set -Eeuo pipefail
 
@@ -56,17 +72,34 @@ IMAGES=(
 # ---------------------------------------------------------------------------
 
 usage() {
-  grep '^#' "$0" | sed 's/^# \{0,1\}//' | head -20
+  # Print the leading comment block up to (but not including) the first non-# line.
+  awk '/^[^#]/{exit} {sub(/^# ?/,""); print}' "$0"
   exit 1
 }
+
+FORCE=0
+
+# Parse optional --force flag before positional arguments.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --force) FORCE=1; shift ;;
+    --) shift; break ;;
+    -*) echo "error: unknown flag '$1'" >&2; usage ;;
+    *) break ;;
+  esac
+done
 
 if [[ $# -lt 1 ]]; then
   echo "error: missing required argument <sha-TAG>" >&2
   usage
 fi
 
-SRC_TAG="$1"
+SRC_TAG="${1}"
 DEST_TAG="${2:-}"
+
+# Trim surrounding whitespace (guards against copy-paste with trailing spaces).
+SRC_TAG="${SRC_TAG// /}"
+DEST_TAG="${DEST_TAG// /}"
 
 # Default destination tag: prod-YYYYMMDD (UTC).
 if [[ -z "${DEST_TAG}" ]]; then
@@ -78,8 +111,9 @@ if [[ ! "${SRC_TAG}" =~ ^sha-[0-9a-f]{7,40}$ ]]; then
   echo "error: source tag '${SRC_TAG}' does not look like a sha-* build tag" >&2
   exit 1
 fi
-if [[ ! "${DEST_TAG}" =~ ^prod- ]]; then
-  echo "error: destination tag '${DEST_TAG}' must start with 'prod-'" >&2
+# Destination must match the documented form: prod-YYYYMMDD or prod-YYYYMMDD-HHMMSSz
+if [[ ! "${DEST_TAG}" =~ ^prod-[0-9]{8}(-[0-9]{6}z)?$ ]]; then
+  echo "error: destination tag '${DEST_TAG}' must match prod-YYYYMMDD or prod-YYYYMMDD-HHMMSSz" >&2
   exit 1
 fi
 
@@ -136,6 +170,33 @@ echo ""
 for IMAGE in "${IMAGES[@]}"; do
   SRC="${IMAGE_PREFIX}/${IMAGE}:${SRC_TAG}"
   DEST="${IMAGE_PREFIX}/${IMAGE}:${DEST_TAG}"
+
+  # Resolve manifest digest for clobber guard.
+  # --format '{{.Manifest.Digest}}' returns the top-level manifest (or manifest
+  # list) digest — the same value the registry uses as the canonical reference.
+  SRC_DIGEST=$(docker buildx imagetools inspect \
+    --format '{{.Manifest.Digest}}' "${SRC}" 2>/dev/null || true)
+
+  if docker buildx imagetools inspect "${DEST}" >/dev/null 2>&1; then
+    # Destination tag already exists — compare digests.
+    DEST_DIGEST=$(docker buildx imagetools inspect \
+      --format '{{.Manifest.Digest}}' "${DEST}" 2>/dev/null || true)
+
+    if [[ -n "${SRC_DIGEST}" && -n "${DEST_DIGEST}" && "${SRC_DIGEST}" == "${DEST_DIGEST}" ]]; then
+      echo "  ${IMAGE}: ${DEST_TAG} already points to same digest — skipping (no-op)."
+      continue
+    fi
+
+    if [[ "${FORCE}" -eq 0 ]]; then
+      echo "error: ${IMAGE}: destination tag ${DEST_TAG} already exists and points to a different" >&2
+      echo "       digest than source ${SRC_TAG}." >&2
+      echo "       Pass --force to overwrite, or choose a different destination tag." >&2
+      exit 1
+    fi
+
+    echo "  ${IMAGE}: WARNING — overwriting existing ${DEST_TAG} (--force)."
+  fi
+
   echo "  ${IMAGE}: ${SRC_TAG} -> ${DEST_TAG}"
   docker buildx imagetools create --tag "${DEST}" "${SRC}"
 done

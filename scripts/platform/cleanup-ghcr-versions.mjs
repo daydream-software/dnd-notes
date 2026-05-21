@@ -29,6 +29,7 @@
 // interpolated into shell commands; version IDs are numeric and validated.
 
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 
 const ORG = process.env.GHCR_ORG ?? 'daydream-software';
 const APPLY = process.env.APPLY === '1';
@@ -168,8 +169,7 @@ function formatVersion(v) {
 
 // ESM equivalent of require.main === module.
 const isMain =
-  process.argv[1] != null &&
-  (await import('node:url')).fileURLToPath(import.meta.url) === process.argv[1];
+  process.argv[1] != null && fileURLToPath(import.meta.url) === process.argv[1];
 
 if (isMain) {
   const pkg = process.argv[2];
