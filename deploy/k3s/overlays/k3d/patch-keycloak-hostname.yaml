@@ -8,6 +8,36 @@ spec:
     spec:
       containers:
         - name: keycloak
+          # env is a name-keyed list: these entries merge into the base container's
+          # env without replacing it (unlike envFrom, which has no merge key and
+          # would clobber the base keycloak-bootstrap-env secretRef).
+          #
+          # KC_DEV_* feed Keycloak's realm-import placeholder substitution
+          # (${KC_DEV_*} in keycloak-realm-config.yaml). Values come from the
+          # keycloak-realm-dev-secrets Secret, provisioned for k3d by
+          # scripts/platform/provision-secrets.sh --mode k3d realm-dev. The base
+          # (prod) realm seed carries no committed secrets, so prod needs none of
+          # these.
           env:
             - name: KC_HOSTNAME
               value: https://keycloak.127.0.0.1.nip.io
+            - name: KC_DEV_OWNER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-realm-dev-secrets
+                  key: KC_DEV_OWNER_PASSWORD
+            - name: KC_DEV_OPS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-realm-dev-secrets
+                  key: KC_DEV_OPS_PASSWORD
+            - name: KC_DEV_SITE_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-realm-dev-secrets
+                  key: KC_DEV_SITE_ADMIN_PASSWORD
+            - name: KC_DEV_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-realm-dev-secrets
+                  key: KC_DEV_ADMIN_CLIENT_SECRET
