@@ -144,22 +144,29 @@ fail_if_missing() {
 }
 
 # ---------------------------------------------------------------------------
-# Per-secret provisioning functions. Each resolves values per mode, then calls
-# apply_secret. Required-variable checks for prod accumulate into
-# MISSING_REQUIRED; the caller runs fail_if_missing before any apply.
+# Per-secret provisioning is split into a REQUIRE phase and an APPLY phase so a
+# prod run is all-or-none: the caller runs every selected secret's require_*
+# first, then a single fail_if_missing, and only then any apply_*. That way a
+# missing variable for a later secret never leaves earlier secrets half-applied.
+#
+#   require_<secret>   prod: record any missing required vars (no-op in k3d).
+#   apply_<secret>     resolve values per mode and create the Secret.
 # ---------------------------------------------------------------------------
 
-provision_postgres() {
+require_postgres() {
+  [ "${MODE}" = "k3d" ] && return 0
+  require PLATFORM_POSTGRES_USER
+  require PLATFORM_POSTGRES_PASSWORD
+  require PLATFORM_POSTGRES_DB
+}
+
+apply_postgres() {
   local user password db
   if [ "${MODE}" = "k3d" ]; then
     user="${PLATFORM_POSTGRES_USER:-postgres}"
     password="${PLATFORM_POSTGRES_PASSWORD:-postgres}"
     db="${PLATFORM_POSTGRES_DB:-postgres}"
   else
-    require PLATFORM_POSTGRES_USER
-    require PLATFORM_POSTGRES_PASSWORD
-    require PLATFORM_POSTGRES_DB
-    fail_if_missing
     user="${PLATFORM_POSTGRES_USER}"
     password="${PLATFORM_POSTGRES_PASSWORD}"
     db="${PLATFORM_POSTGRES_DB}"
@@ -170,15 +177,18 @@ provision_postgres() {
     "POSTGRES_DB=${db}"
 }
 
-provision_keycloak_bootstrap() {
+require_keycloak_bootstrap() {
+  [ "${MODE}" = "k3d" ] && return 0
+  require KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME
+  require KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
+}
+
+apply_keycloak_bootstrap() {
   local kc_user kc_password
   if [ "${MODE}" = "k3d" ]; then
     kc_user="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}"
     kc_password="${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
   else
-    require KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME
-    require KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD
-    fail_if_missing
     kc_user="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME}"
     kc_password="${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD}"
   fi
@@ -187,11 +197,17 @@ provision_keycloak_bootstrap() {
     "KC_BOOTSTRAP_ADMIN_PASSWORD=${kc_password}"
 }
 
+# k3d-only secret: no required vars in any mode (defaults fill in k3d; prod
+# skips it entirely in apply_realm_dev).
+require_realm_dev() {
+  return 0
+}
+
 # k3d-only: dev credentials injected into the Keycloak container as env vars so
 # the realm import substitutes the ${REALM_DEV_*} placeholders in the committed
 # realm seed. Never provisioned in prod (the prod base realm seed carries no
 # committed secrets — the admin client secret is auto-generated on import).
-provision_realm_dev() {
+apply_realm_dev() {
   if [ "${MODE}" != "k3d" ]; then
     echo "Skipping keycloak-realm-dev-secrets: only provisioned in --mode k3d" >&2
     return 0
@@ -203,7 +219,14 @@ provision_realm_dev() {
     "REALM_DEV_ADMIN_CLIENT_SECRET=${REALM_DEV_ADMIN_CLIENT_SECRET:-dev-admin-client-secret}"
 }
 
-provision_control_plane() {
+require_control_plane() {
+  [ "${MODE}" = "k3d" ] && return 0
+  require CONTROL_PLANE_DATABASE_URL
+  require TENANT_DATABASE_ADMIN_URL
+  require TENANT_DATABASE_RUNTIME_URL
+}
+
+apply_control_plane() {
   local pg_url admin_url runtime_url admin_token
   local pairs=()
   if [ "${MODE}" = "k3d" ]; then
@@ -213,10 +236,6 @@ provision_control_plane() {
     admin_token="${CONTROL_PLANE_ADMIN_TOKEN:-local-admin-token}"
     pairs+=("CONTROL_PLANE_ADMIN_TOKEN=${admin_token}")
   else
-    require CONTROL_PLANE_DATABASE_URL
-    require TENANT_DATABASE_ADMIN_URL
-    require TENANT_DATABASE_RUNTIME_URL
-    fail_if_missing
     pg_url="${CONTROL_PLANE_DATABASE_URL}"
     admin_url="${TENANT_DATABASE_ADMIN_URL}"
     runtime_url="${TENANT_DATABASE_RUNTIME_URL}"
@@ -248,7 +267,20 @@ provision_control_plane() {
   apply_secret dnd-notes-control-plane-secrets "${pairs[@]}"
 }
 
-provision_activator() {
+require_activator() {
+  [ "${MODE}" = "k3d" ] && return 0
+  # Prod requires the activator's control_plane DB URL — either its own override
+  # or the shared CONTROL_PLANE_DATABASE_URL. Record a synthetic name (rather
+  # than calling `require` on a single var) so the all-at-once missing-var report
+  # explains the OR relationship.
+  if [ -z "${ACTIVATOR_CONTROL_PLANE_DATABASE_URL:-}" ] && [ -z "${CONTROL_PLANE_DATABASE_URL:-}" ]; then
+    # No spaces: fail_if_missing word-splits MISSING_REQUIRED on whitespace, so
+    # the OR relationship is spelled with slashes to stay one token / one bullet.
+    MISSING_REQUIRED="${MISSING_REQUIRED} ACTIVATOR_CONTROL_PLANE_DATABASE_URL(or/CONTROL_PLANE_DATABASE_URL)"
+  fi
+}
+
+apply_activator() {
   local url
   if [ "${MODE}" = "k3d" ]; then
     # Default to the same control_plane URL the control-plane uses. The activator
@@ -259,11 +291,8 @@ provision_activator() {
     # of #363 — without this secret a prod scale-to-zero deploy has an activator
     # that cannot boot. Accept ACTIVATOR_CONTROL_PLANE_DATABASE_URL, falling back
     # to the control-plane's CONTROL_PLANE_DATABASE_URL when they share a DB.
+    # Presence is enforced in require_activator before any apply runs.
     url="${ACTIVATOR_CONTROL_PLANE_DATABASE_URL:-${CONTROL_PLANE_DATABASE_URL:-}}"
-    if [ -z "${url}" ]; then
-      echo "Error: --mode prod requires ACTIVATOR_CONTROL_PLANE_DATABASE_URL (or CONTROL_PLANE_DATABASE_URL) to be set for dnd-notes-activator-secrets." >&2
-      exit 1
-    fi
   fi
   apply_secret dnd-notes-activator-secrets \
     "CONTROL_PLANE_DATABASE_URL=${url}"
@@ -338,12 +367,29 @@ case " ${SELECTORS} " in
     ;;
 esac
 
+# Phase 1 (require): collect every selected secret's required-variable gaps so a
+# prod run reports them all at once. No-op in k3d mode (defaults fill in).
 for selector in ${SELECTORS}; do
   case "${selector}" in
-    postgres)            provision_postgres ;;
-    keycloak-bootstrap)  provision_keycloak_bootstrap ;;
-    realm-dev)           provision_realm_dev ;;
-    control-plane)       provision_control_plane ;;
-    activator)           provision_activator ;;
+    postgres)            require_postgres ;;
+    keycloak-bootstrap)  require_keycloak_bootstrap ;;
+    realm-dev)           require_realm_dev ;;
+    control-plane)       require_control_plane ;;
+    activator)           require_activator ;;
+  esac
+done
+
+# Single gate before any Secret is written: in prod, if anything is missing we
+# exit here having applied nothing (all-or-none). In k3d this is always clean.
+fail_if_missing
+
+# Phase 2 (apply): every required variable is present — create each Secret.
+for selector in ${SELECTORS}; do
+  case "${selector}" in
+    postgres)            apply_postgres ;;
+    keycloak-bootstrap)  apply_keycloak_bootstrap ;;
+    realm-dev)           apply_realm_dev ;;
+    control-plane)       apply_control_plane ;;
+    activator)           apply_activator ;;
   esac
 done
