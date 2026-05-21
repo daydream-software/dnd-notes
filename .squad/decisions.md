@@ -8907,3 +8907,41 @@ Coordinator gates Mikey before any CodeRabbit retrigger.
 - Document in `docs/deploy/README.md` (step 4: "Run the convergence workflow")
 
 ---
+
+### 2026-05-21: Weekend Deploy Gate — #364 Idle-Scaler Guard Fixed
+
+**Date:** 2026-05-21  
+**Status:** Fixed (PR #372 pending CodeRabbit + merge)  
+**Issue:** #364 + follow-up #373
+
+#### Idle-Scaler Guard Implementation
+
+**Problem:** Idle-scaler scale-down SELECT could target a tenant never routed through activator, causing orphaned session files.
+
+**Solution:**
+1. **New migration:** `0009_seen_by_activator.sql` adds `tenants.seen_by_activator BOOLEAN DEFAULT FALSE NOT NULL`
+2. **Activator upsert:** Flips `seen_by_activator=TRUE` in both VALUES and ON CONFLICT branches (observational flag, one-way)
+3. **Scale-down SELECT:** Gated by `seen_by_activator=TRUE` (INNER JOIN), fail-safe for never-seen tenants
+
+**Column naming:** `seen_by_activator` chosen over `routed_through_activator` (truer semantics: "observed at least once", one-way flag, not a count).
+
+**Commit:** PR #372 (coordinator-fixed ESLint `||` → `??`)
+
+#### Deploy Gate Status (Weekend)
+
+**Critical path:**
+- **#364:** Now in PR #372 (pending CodeRabbit + merge)
+- **#338:** Code done, fresh-apply verified (all 7 bugs M1–M5, C1–C2 confirmed present; acceptance = fresh kubectl apply without patches)
+
+**Post-deploy (non-blocking):**
+- #354–#361 (activator hardening)
+- #362 PR C (CI render-parity)
+
+**Follow-up:** #373 (squad:data) — operator API PATCH `/internal/tenants/:id/state` can sleep a never-seen tenant; escape hatch non-blocking, post-deploy.
+
+#### Notes
+
+- LSP diagnostics on `migrate.test.ts` (`pool.query<T>()` generic) are pre-existing whole-file pattern; test runner type-strips, build excludes test/. CI does not enforce. Not a regression.
+- Mikey review: APPROVE (1 non-blocking flag re: #373 escape hatch).
+
+---
