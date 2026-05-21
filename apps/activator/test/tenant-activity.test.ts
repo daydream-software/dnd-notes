@@ -185,7 +185,7 @@ describe('TenantActivityStore', () => {
 
     // Must set TRUE in the INSERT VALUES list
     assert.ok(
-      capturedUpsertSql.match(/VALUES\s*\([^)]*TRUE[^)]*\)/i) ||
+      capturedUpsertSql.match(/VALUES\s*\([^)]*TRUE[^)]*\)/i) ??
       capturedUpsertSql.match(/VALUES\s*\(\$1::text,\s*CURRENT_TIMESTAMP,\s*TRUE\)/i),
       'VALUES clause must pass TRUE for seen_by_activator',
     )
