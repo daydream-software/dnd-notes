@@ -95,11 +95,23 @@ const PARITY_KINDS = new Set([
   'StatefulSet',
 ]);
 
+// ClusterRole / ClusterRoleBinding are cluster-scoped and carry no namespace.
+// Bucketing them under a fixed scope keeps their key stable across overlays
+// instead of leaking an `undefined` namespace segment into the identity.
+const CLUSTER_SCOPED_KINDS = new Set(['ClusterRole', 'ClusterRoleBinding']);
+
 function resourceKeys(resources) {
   const keys = new Set();
   for (const r of resources) {
     if (PARITY_KINDS.has(r.kind)) {
-      keys.add(`${r.kind}/${r.metadata.name}`);
+      // Two namespaced resources with the same kind+name in different
+      // namespaces are distinct; fold the namespace into the identity so a
+      // missing-resource regression in one namespace cannot be masked by a
+      // same-named resource in another.
+      const scope = CLUSTER_SCOPED_KINDS.has(r.kind)
+        ? '_cluster'
+        : (r.metadata.namespace ?? '_default');
+      keys.add(`${r.kind}/${scope}/${r.metadata.name}`);
     }
   }
   return keys;

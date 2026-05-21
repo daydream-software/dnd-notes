@@ -273,16 +273,24 @@ wait_for_dev_ca_issuer() {
 # CreateContainerConfigError.
 create_platform_secrets() {
   echo "Creating canonical platform secrets (postgres + keycloak bootstrap)..."
+  # Insecure local-only defaults. Override via env for a less predictable local
+  # cluster; full secret-provisioning unification lands in a later PR.
+  local pg_user="${PLATFORM_POSTGRES_USER:-postgres}"
+  local pg_password="${PLATFORM_POSTGRES_PASSWORD:-postgres}"
+  local pg_db="${PLATFORM_POSTGRES_DB:-postgres}"
+  local kc_admin_user="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+  local kc_admin_password="${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+
   kubectl -n "${PLATFORM_NAMESPACE}" create secret generic platform-postgres-credentials \
-    --from-literal=POSTGRES_USER=postgres \
-    --from-literal=POSTGRES_PASSWORD=postgres \
-    --from-literal=POSTGRES_DB=postgres \
+    --from-literal=POSTGRES_USER="${pg_user}" \
+    --from-literal=POSTGRES_PASSWORD="${pg_password}" \
+    --from-literal=POSTGRES_DB="${pg_db}" \
     --dry-run=client -o yaml \
     | kubectl apply -f -
 
   kubectl -n "${PLATFORM_NAMESPACE}" create secret generic keycloak-bootstrap-env \
-    --from-literal=KC_BOOTSTRAP_ADMIN_USERNAME=admin \
-    --from-literal=KC_BOOTSTRAP_ADMIN_PASSWORD=admin \
+    --from-literal=KC_BOOTSTRAP_ADMIN_USERNAME="${kc_admin_user}" \
+    --from-literal=KC_BOOTSTRAP_ADMIN_PASSWORD="${kc_admin_password}" \
     --dry-run=client -o yaml \
     | kubectl apply -f -
 }

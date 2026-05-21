@@ -47,6 +47,11 @@ jobs:
           KUBECTL_VERSION: v1.35.4
         run: |
           curl -fsSLo kubectl "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
+          # Verify against the official upstream checksum (matches the pinned
+          # version automatically, so no manually-pinned digest to keep in sync).
+          curl -fsSLo kubectl.sha256 "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          rm -f kubectl.sha256
           chmod +x kubectl
           sudo mv kubectl /usr/local/bin/kubectl
           kubectl version --client

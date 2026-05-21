@@ -155,7 +155,6 @@ test('migration 0008 backfill seeds tenant_activity only for active-state tenant
     ]
 
     for (const { id, state } of tenantRows) {
-      // eslint-disable-next-line no-await-in-loop
       await pool.query(
         `INSERT INTO tenants
            (id, slug, owner_id, desired_state, current_state, version)
