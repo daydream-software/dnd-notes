@@ -12,32 +12,37 @@ spec:
           # env without replacing it (unlike envFrom, which has no merge key and
           # would clobber the base keycloak-bootstrap-env secretRef).
           #
-          # KC_DEV_* feed Keycloak's realm-import placeholder substitution
-          # (${KC_DEV_*} in keycloak-realm-config.yaml). Values come from the
+          # REALM_DEV_* feed Keycloak's realm-import placeholder substitution
+          # (${REALM_DEV_*} in keycloak-realm-config.yaml). Values come from the
           # keycloak-realm-dev-secrets Secret, provisioned for k3d by
           # scripts/platform/provision-secrets.sh --mode k3d realm-dev. The base
           # (prod) realm seed carries no committed secrets, so prod needs none of
           # these.
+          #
+          # Do NOT use a KC_ prefix here: Keycloak routes KC_*-prefixed env vars
+          # through SmallRye Config as server options (collapsing $$, evaluating
+          # ${...} expressions, and warning on unknown options). Realm-import
+          # ${...} substitution accepts any non-KC_ variable name unchanged.
           env:
             - name: KC_HOSTNAME
               value: https://keycloak.127.0.0.1.nip.io
-            - name: KC_DEV_OWNER_PASSWORD
+            - name: REALM_DEV_OWNER_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: keycloak-realm-dev-secrets
-                  key: KC_DEV_OWNER_PASSWORD
-            - name: KC_DEV_OPS_PASSWORD
+                  key: REALM_DEV_OWNER_PASSWORD
+            - name: REALM_DEV_OPS_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: keycloak-realm-dev-secrets
-                  key: KC_DEV_OPS_PASSWORD
-            - name: KC_DEV_SITE_ADMIN_PASSWORD
+                  key: REALM_DEV_OPS_PASSWORD
+            - name: REALM_DEV_SITE_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: keycloak-realm-dev-secrets
-                  key: KC_DEV_SITE_ADMIN_PASSWORD
-            - name: KC_DEV_ADMIN_CLIENT_SECRET
+                  key: REALM_DEV_SITE_ADMIN_PASSWORD
+            - name: REALM_DEV_ADMIN_CLIENT_SECRET
               valueFrom:
                 secretKeyRef:
                   name: keycloak-realm-dev-secrets
-                  key: KC_DEV_ADMIN_CLIENT_SECRET
+                  key: REALM_DEV_ADMIN_CLIENT_SECRET

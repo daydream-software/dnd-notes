@@ -83,10 +83,10 @@ Environment variables (k3d defaults shown in parentheses):
   KEYCLOAK_ADMIN_CLIENT_SECRET (optional in both modes; key omitted if unset)
   ACTIVATOR_CONTROL_PLANE_DATABASE_URL (k3d: in-cluster control_plane URL;
                                         defaults to CONTROL_PLANE_DATABASE_URL)
-  KC_DEV_OWNER_PASSWORD        (k3d realm-dev: password)
-  KC_DEV_OPS_PASSWORD          (k3d realm-dev: password)
-  KC_DEV_SITE_ADMIN_PASSWORD   (k3d realm-dev: password)
-  KC_DEV_ADMIN_CLIENT_SECRET   (k3d realm-dev: dev-admin-client-secret)
+  REALM_DEV_OWNER_PASSWORD        (k3d realm-dev: password)
+  REALM_DEV_OPS_PASSWORD          (k3d realm-dev: password)
+  REALM_DEV_SITE_ADMIN_PASSWORD   (k3d realm-dev: password)
+  REALM_DEV_ADMIN_CLIENT_SECRET   (k3d realm-dev: dev-admin-client-secret)
 EOF
 }
 
@@ -188,7 +188,7 @@ provision_keycloak_bootstrap() {
 }
 
 # k3d-only: dev credentials injected into the Keycloak container as env vars so
-# the realm import substitutes the ${KC_DEV_*} placeholders in the committed
+# the realm import substitutes the ${REALM_DEV_*} placeholders in the committed
 # realm seed. Never provisioned in prod (the prod base realm seed carries no
 # committed secrets — the admin client secret is auto-generated on import).
 provision_realm_dev() {
@@ -197,10 +197,10 @@ provision_realm_dev() {
     return 0
   fi
   apply_secret keycloak-realm-dev-secrets \
-    "KC_DEV_OWNER_PASSWORD=${KC_DEV_OWNER_PASSWORD:-password}" \
-    "KC_DEV_OPS_PASSWORD=${KC_DEV_OPS_PASSWORD:-password}" \
-    "KC_DEV_SITE_ADMIN_PASSWORD=${KC_DEV_SITE_ADMIN_PASSWORD:-password}" \
-    "KC_DEV_ADMIN_CLIENT_SECRET=${KC_DEV_ADMIN_CLIENT_SECRET:-dev-admin-client-secret}"
+    "REALM_DEV_OWNER_PASSWORD=${REALM_DEV_OWNER_PASSWORD:-password}" \
+    "REALM_DEV_OPS_PASSWORD=${REALM_DEV_OPS_PASSWORD:-password}" \
+    "REALM_DEV_SITE_ADMIN_PASSWORD=${REALM_DEV_SITE_ADMIN_PASSWORD:-password}" \
+    "REALM_DEV_ADMIN_CLIENT_SECRET=${REALM_DEV_ADMIN_CLIENT_SECRET:-dev-admin-client-secret}"
 }
 
 provision_control_plane() {

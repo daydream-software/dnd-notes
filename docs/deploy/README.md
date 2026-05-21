@@ -243,7 +243,7 @@ export ACTIVATOR_CONTROL_PLANE_DATABASE_URL="$CONTROL_PLANE_DATABASE_URL"
 scripts/platform/provision-secrets.sh --mode prod --context dnd-notes-prod
 ```
 
-This creates `platform-postgres-credentials`, `keycloak-bootstrap-env`, `dnd-notes-control-plane-secrets`, and `dnd-notes-activator-secrets` in one pass. The `keycloak-realm-dev-secrets` Secret is k3d-only (it feeds the local realm seed's `${KC_DEV_*}` placeholders) and is never created in prod — the prod realm seed carries no committed secrets.
+This creates `platform-postgres-credentials`, `keycloak-bootstrap-env`, `dnd-notes-control-plane-secrets`, and `dnd-notes-activator-secrets` in one pass. The `keycloak-realm-dev-secrets` Secret is k3d-only (it feeds the local realm seed's `${REALM_DEV_*}` placeholders) and is never created in prod — the prod realm seed carries no committed secrets.
 
 The script does not create the namespace, the Cloudflare token, the backup config, or the GHCR pull secret — handle those separately (3a, 2e, 3e, prerequisite #8). After the script runs, skip to Section 4.
 

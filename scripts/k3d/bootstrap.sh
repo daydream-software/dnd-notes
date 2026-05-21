@@ -276,7 +276,7 @@ create_platform_secrets() {
   # Delegated to the shared, mode-aware provisioner (scripts/platform/provision-secrets.sh)
   # so k3d and prod stand up secrets via the SAME mechanism (epic #362). In k3d
   # mode the script fills insecure local-only defaults
-  # (POSTGRES_*=postgres, KC_BOOTSTRAP_ADMIN_*=admin, KC_DEV_*=password/dev-admin-client-secret)
+  # (POSTGRES_*=postgres, KC_BOOTSTRAP_ADMIN_*=admin, REALM_DEV_*=password/dev-admin-client-secret)
   # for any unset variable. Override via env for a less predictable local cluster.
   #
   # bootstrap.sh stands up infra (postgres + keycloak), so it provisions the
