@@ -9019,3 +9019,66 @@ Post-merge cleanup completed:
 Document pg-mem skip reason inline in test. Do not backfill this test to pg-mem; defer to real-Postgres integration test suite if needed post-deploy.
 
 ---
+
+---
+
+### 2026-05-21: Prod Image Pipeline Incident Response (#375/#376)
+
+**Decided by:** Scribe (session coordination, memory tracking)  
+**Date:** 2026-05-21  
+**Type:** Operations — GHCR retention policy, release tag semantics, CI build matrix  
+**Issues:** #375 (post-mortem), #376 (PR), #374 (deferred PR C)  
+
+#### Context
+
+Prod VM hit `ImagePullBackOff` on all workloads after reboot on 2026-05-20. Incident exposed three distinct failures:
+
+1. **R1 — CI build tag retention gap:** Overlay pinned images to ephemeral `sha-*` tags; retention policy `keep: 10` purged them after >10 merges since last weekend. VM reboot cleared containerd cache → unpullable → `ImagePullBackOff`.
+
+2. **R2 — Activator CI gap:** Activator image never built/pushed by CI. `dnd-notes-activator` GHCR package is empty. Blocks scale-to-zero prod rollout (#340/#364) entirely.
+
+3. **R3 — API semantics misunderstood:** Initial fix attempt used `actions/delete-package-versions@v4` with `ignore-versions: '^prod-.*$'` regex. Discovered: `ignore-versions` matches container **digest** (SHA256), not tags — tag regex is a no-op.
+
+#### Decisions
+
+**D1: Prod images must NEVER pin `sha-*` (CI build) tags.**
+- Retention policies purge them after keep-N cutoff.
+- Always use protected `prod-*` release tags (immutable reference tier).
+- Protect `prod-*` from deletion via custom retention script (tag-aware).
+
+**D2: `ignore-versions` on `delete-package-versions` API matches digest, not tags.**
+- Does not provide tag-based retention semantics.
+- Replaced regex approach with custom Node script: `scripts/platform/cleanup-ghcr-versions.mjs` (186 lines, 16 tests).
+- Custom script fetches all manifests, explicitly protects `prod-*`, deletes older non-protected tags.
+
+**D3: Activator image must be part of CI build + retention.**
+- Add to `deployment-artifacts.yml` build matrix.
+- Unblocks scale-to-zero prod rollout (#340/#364).
+
+**D4: Release tag promotion flow documented.**
+- New script: `scripts/platform/promote-prod-image.sh` (idempotent, `--force` flag for clobber safety).
+- Tags image as `prod-YYYYMMDD-{commit-short}`.
+- Called before overlay re-pin.
+
+**D5: Weekend deployment gate.**
+- VM stays scaled-down until #376 merges.
+- Images promoted to `prod-*` (post-merge CI run).
+- Overlay re-pinned to `prod-*` tag + `prod-pin-before-deploy` sentinel.
+- Scale-up verified before return to normal ops.
+
+#### Artifacts
+
+- **PR #375 (branch `fix/375-prod-image-pipeline`):** Post-mortem, fix R1/R2/R3.
+- **PR #376 (open):** Code implementation. Mikey: APPROVE (after R3 rework). CodeRabbit: 1 critical + 7 nitpicks (all addressed in 6dcc915).
+- **Issue #374 (deferred):** PR C of epic #362 — prod-deploy.yml automation. PAUSED. Reconcile with #375's promote-then-pin flow post-merge.
+
+#### Blocking Dependencies
+
+- **#376 merge required before scale-up.** Currently awaiting CodeRabbit re-review.
+
+#### Memory
+
+- `project_prod_image_tag_retention.md` — updated R1/R2/R3 lessons, tag semantics, retention policy design.
+- `project_epic_362_status.md` — corrected to reflect PR C (prod-deploy.yml) is unbuilt planned work, not blocking #362 acceptance.
+
+---
