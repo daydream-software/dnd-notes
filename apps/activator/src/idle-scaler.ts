@@ -21,19 +21,7 @@
 import { KubeConfig, AppsV1Api, PatchStrategy, setHeaderOptions } from '@kubernetes/client-node'
 import { Pool } from 'pg'
 
-const CONTROL_PLANE_DATABASE_URL = process.env['CONTROL_PLANE_DATABASE_URL'] ?? ''
-const IDLE_THRESHOLD_MINUTES = Number(process.env['IDLE_THRESHOLD_MINUTES'] ?? '30')
-if (!Number.isFinite(IDLE_THRESHOLD_MINUTES) || IDLE_THRESHOLD_MINUTES <= 0) {
-  console.error('[idle-scaler] IDLE_THRESHOLD_MINUTES must be a positive number')
-  process.exit(1)
-}
-
-if (!CONTROL_PLANE_DATABASE_URL) {
-  console.error('[idle-scaler] CONTROL_PLANE_DATABASE_URL is required')
-  process.exit(1)
-}
-
-interface IdleTenant {
+export interface IdleTenant {
   tenantId: string
   subdomain: string
   currentState: string
@@ -45,7 +33,53 @@ interface ActiveTenant {
   currentState: string
 }
 
+/** Minimal DB client shape used internally — allows injection in tests. */
+export interface IdleScalerDbClient {
+  query<T extends Record<string, unknown> = Record<string, unknown>>(
+    sql: string,
+    params?: unknown[],
+  ): Promise<{ rows: T[] }>
+}
+
+/**
+ * Return tenants eligible for scale-to-zero: ready, seen by the activator
+ * (seen_by_activator = TRUE), and idle past the threshold.
+ *
+ * Exported for unit testing against pg-mem — callers do not need a K8s client.
+ * Only tenants that have been seen_by_activator are eligible; tenants with no
+ * activity row or with seen_by_activator = FALSE are never returned (#364 guard).
+ */
+export async function queryIdleEligibleTenants(
+  db: IdleScalerDbClient,
+  thresholdMinutes: number,
+): Promise<IdleTenant[]> {
+  const result = await db.query(
+    `SELECT t.id AS "tenantId", t.subdomain, t.current_state AS "currentState"
+     FROM tenants t
+     JOIN tenant_activity ta ON ta.tenant_id::text = t.id::text
+     WHERE t.current_state IN ('ready')
+       AND t.desired_state NOT IN ('deprovisioned', 'failed')
+       AND ta.seen_by_activator = TRUE
+       AND ta.last_request_at < NOW() - ($1 || ' minutes')::INTERVAL`,
+    [thresholdMinutes],
+  )
+  return result.rows as unknown as IdleTenant[]
+}
+
 async function main(): Promise<void> {
+  const CONTROL_PLANE_DATABASE_URL = process.env['CONTROL_PLANE_DATABASE_URL'] ?? ''
+  const IDLE_THRESHOLD_MINUTES = Number(process.env['IDLE_THRESHOLD_MINUTES'] ?? '30')
+
+  if (!Number.isFinite(IDLE_THRESHOLD_MINUTES) || IDLE_THRESHOLD_MINUTES <= 0) {
+    console.error('[idle-scaler] IDLE_THRESHOLD_MINUTES must be a positive number')
+    process.exit(1)
+  }
+
+  if (!CONTROL_PLANE_DATABASE_URL) {
+    console.error('[idle-scaler] CONTROL_PLANE_DATABASE_URL is required')
+    process.exit(1)
+  }
+
   const pool = new Pool({ connectionString: CONTROL_PLANE_DATABASE_URL })
   const kubeConfig = new KubeConfig()
   kubeConfig.loadFromDefault()
@@ -54,19 +88,7 @@ async function main(): Promise<void> {
   try {
     console.log(`[idle-scaler] running with idle threshold ${IDLE_THRESHOLD_MINUTES} minutes`)
 
-    // Find tenants idle past the threshold that are not already sleeping
-    const idleResult = await pool.query<IdleTenant>(
-      `SELECT t.id AS "tenantId", t.subdomain, t.current_state AS "currentState"
-       FROM tenants t
-       LEFT JOIN tenant_activity ta ON ta.tenant_id::text = t.id::text
-       WHERE t.current_state IN ('ready')
-         AND t.desired_state NOT IN ('deprovisioned', 'failed')
-         AND (
-           ta.last_request_at IS NULL
-           OR ta.last_request_at < NOW() - ($1 || ' minutes')::INTERVAL
-         )`,
-      [IDLE_THRESHOLD_MINUTES],
-    )
+    const idleResult = { rows: await queryIdleEligibleTenants(pool, IDLE_THRESHOLD_MINUTES) }
 
     console.log(`[idle-scaler] found ${idleResult.rows.length} idle tenant(s) to scale to zero`)
 
@@ -122,7 +144,14 @@ async function main(): Promise<void> {
       }
     }
 
-    // Sync back: sleeping tenants that are now awake (manual wake or operator action)
+    // Sync back: sleeping tenants that are now awake (manual wake or operator action).
+    //
+    // No seen_by_activator guard needed here: to reach current_state='sleeping' a
+    // tenant must have been scaled by the first SELECT above, which already requires
+    // seen_by_activator = TRUE. Every sleeping tenant therefore carries the flag.
+    // This query is a registry-state-sync against actual Deployment replicas, not a
+    // scale decision — gating it on seen_by_activator would add no safety and could
+    // mask a stuck-sleeping tenant if the flag were ever inconsistent.
     const awakeSleepingResult = await pool.query<ActiveTenant>(
       `SELECT t.id AS "tenantId", t.subdomain, t.current_state AS "currentState"
        FROM tenants t
@@ -167,7 +196,14 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error('[idle-scaler] fatal error:', err instanceof Error ? err.message : String(err))
-  process.exit(1)
-})
+// Only run main() when this module is the direct entry point, not when imported
+// by tests or other modules. The ESM equivalent of Node's __filename === process.argv[1].
+const isEntryPoint = process.argv[1] !== undefined &&
+  import.meta.url === new URL(process.argv[1], 'file:').href
+
+if (isEntryPoint) {
+  main().catch((err) => {
+    console.error('[idle-scaler] fatal error:', err instanceof Error ? err.message : String(err))
+    process.exit(1)
+  })
+}

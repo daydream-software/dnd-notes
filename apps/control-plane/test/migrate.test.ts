@@ -22,6 +22,7 @@ const expectedControlPlaneMigrations = [
   '0006_deprecate_initial_admin_email.sql',
   '0007_backup_catalog_location_deleted.sql',
   '0008_scale_to_zero.sql',
+  '0009_seen_by_activator.sql',
 ]
 
 test('control-plane migrations seed schema metadata and use a namespaced ledger', async () => {
@@ -204,6 +205,86 @@ test('migration 0008 backfill seeds tenant_activity only for active-state tenant
     await pool.end()
   }
 })
+
+test('migration 0009 adds seen_by_activator column defaulting FALSE; backfill rows remain FALSE', async () => {
+  // Strategy: run the full migration chain (0001–0009) and verify:
+  //   1. The seen_by_activator column exists on tenant_activity.
+  //   2. Rows inserted by the 0008 backfill (before 0009) carry FALSE.
+  //   3. A row written with seen_by_activator=TRUE (simulating the activator
+  //      write path) carries TRUE.
+  //   4. A fresh INSERT without specifying the column inherits FALSE.
+  const db = newDb({ autoCreateForeignKeyIndices: true })
+  registerPgMemTenantRegistrySupport(db)
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
+
+  try {
+    await runControlPlaneMigrations({ pool })
+
+    // Insert a tenant so we can write activity rows that satisfy the FK.
+    await pool.query(
+      `INSERT INTO tenants
+         (id, slug, owner_id, desired_state, current_state, version)
+       VALUES ('t-backfill', 't-backfill', 'owner-1', 'ready', 'ready', '1.0.0')`,
+    )
+    await pool.query(
+      `INSERT INTO tenants
+         (id, slug, owner_id, desired_state, current_state, version)
+       VALUES ('t-seen', 't-seen', 'owner-1', 'ready', 'ready', '1.0.0')`,
+    )
+    await pool.query(
+      `INSERT INTO tenants
+         (id, slug, owner_id, desired_state, current_state, version)
+       VALUES ('t-default', 't-default', 'owner-1', 'ready', 'ready', '1.0.0')`,
+    )
+
+    // Simulate a 0008-backfilled row: INSERT without seen_by_activator (inherits DEFAULT FALSE)
+    await pool.query(
+      `INSERT INTO tenant_activity (tenant_id, last_request_at)
+       VALUES ('t-backfill', CURRENT_TIMESTAMP)`,
+    )
+
+    // Simulate the activator write path: INSERT with seen_by_activator=TRUE
+    await pool.query(
+      `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+       VALUES ('t-seen', CURRENT_TIMESTAMP, TRUE)`,
+    )
+
+    // INSERT without specifying the column — must inherit DEFAULT FALSE
+    await pool.query(
+      `INSERT INTO tenant_activity (tenant_id, last_request_at)
+       VALUES ('t-default', CURRENT_TIMESTAMP)`,
+    )
+
+    const rows = await pool.query<{ tenant_id: string; seen_by_activator: boolean }>(
+      `SELECT tenant_id, seen_by_activator
+       FROM tenant_activity
+       ORDER BY tenant_id`,
+    )
+
+    const byId = Object.fromEntries(rows.rows.map((r) => [r.tenant_id, r.seen_by_activator]))
+
+    // Backfill-style rows carry FALSE
+    assert.equal(byId['t-backfill'], false, 'backfill row must have seen_by_activator = FALSE')
+    assert.equal(byId['t-default'], false, 'row without explicit column must default to FALSE')
+
+    // Activator-written row carries TRUE
+    assert.equal(byId['t-seen'], true, 'activator-written row must have seen_by_activator = TRUE')
+  } finally {
+    await pool.end()
+  }
+})
+
+// NOTE: a two-phase test verifying that migration 0009 backfills
+// seen_by_activator = FALSE onto rows that pre-date the migration was
+// attempted and skipped.
+//
+// Reason: pg-mem does not reproduce the real Postgres behaviour of
+// ALTER TABLE ... ADD COLUMN ... NOT NULL DEFAULT for existing rows.
+// In pg-mem the pre-existing rows read NULL after the ALTER; on real
+// Postgres (>=11) they are backfilled with FALSE at DDL time. The
+// invariant is documented in the 0009 SQL comment and is the correct
+// venue for a real-Postgres integration test.
 
 test('control-plane migrations issue the ledger contract DDL', async () => {
   const queries: string[] = []

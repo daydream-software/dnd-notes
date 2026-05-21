@@ -991,6 +991,48 @@ These constraints are intentional for the test period. They are not defects.
 
 ---
 
+## 11. Scale-to-zero operator notes
+
+### Enabling scale-to-zero on an environment with pre-existing tenants
+
+Pre-existing tenants — those provisioned before `ACTIVATOR_EXTERNAL_NAME` was set and their
+IngressRoute pointed at the activator — are safe by default after the 0009 migration. Their
+`tenant_activity` rows carry `seen_by_activator = FALSE`, which prevents the idle-scaler from ever
+targeting them. They continue running until they receive their first request through the activator,
+at which point the activator flips the flag to `TRUE` and the tenant becomes scale-eligible on the
+next idle-scaler run.
+
+No operator action is needed. The migration runs automatically on control-plane startup. Tenants
+whose traffic is already routed through the activator will flip to eligible on first activity write;
+tenants still on direct-to-Service routing stay running indefinitely until re-provisioned or
+manually re-routed.
+
+Before rolling out the activator, verify migration 0009 is applied:
+
+```bash
+kubectl --context dnd-notes-prod exec -it platform-postgres-0 -n dnd-notes-platform -- \
+  psql -U postgres -d control_plane -c "\d tenant_activity"
+```
+
+Confirm `seen_by_activator boolean not null default false` is present in the output.
+
+Deploy ordering is required: migration 0009 must run before the updated activator code reaches
+the cluster. The standard workflow (control-plane rollout precedes activator rollout) ensures this.
+
+### Limitation: the seen_by_activator flag is one-way
+
+Once a tenant's `seen_by_activator` flips to `TRUE` it stays `TRUE`. If an operator later re-wires
+a tenant's IngressRoute back to direct (bypassing the activator at runtime), the idle-scaler still
+considers that tenant eligible and will scale it to zero. The activator would then never see traffic
+to wake it, re-creating the original outage class on direct routes.
+
+If you need to reverse a tenant's routing away from the activator, either:
+
+- Manually reset the flag: `UPDATE tenant_activity SET seen_by_activator = FALSE WHERE tenant_id = '<id>';`
+- Or keep the activator in the path (pattern B is the supported configuration).
+
+---
+
 ## Changelog
 
 ### 2026-05-18 — post-deploy walkthrough (issue #339)

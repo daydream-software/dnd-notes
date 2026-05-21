@@ -85,11 +85,18 @@ export function createTenantActivityStoreWithClient(options: TenantActivityStore
 
       // Cast $1 explicitly to text to avoid the null-parameter ambiguity
       // documented in feedback_run_pg_mem_tests_on_sql_changes.
+      //
+      // seen_by_activator is set TRUE on BOTH insert and conflict-update so that
+      // a backfilled tenant (FALSE from migration 0008) that later receives real
+      // traffic through the activator flips to TRUE and becomes eligible for
+      // scale-to-zero. Without the UPDATE branch, a re-provisioned migrated
+      // tenant would stay FALSE forever (#364 fix — guard idle scaler).
       await db.query(
-        `INSERT INTO tenant_activity (tenant_id, last_request_at)
-         VALUES ($1::text, CURRENT_TIMESTAMP)
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ($1::text, CURRENT_TIMESTAMP, TRUE)
          ON CONFLICT (tenant_id) DO UPDATE
-           SET last_request_at = EXCLUDED.last_request_at`,
+           SET last_request_at = EXCLUDED.last_request_at,
+               seen_by_activator = TRUE`,
         [tenantId],
       )
     },
