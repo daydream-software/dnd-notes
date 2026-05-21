@@ -37,6 +37,7 @@ const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n
 const buildTokenSnippetFnMatch = upScript.match(/^build_token_snippet\(\) \{\n[\s\S]*?^}/m)
 const stateModuleFnMatch = upScript.match(/^state_module\(\) \{\n[\s\S]*?^}/m)
 const runK3dImageImportFnMatch = upScript.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
+const importAndVerifyFnMatch = upScript.match(/^import_and_verify_into_cluster\(\) \{\n[\s\S]*?^}/m)
 const ensureImageImportedFnMatch = upScript.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
 const ensureImageReadyFnMatch = upScript.match(/^ensure_image_ready\(\) \{\n[\s\S]*?^}/m)
 const writeStateFnMatch = upScript.match(/^write_state\(\) \{\n[\s\S]*?^}/m)
@@ -79,6 +80,10 @@ if (!stateModuleFnMatch) {
 
 if (!runK3dImageImportFnMatch) {
   throw new Error('Expected run_k3d_image_import() in scripts/k3d/up.sh')
+}
+
+if (!importAndVerifyFnMatch) {
+  throw new Error('Expected import_and_verify_into_cluster() in scripts/k3d/up.sh')
 }
 
 if (!ensureImageImportedFnMatch) {
@@ -687,6 +692,8 @@ printf 'k3d:%s\n' "$*" >> "$LOG_FILE"
     try {
       result = runBash(
         `${runK3dImageImportFnMatch[0]}
+image_present_in_cluster() { return 0; }
+${importAndVerifyFnMatch[0]}
 ${ensureImageImportedFnMatch[0]}
 ${ensureImageReadyFnMatch[0]}
 log() { :; }
