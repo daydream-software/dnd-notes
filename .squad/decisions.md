@@ -8793,3 +8793,117 @@ so it was not the CI blocker, but warnings get triaged per squad convention).
 - lint: clean (0 warnings, 0 errors)
 
 Coordinator gates Mikey before any CodeRabbit retrigger.
+
+---
+
+### 2026-05-20: PR #366 — Unified secret provisioning + image-import hardening (epic #362)
+
+**Decided by:** Brand (Platform Dev)  
+**Date:** 2026-05-20  
+**PR:** #366 (`feat(platform): unified secret provisioning + image-import hardening`)  
+**Branch:** feat/366-secret-provisioning-unified  
+**Issue:** #363 (activator secret in prod), #362 (epic)  
+**Status:** Merged
+
+#### Unified Secret Provisioning (`scripts/platform/provision-secrets.sh`)
+
+**Scope:** Single mode-aware script provisioning secrets for both k3d and prod environments.
+
+**Key design choices:**
+
+1. **Mode-aware provisioning:** Script detects environment (k3d vs prod) and selectively provisions:
+   - **k3d mode:** Full set of secrets (dev realms, bootstrap creds, activator secret, backup config — all local/insecure)
+   - **Prod mode:** Core secrets only (activator secret, backup config); other secrets manually applied via runbook (sections 1–2 of `docs/deploy/README.md`)
+
+2. **Prod all-or-none atomicity:** For production, the entire secret collection (activator + backup config) is created as a single Kubernetes Secret object (`dnd-notes-prod-secrets`). If any required field is missing, the script fails before `kubectl apply`, preventing partial/corrupted secrets from entering the cluster.
+
+3. **Dev realm credentials → `${REALM_DEV_*}` placeholders:** Secret values for Keycloak realm imports are parameterized with `${REALM_DEV_ADMIN_USER}` etc. (not `${KEYCLOAK_*}` or `${KC_*}`) to avoid SmallRye config collision. SmallRey's ConfigProvider auto-injects `KC_*` prefixed vars from the environment; using `REALM_` prefix ensures the placeholder syntax is inert and controlled by the realm-seed ConfigMap.
+
+4. **Activator secret for prod:** Closes the remaining half of #363 — provisioning the tenant_activity DB credentials (distinct from control-plane DB). The secret includes `TENANT_ACTIVITY_DB_*` env vars and is mounted as ConfigMapKeyRef in the activator Deployment pod spec.
+
+#### Image-Import Hardening (`scripts/k3d/lib/image-import.sh`)
+
+**Problem:** `k3d image import --mode direct` can exit with code 0 even when the image fails to load into the k3d cluster. The symptom is diagnosed only later when a pod tries to pull the image and gets ImagePullBackOff. This breaks the "fail fast" diagnostic chain.
+
+**Solution:** New `image_import_with_verify()` function:
+1. Calls `k3d image import --mode direct`
+2. Immediately after, runs `crictl --runtime-endpoint images` on the k3d control-plane to enumerate loaded images
+3. Compares the uploaded image's Docker `.Id` (from `docker images --no-trunc`) against crictl's image ID list
+4. If the image is not found in crictl output, logs `ERROR` and exits 1, forcing the caller to diagnose the real reason (e.g., disk full, corrupted tarball)
+
+**Empirical validation:** Docker `.Id` (output of `docker images --no-trunc`) exactly matches crictl `IMAGE_ID` (output of `crictl images --no-trunc`) for all k3d loaded images. This enables the digest-compare strategy without false negatives.
+
+**Retry fallback (tools mode):** In k3d tools image, `crictl` is not available. The function detects this and falls back to a single retry with `--mode docker` (slower, but avoids the `crictl: command not found` failure).
+
+#### CodeRabbit Triage (2 Major findings — both fixed)
+
+1. **Image verify-by-digest:** CodeRabbit flagged the logic for comparing image digests as a potential false-success window. The function now uses explicit image-ID matching (crictl) instead of digest substring, preventing hash collisions or partial-match bugs. Thread auto-resolved.
+
+2. **Prod secret all-or-none:** CodeRabbit required proof that the prod secret upsert would fail if any required field is missing (no partial secrets entering the cluster). Function now constructs the secret payload in advance, validates all keys are present, and exits 1 before `kubectl apply` if validation fails. Thread auto-resolved.
+
+#### Live k3d:up Validation
+
+- `npm run k3d:up` passed with new secret provisioning and image-import hardening
+- Existing k3d image-import false-success race reproduced and fixed (424MB control-plane image now verifies correctly)
+- Activator secret correctly mounted and available in activator pod spec
+
+#### Deferred
+
+- Prod secret provisioning runbook (§3 of `docs/deploy/README.md`) — manual; no automation for that section
+- Detailed image-import retry metrics/observability — post-launch enhancement
+
+---
+
+### 2026-05-20: PR C designed — Prod convergence GitHub Actions workflow (epic #362)
+
+**Decided by:** Coordinator (with user approval)  
+**Date:** 2026-05-20  
+**Status:** Designed, not started  
+**Branch:** feat/362-prod-apply-workflow (to be created)
+
+#### Scope: Prod Convergence Workflow
+
+**Purpose:** Manually-triggered GitHub Actions workflow that converges the prod cluster to the desired state (manifests in `deploy/k3s/overlays/prod/`).
+
+**What it does:**
+- `kubectl apply -k deploy/k3s/overlays/prod` (idempotent apply)
+- `kubectl rollout status` for Deployments, StatefulSets, DaemonSets (verifies convergence complete)
+- No secret provisioning (manual, per runbook §3)
+- No VM provisioning (manual runbook — no ARM/Terraform/IaC automation)
+
+**Trigger:** `workflow_dispatch` only (manual button in GitHub UI). No automatic triggers on commit/tag.
+
+**Runner:** Self-hosted runner on the prod VM (no public k3s API, no kubeconfig in GitHub secrets, no internet-routable service port).
+
+**Authorization:**
+- `environment: production` + required reviewers (GitHub environment protection)
+- SHA-pinned actions (no floating `@main` or `@latest`)
+
+**Non-scope:**
+- Secret provisioning (steps 1–2 of prod runbook are manual; step 3 is `provision-secrets.sh` run locally)
+- VM provisioning (separate runbook; Terraform/ARM not in scope)
+- Image tag pinning (overlaps with #359; design deferred to follow-up)
+- Observability / post-apply verification (logging / metrics; follow-up)
+
+#### Design Rationale
+
+1. **Self-hosted runner:** Prod cluster is air-gapped (private K8s API, no public ingress). Cannot be managed from a GitHub-hosted runner in AWS/GCP.
+
+2. **workflow_dispatch only:** Converging prod on every commit is dangerous (no validation gate, easy to ship broken manifests). Manual dispatch forces operator review of the PR/manifest changes before applying.
+
+3. **No secrets in workflow:** Secrets are provided by the runbook (operator manually runs `scripts/platform/provision-secrets.sh` on the prod VM or via SSH). Keeps the workflow pure-stateless (only reads kubeconfig + applies manifests).
+
+4. **No VM provisioning:** Terraform would require storing sensitive cloud credentials. VM setup is a one-time manual operation (documented in RUNTIME.md). Workflow only assumes the VM and k3d cluster already exist.
+
+#### Next Steps (PR C implementation)
+
+- Create `.github/workflows/prod-deploy.yml` with:
+  - `workflow_dispatch` trigger
+  - Self-hosted runner: `runs-on: [self-hosted, prod]`
+  - SHA-pinned actions for checkout, kustomize, kubectl
+  - `environment: production` block with required reviewers
+  - Steps: render manifests, apply, rollout status
+- Coordinate with #359 (image tag pinning) on overlay structure
+- Document in `docs/deploy/README.md` (step 4: "Run the convergence workflow")
+
+---
