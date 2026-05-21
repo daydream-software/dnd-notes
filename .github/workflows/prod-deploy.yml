@@ -143,6 +143,8 @@ jobs:
           grep "newTag:" deploy/k3s/overlays/prod/kustomization.yaml
 
       - name: Guard against sentinel tag reaching the cluster
+        env:
+          PROD_TAG: ${{ inputs.prod_tag }}
         run: |
           # Fail fast if prod-pin-before-deploy still appears anywhere in the
           # rendered output. This catches: wrong input format, kustomize edit
@@ -154,7 +156,7 @@ jobs:
             echo "       in the rendered overlay. The prod_tag pin did not apply"
             echo "       to all images."
             echo ""
-            echo "  Supplied prod_tag: ${{ inputs.prod_tag }}"
+            echo "  Supplied prod_tag: ${PROD_TAG}"
             echo "  Check that kustomize is installed and the overlay image names"
             echo "  match the names in deploy/k3s/overlays/prod/kustomization.yaml."
             exit 1
