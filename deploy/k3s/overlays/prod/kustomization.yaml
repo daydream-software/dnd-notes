@@ -51,8 +51,9 @@ patches:
 #
 # Tag convention: prod-YYYYMMDD (e.g. prod-20260521), with a time suffix
 # (prod-YYYYMMDD-HHMMSSz) when more than one promotion lands on the same day.
-# These tags are excluded from the sha-* retention cleanup in CI and will not
-# be deleted by build churn (see deployment-artifacts.yml ignore-versions).
+# These tags are protected by the tag-aware retention script in CI and will not
+# be deleted by build churn (see deployment-artifacts.yml and
+# scripts/platform/cleanup-ghcr-versions.mjs).
 #
 # Deploy flow:
 #   1. CI pushes sha-<commit> tags on every merge to main.

@@ -148,5 +148,5 @@ echo "  1. Update deploy/k3s/overlays/prod/kustomization.yaml — set newTag: ${
 echo "     on all 5 image entries."
 echo "  2. Commit and apply: kubectl kustomize deploy/k3s/overlays/prod | kubectl apply -f -"
 echo ""
-echo "The ${DEST_TAG} tag is excluded from sha-* retention cleanup and will not"
-echo "be deleted by CI churn (see deployment-artifacts.yml ignore-versions)."
+echo "The ${DEST_TAG} tag is protected from deletion by the tag-aware retention"
+echo "script in CI (see scripts/platform/cleanup-ghcr-versions.mjs)."
