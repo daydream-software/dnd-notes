@@ -133,14 +133,52 @@ run_image_import() {
   return "${status}"
 }
 
-if ! run_image_import "${IMAGE_IMPORT_MODE}"; then
+# Verify the image actually landed in the cluster's containerd. k3d's `direct`
+# import mode can exit 0 WITHOUT the image fully landing on a node (more likely
+# for large images) — a silent false success that surfaces later as
+# ImagePullBackOff on an IfNotPresent pod. Check every server/agent node
+# container (skip the *-serverlb load balancer, which has no containerd) and
+# match crictl's "REPO TAG" columns exactly.
+image_present_in_cluster() {
+  local node node_count=0
+  for node in $(docker ps --filter "label=k3d.cluster=${CLUSTER_NAME}" --format '{{.Names}}' 2>/dev/null); do
+    case "${node}" in *serverlb*) continue ;; esac
+    node_count=$((node_count + 1))
+    if ! docker exec "${node}" crictl images 2>/dev/null \
+      | awk -v repo="${IMAGE_REF%:*}" -v tag="${IMAGE_REF##*:}" \
+          '$1==repo && $2==tag {f=1} END{exit f?0:1}'; then
+      return 1
+    fi
+  done
+  # If we couldn't enumerate any node container, we cannot verify — don't block
+  # the build (e.g. an unusual local setup); the import return code stands.
+  [ "${node_count}" -eq 0 ] && return 0
+  return 0
+}
+
+# Import, then confirm the image is really present. A clean exit code from
+# `k3d image import` is necessary but not sufficient (see image_present_in_cluster).
+import_and_verify() {
+  local mode="$1"
+  run_image_import "${mode}" || return 1
+  if ! image_present_in_cluster; then
+    echo "Import (mode ${mode}) exited 0 but ${IMAGE_REF} is NOT present in the cluster node containerd; treating as failed." >&2
+    return 1
+  fi
+  return 0
+}
+
+if ! import_and_verify "${IMAGE_IMPORT_MODE}"; then
   if [[ "${IMAGE_IMPORT_FALLBACK_MODE}" == "${IMAGE_IMPORT_MODE}" ]]; then
-    echo "Image import failed with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured." >&2
+    echo "Image import failed/unverified with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured." >&2
     exit 1
   fi
 
-  echo "Image import with mode ${IMAGE_IMPORT_MODE} failed or timed out; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}." >&2
-  run_image_import "${IMAGE_IMPORT_FALLBACK_MODE}"
+  echo "Image import with mode ${IMAGE_IMPORT_MODE} failed or did not land; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}." >&2
+  if ! import_and_verify "${IMAGE_IMPORT_FALLBACK_MODE}"; then
+    echo "Image ${IMAGE_REF} did not land in the cluster after both modes (${IMAGE_IMPORT_MODE}, ${IMAGE_IMPORT_FALLBACK_MODE})." >&2
+    exit 1
+  fi
 fi
 
 # ---------------------------------------------------------------------------
