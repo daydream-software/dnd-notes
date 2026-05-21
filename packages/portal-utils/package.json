@@ -16,7 +16,7 @@
     "test:ci": "vitest run --reporter=default --reporter=junit --outputFile.junit=../../reports/test-results/portal-utils.junit.xml --coverage.enabled --coverage.provider=v8 --coverage.reporter=text-summary --coverage.reporter=lcov --coverage.reporter=json-summary --coverage.reporter=cobertura --coverage.reportsDirectory=../../reports/coverage/portal-utils"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^4.1.6",
+    "@vitest/coverage-v8": "^4.1.7",
     "typescript": "~6.0.2",
     "vitest": "^4.1.6"
   }
