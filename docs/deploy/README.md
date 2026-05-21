@@ -68,6 +68,10 @@ Already provisioned:
 The `prod-deploy.yml` workflow runs on a self-hosted runner tagged `[self-hosted, prod]`. The
 runner must be installed and started on the prod VM before the first workflow trigger.
 
+> The `prod` label must be exclusive to this prod-VM runner. Any runner carrying it can pick up
+> a prod deploy with the VM's cluster and credentials, so do not reuse the label elsewhere — that
+> is the runner-trust boundary the `workflow_dispatch`-only trigger relies on.
+
 On the VM, as `azureuser`:
 
 ```bash

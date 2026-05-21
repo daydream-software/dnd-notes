@@ -83,7 +83,6 @@ jobs:
       - name: Verify all 5 images exist in GHCR
         env:
           PROD_TAG: ${{ inputs.prod_tag }}
-          GH_TOKEN: ${{ github.token }}
         run: |
           # Check all 5 images: the 4 pinned in the overlay plus the tenant image
           # referenced dynamically by the control-plane ConfigMap. A half-promote
