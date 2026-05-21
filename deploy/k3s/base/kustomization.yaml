@@ -8,4 +8,8 @@ resources:
   - activator/
   - customer-portal/
   - operator-portal/
-  - cert-manager/
+# cert-manager ClusterIssuer + Certificate are environment-specific (prod uses
+# letsencrypt-prod via Cloudflare DNS-01; k3d uses a dev-ca CA issuer backed by
+# the mkcert root). Each overlay supplies its own issuer — they have
+# incompatible shapes and cannot be expressed as a single patchable base
+# resource. The cert-manager namespace itself stays in namespaces/.

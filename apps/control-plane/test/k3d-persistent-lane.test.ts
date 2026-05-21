@@ -912,7 +912,11 @@ describe('k3d status --json schema', () => {
   })
 
   it('uses --context for live kubectl reads instead of switching the active kube context', () => {
-    assert.match(statusScript, /kubectl --context "\$\{context\}" get deployment/)
+    // status.sh reads readiness through the generic deployment_ready_count
+    // helper, which passes the kind (Deployment/StatefulSet) as a parameter
+    // rather than inlining `get deployment`. The invariant we guard is that the
+    // live read targets an explicit --context and never mutates the active one.
+    assert.match(statusScript, /kubectl --context "\$\{context\}" get "\$\{kind\}"/)
     assert.match(statusScript, /target_kube_context="k3d-\$\{CLUSTER_NAME\}"/)
     assert.doesNotMatch(statusScript, /kubectl config use-context/)
   })

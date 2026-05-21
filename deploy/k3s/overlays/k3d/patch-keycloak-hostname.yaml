@@ -1,0 +1,13 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: platform-keycloak
+  namespace: dnd-notes-platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: keycloak
+          env:
+            - name: KC_HOSTNAME
+              value: https://keycloak.127.0.0.1.nip.io

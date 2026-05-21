@@ -1,0 +1,66 @@
+# k3d loads images via `k3d image import` from the local Docker daemon (built by
+# scripts/k3d/build-image.sh), so the cluster must use the locally imported
+# layers rather than pulling from GHCR. Flip imagePullPolicy Always -> IfNotPresent
+# on every workload that carries a project image. Keycloak and Postgres already
+# use IfNotPresent in base.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnd-notes-control-plane
+  namespace: dnd-notes-platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: control-plane
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dnd-notes-activator
+  namespace: dnd-notes-platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: activator
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-portal
+  namespace: dnd-notes-platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: portal
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: operator-portal
+  namespace: dnd-notes-platform
+spec:
+  template:
+    spec:
+      containers:
+        - name: portal
+          imagePullPolicy: IfNotPresent
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: dnd-notes-idle-scaler
+  namespace: dnd-notes-platform
+spec:
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: idle-scaler
+              imagePullPolicy: IfNotPresent

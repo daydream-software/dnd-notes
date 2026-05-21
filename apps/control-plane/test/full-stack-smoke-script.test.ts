@@ -12,7 +12,7 @@ const fullStackSmokeScript = readFileSync(fullStackSmokeScriptPath, 'utf8')
 describe('k3d full-stack smoke control-plane secret setup', () => {
   it('replaces the placeholder control-plane secret after applying the kustomize overlay', () => {
     const overlayApplyIndex = fullStackSmokeScript.indexOf(
-      'run_visible kubectl apply -k "${ROOT}/platform/control-plane/overlays/k3d"',
+      'run_visible kubectl apply -k "${ROOT}/deploy/k3s/overlays/k3d"',
     )
     const secretReplaceIndex = fullStackSmokeScript.indexOf(
       'kubectl create secret generic dnd-notes-control-plane-secrets',

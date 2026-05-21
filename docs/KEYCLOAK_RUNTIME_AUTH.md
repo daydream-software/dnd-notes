@@ -53,27 +53,34 @@ The control-plane also decides how new tenant pods boot:
 
 ## Local k3d contract
 
-`platform/k3d/keycloak.yaml` seeds one dev realm, `dnd-notes-dev`, with:
+The k3d overlay (`deploy/k3s/overlays/k3d/keycloak-realm-config.yaml`) seeds the
+same two-realm topology as prod, with k3d-specific (nip.io / dev) content.
 
-- tenant web client: `dnd-notes-tenant-app`
-- control-plane admin client: `dnd-notes-control-plane`
-- customer-portal client: `dnd-notes-customer-portal`
+Tenant realm `dnd-notes`:
+
+- customer-portal client: `dnd-notes-customer-portal` (nip.io + localhost redirect URIs)
+- service-account admin client: `dnd-notes-keycloak-admin` (dev secret `dev-admin-client-secret`)
 - tenant user: `owner@example.com` / `password`
-- workforce user: `ops@example.com` / `password`
-- site admin: `site-admin@example.com` / `password`
+- per-tenant clients (`dnd-notes-tenant-{tenantId}`) are created here by the control-plane
 
-The k3d control-plane overlay enables both runtime paths with:
+Workforce realm `dnd-notes-workforce`:
+
+- control-plane admin client: `dnd-notes-control-plane` (operator-login theme)
+- workforce user: `ops@example.com` / `password` (role `control-plane-workforce`)
+- site admin: `site-admin@example.com` / `password` (roles `control-plane-admin`, `control-plane-workforce`)
+
+The k3d control-plane configmap enables both runtime paths with:
 
 - `CONTROL_PLANE_AUTH_MODE=keycloak`
 - `CONTROL_PLANE_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
-- `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-dev`
+- `CONTROL_PLANE_KEYCLOAK_REALM=dnd-notes-workforce`
 - `CONTROL_PLANE_KEYCLOAK_CLIENT_ID=dnd-notes-control-plane`
 - `CUSTOMER_PORTAL_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
-- `CUSTOMER_PORTAL_KEYCLOAK_REALM=dnd-notes-dev`
+- `CUSTOMER_PORTAL_KEYCLOAK_REALM=dnd-notes`
 - `CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID=dnd-notes-customer-portal`
 - `TENANT_KEYCLOAK_URL=https://keycloak.127.0.0.1.nip.io`
-- `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
-- `TENANT_KEYCLOAK_REALM=dnd-notes-dev`
+- `TENANT_KEYCLOAK_JWKS_URL=http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes/protocol/openid-connect/certs`
+- `TENANT_KEYCLOAK_REALM=dnd-notes`
 - Per-tenant client: derived automatically as `dnd-notes-tenant-{tenantId}` at provisioning time
 
 The split matters in k3d: browsers and the local control-plane use the public
@@ -102,7 +109,7 @@ curl -fsS \
   --data-urlencode 'client_id=dnd-notes-control-plane' \
   --data-urlencode 'username=site-admin@example.com' \
   --data-urlencode 'password=password' \
-  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes-dev/protocol/openid-connect/token
+  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes-workforce/protocol/openid-connect/token
 ```
 
 ### Get a tenant token
@@ -115,7 +122,7 @@ curl -fsS \
   --data-urlencode 'client_id=dnd-notes-tenant-app' \
   --data-urlencode 'username=owner@example.com' \
   --data-urlencode 'password=password' \
-  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes-dev/protocol/openid-connect/token
+  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes/protocol/openid-connect/token
 ```
 
 ### Smoke lane

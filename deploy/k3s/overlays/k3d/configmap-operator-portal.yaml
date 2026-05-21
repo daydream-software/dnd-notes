@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: operator-portal-config
+  namespace: dnd-notes-platform
+data:
+  KEYCLOAK_URL: "https://keycloak.127.0.0.1.nip.io"
+  KEYCLOAK_REALM: "dnd-notes-workforce"
+  CUSTOMER_PORTAL_URL: "https://portal.127.0.0.1.nip.io"

@@ -163,10 +163,13 @@ probe_tenant_url() {
 deployment_ready_count() {
   local context="$1"
   local namespace="$2"
-  local deployment="$3"
+  local name="$3"
+  # Postgres is a StatefulSet on the unified base; everything else is a
+  # Deployment. Both expose readyReplicas/replicas under .status.
+  local kind="${4:-deployment}"
 
   local out
-  out="$(kubectl --context "${context}" get deployment "${deployment}" -n "${namespace}" \
+  out="$(kubectl --context "${context}" get "${kind}" "${name}" -n "${namespace}" \
     -o jsonpath='{.status.readyReplicas}/{.status.replicas}' 2>/dev/null)" || true
   echo "${out:-unavailable}"
 }
@@ -256,7 +259,7 @@ if [[ "${cluster_running}" == "true" ]]; then
 
     control_plane_ready="$(deployment_ready_count "${target_kube_context}" "${PLATFORM_NAMESPACE}" dnd-notes-control-plane)"
     keycloak_ready="$(deployment_ready_count "${target_kube_context}" "${PLATFORM_NAMESPACE}" platform-keycloak)"
-    postgres_ready="$(deployment_ready_count "${target_kube_context}" "${PLATFORM_NAMESPACE}" platform-postgres)"
+    postgres_ready="$(deployment_ready_count "${target_kube_context}" "${PLATFORM_NAMESPACE}" platform-postgres statefulset)"
 
     # Use the stored namespace verbatim — never re-derive it from the subdomain.
     if [[ -n "${state_tenantNamespace}" ]]; then

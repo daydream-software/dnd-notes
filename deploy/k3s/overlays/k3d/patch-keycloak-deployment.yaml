@@ -1,0 +1,15 @@
+# k3d Keycloak runs in dev mode (start-dev) behind the nginx ingress with the
+# mkcert dev-ca terminating TLS. Replace the prod "start" args (production mode,
+# requires --http-enabled + hostname config) with the dev-mode args.
+#
+# A JSON 6902 replace on the args array is used deliberately: strategic-merge on
+# a bare string list appends rather than replaces, which would leave the prod
+# "start" command in place alongside "start-dev". KC_HOSTNAME is patched
+# separately via strategic merge (env is a name-keyed list, merges cleanly).
+- op: replace
+  path: /spec/template/spec/containers/0/args
+  value:
+    - start-dev
+    - --import-realm
+    - --http-port=8080
+    - --proxy-headers=xforwarded

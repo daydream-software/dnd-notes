@@ -392,8 +392,9 @@ This skeleton is ready to drive:
 Issue `#43` now carries the committed in-cluster packaging lane for this service:
 
 - `docker/control-plane/Dockerfile` — production image for the internal control plane
-- `platform/control-plane/overlays/k3d` — local k3d manifest overlay
-- `platform/control-plane/overlays/hosted-reference` — hosted-cluster reference overlay
+- `deploy/k3s/base/control-plane` — canonical control-plane manifests (shared by both overlays)
+- `deploy/k3s/overlays/k3d` — local k3d overlay (the control-plane is one of its patched resources)
+- `deploy/k3s/overlays/prod` — production overlay
 
 These artifacts keep the control plane internal-only while preserving the locked
 same-origin tenant model through `TENANT_BASE_DOMAIN` + `TENANT_PUBLIC_SCHEME`.

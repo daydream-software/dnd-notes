@@ -40,7 +40,10 @@ npm run k3d:down     # tear down cluster and clean up state
 
 `k3d:up` accepts `--no-rebuild` to skip image builds when tags already exist, and `--json` for machine-readable output. `k3d:status` also supports `--json`.
 
-See `platform/k3d/README.md` for the full workflow.
+The k3d platform is stood up from the unified deploy tree via a single
+`kubectl apply -k deploy/k3s/overlays/k3d` (driven by `scripts/k3d/bootstrap.sh`
+and `scripts/k3d/up.sh`). The prod overlay lives alongside it at
+`deploy/k3s/overlays/prod`.
 
 ## Workspace layout
 

@@ -24,6 +24,10 @@ kind: Kustomization
 
 resources:
 - ../../base
+# cert-manager issuer + wildcard certificate are prod-specific (Let's Encrypt
+# via Cloudflare DNS-01). The k3d overlay supplies a dev-ca CA issuer instead.
+- cluster-issuer.yaml
+- certificate.yaml
 
 # Prod-specific ConfigMaps (override base placeholders with real daydreamsoftware.ca values)
 patches:

@@ -1,0 +1,67 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Local k3d overlay for *.127.0.0.1.nip.io on k3d (Kubernetes in Docker).
+#
+# A single `kubectl apply -k deploy/k3s/overlays/k3d` stands up the whole
+# platform on top of cluster prerequisites, mirroring how prod uses one umbrella
+# (deploy/k3s/overlays/prod). Prerequisites are provisioned imperatively by
+# scripts/k3d/bootstrap.sh BEFORE this overlay is applied:
+#   1. k3d cluster (traefik disabled, ports 80/443 mapped)
+#   2. ingress-nginx controller (scripts/k3d/manifests/ingress-nginx-controller-*.yaml)
+#   3. cert-manager + the mkcert-ca TLS secret (feeds the dev-ca ClusterIssuer here)
+#   4. canonical secrets created imperatively (out of scope for unification here):
+#        platform-postgres-credentials  (POSTGRES_USER/PASSWORD/DB = postgres)
+#        keycloak-bootstrap-env         (KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD = admin)
+#        dnd-notes-control-plane-secrets / dnd-notes-activator-secrets
+#   5. the control_plane + keycloak databases (created via the postgres pod)
+#
+# Guardrail (see scripts/platform/validate-render-parity.sh): overlays express
+# ONLY environment deltas via strategic-merge / JSON-6902 patches. No overlay may
+# replace a base ConfigMap's whole data map or run a configMapGenerator with
+# replace behavior on a base-defined ConfigMap — that is the #363 dropped-key
+# class. The realm ConfigMaps below are patched per-key (the JSON value of a
+# single existing key), never wholesale-regenerated.
+
+resources:
+- ../../base
+# k3d uses a CA ClusterIssuer (mkcert root) instead of prod's letsencrypt-prod.
+- cluster-issuer.yaml
+
+# Environment-delta patches (strategic merge unless noted).
+patches:
+# control-plane / portal / activator configmaps: nip.io URLs, 2-realm refs,
+# nginx ingress class, dev-ca issuer. Each patch sets ONLY the keys that differ
+# from base — base keys it does not mention are preserved (ACTIVATOR_EXTERNAL_NAME,
+# ACTIVATOR_PORT, client IDs, ports, required roles, etc.).
+- path: configmap-control-plane.yaml
+- path: configmap-customer-portal.yaml
+- path: configmap-operator-portal.yaml
+- path: configmap-activator.yaml
+# Keycloak: dev-mode args (JSON 6902 replace) + nip.io hostname (strategic merge).
+- path: patch-keycloak-deployment.yaml
+  target:
+    kind: Deployment
+    name: platform-keycloak
+- path: patch-keycloak-hostname.yaml
+# Realm seeds: replace the JSON value of each realm ConfigMap's single data key
+# with k3d content (nip.io redirect URIs, dev users, explicit admin secret).
+# Per-key strategic merge — the data-map key set is unchanged.
+- path: keycloak-realm-config.yaml
+# Ingresses: nginx class + dev-ca issuer + nip.io hosts/TLS.
+- path: patch-ingress-keycloak.yaml
+- path: patch-ingress-customer-portal.yaml
+- path: patch-ingress-operator-portal.yaml
+# Locally imported images must not be re-pulled from GHCR.
+- path: patch-pull-policy.yaml
+
+# k3d images are built locally and tagged :k3d, then imported into the cluster.
+images:
+- name: ghcr.io/daydream-software/dnd-notes-control-plane
+  newTag: k3d
+- name: ghcr.io/daydream-software/dnd-notes-customer-portal
+  newTag: k3d
+- name: ghcr.io/daydream-software/dnd-notes-operator-portal
+  newTag: k3d
+- name: ghcr.io/daydream-software/dnd-notes-activator
+  newTag: k3d

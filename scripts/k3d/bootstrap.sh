@@ -12,7 +12,8 @@ K3S_PULL_RETRIES="${K3D_K3S_PULL_RETRIES:-3}"
 K3S_PULL_TIMEOUT_SECONDS="${K3D_K3S_PULL_TIMEOUT_SECONDS:-180}"
 K3S_PULL_RETRY_DELAY_SECONDS="${K3D_K3S_PULL_RETRY_DELAY_SECONDS:-5}"
 PLATFORM_NAMESPACE="dnd-notes-platform"
-INGRESS_NGINX_MANIFEST_PATH="${INGRESS_NGINX_MANIFEST_PATH:-${ROOT}/platform/k3d/ingress-nginx-controller-v1.12.1.yaml}"
+K3D_OVERLAY_PATH="${ROOT}/deploy/k3s/overlays/k3d"
+INGRESS_NGINX_MANIFEST_PATH="${INGRESS_NGINX_MANIFEST_PATH:-${ROOT}/scripts/k3d/manifests/ingress-nginx-controller-v1.12.1.yaml}"
 previous_kube_context=""
 
 usage() {
@@ -103,10 +104,13 @@ validate_ingress_ports() {
 
 wait_for_rollout() {
   local namespace="$1"
-  local deployment="$2"
+  local name="$2"
   local timeout="${3:-180s}"
+  # Postgres is a StatefulSet on the unified base; everything else is a
+  # Deployment. kubectl rollout status accepts either kind.
+  local kind="${4:-deployment}"
 
-  kubectl rollout status -n "$namespace" "deployment/${deployment}" --timeout="$timeout"
+  kubectl rollout status -n "$namespace" "${kind}/${name}" --timeout="$timeout"
 }
 
 normalize_kubeconfig_server() {
@@ -177,18 +181,6 @@ restore_previous_context() {
   exit "${exit_code}"
 }
 
-apply_keycloak_manifest() {
-  kubectl apply -f "${ROOT}/platform/k3d/keycloak.yaml"
-  # Restart Keycloak so it picks up the updated realm configmap on a fresh
-  # cluster. Note: --import-realm only imports on the very first startup when the
-  # realm does not yet exist. On an existing cluster the realm is NOT re-imported
-  # on restart — changes that landed after the initial import are applied instead
-  # via the control-plane's KeycloakAdminClient startup upsert.
-  # We surface failures here — silently swallowing them would let bootstrap
-  # report success while Keycloak remains unhealthy.
-  kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/platform-keycloak >/dev/null
-}
-
 validate_caroot() {
   if [[ -z "${CAROOT:-}" ]]; then
     echo "ERROR: CAROOT environment variable is not set." >&2
@@ -245,33 +237,62 @@ install_cert_manager() {
   exit 1
 }
 
-apply_cert_manager_ca() {
+create_mkcert_ca_secret() {
   echo "Creating mkcert-ca secret from CAROOT=${CAROOT}..."
+  # The dev-ca ClusterIssuer (applied via the k3d overlay) references this
+  # secret. It must exist before the overlay apply so the issuer can become
+  # Ready and downstream Certificates can be signed.
   kubectl -n cert-manager create secret tls mkcert-ca \
     --cert="${CAROOT}/rootCA.pem" \
     --key="${CAROOT}/rootCA-key.pem" \
     --dry-run=client -o yaml \
     | kubectl apply -f -
+}
 
-  echo "Applying ClusterIssuer dev-ca..."
-  # Retry a few times in case the cert-manager webhook is still initialising.
+# The dev-ca ClusterIssuer ships in deploy/k3s/overlays/k3d (applied below), not
+# as a standalone manifest. After the overlay apply, wait for it to become Ready
+# so downstream per-ingress Certificates are not left pending.
+wait_for_dev_ca_issuer() {
+  echo "Waiting for ClusterIssuer dev-ca to become Ready..."
   local attempt
   for attempt in 1 2 3 4 5; do
-    if kubectl apply -f "${ROOT}/platform/k3d/cluster-issuer.yaml"; then
-      # A successful apply only confirms acceptance. Wait for the issuer to
-      # actually become Ready — otherwise downstream Certificates will sit
-      # pending and the HTTPS endpoints will be flaky.
-      if kubectl wait --for=condition=Ready --timeout=60s clusterissuer/dev-ca; then
-        return 0
-      fi
-      echo "ClusterIssuer dev-ca did not become Ready within 60s — retrying apply..." >&2
-      kubectl describe clusterissuer dev-ca >&2 || true
+    if kubectl wait --for=condition=Ready --timeout=60s clusterissuer/dev-ca; then
+      return 0
     fi
-    echo "ClusterIssuer apply attempt ${attempt} failed — retrying in 10s..."
+    echo "ClusterIssuer dev-ca not Ready (attempt ${attempt}/5) — retrying in 10s..." >&2
+    kubectl describe clusterissuer dev-ca >&2 || true
     sleep 10
   done
-  echo "ERROR: Failed to apply or ready ClusterIssuer after 5 attempts." >&2
+  echo "ERROR: ClusterIssuer dev-ca did not become Ready after 5 attempts." >&2
   return 1
+}
+
+# Canonical platform secrets, created imperatively (secret provisioning
+# unification is a separate later PR). The unified base/overlay manifests
+# reference these names; without them postgres + keycloak would sit in
+# CreateContainerConfigError.
+create_platform_secrets() {
+  echo "Creating canonical platform secrets (postgres + keycloak bootstrap)..."
+  # Insecure local-only defaults. Override via env for a less predictable local
+  # cluster; full secret-provisioning unification lands in a later PR.
+  local pg_user="${PLATFORM_POSTGRES_USER:-postgres}"
+  local pg_password="${PLATFORM_POSTGRES_PASSWORD:-postgres}"
+  local pg_db="${PLATFORM_POSTGRES_DB:-postgres}"
+  local kc_admin_user="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+  local kc_admin_password="${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
+
+  kubectl -n "${PLATFORM_NAMESPACE}" create secret generic platform-postgres-credentials \
+    --from-literal=POSTGRES_USER="${pg_user}" \
+    --from-literal=POSTGRES_PASSWORD="${pg_password}" \
+    --from-literal=POSTGRES_DB="${pg_db}" \
+    --dry-run=client -o yaml \
+    | kubectl apply -f -
+
+  kubectl -n "${PLATFORM_NAMESPACE}" create secret generic keycloak-bootstrap-env \
+    --from-literal=KC_BOOTSTRAP_ADMIN_USERNAME="${kc_admin_user}" \
+    --from-literal=KC_BOOTSTRAP_ADMIN_PASSWORD="${kc_admin_password}" \
+    --dry-run=client -o yaml \
+    | kubectl apply -f -
 }
 
 if [[ "${1:-}" == "--help" ]]; then
@@ -310,50 +331,70 @@ kubectl config use-context "k3d-${CLUSTER_NAME}" >/dev/null
 normalize_kubeconfig_server
 wait_for_kube_api 60
 
-kubectl apply -f "${ROOT}/platform/k3d/namespace.yaml"
+# Namespace is also defined in the k3d overlay (applied below) and re-applied
+# idempotently there, but it must exist first so the canonical secrets land in
+# the right namespace before the overlay brings up postgres + keycloak.
+kubectl create namespace "${PLATFORM_NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
 kubectl apply -f "${INGRESS_NGINX_MANIFEST_PATH}"
 wait_for_rollout ingress-nginx ingress-nginx-controller 240s
 
 install_cert_manager
-apply_cert_manager_ca
+create_mkcert_ca_secret
+create_platform_secrets
 
-kubectl apply -f "${ROOT}/platform/k3d/postgres.yaml"
+# ---------------------------------------------------------------------------
+# Apply the unified k3d overlay. This is the single umbrella that stands up the
+# whole platform (namespace, dev-ca issuer, postgres, keycloak, control-plane,
+# activator, portals) — mirroring how prod uses deploy/k3s/overlays/prod.
+#
+# The four application Deployments (control-plane, activator, portals) will
+# crashloop until up.sh creates dnd-notes-control-plane-secrets /
+# dnd-notes-activator-secrets and rolls them. That is expected: bootstrap brings
+# up infra (postgres + keycloak healthy); up.sh brings up the apps.
+# ---------------------------------------------------------------------------
+echo "Applying unified k3d overlay (deploy/k3s/overlays/k3d)..."
+kubectl apply -k "${K3D_OVERLAY_PATH}"
 
-wait_for_rollout "${PLATFORM_NAMESPACE}" platform-postgres 180s
+wait_for_dev_ca_issuer
+
+wait_for_rollout "${PLATFORM_NAMESPACE}" platform-postgres 180s statefulset
 
 # Create the control_plane database for the control-plane registry
 if [[ "$(
-  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+  kubectl exec -n "${PLATFORM_NAMESPACE}" statefulset/platform-postgres -- \
     psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'control_plane'"
 )" != "1" ]]; then
-  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+  kubectl exec -n "${PLATFORM_NAMESPACE}" statefulset/platform-postgres -- \
     psql -U postgres -c "CREATE DATABASE control_plane"
 fi
 
-# Create the keycloak database. Keycloak's deployment is configured (see
-# platform/k3d/keycloak.yaml) to use this DB instead of the default ephemeral
-# H2 file storage, so per-tenant clients created dynamically by the control-plane
-# survive Keycloak pod restarts.
+# Create the keycloak database. The unified keycloak Deployment uses Postgres
+# (KC_DB) instead of the default ephemeral H2 file storage, so per-tenant clients
+# created dynamically by the control-plane survive Keycloak pod restarts.
 if [[ "$(
-  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+  kubectl exec -n "${PLATFORM_NAMESPACE}" statefulset/platform-postgres -- \
     psql -U postgres -tAc "SELECT 1 FROM pg_database WHERE datname = 'keycloak'"
 )" != "1" ]]; then
-  kubectl exec -n "${PLATFORM_NAMESPACE}" deployment/platform-postgres -- \
+  kubectl exec -n "${PLATFORM_NAMESPACE}" statefulset/platform-postgres -- \
     psql -U postgres -c "CREATE DATABASE keycloak"
 fi
 
-# Apply Keycloak after both DBs exist so its first boot can connect immediately.
-apply_keycloak_manifest
-
+# Keycloak first-boots before the keycloak DB exists and crashloops on the JDBC
+# connection. Restart it now that the DB is present so --import-realm runs
+# against a reachable database. --import-realm only imports on the first
+# successful startup when a realm does not yet exist.
+echo "Restarting Keycloak now that its database exists..."
+kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/platform-keycloak >/dev/null
 wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
 
 # ---------------------------------------------------------------------------
 # Seed dnd-notes-keycloak-admin using the bootstrap-admin credentials.
 #
 # This Job runs once per cluster using the KC_BOOTSTRAP_ADMIN_USERNAME /
-# KC_BOOTSTRAP_ADMIN_PASSWORD bootstrap credentials from the
-# platform-keycloak-bootstrap-env Secret to create the dnd-notes-keycloak-admin
-# service-account client and bind its realm-management roles.
+# KC_BOOTSTRAP_ADMIN_PASSWORD bootstrap credentials from the keycloak-bootstrap-env
+# Secret to create the dnd-notes-keycloak-admin service-account client in the
+# dnd-notes tenant realm and bind its realm-management roles.
 #
 # On a fresh cluster --import-realm already created the client, so the Job is
 # a no-op. On an existing cluster where the realm was imported before this
@@ -364,7 +405,7 @@ wait_for_rollout "${PLATFORM_NAMESPACE}" platform-keycloak 240s
 # ---------------------------------------------------------------------------
 echo "Running keycloak-admin-bootstrap Job..."
 kubectl delete job -n "${PLATFORM_NAMESPACE}" keycloak-admin-bootstrap --ignore-not-found >/dev/null
-kubectl apply -f "${ROOT}/platform/k3d/keycloak-admin-bootstrap-job.yaml" >/dev/null
+kubectl apply -f "${ROOT}/scripts/k3d/manifests/keycloak-admin-bootstrap-job.yaml" >/dev/null
 if ! kubectl wait --for=condition=complete --timeout=300s \
   -n "${PLATFORM_NAMESPACE}" job/keycloak-admin-bootstrap; then
   kubectl logs -n "${PLATFORM_NAMESPACE}" job/keycloak-admin-bootstrap || true

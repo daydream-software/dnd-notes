@@ -36,3 +36,9 @@ data:
   CUSTOMER_PORTAL_KEYCLOAK_JWKS_URL: https://auth.example.com/realms/dnd-notes/protocol/openid-connect/certs
   CUSTOMER_PORTAL_KEYCLOAK_REALM: dnd-notes
   CUSTOMER_PORTAL_KEYCLOAK_CLIENT_ID: dnd-notes-customer-portal
+  # The ingress (Traefik in prod, nginx in k3d) sets X-Forwarded-For; Express
+  # must be told to trust it or express-rate-limit raises a ValidationError on
+  # every request. "1" trusts exactly one upstream proxy hop, preventing IP
+  # spoofing via a forged X-Forwarded-For header. Both environments sit behind a
+  # single ingress hop, so this default holds for both.
+  CONTROL_PLANE_TRUST_PROXY: "1"
