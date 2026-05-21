@@ -157,4 +157,44 @@ describe('TenantActivityStore', () => {
     assert.equal(upsertParams[0]?.[0], 'opaque-tenant-id-999', 'upsert param must be tenants.id')
     assert.notEqual(upsertParams[0]?.[0], 'some-subdomain', 'upsert must not use the subdomain as tenant_id')
   })
+
+  it('the upsert sets seen_by_activator=TRUE in both VALUES and DO UPDATE SET (#364 guard)', async () => {
+    // This is the hinge of the #364 fix: a backfilled tenant (seen_by_activator=FALSE)
+    // must flip to TRUE on the first real activator write. If the DO UPDATE SET branch
+    // is omitted, the tenant stays FALSE and is never eligible for scale-to-zero.
+    let capturedUpsertSql = ''
+
+    const db = makeDb((sql) => {
+      if (sql.includes('SELECT id FROM tenants')) {
+        return { rows: [{ id: 'tenant-id-abc' }] }
+      }
+      if (sql.includes('INSERT INTO tenant_activity')) {
+        capturedUpsertSql = sql
+      }
+      return { rows: [] }
+    })
+
+    const store = createTenantActivityStoreWithClient({ db })
+    await store.recordActivity('t-some-subdomain')
+
+    // Values clause must include the column
+    assert.ok(
+      capturedUpsertSql.includes('seen_by_activator'),
+      'upsert SQL must include seen_by_activator column',
+    )
+
+    // Must set TRUE in the INSERT VALUES list
+    assert.ok(
+      capturedUpsertSql.match(/VALUES\s*\([^)]*TRUE[^)]*\)/i) ||
+      capturedUpsertSql.match(/VALUES\s*\(\$1::text,\s*CURRENT_TIMESTAMP,\s*TRUE\)/i),
+      'VALUES clause must pass TRUE for seen_by_activator',
+    )
+
+    // Must set TRUE in the DO UPDATE SET branch (the hinge)
+    const doUpdatePart = capturedUpsertSql.split(/DO UPDATE/i)[1] ?? ''
+    assert.ok(
+      doUpdatePart.includes('seen_by_activator') && doUpdatePart.includes('TRUE'),
+      'DO UPDATE SET must also set seen_by_activator = TRUE (backfill-flip hinge)',
+    )
+  })
 })
