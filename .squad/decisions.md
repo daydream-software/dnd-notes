@@ -9082,3 +9082,47 @@ Prod VM hit `ImagePullBackOff` on all workloads after reboot on 2026-05-20. Inci
 - `project_epic_362_status.md` — corrected to reflect PR C (prod-deploy.yml) is unbuilt planned work, not blocking #362 acceptance.
 
 ---
+
+### 2026-05-21: Prod-Deploy Workflow Shipped to PR #377 (#374, epic #362 PR C)
+
+**Decided by:** Brand (feat/374-prod-deploy-workflow), Coordinator review gate  
+**Date:** 2026-05-21  
+**Type:** Operations — workflow convergence, self-hosted runner, promotion flow  
+**Issue:** #374 (deferred PR C of epic #362)  
+
+#### Decision: Option 2 — Workflow Converges to Already-Promoted Tag
+
+The manual deployment workflow (`prod-deploy.yml`) takes a `prod_tag` input and converges to a tag that already exists in GHCR. Promotion (`promote-prod-image.sh`) remains a deliberate, separate operator step. The workflow only deploys; it never promotes.
+
+**Rationale:** Cleaner separation of concerns. Promotion has its own clobber guard (#375 introduced this); mixing it into the workflow would duplicate that logic or lose it. Option 1 (workflow runs `promote-prod-image.sh` from a `source_sha` input) was rejected — operators would need to understand both inputs, and the promote script's behaviour would be hidden inside a workflow step.
+
+#### Workflow Design
+
+- `prod_tag` is required (not optional). Accepts `prod-*` tags only — protects against ImagePullBackOff regression by rejecting ephemeral `sha-*` tags.
+- GHCR pre-flight checks all 5 images (including dynamically referenced `dnd-notes` tenant image).
+- Ephemeral `kustomize edit set image` pin runs from `deploy/k3s/overlays/prod`.
+- Sentinel guard (`prod-pin-before-deploy`) validates the full rendered output before apply.
+- `kustomize edit set image` from overlay directory (kustomize v5 does not support `--kustomization-file` flag).
+- `environment: production` at job level with required reviewers.
+- Rollout targets: `dnd-notes-control-plane`, `dnd-notes-activator`, `customer-portal`, `operator-portal` (confirmed from render).
+- `workflow_dispatch` on self-hosted `[self-hosted, prod]` runner (prod Azure VM).
+
+#### Build & Cleanup
+
+- README updated: Runner setup (Section 1), end-to-end workflow flow (new Section 5b), deploy instructions updated to lead with workflow.
+- Sections 5b–5f in old numbering → 5c–5g.
+
+#### Process Note
+
+Minimize CodeRabbit triggers (hourly limit observed). Get PRs clean locally (Mikey + coordinator self-review) before opening so CodeRabbit passes on first review.
+
+#### Artifacts
+
+- **PR #377 (branch `feat/374-prod-deploy-workflow`):** Ready for merge. Mikey: APPROVE on all 5 security axes (runner trust, script injection, token/secrets, blast radius, #375 reconciliation). Coordinator pre-emptively addressed two non-blocking nits before opening (reduces CodeRabbit round-trips).
+- **Deploy story complete:** #375 (pipeline, merged) + #374 (convergence workflow, PR #377 open). VM recovery: promote → trigger #377 / manual apply → scale up.
+
+#### Memory
+
+- Epic #362 status: PRs A (#365) + B (#366) merged, PR C (#377, currently open) completes deploy automation.
+
+---
