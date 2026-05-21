@@ -69,7 +69,7 @@ The tenant runtime is Keycloak-only as of the Phase 2 exit (#318). All authentic
 
 - **`KEYCLOAK_JWKS_URL`** (optional)  
   Server-side override for the JWKS endpoint used to validate bearer tokens. Leave it unset when the runtime can reach `{KEYCLOAK_URL}/realms/{KEYCLOAK_REALM}/protocol/openid-connect/certs` directly.  
-  Example (k3d tenant pod): `http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes-dev/protocol/openid-connect/certs`
+  Example (k3d tenant pod): `http://platform-keycloak.dnd-notes-platform.svc.cluster.local:8080/realms/dnd-notes/protocol/openid-connect/certs`
 
 - **`KEYCLOAK_REALM`** (required)  
   Keycloak realm name for tenant users. The control-plane admin API uses its own `CONTROL_PLANE_KEYCLOAK_REALM` variable (see `apps/control-plane/README.md`).  

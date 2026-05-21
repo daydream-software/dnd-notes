@@ -109,7 +109,7 @@ curl -fsS \
   --data-urlencode 'client_id=dnd-notes-control-plane' \
   --data-urlencode 'username=site-admin@example.com' \
   --data-urlencode 'password=password' \
-  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes-dev/protocol/openid-connect/token
+  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes-workforce/protocol/openid-connect/token
 ```
 
 ### Get a tenant token
@@ -122,7 +122,7 @@ curl -fsS \
   --data-urlencode 'client_id=dnd-notes-tenant-app' \
   --data-urlencode 'username=owner@example.com' \
   --data-urlencode 'password=password' \
-  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes-dev/protocol/openid-connect/token
+  https://keycloak.127.0.0.1.nip.io/realms/dnd-notes/protocol/openid-connect/token
 ```
 
 ### Smoke lane

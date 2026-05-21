@@ -74,8 +74,7 @@ data:
             "http://localhost:5175"
           ],
           "attributes": {
-            "pkce.code.challenge.method": "S256",
-            "login_theme": "customer-login"
+            "pkce.code.challenge.method": "S256"
           }
         },
         {
