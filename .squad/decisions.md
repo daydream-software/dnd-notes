@@ -8945,3 +8945,72 @@ Coordinator gates Mikey before any CodeRabbit retrigger.
 - Mikey review: APPROVE (1 non-blocking flag re: #373 escape hatch).
 
 ---
+
+### 2026-05-21: Epic #362 CLOSED — Single Manifest Tree & Render-Parity Guard Live
+
+**Date:** 2026-05-21  
+**Status:** CLOSED (acceptance verified on main)  
+**Epic:** #362 (unify k3d + prod deploy)
+
+#### Acceptance Verified
+
+All acceptance criteria met on main:
+
+1. **Single manifest tree:** platform/ holds only keycloak-jwt lib (no overlays, no app overlays)
+2. **Render-parity CI guard live:** .github/workflows/ci.yml:63 — `render-parity` job validates manifest consistency across all environments
+3. **Unified secret provisioning:** #366 merged (prod + k3d use same secret-provisioning script)
+4. **Documentation updated:** docs/deploy/README.md reflects unified workflow
+
+#### Epic Status Correction
+
+Prior note (project_epic_362_status.md) recorded "PR C (workflow GH Actions converge prod, self-hosted runner) designed, not started." **This is incorrect.** PR C (render-parity CI + unified secret flow) is merged and live on main.
+
+**Commits:**
+- #365 (manifest tree unification): merged
+- #366 (secret provisioning unify): merged
+- #362 PR C (CI guard + docs): merged
+
+#### Weekend Deploy Critical Path
+
+- **#364:** Merged (PR #372 squash e570cc1) ✓
+- **#338:** Confirmed at fresh-apply (all 7 fixes present; acceptance = deploy confirms) — **KEPT OPEN** per user confirmation
+- **#362:** CLOSED ✓
+
+**Post-deploy follow-ups (non-blocking):**
+- #354–#361 (activator hardening)
+- #373 (operator escape hatch for never-seen tenants)
+
+#### Decision
+
+Close epic #362. Update project_epic_362_status.md memory note to reflect actual merged state.
+
+---
+
+### 2026-05-21: PR #372 Merged — pg-mem Test Skip Documented
+
+**Date:** 2026-05-21  
+**Status:** MERGED (squash e570cc1)  
+**PR:** #372 (#364 idle-scaler guard)
+
+#### CodeRabbit Review Triage
+
+CodeRabbit returned 2 nitpicks:
+
+1. **Pre-activator migration-0009 verification:** Brand added inline verification step to docs/deploy/README.md
+2. **Two-phase pre-0009 rewrite test:** Marked SKIPPED with inline reason — pg-mem does not reproduce real Postgres `ALTER ... ADD COLUMN ... NOT NULL DEFAULT` backfill semantics on pre-existing rows (pg-mem reads NULL, real Postgres reads FALSE as default). Invariant belongs in real-Postgres integration test, not pg-mem suite.
+
+#### Repo Cleanup & Verification
+
+Post-merge cleanup completed:
+
+- Removed 18 orphan worktrees
+- Deleted 45 merged branches
+- Deleted 3 stale `worktree-agent-*` refs (verified #318 and #362 work superseded by merged commits)
+- Preserved main + previews branches
+- Confirmed: repo now has 1 worktree (main) + 2 local branches
+
+#### Decision
+
+Document pg-mem skip reason inline in test. Do not backfill this test to pg-mem; defer to real-Postgres integration test suite if needed post-deploy.
+
+---
