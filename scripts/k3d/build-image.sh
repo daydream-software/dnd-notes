@@ -18,6 +18,15 @@ IMAGE_IMPORT_MODE="${K3D_IMAGE_IMPORT_MODE:-direct}"
 IMAGE_IMPORT_FALLBACK_MODE="${K3D_IMAGE_IMPORT_FALLBACK_MODE:-tools}"
 IMAGE_IMPORT_TIMEOUT_SECONDS="${K3D_IMAGE_IMPORT_TIMEOUT_SECONDS:-180}"
 
+# The image import + digest-verification helpers are shared with scripts/k3d/up.sh.
+# This script provides the source contract (CLUSTER_NAME, IMAGE_IMPORT_MODE,
+# IMAGE_IMPORT_FALLBACK_MODE, IMAGE_IMPORT_TIMEOUT_SECONDS, and a log function).
+log() {
+  echo "$*" >&2
+}
+# shellcheck source=scripts/k3d/lib/image-import.sh
+source "${ROOT}/scripts/k3d/lib/image-import.sh"
+
 # ---------------------------------------------------------------------------
 # Argument parsing
 # ---------------------------------------------------------------------------
@@ -110,37 +119,13 @@ docker build \
   "${ROOT}"
 
 # ---------------------------------------------------------------------------
-# Import into k3d
+# Import into k3d (build then verify-by-digest, retrying on the fallback mode).
+# The import + digest-verification logic lives in the shared lib sourced above.
+# Note: the CI host-image prune below runs AFTER this verify, so the host image
+# is still present here for `docker image inspect` to read its ID.
 # ---------------------------------------------------------------------------
-run_image_import() {
-  local mode="$1"
-  local status=0
-
-  echo "Importing ${IMAGE_REF} into k3d cluster ${CLUSTER_NAME} with mode ${mode}..."
-  if command -v timeout >/dev/null 2>&1; then
-    if timeout "${IMAGE_IMPORT_TIMEOUT_SECONDS}" \
-      k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"; then
-      return 0
-    fi
-    status=$?
-    return "${status}"
-  fi
-
-  if k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${IMAGE_REF}"; then
-    return 0
-  fi
-  status=$?
-  return "${status}"
-}
-
-if ! run_image_import "${IMAGE_IMPORT_MODE}"; then
-  if [[ "${IMAGE_IMPORT_FALLBACK_MODE}" == "${IMAGE_IMPORT_MODE}" ]]; then
-    echo "Image import failed with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured." >&2
-    exit 1
-  fi
-
-  echo "Image import with mode ${IMAGE_IMPORT_MODE} failed or timed out; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}." >&2
-  run_image_import "${IMAGE_IMPORT_FALLBACK_MODE}"
+if ! ensure_image_imported_into_cluster "${IMAGE_REF}"; then
+  exit 1
 fi
 
 # ---------------------------------------------------------------------------

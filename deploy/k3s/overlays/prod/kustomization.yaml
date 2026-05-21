@@ -6,13 +6,25 @@ kind: Kustomization
 # Prerequisites before applying:
 #   1. cert-manager v1.16.3 installed (see deploy/k3s/base/cert-manager/cluster-issuer.yaml)
 #   2. Cloudflare API token secret in cert-manager namespace
-#   3. platform-postgres-credentials secret in dnd-notes-platform namespace
-#   4. keycloak-bootstrap-env secret in dnd-notes-platform namespace
-#   5. dnd-notes-control-plane-secrets secret in dnd-notes-platform namespace
-#   6. Optional: dnd-notes-backup-config secret in dnd-notes-platform namespace (Issue #330)
+#   3-6. Platform Secrets in the dnd-notes-platform namespace. Provision all of
+#      them with the SAME shared script used for local k3d (epic #362):
+#        export PLATFORM_POSTGRES_USER=... PLATFORM_POSTGRES_PASSWORD=... PLATFORM_POSTGRES_DB=keycloak
+#        export KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=... KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=...
+#        export CONTROL_PLANE_DATABASE_URL=... TENANT_DATABASE_ADMIN_URL=... TENANT_DATABASE_RUNTIME_URL=...
+#        export ACTIVATOR_CONTROL_PLANE_DATABASE_URL=...   # defaults to CONTROL_PLANE_DATABASE_URL
+#        scripts/platform/provision-secrets.sh --mode prod --context dnd-notes-prod
+#      In --mode prod the script has NO defaults for real secrets — it fails
+#      loudly listing any unset required variable. It creates:
+#        - platform-postgres-credentials
+#        - keycloak-bootstrap-env
+#        - dnd-notes-control-plane-secrets   (KEYCLOAK_ADMIN_CLIENT_SECRET set after first deploy)
+#        - dnd-notes-activator-secrets        (#363: required for prod scale-to-zero)
+#      See docs/deploy/README.md section 3 for the full procedure (env files,
+#      umask, and the post-deploy KEYCLOAK_ADMIN_CLIENT_SECRET patch).
+#   7. Optional: dnd-notes-backup-config secret in dnd-notes-platform namespace (Issue #330)
 #      The control-plane pod boots without this secret (all backup env vars use optional: true).
 #      Backup functionality is disabled until this secret is applied.
-#   7. GHCR image pull secret if images are private:
+#   8. GHCR image pull secret if images are private:
 #        kubectl create secret docker-registry ghcr-pull-secret \
 #          -n dnd-notes-platform \
 #          --docker-server=ghcr.io \

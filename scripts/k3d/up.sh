@@ -126,43 +126,13 @@ image_exists_locally() {
   docker image inspect "$1" >/dev/null 2>&1
 }
 
-run_k3d_image_import() {
-  local image_ref="$1"
-  local mode="$2"
-  local status=0
-
-  log "Importing ${image_ref} into k3d cluster ${CLUSTER_NAME} with mode ${mode}..."
-  if command -v timeout >/dev/null 2>&1; then
-    if timeout "${IMAGE_IMPORT_TIMEOUT_SECONDS}" \
-      k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${image_ref}"; then
-      return 0
-    fi
-
-    status=$?
-    return "${status}"
-  fi
-
-  if k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${image_ref}"; then
-    return 0
-  fi
-
-  status=$?
-  return "${status}"
-}
-
-ensure_image_imported_into_cluster() {
-  local image_ref="$1"
-
-  if ! run_k3d_image_import "${image_ref}" "${IMAGE_IMPORT_MODE}"; then
-    if [[ "${IMAGE_IMPORT_FALLBACK_MODE}" == "${IMAGE_IMPORT_MODE}" ]]; then
-      log "Image import failed for ${image_ref} with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured."
-      return 1
-    fi
-
-    log "Image import of ${image_ref} with mode ${IMAGE_IMPORT_MODE} failed or timed out; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}."
-    run_k3d_image_import "${image_ref}" "${IMAGE_IMPORT_FALLBACK_MODE}"
-  fi
-}
+# The image import + digest-verification helpers (run_k3d_image_import,
+# image_present_in_cluster, import_and_verify_into_cluster,
+# ensure_image_imported_into_cluster) are shared with scripts/k3d/build-image.sh.
+# The source contract (CLUSTER_NAME, IMAGE_IMPORT_MODE, IMAGE_IMPORT_FALLBACK_MODE,
+# IMAGE_IMPORT_TIMEOUT_SECONDS, and a log function) is satisfied above.
+# shellcheck source=scripts/k3d/lib/image-import.sh
+source "${ROOT}/scripts/k3d/lib/image-import.sh"
 
 ensure_image_ready() {
   # Args: <image_name> <image_ref> <build_script> [extra args...]
@@ -638,23 +608,16 @@ log "All 5 images built and imported."
 # pick up freshly imported images on the fixed :k3d tag.
 run_visible kubectl apply -k "${ROOT}/deploy/k3s/overlays/k3d"
 
-# The app Deployments reference Secret names that are provisioned imperatively
-# here (secret-provisioning unification is a separate later PR). Create them
-# before waiting on the deployments.
-kubectl create secret generic dnd-notes-control-plane-secrets \
-  -n "${PLATFORM_NAMESPACE}" \
-  --from-literal=CONTROL_PLANE_ADMIN_TOKEN='local-admin-token' \
-  --from-literal=CONTROL_PLANE_DATABASE_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/control_plane" \
-  --from-literal=TENANT_DATABASE_ADMIN_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres" \
-  --from-literal=TENANT_DATABASE_RUNTIME_URL="postgresql://runtime-template:placeholder@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres?sslmode=disable" \
-  --dry-run=client -o yaml \
-  | kubectl apply -f - >/dev/null
-
-kubectl create secret generic dnd-notes-activator-secrets \
-  -n "${PLATFORM_NAMESPACE}" \
-  --from-literal=CONTROL_PLANE_DATABASE_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/control_plane" \
-  --dry-run=client -o yaml \
-  | kubectl apply -f - >/dev/null
+# The app Deployments reference Secret names provisioned by the shared, mode-aware
+# provisioner (scripts/platform/provision-secrets.sh) — the SAME mechanism prod
+# operators run (epic #362). In k3d mode it fills insecure local-only defaults
+# (in-cluster postgres URLs, local-admin-token) for any unset variable, producing
+# byte-identical secrets to the previous inline blocks. The current kube-context
+# is already pinned to k3d-${CLUSTER_NAME} above; the script inherits it and
+# never mutates the caller's context. Create these before waiting on the
+# deployments. (bootstrap.sh provisions the postgres/keycloak/realm-dev secrets.)
+bash "${ROOT}/scripts/platform/provision-secrets.sh" --mode k3d \
+  control-plane activator >/dev/null
 
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-activator

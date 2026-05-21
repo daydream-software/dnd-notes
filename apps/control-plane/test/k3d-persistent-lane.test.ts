@@ -17,11 +17,21 @@ const downScriptPath = fileURLToPath(
 const upScriptPath = fileURLToPath(
   new URL('../../../scripts/k3d/up.sh', import.meta.url),
 )
+const provisionSecretsScriptPath = fileURLToPath(
+  new URL('../../../scripts/platform/provision-secrets.sh', import.meta.url),
+)
+const imageImportLibPath = fileURLToPath(
+  new URL('../../../scripts/k3d/lib/image-import.sh', import.meta.url),
+)
 
 // Extract functions from the scripts by matching function body blocks
 const statusScript = readFileSync(statusScriptPath, 'utf8')
 const downScript = readFileSync(downScriptPath, 'utf8')
 const upScript = readFileSync(upScriptPath, 'utf8')
+const provisionSecretsScript = readFileSync(provisionSecretsScriptPath, 'utf8')
+// The image import + digest-verification helpers were hoisted out of up.sh into
+// a shared lib that both up.sh and build-image.sh source (epic #362).
+const imageImportLib = readFileSync(imageImportLibPath, 'utf8')
 
 const resetStateFnMatch = statusScript.match(/^reset_state\(\) \{\n[\s\S]*?^}/m)
 const readStateFnMatch = statusScript.match(/^read_state\(\) \{\n[\s\S]*?^}/m)
@@ -32,8 +42,9 @@ const removeStateArtifactsFnMatch = downScript.match(/^remove_state_artifacts\(\
 const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n[\s\S]*?^}/m)
 const buildTokenSnippetFnMatch = upScript.match(/^build_token_snippet\(\) \{\n[\s\S]*?^}/m)
 const stateModuleFnMatch = upScript.match(/^state_module\(\) \{\n[\s\S]*?^}/m)
-const runK3dImageImportFnMatch = upScript.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
-const ensureImageImportedFnMatch = upScript.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
+const runK3dImageImportFnMatch = imageImportLib.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
+const importAndVerifyFnMatch = imageImportLib.match(/^import_and_verify_into_cluster\(\) \{\n[\s\S]*?^}/m)
+const ensureImageImportedFnMatch = imageImportLib.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
 const ensureImageReadyFnMatch = upScript.match(/^ensure_image_ready\(\) \{\n[\s\S]*?^}/m)
 const writeStateFnMatch = upScript.match(/^write_state\(\) \{\n[\s\S]*?^}/m)
 
@@ -74,11 +85,15 @@ if (!stateModuleFnMatch) {
 }
 
 if (!runK3dImageImportFnMatch) {
-  throw new Error('Expected run_k3d_image_import() in scripts/k3d/up.sh')
+  throw new Error('Expected run_k3d_image_import() in scripts/k3d/lib/image-import.sh')
+}
+
+if (!importAndVerifyFnMatch) {
+  throw new Error('Expected import_and_verify_into_cluster() in scripts/k3d/lib/image-import.sh')
 }
 
 if (!ensureImageImportedFnMatch) {
-  throw new Error('Expected ensure_image_imported_into_cluster() in scripts/k3d/up.sh')
+  throw new Error('Expected ensure_image_imported_into_cluster() in scripts/k3d/lib/image-import.sh')
 }
 
 if (!ensureImageReadyFnMatch) {
@@ -683,6 +698,8 @@ printf 'k3d:%s\n' "$*" >> "$LOG_FILE"
     try {
       result = runBash(
         `${runK3dImageImportFnMatch[0]}
+image_present_in_cluster() { return 0; }
+${importAndVerifyFnMatch[0]}
 ${ensureImageImportedFnMatch[0]}
 ${ensureImageReadyFnMatch[0]}
 log() { :; }
@@ -729,11 +746,38 @@ describe('k3d up script guards', () => {
     )
   })
 
-  it('uses PLATFORM_NAMESPACE when constructing in-cluster Postgres service URLs', () => {
+  it('delegates secret provisioning to the shared provisioner instead of inlining kubectl create secret', () => {
+    // The control-plane + activator Secrets are now created by the shared,
+    // mode-aware provisioner (epic #362). up.sh must call it (in k3d mode) and
+    // must NOT carry the old inline `kubectl create secret generic
+    // dnd-notes-*-secrets` blocks.
     assert.match(
       upScript,
+      /scripts\/platform\/provision-secrets\.sh" --mode k3d[\s\S]*?control-plane activator/,
+    )
+    assert.doesNotMatch(
+      upScript,
+      /kubectl create secret generic dnd-notes-control-plane-secrets/,
+    )
+    assert.doesNotMatch(
+      upScript,
+      /kubectl create secret generic dnd-notes-activator-secrets/,
+    )
+  })
+
+  it('constructs in-cluster Postgres service URLs via PLATFORM_NAMESPACE in the shared provisioner', () => {
+    // The in-cluster Postgres service URLs moved from up.sh into the shared
+    // provisioner. Wherever they live, they must reference ${PLATFORM_NAMESPACE}
+    // rather than hardcoding the namespace literal.
+    assert.match(
+      provisionSecretsScript,
       /platform-postgres\.\$\{PLATFORM_NAMESPACE\}\.svc\.cluster\.local/g,
     )
+    assert.doesNotMatch(
+      provisionSecretsScript,
+      /platform-postgres\.dnd-notes-platform\.svc\.cluster\.local/,
+    )
+    // up.sh no longer constructs these URLs at all.
     assert.doesNotMatch(
       upScript,
       /platform-postgres\.dnd-notes-platform\.svc\.cluster\.local/,

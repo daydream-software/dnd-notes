@@ -6,9 +6,14 @@ metadata:
   annotations:
     dnd-notes.dev/warning: >
       Development-only realm seed for local k3d. Mirrors the prod tenant realm
-      (deploy/k3s/base/keycloak/realm-config.yaml) but with nip.io redirect URIs,
-      a seeded dev owner user, and an explicit dnd-notes-keycloak-admin client
-      secret. Never reuse these credentials outside local k3d.
+      (deploy/k3s/base/keycloak/realm-config.yaml) but with nip.io redirect URIs
+      and a seeded dev owner user. Sensitive values (dev user passwords + the
+      dnd-notes-keycloak-admin client secret) are NOT committed: they are
+      ${REALM_DEV_*} placeholders substituted at realm-import time from the
+      keycloak-realm-dev-secrets Secret (created by
+      scripts/platform/provision-secrets.sh --mode k3d realm-dev and injected as
+      container env via the k3d keycloak patch). These are local-only dev creds;
+      never reuse them outside local k3d.
 data:
   dnd-notes-realm.json: |
     {
@@ -34,7 +39,7 @@ data:
           "credentials": [
             {
               "type": "password",
-              "value": "password",
+              "value": "${REALM_DEV_OWNER_PASSWORD}",
               "temporary": false
             }
           ]
@@ -86,7 +91,7 @@ data:
           "directAccessGrantsEnabled": false,
           "serviceAccountsEnabled": true,
           "clientAuthenticatorType": "client-secret",
-          "secret": "dev-admin-client-secret"
+          "secret": "${REALM_DEV_ADMIN_CLIENT_SECRET}"
         }
       ]
     }
@@ -126,7 +131,7 @@ data:
           "credentials": [
             {
               "type": "password",
-              "value": "password",
+              "value": "${REALM_DEV_OPS_PASSWORD}",
               "temporary": false
             }
           ],
@@ -144,7 +149,7 @@ data:
           "credentials": [
             {
               "type": "password",
-              "value": "password",
+              "value": "${REALM_DEV_SITE_ADMIN_PASSWORD}",
               "temporary": false
             }
           ],

@@ -214,6 +214,41 @@ Estimated time: ~10 min.
 
 All secrets must exist in the cluster before applying the kustomization. The control-plane pod will not start until its secret is present. Keycloak and Postgres will not start without theirs.
 
+### Provision everything with the shared script (recommended)
+
+`scripts/platform/provision-secrets.sh` is the single, mode-aware provisioner used for **both** local k3d and prod (epic #362). It creates every platform Secret idempotently (`kubectl create secret ... --dry-run=client -o yaml | kubectl apply -f -`) and never echoes secret values. In `--mode prod` it has **no defaults for real secrets** — it fails loudly listing any unset required variable, so a half-blank Secret can never reach the cluster.
+
+Export the real values (from a secured source — a sourced env file, your secrets manager, etc.), then run the script once. Use `--context dnd-notes-prod` so the script targets the prod cluster without mutating your current kube-context:
+
+```bash
+# Export real values from a secured source. Do NOT paste secrets into shell
+# history; prefer `set -a; source /path/to/secured.env; set +a`.
+export PLATFORM_POSTGRES_USER=postgres
+export PLATFORM_POSTGRES_PASSWORD='<strong-random-password>'
+export PLATFORM_POSTGRES_DB=keycloak
+export KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=admin
+export KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='<strong-random-password>'
+export CONTROL_PLANE_DATABASE_URL='postgresql://postgres:<password>@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/control_plane'
+export TENANT_DATABASE_ADMIN_URL='postgresql://postgres:<password>@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres'
+export TENANT_DATABASE_RUNTIME_URL='postgresql://postgres:<password>@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/postgres'
+# Activator DB URL (#363). Defaults to CONTROL_PLANE_DATABASE_URL when the
+# activator shares the control-plane registry DB, so this export is optional:
+export ACTIVATOR_CONTROL_PLANE_DATABASE_URL="$CONTROL_PLANE_DATABASE_URL"
+
+# KEYCLOAK_ADMIN_CLIENT_ID/_SECRET are optional here: the secret is auto-generated
+# by Keycloak on first realm import and is unknown before the first deploy. Leave
+# them unset now and patch the value in after deploy (Section 5d), or export a
+# placeholder you will overwrite.
+
+scripts/platform/provision-secrets.sh --mode prod --context dnd-notes-prod
+```
+
+This creates `platform-postgres-credentials`, `keycloak-bootstrap-env`, `dnd-notes-control-plane-secrets`, and `dnd-notes-activator-secrets` in one pass. The `keycloak-realm-dev-secrets` Secret is k3d-only (it feeds the local realm seed's `${REALM_DEV_*}` placeholders) and is never created in prod — the prod realm seed carries no committed secrets.
+
+The script does not create the namespace, the Cloudflare token, the backup config, or the GHCR pull secret — handle those separately (3a, 2e, 3e, prerequisite #8). After the script runs, skip to Section 4.
+
+> The per-secret subsections below (3b–3e) document the same Secrets created by hand with `--from-env-file`. Use them only if you need to create or rotate a single Secret without running the full script.
+
 ### 3a. Create the namespace
 
 The prod overlay targets `dnd-notes-platform`. Create it if it does not already exist:
@@ -344,6 +379,30 @@ EOF
     | kubectl --context dnd-notes-prod apply -f -
 )
 ```
+
+### 3f. Activator secrets
+
+Required for prod scale-to-zero (#363). The activator wakes idle tenants and reads/writes `tenant_activity` in the control-plane registry database, so it needs `CONTROL_PLANE_DATABASE_URL`. Without this Secret a prod deploy has an activator that cannot boot — historically it was created only for local k3d. The shared script (above) provisions it automatically; the manual equivalent:
+
+```bash
+(
+  umask 077
+  ENV_FILE=$(mktemp)
+  trap 'rm -f "$ENV_FILE"' EXIT
+
+  cat > "$ENV_FILE" <<'EOF'
+CONTROL_PLANE_DATABASE_URL=postgresql://postgres:<postgres-password>@platform-postgres.dnd-notes-platform.svc.cluster.local:5432/control_plane
+EOF
+
+  kubectl --context dnd-notes-prod create secret generic dnd-notes-activator-secrets \
+    -n dnd-notes-platform \
+    --from-env-file="$ENV_FILE" \
+    --dry-run=client -o yaml \
+    | kubectl --context dnd-notes-prod apply -f -
+)
+```
+
+This URL is normally the same `control_plane` connection string used by `dnd-notes-control-plane-secrets` (Section 3d).
 
 ---
 

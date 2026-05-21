@@ -272,27 +272,20 @@ wait_for_dev_ca_issuer() {
 # reference these names; without them postgres + keycloak would sit in
 # CreateContainerConfigError.
 create_platform_secrets() {
-  echo "Creating canonical platform secrets (postgres + keycloak bootstrap)..."
-  # Insecure local-only defaults. Override via env for a less predictable local
-  # cluster; full secret-provisioning unification lands in a later PR.
-  local pg_user="${PLATFORM_POSTGRES_USER:-postgres}"
-  local pg_password="${PLATFORM_POSTGRES_PASSWORD:-postgres}"
-  local pg_db="${PLATFORM_POSTGRES_DB:-postgres}"
-  local kc_admin_user="${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}"
-  local kc_admin_password="${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
-
-  kubectl -n "${PLATFORM_NAMESPACE}" create secret generic platform-postgres-credentials \
-    --from-literal=POSTGRES_USER="${pg_user}" \
-    --from-literal=POSTGRES_PASSWORD="${pg_password}" \
-    --from-literal=POSTGRES_DB="${pg_db}" \
-    --dry-run=client -o yaml \
-    | kubectl apply -f -
-
-  kubectl -n "${PLATFORM_NAMESPACE}" create secret generic keycloak-bootstrap-env \
-    --from-literal=KC_BOOTSTRAP_ADMIN_USERNAME="${kc_admin_user}" \
-    --from-literal=KC_BOOTSTRAP_ADMIN_PASSWORD="${kc_admin_password}" \
-    --dry-run=client -o yaml \
-    | kubectl apply -f -
+  echo "Creating canonical platform secrets (postgres + keycloak bootstrap + realm dev creds)..."
+  # Delegated to the shared, mode-aware provisioner (scripts/platform/provision-secrets.sh)
+  # so k3d and prod stand up secrets via the SAME mechanism (epic #362). In k3d
+  # mode the script fills insecure local-only defaults
+  # (POSTGRES_*=postgres, KC_BOOTSTRAP_ADMIN_*=admin, REALM_DEV_*=password/dev-admin-client-secret)
+  # for any unset variable. Override via env for a less predictable local cluster.
+  #
+  # bootstrap.sh stands up infra (postgres + keycloak), so it provisions the
+  # postgres, keycloak-bootstrap, and realm-dev secrets here. up.sh provisions
+  # the app secrets (control-plane + activator) once images are built. The
+  # current kube-context is already pinned to k3d-${CLUSTER_NAME} above, so the
+  # shared script inherits it (it never mutates the caller's context).
+  bash "${ROOT}/scripts/platform/provision-secrets.sh" --mode k3d \
+    postgres keycloak-bootstrap realm-dev
 }
 
 if [[ "${1:-}" == "--help" ]]; then

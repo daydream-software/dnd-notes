@@ -10,10 +10,15 @@ kind: Kustomization
 #   1. k3d cluster (traefik disabled, ports 80/443 mapped)
 #   2. ingress-nginx controller (scripts/k3d/manifests/ingress-nginx-controller-*.yaml)
 #   3. cert-manager + the mkcert-ca TLS secret (feeds the dev-ca ClusterIssuer here)
-#   4. canonical secrets created imperatively (out of scope for unification here):
-#        platform-postgres-credentials  (POSTGRES_USER/PASSWORD/DB = postgres)
-#        keycloak-bootstrap-env         (KC_BOOTSTRAP_ADMIN_USERNAME/PASSWORD = admin)
-#        dnd-notes-control-plane-secrets / dnd-notes-activator-secrets
+#   4. platform secrets, created via the shared mode-aware provisioner
+#      scripts/platform/provision-secrets.sh --mode k3d (the SAME mechanism prod
+#      operators run — epic #362). bootstrap.sh provisions the infra secrets
+#      (platform-postgres-credentials, keycloak-bootstrap-env, and the k3d-only
+#      keycloak-realm-dev-secrets that feeds the realm seed's ${REALM_DEV_*}
+#      placeholders); up.sh provisions the app secrets
+#      (dnd-notes-control-plane-secrets / dnd-notes-activator-secrets) once images
+#      are built. In k3d mode the script fills insecure local-only defaults
+#      (POSTGRES_*=postgres, KC_BOOTSTRAP_ADMIN_*=admin, REALM_DEV_*=password/...).
 #   5. the control_plane + keycloak databases (created via the postgres pod)
 #
 # Guardrail (see scripts/platform/validate-render-parity.sh): overlays express
