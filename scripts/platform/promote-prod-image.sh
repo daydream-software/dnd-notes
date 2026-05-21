@@ -27,7 +27,7 @@
 # credentials. All operations are idempotent — re-running with the same
 # arguments is safe.
 
-set -Euo pipefail
+set -Eeuo pipefail
 
 # Bash 4.4+ optional hardening: inherit errexit into subshells / command
 # substitutions. Guarded so Bash 3.2 (macOS default) still runs the script.
