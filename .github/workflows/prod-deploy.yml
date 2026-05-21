@@ -1,0 +1,207 @@
+name: Deploy to production
+
+# Trigger: manual only. A self-hosted runner must never execute untrusted fork
+# code, so no push / pull_request triggers.
+#
+# Flow:
+#   1. Operator promotes a sha-* build to a protected prod-* tag:
+#        scripts/platform/promote-prod-image.sh sha-<commit>
+#   2. Operator triggers this workflow with the prod_tag input (e.g. prod-20260521).
+#   3. Workflow validates the tag exists in GHCR for all 5 images, pins the
+#      overlay ephemerally (never committed), applies, and waits for rollout.
+#
+# Promotion (step 1) is a deliberate, separate operator step.
+# This workflow only converges to a tag that already exists.
+# See docs/deploy/README.md §4 and §7 for the full procedure.
+
+on:
+  workflow_dispatch:
+    inputs:
+      prod_tag:
+        description: |
+          Protected prod-* tag to deploy (e.g. prod-20260521). Must have been
+          created by scripts/platform/promote-prod-image.sh. The workflow
+          validates that this tag exists in GHCR for all 5 images before
+          touching the cluster.
+        required: true
+        type: string
+      dry_run:
+        description: |
+          When true, runs kubectl apply with --dry-run=server (server-side
+          validation only) and skips rollout-status waits. Useful for
+          previewing the rendered manifest without mutating the cluster.
+        required: false
+        type: boolean
+        default: false
+
+# Serialize prod deploys. Cancelling a mid-rollout deploy is worse than
+# queueing the next one.
+concurrency:
+  group: prod-deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  deploy:
+    runs-on: [self-hosted, prod]
+    environment: production
+    timeout-minutes: 30
+
+    # Runner setup requirement:
+    # The self-hosted runner must run on the prod VM as a user whose kubeconfig
+    # has a context named dnd-notes-prod pointing at https://127.0.0.1:6443 (or
+    # the VM's public IP). See docs/deploy/README.md §2c for the merge procedure.
+    # A minimal runner-setup check: `kubectl --context dnd-notes-prod get nodes`.
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Validate prod_tag format
+        env:
+          PROD_TAG: ${{ inputs.prod_tag }}
+        run: |
+          # Must match prod-YYYYMMDD or prod-YYYYMMDD-HHMMSSz
+          if ! echo "${PROD_TAG}" | grep -qE '^prod-[0-9]{8}(-[0-9]{6}z)?$'; then
+            echo "error: prod_tag '${PROD_TAG}' does not match the required format."
+            echo "  Expected: prod-YYYYMMDD  or  prod-YYYYMMDD-HHMMSSz"
+            echo "  Use scripts/platform/promote-prod-image.sh to create a valid tag."
+            exit 1
+          fi
+          echo "Tag format valid: ${PROD_TAG}"
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify all 5 images exist in GHCR
+        env:
+          PROD_TAG: ${{ inputs.prod_tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Check all 5 images: the 4 pinned in the overlay plus the tenant image
+          # referenced dynamically by the control-plane ConfigMap. A half-promote
+          # (e.g. promote-prod-image.sh interrupted) is caught here before the
+          # cluster ever sees it.
+          IMAGES=(
+            "dnd-notes"
+            "dnd-notes-control-plane"
+            "dnd-notes-customer-portal"
+            "dnd-notes-operator-portal"
+            "dnd-notes-activator"
+          )
+          REGISTRY="ghcr.io/daydream-software"
+          MISSING=()
+
+          echo "Verifying GHCR images for tag: ${PROD_TAG}"
+          for IMG in "${IMAGES[@]}"; do
+            REF="${REGISTRY}/${IMG}:${PROD_TAG}"
+            if ! docker buildx imagetools inspect "${REF}" > /dev/null 2>&1; then
+              MISSING+=("${REF}")
+            else
+              echo "  OK: ${REF}"
+            fi
+          done
+
+          if [[ ${#MISSING[@]} -gt 0 ]]; then
+            echo ""
+            echo "error: the following images were not found in GHCR:"
+            for M in "${MISSING[@]}"; do
+              echo "  ${M}"
+            done
+            echo ""
+            echo "Run scripts/platform/promote-prod-image.sh ${PROD_TAG%%-*}-... first,"
+            echo "or check that promote-prod-image.sh completed without error."
+            exit 1
+          fi
+          echo "All 5 images verified."
+
+      - name: Pin overlay to prod_tag (ephemeral — runner workspace only)
+        env:
+          PROD_TAG: ${{ inputs.prod_tag }}
+        run: |
+          # Ephemeral kustomize edit: modifies the runner's checkout only.
+          # This change is never staged or committed.
+          # kustomize edit set image operates on the current directory, so cd first.
+          echo "Pinning overlay to: ${PROD_TAG}"
+          (
+            cd deploy/k3s/overlays/prod
+            kustomize edit set image \
+              "ghcr.io/daydream-software/dnd-notes-control-plane=ghcr.io/daydream-software/dnd-notes-control-plane:${PROD_TAG}" \
+              "ghcr.io/daydream-software/dnd-notes-customer-portal=ghcr.io/daydream-software/dnd-notes-customer-portal:${PROD_TAG}" \
+              "ghcr.io/daydream-software/dnd-notes-operator-portal=ghcr.io/daydream-software/dnd-notes-operator-portal:${PROD_TAG}" \
+              "ghcr.io/daydream-software/dnd-notes-activator=ghcr.io/daydream-software/dnd-notes-activator:${PROD_TAG}"
+          )
+
+          echo "--- overlay images after pin ---"
+          grep "newTag:" deploy/k3s/overlays/prod/kustomization.yaml
+
+      - name: Guard against sentinel tag reaching the cluster
+        run: |
+          # Fail fast if prod-pin-before-deploy still appears anywhere in the
+          # rendered output. This catches: wrong input format, kustomize edit
+          # matching fewer entries than expected, or any other patching failure.
+          if kubectl kustomize deploy/k3s/overlays/prod \
+               | grep -q 'prod-pin-before-deploy'; then
+            echo ""
+            echo "error: the sentinel tag 'prod-pin-before-deploy' is still present"
+            echo "       in the rendered overlay. The prod_tag pin did not apply"
+            echo "       to all images."
+            echo ""
+            echo "  Supplied prod_tag: ${{ inputs.prod_tag }}"
+            echo "  Check that kustomize is installed and the overlay image names"
+            echo "  match the names in deploy/k3s/overlays/prod/kustomization.yaml."
+            exit 1
+          fi
+          echo "Sentinel guard passed: no prod-pin-before-deploy in rendered output."
+
+      - name: Apply prod overlay
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${DRY_RUN}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run=server"
+            echo "Dry-run mode: server-side validation only, no cluster mutation."
+          fi
+          kubectl --context dnd-notes-prod \
+            apply -k deploy/k3s/overlays/prod \
+            ${DRY_RUN_FLAG}
+
+      - name: Wait for control-plane rollout
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          kubectl --context dnd-notes-prod \
+            rollout status deployment/dnd-notes-control-plane \
+            -n dnd-notes-platform \
+            --timeout=10m
+
+      - name: Wait for activator rollout
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          kubectl --context dnd-notes-prod \
+            rollout status deployment/dnd-notes-activator \
+            -n dnd-notes-platform \
+            --timeout=10m
+
+      - name: Wait for customer-portal rollout
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          kubectl --context dnd-notes-prod \
+            rollout status deployment/customer-portal \
+            -n dnd-notes-platform \
+            --timeout=10m
+
+      - name: Wait for operator-portal rollout
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          kubectl --context dnd-notes-prod \
+            rollout status deployment/operator-portal \
+            -n dnd-notes-platform \
+            --timeout=10m
