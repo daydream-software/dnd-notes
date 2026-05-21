@@ -36,6 +36,7 @@ const SHA_KEEP = 10;
 const PROD_KEEP = 3;
 
 // Allowed package names — whitelist to prevent command injection via argv.
+// Keep in sync with the build/push steps in .github/workflows/deployment-artifacts.yml.
 const ALLOWED_PACKAGES = new Set([
   'dnd-notes',
   'dnd-notes-control-plane',

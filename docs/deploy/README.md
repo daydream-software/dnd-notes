@@ -414,7 +414,8 @@ Estimated time: ~5 min.
 ### Tag convention
 
 Prod images are pinned to **`prod-*` tags** (e.g. `prod-20260521`). These tags are
-excluded from the `sha-*` retention cleanup in CI and will not be deleted by build
+protected by the tag-aware retention script
+(`scripts/platform/cleanup-ghcr-versions.mjs`) and will not be deleted by build
 churn — no amount of merges to main can remove the image prod is running. The
 `sha-*` tags are for CI builds only; never pin prod directly to a `sha-*` tag.
 
@@ -1112,12 +1113,13 @@ If you need to reverse a tenant's routing away from the activator, either:
 Two structural gaps closed:
 
 - **R1 — prod tag protection**: prod overlay now pins `prod-*` tags instead of
-  `sha-*` tags. The `sha-*` CI cleanup excludes `prod-*` from its candidate pool
-  via `ignore-versions: '^prod-.*$'` on every retention step, so build churn can
-  no longer delete the image prod is running. A bounded cleanup pass keeps at most
-  3 `prod-*` versions per image. The promotion script
-  `scripts/platform/promote-prod-image.sh` retags a chosen `sha-*` build to
-  `prod-YYYYMMDD` for all 5 images without rebuilding.
+  `sha-*` tags. The tag-aware retention script
+  (`scripts/platform/cleanup-ghcr-versions.mjs`) inspects `metadata.container.tags[]`
+  directly via the GHCR API: it keeps the 10 newest `sha-*/latest` versions and always
+  keeps `prod-*` versions (bounded to 3). A version carrying both `sha-*` and `prod-*`
+  counts as prod-only, so build churn can never delete the image prod is running. The
+  promotion script `scripts/platform/promote-prod-image.sh` retags a chosen `sha-*`
+  build to `prod-YYYYMMDD` for all 5 images without rebuilding.
 - **R2 — activator image**: `dnd-notes-activator` is now built and pushed by the
   `deployment-artifacts.yml` CI workflow on every merge to main. The prod overlay
   pins it alongside the other four images. This unblocks the scale-to-zero prod
