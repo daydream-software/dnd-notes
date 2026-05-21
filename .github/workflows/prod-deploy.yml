@@ -48,7 +48,7 @@ jobs:
   deploy:
     runs-on: [self-hosted, prod]
     environment: production
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     # Runner setup requirement:
     # The self-hosted runner must run on the prod VM as a user whose kubeconfig

@@ -579,9 +579,10 @@ kubectl kustomize deploy/k3s/overlays/prod \
 
 ### 5b. GitHub Actions workflow (routine deploys)
 
-`.github/workflows/prod-deploy.yml` is the `k3d:up` equivalent for prod — it promotes the
-right images, pins the overlay ephemerally, and waits for rollout. Use it for every deploy
-after the initial one.
+`.github/workflows/prod-deploy.yml` is the `k3d:up` equivalent for prod — it converges the
+cluster to an already-promoted `prod-*` tag, pinning the overlay ephemerally and waiting for
+rollout. **Promotion is a separate operator step** (step 1 below); this workflow only reads
+a tag that already exists in GHCR. Use it for every deploy after the initial one.
 
 **End-to-end flow:**
 
