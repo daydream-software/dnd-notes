@@ -59,6 +59,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+        with:
+          persist-credentials: false
 
       - name: Validate prod_tag format
         env:
@@ -115,8 +117,9 @@ jobs:
               echo "  ${M}"
             done
             echo ""
-            echo "Run scripts/platform/promote-prod-image.sh ${PROD_TAG%%-*}-... first,"
-            echo "or check that promote-prod-image.sh completed without error."
+            echo "Run scripts/platform/promote-prod-image.sh sha-<commit> first to create"
+            echo "the '${PROD_TAG}' tag, or check that a previous promote run completed"
+            echo "without error."
             exit 1
           fi
           echo "All 5 images verified."
