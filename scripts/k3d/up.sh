@@ -638,23 +638,16 @@ log "All 5 images built and imported."
 # pick up freshly imported images on the fixed :k3d tag.
 run_visible kubectl apply -k "${ROOT}/deploy/k3s/overlays/k3d"
 
-# The app Deployments reference Secret names that are provisioned imperatively
-# here (secret-provisioning unification is a separate later PR). Create them
-# before waiting on the deployments.
-kubectl create secret generic dnd-notes-control-plane-secrets \
-  -n "${PLATFORM_NAMESPACE}" \
-  --from-literal=CONTROL_PLANE_ADMIN_TOKEN='local-admin-token' \
-  --from-literal=CONTROL_PLANE_DATABASE_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/control_plane" \
-  --from-literal=TENANT_DATABASE_ADMIN_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres" \
-  --from-literal=TENANT_DATABASE_RUNTIME_URL="postgresql://runtime-template:placeholder@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/postgres?sslmode=disable" \
-  --dry-run=client -o yaml \
-  | kubectl apply -f - >/dev/null
-
-kubectl create secret generic dnd-notes-activator-secrets \
-  -n "${PLATFORM_NAMESPACE}" \
-  --from-literal=CONTROL_PLANE_DATABASE_URL="postgresql://postgres:postgres@platform-postgres.${PLATFORM_NAMESPACE}.svc.cluster.local:5432/control_plane" \
-  --dry-run=client -o yaml \
-  | kubectl apply -f - >/dev/null
+# The app Deployments reference Secret names provisioned by the shared, mode-aware
+# provisioner (scripts/platform/provision-secrets.sh) — the SAME mechanism prod
+# operators run (epic #362). In k3d mode it fills insecure local-only defaults
+# (in-cluster postgres URLs, local-admin-token) for any unset variable, producing
+# byte-identical secrets to the previous inline blocks. The current kube-context
+# is already pinned to k3d-${CLUSTER_NAME} above; the script inherits it and
+# never mutates the caller's context. Create these before waiting on the
+# deployments. (bootstrap.sh provisions the postgres/keycloak/realm-dev secrets.)
+bash "${ROOT}/scripts/platform/provision-secrets.sh" --mode k3d \
+  control-plane activator >/dev/null
 
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-control-plane
 run_visible kubectl rollout restart -n "${PLATFORM_NAMESPACE}" deployment/dnd-notes-activator

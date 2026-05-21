@@ -17,11 +17,15 @@ const downScriptPath = fileURLToPath(
 const upScriptPath = fileURLToPath(
   new URL('../../../scripts/k3d/up.sh', import.meta.url),
 )
+const provisionSecretsScriptPath = fileURLToPath(
+  new URL('../../../scripts/platform/provision-secrets.sh', import.meta.url),
+)
 
 // Extract functions from the scripts by matching function body blocks
 const statusScript = readFileSync(statusScriptPath, 'utf8')
 const downScript = readFileSync(downScriptPath, 'utf8')
 const upScript = readFileSync(upScriptPath, 'utf8')
+const provisionSecretsScript = readFileSync(provisionSecretsScriptPath, 'utf8')
 
 const resetStateFnMatch = statusScript.match(/^reset_state\(\) \{\n[\s\S]*?^}/m)
 const readStateFnMatch = statusScript.match(/^read_state\(\) \{\n[\s\S]*?^}/m)
@@ -729,11 +733,38 @@ describe('k3d up script guards', () => {
     )
   })
 
-  it('uses PLATFORM_NAMESPACE when constructing in-cluster Postgres service URLs', () => {
+  it('delegates secret provisioning to the shared provisioner instead of inlining kubectl create secret', () => {
+    // The control-plane + activator Secrets are now created by the shared,
+    // mode-aware provisioner (epic #362). up.sh must call it (in k3d mode) and
+    // must NOT carry the old inline `kubectl create secret generic
+    // dnd-notes-*-secrets` blocks.
     assert.match(
       upScript,
+      /scripts\/platform\/provision-secrets\.sh" --mode k3d[\s\S]*?control-plane activator/,
+    )
+    assert.doesNotMatch(
+      upScript,
+      /kubectl create secret generic dnd-notes-control-plane-secrets/,
+    )
+    assert.doesNotMatch(
+      upScript,
+      /kubectl create secret generic dnd-notes-activator-secrets/,
+    )
+  })
+
+  it('constructs in-cluster Postgres service URLs via PLATFORM_NAMESPACE in the shared provisioner', () => {
+    // The in-cluster Postgres service URLs moved from up.sh into the shared
+    // provisioner. Wherever they live, they must reference ${PLATFORM_NAMESPACE}
+    // rather than hardcoding the namespace literal.
+    assert.match(
+      provisionSecretsScript,
       /platform-postgres\.\$\{PLATFORM_NAMESPACE\}\.svc\.cluster\.local/g,
     )
+    assert.doesNotMatch(
+      provisionSecretsScript,
+      /platform-postgres\.dnd-notes-platform\.svc\.cluster\.local/,
+    )
+    // up.sh no longer constructs these URLs at all.
     assert.doesNotMatch(
       upScript,
       /platform-postgres\.dnd-notes-platform\.svc\.cluster\.local/,
