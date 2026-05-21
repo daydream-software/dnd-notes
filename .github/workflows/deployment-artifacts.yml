@@ -8,11 +8,13 @@ on:
       - '.github/workflows/deployment-artifacts.yml'
       - '.dockerignore'
       - 'Dockerfile'
+      - 'docker/activator/**'
       - 'docker/control-plane/**'
       - 'docker/portal/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
+      - 'apps/activator/**'
       - 'apps/api/**'
       - 'apps/control-plane/**'
       - 'apps/web/**'
@@ -33,11 +35,13 @@ on:
       - '.github/workflows/deployment-artifacts.yml'
       - '.dockerignore'
       - 'Dockerfile'
+      - 'docker/activator/**'
       - 'docker/control-plane/**'
       - 'docker/portal/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
+      - 'apps/activator/**'
       - 'apps/api/**'
       - 'apps/control-plane/**'
       - 'apps/web/**'
@@ -111,6 +115,9 @@ jobs:
           --tag dnd-notes-operator-portal:test
           .
 
+      - name: Build activator image
+        run: docker build --file docker/activator/Dockerfile --tag dnd-notes-activator:test .
+
   push:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -183,12 +190,35 @@ jobs:
           docker push "${IMAGE_PREFIX}/dnd-notes-operator-portal:sha-${SHORT_SHA}"
           docker push "${IMAGE_PREFIX}/dnd-notes-operator-portal:latest"
 
+      # --- activator ---
+      - name: Build and push activator image
+        run: |
+          docker build \
+            --file docker/activator/Dockerfile \
+            --tag "${IMAGE_PREFIX}/dnd-notes-activator:sha-${SHORT_SHA}" \
+            --tag "${IMAGE_PREFIX}/dnd-notes-activator:latest" \
+            .
+          docker push "${IMAGE_PREFIX}/dnd-notes-activator:sha-${SHORT_SHA}"
+          docker push "${IMAGE_PREFIX}/dnd-notes-activator:latest"
+
       # --- retention cleanup: keep latest + 10 most recent sha-* per image ---
       # Order matters: untagged layers are purged first so that they are not
       # counted toward the min-versions-to-keep quota. If the tagged cap ran
       # first, the action would count untagged versions as "kept" slots, then
       # the untagged pass would remove them — leaving fewer than 10 tagged
       # rollback images. Untagged-first guarantees exactly 10 sha-* tags remain.
+      #
+      # R1 protection: ignore-versions is set on every tagged-cleanup step to
+      # '^prod-.*$'. The action uses JavaScript RegExp() so the pattern is a
+      # native JS regex. Versions matched by ignore-versions are excluded from
+      # the candidate pool before min-versions-to-keep is applied, so prod-*
+      # tags never consume slots in the sha-* rollback window.
+      #
+      # A separate bounded-cleanup pass (prod-* only, keep 3) runs after the
+      # main pass for each image. ignore-versions '^(?!prod-).*$' is a negative
+      # lookahead that excludes every version that is NOT prod-*, leaving only
+      # prod-* in the candidate pool. Verified: the action passes ignore-versions
+      # directly to JavaScript's RegExp() constructor, which supports lookahead.
 
       - name: Cleanup untagged tenant layers
         uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
@@ -207,6 +237,17 @@ jobs:
           package-name: dnd-notes
           package-type: container
           min-versions-to-keep: 10
+          ignore-versions: '^prod-.*$'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old tenant prod tags
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes
+          package-type: container
+          min-versions-to-keep: 3
+          ignore-versions: '^(?!prod-).*$'
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cleanup untagged control-plane layers
@@ -226,6 +267,17 @@ jobs:
           package-name: dnd-notes-control-plane
           package-type: container
           min-versions-to-keep: 10
+          ignore-versions: '^prod-.*$'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old control-plane prod tags
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-control-plane
+          package-type: container
+          min-versions-to-keep: 3
+          ignore-versions: '^(?!prod-).*$'
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cleanup untagged customer-portal layers
@@ -245,6 +297,17 @@ jobs:
           package-name: dnd-notes-customer-portal
           package-type: container
           min-versions-to-keep: 10
+          ignore-versions: '^prod-.*$'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old customer-portal prod tags
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-customer-portal
+          package-type: container
+          min-versions-to-keep: 3
+          ignore-versions: '^(?!prod-).*$'
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cleanup untagged operator-portal layers
@@ -264,4 +327,45 @@ jobs:
           package-name: dnd-notes-operator-portal
           package-type: container
           min-versions-to-keep: 10
+          ignore-versions: '^prod-.*$'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old operator-portal prod tags
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-operator-portal
+          package-type: container
+          min-versions-to-keep: 3
+          ignore-versions: '^(?!prod-).*$'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup untagged activator layers
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-activator
+          package-type: container
+          delete-only-untagged-versions: 'true'
+          min-versions-to-keep: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old activator versions
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-activator
+          package-type: container
+          min-versions-to-keep: 10
+          ignore-versions: '^prod-.*$'
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup old activator prod tags
+        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
+        with:
+          owner: daydream-software
+          package-name: dnd-notes-activator
+          package-type: container
+          min-versions-to-keep: 3
+          ignore-versions: '^(?!prod-).*$'
           token: ${{ secrets.GITHUB_TOKEN }}
