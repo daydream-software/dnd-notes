@@ -8739,3 +8739,57 @@ During the first commit slice, `git add deploy/k3s/overlays/prod/kustomization.y
 
 ---
 
+# Decision: PR #365 CI red-fixes + CodeRabbit triage (epic #362)
+
+**Decided by:** Brand (Platform Dev)
+**Date:** 2026-05-20
+**Type:** CI / tooling — deployment-unification PR
+**PR:** #365
+**Branch:** chore/unify-deployments-362
+**Tip after fix:** 040015ef0850d2985b00589c593d81c1ab3c9f7f
+
+## CI root causes (all three red checks resolved)
+
+1. **smoke** — `scripts/k3d/smoke.sh` set `KEYCLOAK_ADMIN_REALM` to the workforce
+   realm, but the `dnd-notes-keycloak-admin` service-account client is seeded in
+   the **tenant** realm (`dnd-notes`). Admin token grant returned HTTP 401 and
+   failed tenant provisioning. Fix: `KEYCLOAK_ADMIN_REALM="${TENANT_KEYCLOAK_REALM}"`.
+   Note: `up.sh` / `full-stack-smoke.sh` do not set this var (control-plane reads it
+   from env with no fallback) — smoke.sh was the only outlier with the wrong value.
+
+2. **validate** + **Test Results** — same single root cause: the control-plane
+   node:test `k3d-persistent-lane.test.ts` asserted a stale literal
+   `kubectl --context "${context}" get deployment`. `status.sh` was refactored in
+   this PR to read readiness via a generic `deployment_ready_count` helper
+   (`get "${kind}"`). Realigned the assertion to `get "${kind}"`, preserving the
+   --context / no-`use-context` invariant. The `Test Results` check is the EnricoMi
+   action failing on the same one test; fixing the test clears both.
+
+## CodeRabbit triage (5 comments)
+
+- **#1 ci.yml kubectl checksum** — FIXED. Verify against upstream `kubectl.sha256`
+  for the pinned version (no manually-pinned digest to maintain).
+- **#2 realm-seed dev credentials** — **DEFERRED to PR B (unified secret
+  provisioning).** k3d-only dev creds, already annotated `Never reuse outside
+  local k3d`. Parameterizing JSON-in-ConfigMap = bootstrap-time envsubst or
+  realm-doc generation, which is exactly PR B's scope. Thread left unresolved as
+  the tracking marker.
+- **#3 bootstrap.sh hardcoded creds** — FIXED. Env-var-ized with insecure-local
+  defaults (`PLATFORM_POSTGRES_*`, `KEYCLOAK_BOOTSTRAP_ADMIN_*`).
+- **#4 smoke admin realm** — FIXED (= smoke CI root cause above).
+- **#5 render-parity namespace identity** — FIXED. `resourceKeys` now keys on
+  `kind/namespace/name`; cluster-scoped kinds bucket under `_cluster`.
+
+Bonus: removed an unused `no-await-in-loop` eslint-disable in `migrate.test.ts`
+(pre-existing warning, not introduced by this PR; lint had no `--max-warnings`
+so it was not the CI blocker, but warnings get triaged per squad convention).
+
+## Local re-validation (all green)
+- `validate-render-parity.sh` PASS (19 resources match)
+- `validate-manifests.sh` PASS
+- `kustomize build` k3d + prod PASS
+- control-plane node:test: 382 pass / 0 fail (was 381/1)
+- k3d-state + full-stack-smoke-script + k3d-tenant-api-override-script + persistent-lane: 62 pass / 0 fail
+- lint: clean (0 warnings, 0 errors)
+
+Coordinator gates Mikey before any CodeRabbit retrigger.
