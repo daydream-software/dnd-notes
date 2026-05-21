@@ -8677,3 +8677,65 @@ The activator's proxyRequest needed bounded retries to absorb the kube-proxy ipt
 The body-less gate is honest about the constraint and covers the real customer pain (cold-start wakes are always initiated by a browser GET navigation).
 
 **Retryable error codes:** ECONNREFUSED (primary), ECONNRESET (RST during slow kube-proxy convergence), EHOSTUNREACH (no route to ClusterIP before iptables are installed). ETIMEDOUT and ENOTFOUND are not retried — those indicate structural misconfig, not a transient race.
+
+---
+
+### 2026-05-20: Epic #362 — Unify k3d and prod deployments into one manifest tree
+
+**Decided by:** Coordinator (with user approval and Brand/Mikey execution)  
+**Date:** 2026-05-20  
+**PR:** #365 (`chore(deploy): unify k3d and prod into one manifest tree`)  
+**Branch:** chore/unify-deployments-362
+
+#### Structural Consolidation
+
+Two divergent manifest trees (`deploy/k3s/` prod-only, `deploy/k3d/` k3d-only, each with its own base + overlays) were unified into a single pattern:
+
+- **Canonical base:** `deploy/k3s/base/` (single source of truth for all deployments)
+- **Per-env overlays:** `deploy/k3s/overlays/k3d/` and `deploy/k3s/overlays/prod/` for environment-specific patches
+- **Rationale:** Eliminates manual duplication of manifest structure changes; one base means one path to update Postgres, Keycloak, control-plane, activator, etc.
+
+#### Keycloak Topology Normalization
+
+- **New:** K3d adopts prod's two-realm topology (`dnd-notes` realm for app users, `dnd-notes-workforce` realm for internal login)
+- **Old:** K3d had single `dnd-notes-dev` realm
+- **Themes:** Keycloak themes moved into `deploy/k3s/base/keycloak/themes/` (no longer environment-specific); ConfigMap mounts for operator-login, customer-login, account-console are now conditional (prod doesn't mount them yet — default Keycloak UI is acceptable for test release)
+- **Impact:** Identical realm configs in both environments; K3d and prod are now clean-slate disposable (no persistent state pinning from live clusters)
+
+#### Diagnosis Correction (Issue #363)
+
+**Finding:** #363 title "ACTIVATOR_EXTERNAL_NAME dropped in prod render" was verified to be **already fixed** by PR #348.
+
+- Ran `kustomize build deploy/k3s/overlays/prod` and confirmed `ACTIVATOR_EXTERNAL_NAME` is present in the rendered ConfigMap
+- Configmap patches use strategic-merge semantics, not full-replace, so the key survives the patch correctly
+- No regression in the deploy system; the real problem was structural divergence requiring separate bug fixes for each tree
+
+**Deferred:** The actual remaining half of #363 (activator secret provisioning in prod) → PR B scope.
+
+#### Validation Gate
+
+PR #365 was validated by:
+
+1. **Render-parity:** `kustomize build` diff between old separate trees and new unified tree (manifest structure verified)
+2. **Live k3d rebuild:** `npm run k3d:up` full stack end-to-end, including:
+   - Keycloak two-realm login (dnd-notes + dnd-notes-workforce)
+   - Tenant provisioning (control-plane → database → ingress provisioning)
+   - Application startup and readiness
+
+**Real bug caught by live gate:** `wait_for_rollout()` in `deploy/status.sh` was querying Postgres as a `Deployment` after the migration to `StatefulSet`. Fixed in the PR.
+
+#### Scope Consolidation
+
+- Original issue #362 proposed PR1 (base unification) + PR2 (overlay cleanup) as separate
+- **Decision:** Merged into single PR A (this PR #365); remainder split into:
+  - **PR B (secrets):** Unified secret provisioning, incl. activator secret provisioning in prod (#363 remaining half)
+  - **PR C (docs):** Update `docs/deploy/README.md` and RUNTIME.md for new structure
+
+#### Lesson: Verify Committed Content, Not Working Tree
+
+During the first commit slice, `git add deploy/k3s/overlays/prod/kustomization.yaml` silently failed to stage (showed ` M` in `git status`), but the working tree was correct. The committed manifest was stale, causing validation to fail. Verification that caught this: Brand ran the full k3d build and observed manifest errors.
+
+**Takeaway for coordinator:** Before declaring a slice ready, verify the actual committed diff (`git show HEAD:file`), not just the working tree status or file read. This applies to all slash-command gates where the coordinator stages and commits on behalf of agents.
+
+---
+
