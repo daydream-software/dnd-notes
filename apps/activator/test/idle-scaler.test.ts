@@ -5,16 +5,22 @@
  * idle past the threshold are returned. Tenants backfilled FALSE (pre-activator
  * provisioning) and tenants with no activity row must never be returned.
  *
- * Uses an injected fake DB client — no real Postgres or K8s connection required.
- * The fake DB records which rows were queried and returns only rows that match
- * the three-bucket fixture:
- *   (a) seen_by_activator=TRUE + idle past threshold  → eligible, must appear
- *   (b) seen_by_activator=FALSE (backfill)            → not eligible, must NOT appear
- *   (c) no activity row at all                        → not eligible, must NOT appear
+ * Two test suites:
+ *
+ * 1. Fake-DB suite — fast, verifies function interface (parameter passing,
+ *    return shape, SQL structural assertions). The fake re-implements the
+ *    filter in JS so it proves the function contract, not SQL correctness.
+ *
+ * 2. pg-mem SQL-execution suite — actually runs the SELECT SQL against an
+ *    in-memory Postgres engine. Proves that the seen_by_activator guard and
+ *    the ($1 || ' minutes')::INTERVAL threshold cast are syntactically and
+ *    semantically correct. A SQL typo (e.g. seen_by_activator = FALSE) would
+ *    be caught here.
  */
 
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { newDb } from 'pg-mem'
 import { queryIdleEligibleTenants, type IdleScalerDbClient } from '../src/idle-scaler.js'
 
 interface FakeTenantActivityRow {
@@ -174,5 +180,160 @@ describe('queryIdleEligibleTenants', () => {
       capturedSql.includes('seen_by_activator = TRUE'),
       'query must filter on seen_by_activator = TRUE',
     )
+  })
+})
+
+/**
+ * pg-mem SQL-execution suite.
+ *
+ * Builds a minimal in-memory schema (tenants + tenant_activity with the
+ * seen_by_activator column from migration 0009) and executes the real SELECT
+ * SQL from queryIdleEligibleTenants. This proves:
+ *
+ *  - The ($1 || ' minutes')::INTERVAL threshold cast is syntactically valid
+ *    under pg-mem (proxy for real Postgres compatibility).
+ *  - The seen_by_activator = TRUE guard correctly excludes backfill FALSE rows.
+ *  - The INNER JOIN excludes tenants with no activity row.
+ *  - The threshold arithmetic (last_request_at < NOW() - interval) is correct.
+ *
+ * A SQL typo that the fake-DB suite would miss (e.g., seen_by_activator = FALSE,
+ * LEFT JOIN instead of JOIN, wrong column name) will cause a real SQL error or
+ * wrong result set here.
+ */
+describe('queryIdleEligibleTenants — pg-mem SQL execution', () => {
+  /**
+   * Build a pg-mem pool with the minimal schema needed for idle-scaler queries.
+   * Inline DDL is used to keep the activator package self-contained (no cross-
+   * package import from control-plane migrations).
+   */
+  async function buildPgMemPool() {
+    const db = newDb({ autoCreateForeignKeyIndices: true })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+
+    // Minimal tenants table — only the columns the idle-scaler SELECT reads.
+    // No CHECK constraints on states so we can INSERT any string without pg-mem
+    // constraint naming friction.
+    await pool.query(`
+      CREATE TABLE tenants (
+        id          TEXT PRIMARY KEY,
+        subdomain   TEXT,
+        current_state TEXT NOT NULL,
+        desired_state TEXT NOT NULL
+      )
+    `)
+
+    // tenant_activity as it exists after migration 0009.
+    await pool.query(`
+      CREATE TABLE tenant_activity (
+        tenant_id        TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+        last_request_at  TIMESTAMPTZ NOT NULL,
+        seen_by_activator BOOLEAN NOT NULL DEFAULT FALSE
+      )
+    `)
+
+    return pool
+  }
+
+  it('pg-mem: seen=TRUE idle tenants are returned; backfill FALSE and active tenants are excluded', async () => {
+    const pool = await buildPgMemPool()
+
+    try {
+      // Tenant A: seen=TRUE, idle 60 minutes → eligible
+      await pool.query(
+        `INSERT INTO tenants (id, subdomain, current_state, desired_state) VALUES ('t-a', 'sub-a', 'ready', 'ready')`,
+      )
+      await pool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ('t-a', NOW() - INTERVAL '60 minutes', TRUE)`,
+      )
+
+      // Tenant B: seen=TRUE, idle 10 minutes — still active, NOT eligible
+      await pool.query(
+        `INSERT INTO tenants (id, subdomain, current_state, desired_state) VALUES ('t-b', 'sub-b', 'ready', 'ready')`,
+      )
+      await pool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ('t-b', NOW() - INTERVAL '10 minutes', TRUE)`,
+      )
+
+      // Tenant C: seen=FALSE (backfill), idle 60 minutes — NOT eligible (#364 guard)
+      await pool.query(
+        `INSERT INTO tenants (id, subdomain, current_state, desired_state) VALUES ('t-c', 'sub-c', 'ready', 'ready')`,
+      )
+      await pool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ('t-c', NOW() - INTERVAL '60 minutes', FALSE)`,
+      )
+
+      // Tenant D: no activity row at all — INNER JOIN must exclude it
+      await pool.query(
+        `INSERT INTO tenants (id, subdomain, current_state, desired_state) VALUES ('t-d', 'sub-d', 'ready', 'ready')`,
+      )
+
+      // Tenant E: desired_state=deprovisioned — must be excluded regardless of seen flag
+      await pool.query(
+        `INSERT INTO tenants (id, subdomain, current_state, desired_state) VALUES ('t-e', 'sub-e', 'ready', 'deprovisioned')`,
+      )
+      await pool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ('t-e', NOW() - INTERVAL '60 minutes', TRUE)`,
+      )
+
+      const result = await queryIdleEligibleTenants(pool as unknown as IdleScalerDbClient, 30)
+
+      const returnedIds = result.map((r) => r.tenantId).sort()
+      assert.deepEqual(returnedIds, ['t-a'], 'only the seen+idle tenant must be returned')
+
+      assert.equal(
+        result.some((r) => r.tenantId === 't-b'),
+        false,
+        't-b is not idle past threshold — must not be returned',
+      )
+      assert.equal(
+        result.some((r) => r.tenantId === 't-c'),
+        false,
+        't-c has seen_by_activator=FALSE — must not be returned (#364 guard)',
+      )
+      assert.equal(
+        result.some((r) => r.tenantId === 't-d'),
+        false,
+        't-d has no activity row — INNER JOIN must exclude it',
+      )
+      assert.equal(
+        result.some((r) => r.tenantId === 't-e'),
+        false,
+        't-e has desired_state=deprovisioned — must not be returned',
+      )
+    } finally {
+      await pool.end()
+    }
+  })
+
+  it('pg-mem: the ($1 || \' minutes\')::INTERVAL threshold cast works with integer parameter', async () => {
+    // Directly verifies that the parameterized interval syntax does not throw
+    // under pg-mem. A failure here means the production SQL needs adjustment
+    // (e.g., switch to MAKE_INTERVAL or a different cast) before deploying.
+    const pool = await buildPgMemPool()
+
+    try {
+      await pool.query(
+        `INSERT INTO tenants (id, subdomain, current_state, desired_state) VALUES ('t-interval', 'sub-int', 'ready', 'ready')`,
+      )
+      await pool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ('t-interval', NOW() - INTERVAL '45 minutes', TRUE)`,
+      )
+
+      // Threshold 30: row at 45 min idle should be returned
+      const result30 = await queryIdleEligibleTenants(pool as unknown as IdleScalerDbClient, 30)
+      assert.equal(result30.length, 1, 'threshold=30: tenant idle 45 min must be returned')
+
+      // Threshold 60: row at 45 min idle should NOT be returned
+      const result60 = await queryIdleEligibleTenants(pool as unknown as IdleScalerDbClient, 60)
+      assert.equal(result60.length, 0, 'threshold=60: tenant idle only 45 min must not be returned')
+    } finally {
+      await pool.end()
+    }
   })
 })
