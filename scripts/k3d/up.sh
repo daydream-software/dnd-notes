@@ -126,84 +126,13 @@ image_exists_locally() {
   docker image inspect "$1" >/dev/null 2>&1
 }
 
-run_k3d_image_import() {
-  local image_ref="$1"
-  local mode="$2"
-  local status=0
-
-  log "Importing ${image_ref} into k3d cluster ${CLUSTER_NAME} with mode ${mode}..."
-  if command -v timeout >/dev/null 2>&1; then
-    if timeout "${IMAGE_IMPORT_TIMEOUT_SECONDS}" \
-      k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${image_ref}"; then
-      return 0
-    fi
-
-    status=$?
-    return "${status}"
-  fi
-
-  if k3d image import --mode "${mode}" -c "${CLUSTER_NAME}" "${image_ref}"; then
-    return 0
-  fi
-
-  status=$?
-  return "${status}"
-}
-
-# Verify the image actually landed in the cluster's containerd. `k3d image
-# import --mode direct` can exit 0 without the image landing on a node — a
-# silent false success that surfaces later as ImagePullBackOff. Mirror of the
-# check in scripts/k3d/build-image.sh (TODO: hoist into a shared lib both
-# scripts source). Skip the *-serverlb load balancer (no containerd).
-image_present_in_cluster() {
-  local image_ref="$1"
-  local node node_count=0
-
-  for node in $(docker ps --filter "label=k3d.cluster=${CLUSTER_NAME}" --format '{{.Names}}' 2>/dev/null); do
-    case "${node}" in *serverlb*) continue ;; esac
-    node_count=$((node_count + 1))
-    if ! docker exec "${node}" crictl images 2>/dev/null \
-      | awk -v repo="${image_ref%:*}" -v tag="${image_ref##*:}" \
-          '$1==repo && $2==tag {f=1} END{exit f?0:1}'; then
-      return 1
-    fi
-  done
-
-  # Couldn't enumerate any node container → can't verify → don't block.
-  [ "${node_count}" -eq 0 ] && return 0
-  return 0
-}
-
-# Import, then confirm presence. A clean exit from k3d image import is necessary
-# but not sufficient (see image_present_in_cluster).
-import_and_verify_into_cluster() {
-  local image_ref="$1"
-  local mode="$2"
-
-  run_k3d_image_import "${image_ref}" "${mode}" || return 1
-  if ! image_present_in_cluster "${image_ref}"; then
-    log "Import (mode ${mode}) exited 0 but ${image_ref} is NOT present in the cluster node containerd; treating as failed."
-    return 1
-  fi
-  return 0
-}
-
-ensure_image_imported_into_cluster() {
-  local image_ref="$1"
-
-  if ! import_and_verify_into_cluster "${image_ref}" "${IMAGE_IMPORT_MODE}"; then
-    if [[ "${IMAGE_IMPORT_FALLBACK_MODE}" == "${IMAGE_IMPORT_MODE}" ]]; then
-      log "Image import failed/unverified for ${image_ref} with mode ${IMAGE_IMPORT_MODE} and no alternate fallback mode is configured."
-      return 1
-    fi
-
-    log "Image import of ${image_ref} with mode ${IMAGE_IMPORT_MODE} failed or did not land; retrying with ${IMAGE_IMPORT_FALLBACK_MODE}."
-    if ! import_and_verify_into_cluster "${image_ref}" "${IMAGE_IMPORT_FALLBACK_MODE}"; then
-      log "Image ${image_ref} did not land in the cluster after both modes (${IMAGE_IMPORT_MODE}, ${IMAGE_IMPORT_FALLBACK_MODE})."
-      return 1
-    fi
-  fi
-}
+# The image import + digest-verification helpers (run_k3d_image_import,
+# image_present_in_cluster, import_and_verify_into_cluster,
+# ensure_image_imported_into_cluster) are shared with scripts/k3d/build-image.sh.
+# The source contract (CLUSTER_NAME, IMAGE_IMPORT_MODE, IMAGE_IMPORT_FALLBACK_MODE,
+# IMAGE_IMPORT_TIMEOUT_SECONDS, and a log function) is satisfied above.
+# shellcheck source=scripts/k3d/lib/image-import.sh
+source "${ROOT}/scripts/k3d/lib/image-import.sh"
 
 ensure_image_ready() {
   # Args: <image_name> <image_ref> <build_script> [extra args...]

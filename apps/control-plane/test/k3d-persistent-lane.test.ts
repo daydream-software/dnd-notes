@@ -20,12 +20,18 @@ const upScriptPath = fileURLToPath(
 const provisionSecretsScriptPath = fileURLToPath(
   new URL('../../../scripts/platform/provision-secrets.sh', import.meta.url),
 )
+const imageImportLibPath = fileURLToPath(
+  new URL('../../../scripts/k3d/lib/image-import.sh', import.meta.url),
+)
 
 // Extract functions from the scripts by matching function body blocks
 const statusScript = readFileSync(statusScriptPath, 'utf8')
 const downScript = readFileSync(downScriptPath, 'utf8')
 const upScript = readFileSync(upScriptPath, 'utf8')
 const provisionSecretsScript = readFileSync(provisionSecretsScriptPath, 'utf8')
+// The image import + digest-verification helpers were hoisted out of up.sh into
+// a shared lib that both up.sh and build-image.sh source (epic #362).
+const imageImportLib = readFileSync(imageImportLibPath, 'utf8')
 
 const resetStateFnMatch = statusScript.match(/^reset_state\(\) \{\n[\s\S]*?^}/m)
 const readStateFnMatch = statusScript.match(/^read_state\(\) \{\n[\s\S]*?^}/m)
@@ -36,9 +42,9 @@ const removeStateArtifactsFnMatch = downScript.match(/^remove_state_artifacts\(\
 const localizePostgresUrlMatch = upScript.match(/^localize_postgres_url\(\) \{\n[\s\S]*?^}/m)
 const buildTokenSnippetFnMatch = upScript.match(/^build_token_snippet\(\) \{\n[\s\S]*?^}/m)
 const stateModuleFnMatch = upScript.match(/^state_module\(\) \{\n[\s\S]*?^}/m)
-const runK3dImageImportFnMatch = upScript.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
-const importAndVerifyFnMatch = upScript.match(/^import_and_verify_into_cluster\(\) \{\n[\s\S]*?^}/m)
-const ensureImageImportedFnMatch = upScript.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
+const runK3dImageImportFnMatch = imageImportLib.match(/^run_k3d_image_import\(\) \{\n[\s\S]*?^}/m)
+const importAndVerifyFnMatch = imageImportLib.match(/^import_and_verify_into_cluster\(\) \{\n[\s\S]*?^}/m)
+const ensureImageImportedFnMatch = imageImportLib.match(/^ensure_image_imported_into_cluster\(\) \{\n[\s\S]*?^}/m)
 const ensureImageReadyFnMatch = upScript.match(/^ensure_image_ready\(\) \{\n[\s\S]*?^}/m)
 const writeStateFnMatch = upScript.match(/^write_state\(\) \{\n[\s\S]*?^}/m)
 
@@ -79,15 +85,15 @@ if (!stateModuleFnMatch) {
 }
 
 if (!runK3dImageImportFnMatch) {
-  throw new Error('Expected run_k3d_image_import() in scripts/k3d/up.sh')
+  throw new Error('Expected run_k3d_image_import() in scripts/k3d/lib/image-import.sh')
 }
 
 if (!importAndVerifyFnMatch) {
-  throw new Error('Expected import_and_verify_into_cluster() in scripts/k3d/up.sh')
+  throw new Error('Expected import_and_verify_into_cluster() in scripts/k3d/lib/image-import.sh')
 }
 
 if (!ensureImageImportedFnMatch) {
-  throw new Error('Expected ensure_image_imported_into_cluster() in scripts/k3d/up.sh')
+  throw new Error('Expected ensure_image_imported_into_cluster() in scripts/k3d/lib/image-import.sh')
 }
 
 if (!ensureImageReadyFnMatch) {
