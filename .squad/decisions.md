@@ -8963,12 +8963,17 @@ All acceptance criteria met on main:
 
 #### Epic Status Correction
 
-Prior note (project_epic_362_status.md) recorded "PR C (workflow GH Actions converge prod, self-hosted runner) designed, not started." **This is incorrect.** PR C (render-parity CI + unified secret flow) is merged and live on main.
+Prior note (project_epic_362_status.md) conflated two separate deliverables:
 
-**Commits:**
-- #365 (manifest tree unification): merged
-- #366 (secret provisioning unify): merged
-- #362 PR C (CI guard + docs): merged
+**Clarification:**
+- **Render-parity CI guard:** Delivered by PR #365 (commit a1feb03). Scripts `scripts/platform/validate-render-parity.{sh,mjs}` + wired into `.github/workflows/ci.yml:63`. **Merged & live on main.**
+- **PR C (prod-deploy.yml automation):** A separate, **unbuilt** deliverable — manually-triggered workflow to converge prod with `kubectl apply -k deploy/k3s/overlays/prod` on a self-hosted runner on the prod Azure VM. **Does NOT exist in main.** It was planned follow-up work but never filed as a GitHub issue and never built.
+
+**Consequence:** Epic #362 acceptance (6 bullets) is fully met WITHOUT PR C. The prod-deploy.yml workflow is orphaned planned work, not blocking — prod still deploys manually via `kubectl apply -k deploy/k3s/overlays/prod` per docs §5.
+
+**Merged PRs for #362 acceptance:**
+- #365 (manifest tree unification + render-parity CI): merged (a1feb03)
+- #366 (secret provisioning unify): merged (59ac514)
 
 #### Weekend Deploy Critical Path
 
