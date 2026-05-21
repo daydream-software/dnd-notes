@@ -47,30 +47,39 @@ patches:
 - path: configmap-customer-portal.yaml
 - path: configmap-operator-portal.yaml
 
-# Image tags: pinned to an explicit sentinel so applying the overlay without
-# substituting a real tag fails fast (ImagePullBackOff on a nonexistent tag)
-# instead of silently rolling to whatever :latest happens to be. This is
-# deliberate — :latest in prod hides incident-rollback and audit trails.
+# Image tags: pinned to a protected prod-* tag.
 #
-# Before deploying, substitute each newTag below with the immutable sha-* tag
-# from the GHCR push workflow (Issue #331). Recommended workflow:
+# Tag convention: prod-YYYYMMDD (e.g. prod-20260521), with a time suffix
+# (prod-YYYYMMDD-HHMMSSz) when more than one promotion lands on the same day.
+# These tags are protected by the tag-aware retention script in CI and will not
+# be deleted by build churn (see deployment-artifacts.yml and
+# scripts/platform/cleanup-ghcr-versions.mjs).
 #
-#   TAG=sha-abcdef0  # short SHA of the main commit to deploy
-#   cd deploy/k3s/overlays/prod
-#   kustomize edit set image \
-#     ghcr.io/daydream-software/dnd-notes-control-plane=ghcr.io/daydream-software/dnd-notes-control-plane:${TAG} \
-#     ghcr.io/daydream-software/dnd-notes-customer-portal=ghcr.io/daydream-software/dnd-notes-customer-portal:${TAG} \
-#     ghcr.io/daydream-software/dnd-notes-operator-portal=ghcr.io/daydream-software/dnd-notes-operator-portal:${TAG}
+# Deploy flow:
+#   1. CI pushes sha-<commit> tags on every merge to main.
+#   2. When ready to deploy, promote the chosen build to a protected tag:
+#        scripts/platform/promote-prod-image.sh sha-<commit> [prod-<date>]
+#      This retags all 5 images without rebuilding (docker buildx imagetools create).
+#   3. Update the newTag values below to the promoted prod-* tag.
+#   4. Commit the change and apply:
+#        kubectl kustomize deploy/k3s/overlays/prod | kubectl --context dnd-notes-prod apply -f -
 #
-# See the runbook in Issue #329, section 4 "Daily ops / Deploy a new image
-# version" for the full deploy procedure.
+# The tenant image (dnd-notes) is not listed here because it is referenced
+# dynamically by the control-plane at tenant provisioning time via
+# TENANT_IMAGE_REPOSITORY in the ConfigMap. It uses the same prod-* tag and
+# must also be promoted by the script above.
+#
+# See docs/deploy/README.md section 4 for the full procedure.
 images:
 - name: ghcr.io/daydream-software/dnd-notes-control-plane
   newName: ghcr.io/daydream-software/dnd-notes-control-plane
-  newTag: sha-04e3c4a
+  newTag: prod-pin-before-deploy
 - name: ghcr.io/daydream-software/dnd-notes-customer-portal
   newName: ghcr.io/daydream-software/dnd-notes-customer-portal
-  newTag: sha-04e3c4a
+  newTag: prod-pin-before-deploy
 - name: ghcr.io/daydream-software/dnd-notes-operator-portal
   newName: ghcr.io/daydream-software/dnd-notes-operator-portal
-  newTag: sha-04e3c4a
+  newTag: prod-pin-before-deploy
+- name: ghcr.io/daydream-software/dnd-notes-activator
+  newName: ghcr.io/daydream-software/dnd-notes-activator
+  newTag: prod-pin-before-deploy

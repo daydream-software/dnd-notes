@@ -8,11 +8,13 @@ on:
       - '.github/workflows/deployment-artifacts.yml'
       - '.dockerignore'
       - 'Dockerfile'
+      - 'docker/activator/**'
       - 'docker/control-plane/**'
       - 'docker/portal/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
+      - 'apps/activator/**'
       - 'apps/api/**'
       - 'apps/control-plane/**'
       - 'apps/web/**'
@@ -33,11 +35,13 @@ on:
       - '.github/workflows/deployment-artifacts.yml'
       - '.dockerignore'
       - 'Dockerfile'
+      - 'docker/activator/**'
       - 'docker/control-plane/**'
       - 'docker/portal/**'
       - 'package.json'
       - 'package-lock.json'
       - 'tsconfig.json'
+      - 'apps/activator/**'
       - 'apps/api/**'
       - 'apps/control-plane/**'
       - 'apps/web/**'
@@ -89,6 +93,9 @@ jobs:
       - name: Validate control-plane manifests
         run: npm run platform:validate
 
+      - name: Test GHCR retention script
+        run: node --test scripts/platform/cleanup-ghcr-versions.test.mjs
+
       - name: Build tenant image
         run: docker build --tag dnd-notes-tenant:test .
 
@@ -111,6 +118,9 @@ jobs:
           --tag dnd-notes-operator-portal:test
           .
 
+      - name: Build activator image
+        run: docker build --file docker/activator/Dockerfile --tag dnd-notes-activator:test .
+
   push:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -127,6 +137,13 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version-file: '.nvmrc'
+          # No cache: 'npm' — this step only runs the pure-Node cleanup script;
+          # no npm install happens, so caching would have nothing to restore.
 
       - name: Compute short SHA
         run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
@@ -183,85 +200,61 @@ jobs:
           docker push "${IMAGE_PREFIX}/dnd-notes-operator-portal:sha-${SHORT_SHA}"
           docker push "${IMAGE_PREFIX}/dnd-notes-operator-portal:latest"
 
-      # --- retention cleanup: keep latest + 10 most recent sha-* per image ---
-      # Order matters: untagged layers are purged first so that they are not
-      # counted toward the min-versions-to-keep quota. If the tagged cap ran
-      # first, the action would count untagged versions as "kept" slots, then
-      # the untagged pass would remove them — leaving fewer than 10 tagged
-      # rollback images. Untagged-first guarantees exactly 10 sha-* tags remain.
+      # --- activator ---
+      - name: Build and push activator image
+        run: |
+          docker build \
+            --file docker/activator/Dockerfile \
+            --tag "${IMAGE_PREFIX}/dnd-notes-activator:sha-${SHORT_SHA}" \
+            --tag "${IMAGE_PREFIX}/dnd-notes-activator:latest" \
+            .
+          docker push "${IMAGE_PREFIX}/dnd-notes-activator:sha-${SHORT_SHA}"
+          docker push "${IMAGE_PREFIX}/dnd-notes-activator:latest"
 
-      - name: Cleanup untagged tenant layers
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes
-          package-type: container
-          delete-only-untagged-versions: 'true'
-          min-versions-to-keep: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+      # --- retention cleanup ---
+      # scripts/platform/cleanup-ghcr-versions.mjs inspects metadata.container.tags[]
+      # directly via the GHCR API. Rules per image:
+      #   - untagged versions: always deleted
+      #   - sha-*/latest:      keep the 10 newest
+      #   - prod-*:            always kept; bounded to the 3 newest
+      #   - sha-*+prod-* both: counted as prod-* only (prod wins; no sha-* slot consumed)
+      # APPLY=1 enables actual deletions; the default is dry-run.
 
-      - name: Cleanup old tenant versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+      # Each cleanup step runs independently: a failure for one package does not
+      # skip cleanup for the remaining packages. continue-on-error is intentional
+      # here — cleanup runs only after all push steps succeed (sequential job
+      # steps), so there is no risk of deleting images when a push has failed.
+      - name: Cleanup tenant versions
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: '1'
+        run: node scripts/platform/cleanup-ghcr-versions.mjs dnd-notes
 
-      - name: Cleanup untagged control-plane layers
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes-control-plane
-          package-type: container
-          delete-only-untagged-versions: 'true'
-          min-versions-to-keep: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup control-plane versions
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: '1'
+        run: node scripts/platform/cleanup-ghcr-versions.mjs dnd-notes-control-plane
 
-      - name: Cleanup old control-plane versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes-control-plane
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup customer-portal versions
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: '1'
+        run: node scripts/platform/cleanup-ghcr-versions.mjs dnd-notes-customer-portal
 
-      - name: Cleanup untagged customer-portal layers
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes-customer-portal
-          package-type: container
-          delete-only-untagged-versions: 'true'
-          min-versions-to-keep: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup operator-portal versions
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: '1'
+        run: node scripts/platform/cleanup-ghcr-versions.mjs dnd-notes-operator-portal
 
-      - name: Cleanup old customer-portal versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes-customer-portal
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cleanup untagged operator-portal layers
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes-operator-portal
-          package-type: container
-          delete-only-untagged-versions: 'true'
-          min-versions-to-keep: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cleanup old operator-portal versions
-        uses: actions/delete-package-versions@e5bc658cc4c965c472efe991f8beea3981499c55 # v5.0.0
-        with:
-          owner: daydream-software
-          package-name: dnd-notes-operator-portal
-          package-type: container
-          min-versions-to-keep: 10
-          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Cleanup activator versions
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLY: '1'
+        run: node scripts/platform/cleanup-ghcr-versions.mjs dnd-notes-activator

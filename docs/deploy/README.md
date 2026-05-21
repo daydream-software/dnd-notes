@@ -15,14 +15,15 @@ without external input.
 1. [Prerequisites](#1-prerequisites)
 2. [Initial VM bootstrap (one-time)](#2-initial-vm-bootstrap-one-time)
 3. [Secrets setup (before first deploy)](#3-secrets-setup-before-first-deploy)
-4. [Pre-deploy: pin image tags](#4-pre-deploy-pin-image-tags)
+4. [Pre-deploy: promote and pin image tags](#4-pre-deploy-promote-and-pin-image-tags)
 5. [First deploy](#5-first-deploy)
 6. [GHCR package linking (one-time, post-first-push)](#6-ghcr-package-linking-one-time-post-first-push)
 7. [Daily ops](#7-daily-ops)
 8. [Backups](#8-backups)
 9. [Failure modes](#9-failure-modes)
 10. [Test release scope reminders](#10-test-release-scope-reminders)
-11. [Changelog](#changelog)
+11. [Scale-to-zero operator notes](#11-scale-to-zero-operator-notes)
+12. [Changelog](#changelog)
 
 ---
 
@@ -406,13 +407,41 @@ This URL is normally the same `control_plane` connection string used by `dnd-not
 
 ---
 
-## 4. Pre-deploy: pin image tags
+## 4. Pre-deploy: promote and pin image tags
 
 Estimated time: ~5 min.
 
-The prod overlay uses a `pin-before-deploy` sentinel tag on all images. Applying the overlay without substituting a real tag will cause ImagePullBackOff on purpose — this is a safety net to prevent silent rollouts of an unreviewed image.
+### Tag convention
 
-Find the `sha-XXXXX` tag to deploy from GHCR. The GHCR push workflow (PR #331) tags every main-branch push with the short commit SHA:
+Prod images are pinned to **`prod-*` tags** (e.g. `prod-20260521`). These tags are
+protected by the tag-aware retention script
+(`scripts/platform/cleanup-ghcr-versions.mjs`) and will not be deleted by build
+churn — no amount of merges to main can remove the image prod is running. The
+`sha-*` tags are for CI builds only; never pin prod directly to a `sha-*` tag.
+
+When more than one promotion lands on the same calendar day, use a time-qualified
+form: `prod-YYYYMMDD-HHMMSSz` (UTC) to keep each promotion unique.
+
+The sentinel `prod-pin-before-deploy` is committed in the overlay. Applying the
+overlay without substituting a real `prod-*` tag causes an intentional
+ImagePullBackOff — a safety net to prevent a silent rollout.
+
+### Five images covered
+
+The prod overlay pins 4 images explicitly. The fifth —
+`ghcr.io/daydream-software/dnd-notes` (per-tenant app) — is referenced dynamically
+by the control-plane at provisioning time via `TENANT_IMAGE_REPOSITORY` in the
+ConfigMap. All 5 must be promoted together using the script below.
+
+| GHCR package | Purpose |
+|---|---|
+| `dnd-notes` | Per-tenant web + API (referenced from ConfigMap) |
+| `dnd-notes-control-plane` | Control plane API |
+| `dnd-notes-customer-portal` | Customer portal frontend |
+| `dnd-notes-operator-portal` | Operator portal frontend |
+| `dnd-notes-activator` | Scale-to-zero wake proxy |
+
+### Step 1 — Find the build to promote
 
 ```bash
 gh api /repos/daydream-software/dnd-notes/packages/container/dnd-notes-control-plane/versions \
@@ -420,47 +449,44 @@ gh api /repos/daydream-software/dnd-notes/packages/container/dnd-notes-control-p
   | grep '^sha-'
 ```
 
-Once you have the tag, substitute it in the prod overlay.
+This returns the most recently pushed `sha-*` tags. Pick the commit you want to
+deploy.
 
-**If you have `kustomize` v5+:**
+### Step 2 — Promote to a protected prod-* tag
+
+Run the promotion script. It retags all 5 images without rebuilding, and fails
+loudly if any source tag is missing:
 
 ```bash
-TAG=sha-abcdef0  # replace with the real tag from the command above
+COMMIT=sha-abcdef0  # replace with the sha-* tag you chose above
 
-cd /path/to/dnd-notes/deploy/k3s/overlays/prod
+scripts/platform/promote-prod-image.sh "${COMMIT}"
+# Creates: prod-YYYYMMDD (today's UTC date)
 
-kustomize edit set image \
-  ghcr.io/daydream-software/dnd-notes-control-plane=ghcr.io/daydream-software/dnd-notes-control-plane:${TAG} \
-  ghcr.io/daydream-software/dnd-notes-customer-portal=ghcr.io/daydream-software/dnd-notes-customer-portal:${TAG} \
-  ghcr.io/daydream-software/dnd-notes-operator-portal=ghcr.io/daydream-software/dnd-notes-operator-portal:${TAG}
+# To supply an explicit destination tag (e.g. same-day re-promote):
+scripts/platform/promote-prod-image.sh "${COMMIT}" prod-20260521-143000z
 ```
 
-**If you only have `kubectl` (no standalone `kustomize` binary):** `kubectl kustomize` renders
-overlays but does not include the `kustomize edit` subcommand. Edit the tag directly with `sed`:
+The script requires `docker` with `buildx` and active GHCR credentials
+(`docker login ghcr.io` or `GITHUB_TOKEN` in the environment).
+
+### Step 3 — Pin the overlay to the new prod-* tag
 
 ```bash
-TAG=sha-abcdef0  # replace with the real tag from the command above
+PROD_TAG=prod-20260521  # use the tag the script printed
 
-sed -i "s/newTag: pin-before-deploy/newTag: ${TAG}/g" \
-  /path/to/dnd-notes/deploy/k3s/overlays/prod/kustomization.yaml
+sed -i "s/newTag: prod-pin-before-deploy/newTag: ${PROD_TAG}/g" \
+  deploy/k3s/overlays/prod/kustomization.yaml
+
+# Confirm all four entries updated:
+grep newTag deploy/k3s/overlays/prod/kustomization.yaml
 ```
 
-Confirm the substitution worked before applying:
+Commit the change:
 
 ```bash
-grep newTag /path/to/dnd-notes/deploy/k3s/overlays/prod/kustomization.yaml
-```
-
-The overlay patches three images. The fourth GHCR package — `ghcr.io/daydream-software/dnd-notes`
-(the per-tenant app image) — is not in this overlay because it is referenced dynamically by the
-control-plane at tenant provisioning time via `TENANT_IMAGE_REPOSITORY` in the ConfigMap. It uses the
-same `sha-XXXXX` tag and does not need a separate `kustomize edit` call here.
-
-Commit the change (you are still in `deploy/k3s/overlays/prod` from the `cd` above):
-
-```bash
-git add kustomization.yaml
-git commit -m "chore(deploy): pin images to ${TAG}"
+git add deploy/k3s/overlays/prod/kustomization.yaml
+git commit -m "chore(deploy): promote images to ${PROD_TAG}"
 ```
 
 ---
@@ -585,8 +611,8 @@ Provision a test tenant via the operator portal, then open the tenant URL
 > ⚠️ **GHCR packages default to private even on a public repo.** Until you manually flip each
 > package to public, pods will fail image pulls with `ImagePullBackOff` / 401 Unauthorized.
 >
-> For each of the four packages — `dnd-notes`, `dnd-notes-control-plane`,
-> `dnd-notes-customer-portal`, `dnd-notes-operator-portal`:
+> For each of the five packages — `dnd-notes`, `dnd-notes-control-plane`,
+> `dnd-notes-customer-portal`, `dnd-notes-operator-portal`, `dnd-notes-activator`:
 >
 > 1. Open `https://github.com/orgs/daydream-software/packages/<package-name>`
 > 2. Package settings → Danger zone → **Change visibility → Public** → confirm.
@@ -599,13 +625,22 @@ retention and so the package shows up under the repo's package list. After the f
 lands an image set on GHCR:
 
 1. Go to `https://github.com/orgs/daydream-software/packages`
-2. For each of the four packages listed above:
+2. For each of the five packages listed above:
 
    Open the package → Package Settings → "Manage Actions access" → connect to the `dnd-notes` repo.
 
 Once Issue #332 lands, the source link becomes automatic (Dockerfile `LABEL` wires it). The
 visibility step (flipping packages to Public) must still be done manually for any newly created
 package — GitHub does not propagate repo visibility to packages automatically.
+
+> Note: `dnd-notes-activator` is a new package created by the CI workflow added in PR #375.
+> It requires the same visibility flip and repository link as the other four packages. Perform
+> these steps the first time the push workflow runs after that PR merges.
+>
+> **Maintainer note:** adding a new package requires updating three places: (1) the prod overlay
+> (`deploy/k3s/overlays/prod/kustomization.yaml` — add an `images:` entry), (2) the CI workflow
+> (`.github/workflows/deployment-artifacts.yml` — add build/push and cleanup steps), and (3) this
+> runbook (Section 4 "5 images" wording and Section 6 package list).
 
 ---
 
@@ -636,26 +671,41 @@ Recommendation: 23:00 local time, manual start when testing resumes.
 
 ### Deploy a new image version
 
-1. Find the `sha-XXXXX` tag from GHCR for the commit you want to deploy (same as Section 4).
+The full procedure is in Section 4. Summary:
 
-2. Update the overlay.
-
-   **With `kustomize` v5+:**
+1. Find the `sha-*` tag from GHCR for the commit you want to deploy.
 
    ```bash
-   TAG=sha-abcdef0
-
-   cd deploy/k3s/overlays/prod
-
-   kustomize edit set image \
-     ghcr.io/daydream-software/dnd-notes-control-plane=ghcr.io/daydream-software/dnd-notes-control-plane:${TAG} \
-     ghcr.io/daydream-software/dnd-notes-customer-portal=ghcr.io/daydream-software/dnd-notes-customer-portal:${TAG} \
-     ghcr.io/daydream-software/dnd-notes-operator-portal=ghcr.io/daydream-software/dnd-notes-operator-portal:${TAG}
+   gh api /repos/daydream-software/dnd-notes/packages/container/dnd-notes-control-plane/versions \
+     --jq '.[0].metadata.container.tags[]' | grep '^sha-'
    ```
 
-   **Without `kustomize` (kubectl only):** use `sed` as documented in Section 4.
+2. Promote all 5 images to a protected `prod-*` tag (no rebuild — retags only):
 
-3. Commit the kustomization change to a deploy branch and push.
+   ```bash
+   scripts/platform/promote-prod-image.sh sha-abcdef0
+   # Prints the created prod-* tag, e.g. prod-20260521
+   ```
+
+3. Pin the overlay to the new tag:
+
+   ```bash
+   PROD_TAG=prod-20260521
+
+   # Capture current tag for rollback reference before rewriting.
+   PREV_TAG=$(grep 'newTag:' deploy/k3s/overlays/prod/kustomization.yaml | head -1 | awk '{print $2}')
+   echo "Previous tag: ${PREV_TAG}"
+
+   # Anchor the substitution to the current tag to avoid clobbering unrelated newTag: lines.
+   sed -i "s/newTag: ${PREV_TAG}/newTag: ${PROD_TAG}/g" \
+     deploy/k3s/overlays/prod/kustomization.yaml
+
+   # Verify all entries updated — confirm no stale tags remain.
+   grep newTag deploy/k3s/overlays/prod/kustomization.yaml
+
+   git add deploy/k3s/overlays/prod/kustomization.yaml
+   git commit -m "chore(deploy): promote images to ${PROD_TAG}"
+   ```
 
 4. Apply:
 
@@ -673,9 +723,10 @@ Recommendation: 23:00 local time, manual start when testing resumes.
 
 ### Roll back to a previous version
 
-Same as deploying — substitute an earlier `sha-XXXXX` tag in step 2 above.
-PR #331's cleanup policy retains the 10 most recent tags per image, so rollback to any of the 10
-most recent main pushes is available without re-building.
+Same as deploying — promote an earlier `sha-*` tag to a new `prod-*` tag and re-pin the overlay.
+The `prod-*` rollback window is kept at 3 versions per the CI retention policy. The `sha-*` window
+is 10 most recent main pushes; rolling back to a `sha-*` directly is not safe because the retention
+policy can delete it — always promote to a `prod-*` tag first.
 
 ### Restart a deployment
 
@@ -898,13 +949,48 @@ kubectl --context dnd-notes-prod exec -n dnd-notes-platform deploy/platform-keyc
 
 ### Image pull fails / ImagePullBackOff
 
-Two likely causes:
+Diagnose the failing image first:
 
-1. `pin-before-deploy` sentinel still in place — the tag was never substituted (Section 4).
-   Substitute the real tag using `kustomize edit set image` or the `sed` alternative documented
-   in Section 4, then re-apply.
-2. The tag you rolled back to is outside the 10-most-recent window and was cleaned up by the
-   retention policy (PR #331). Pick a tag that is still present in GHCR.
+```bash
+kubectl --context dnd-notes-prod describe pod -n dnd-notes-platform <pod-name> \
+  | grep -A5 "Failed\|ImagePull"
+```
+
+Common causes and recovery:
+
+**`prod-pin-before-deploy` sentinel still in place** — the overlay was applied
+without running the promotion script and pinning a real `prod-*` tag (Section 4).
+Run the script, update the overlay, re-apply.
+
+**`prod-*` tag was purged** — this should not happen under normal operation: the CI
+retention policy excludes `prod-*` tags from deletion. If it has been purged (e.g.
+the package was manually deleted from GHCR), recovery is to re-promote from a
+`sha-*` tag that still exists:
+
+```bash
+# Find the most recent sha-* tag still in GHCR
+gh api /repos/daydream-software/dnd-notes/packages/container/dnd-notes-control-plane/versions \
+  --jq '.[0].metadata.container.tags[]' | grep '^sha-'
+
+# Promote it to a new prod-* tag
+scripts/platform/promote-prod-image.sh sha-<latest>
+
+# Update the overlay and re-apply (Section 4)
+```
+
+If the `sha-*` tag for the previously deployed commit is also gone (more than 10
+merges since the last deploy, or the package was recreated), you must rebuild from
+source and push a new `sha-*` before promoting. Trigger a manual workflow run on
+the `main` branch from the Actions tab, or push any change to trigger the
+`deployment-artifacts.yml` workflow, then promote the resulting tag.
+
+**`prod-*` tag exists but GHCR package is private** — pods fail with 401
+Unauthorized. Flip the package to Public (Section 6) and retry.
+
+**Activator ImagePullBackOff specifically** — if only the activator fails, the
+`dnd-notes-activator` package may not have been promoted alongside the other four.
+Re-run `promote-prod-image.sh` with the same `sha-*` tag: it is idempotent and
+will create the missing tag without touching the others.
 
 ### Postgres pod restarting
 
@@ -1034,6 +1120,24 @@ If you need to reverse a tenant's routing away from the activator, either:
 ---
 
 ## Changelog
+
+### 2026-05-21 — prod ImagePullBackOff post-mortem (issue #375, PR #375)
+
+Two structural gaps closed:
+
+- **R1 — prod tag protection**: prod overlay now pins `prod-*` tags instead of
+  `sha-*` tags. The tag-aware retention script
+  (`scripts/platform/cleanup-ghcr-versions.mjs`) inspects `metadata.container.tags[]`
+  directly via the GHCR API: it keeps the 10 newest `sha-*/latest` versions and always
+  keeps `prod-*` versions (bounded to 3). A version carrying both `sha-*` and `prod-*`
+  counts as prod-only, so build churn can never delete the image prod is running. The
+  promotion script `scripts/platform/promote-prod-image.sh` retags a chosen `sha-*`
+  build to `prod-YYYYMMDD` for all 5 images without rebuilding.
+- **R2 — activator image**: `dnd-notes-activator` is now built and pushed by the
+  `deployment-artifacts.yml` CI workflow on every merge to main. The prod overlay
+  pins it alongside the other four images. This unblocks the scale-to-zero prod
+  rollout (#340/#364).
+- Updated Sections 4, 6, 7, 9 and added activator to the image table.
 
 ### 2026-05-18 — post-deploy walkthrough (issue #339)
 
