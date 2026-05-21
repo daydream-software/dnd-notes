@@ -104,10 +104,13 @@ validate_ingress_ports() {
 
 wait_for_rollout() {
   local namespace="$1"
-  local deployment="$2"
+  local name="$2"
   local timeout="${3:-180s}"
+  # Postgres is a StatefulSet on the unified base; everything else is a
+  # Deployment. kubectl rollout status accepts either kind.
+  local kind="${4:-deployment}"
 
-  kubectl rollout status -n "$namespace" "deployment/${deployment}" --timeout="$timeout"
+  kubectl rollout status -n "$namespace" "${kind}/${name}" --timeout="$timeout"
 }
 
 normalize_kubeconfig_server() {
@@ -347,7 +350,7 @@ kubectl apply -k "${K3D_OVERLAY_PATH}"
 
 wait_for_dev_ca_issuer
 
-wait_for_rollout "${PLATFORM_NAMESPACE}" platform-postgres 180s
+wait_for_rollout "${PLATFORM_NAMESPACE}" platform-postgres 180s statefulset
 
 # Create the control_plane database for the control-plane registry
 if [[ "$(
