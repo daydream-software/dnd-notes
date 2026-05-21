@@ -1007,6 +1007,15 @@ whose traffic is already routed through the activator will flip to eligible on f
 tenants still on direct-to-Service routing stay running indefinitely until re-provisioned or
 manually re-routed.
 
+Before rolling out the activator, verify migration 0009 is applied:
+
+```bash
+kubectl --context dnd-notes-prod exec -it platform-postgres-0 -n dnd-notes-platform -- \
+  psql -U postgres -d control_plane -c "\d tenant_activity"
+```
+
+Confirm `seen_by_activator boolean not null default false` is present in the output.
+
 Deploy ordering is required: migration 0009 must run before the updated activator code reaches
 the cluster. The standard workflow (control-plane rollout precedes activator rollout) ensures this.
 

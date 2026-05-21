@@ -275,6 +275,17 @@ test('migration 0009 adds seen_by_activator column defaulting FALSE; backfill ro
   }
 })
 
+// NOTE: a two-phase test verifying that migration 0009 backfills
+// seen_by_activator = FALSE onto rows that pre-date the migration was
+// attempted and skipped.
+//
+// Reason: pg-mem does not reproduce the real Postgres behaviour of
+// ALTER TABLE ... ADD COLUMN ... NOT NULL DEFAULT for existing rows.
+// In pg-mem the pre-existing rows read NULL after the ALTER; on real
+// Postgres (>=11) they are backfilled with FALSE at DDL time. The
+// invariant is documented in the 0009 SQL comment and is the correct
+// venue for a real-Postgres integration test.
+
 test('control-plane migrations issue the ledger contract DDL', async () => {
   const queries: string[] = []
   const client = {
