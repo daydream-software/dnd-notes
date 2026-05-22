@@ -48,7 +48,9 @@ jobs:
   deploy:
     runs-on: [self-hosted, prod]
     environment: production
-    timeout-minutes: 45
+    # 4 sequential rollout waits budget 40m (4 x --timeout=10m); allow headroom
+    # for checkout, GHCR verify, pin, render, and apply on top of that.
+    timeout-minutes: 60
 
     # Runner setup requirement:
     # The self-hosted runner must run on the prod VM as a user whose kubeconfig
