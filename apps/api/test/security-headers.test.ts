@@ -49,12 +49,16 @@ async function createTestApp(
     siteAdminEmails?: readonly string[]
     publicWebUrl?: string
     allowedOrigins?: readonly string[]
+    serveWeb?: boolean
+    webDistPath?: string
   } = {},
 ) {
   return createSharedTestApp({
     siteAdminEmails: options.siteAdminEmails,
     publicWebUrl: options.publicWebUrl,
     allowedOrigins: options.allowedOrigins ?? defaultSecurityTestOrigins,
+    serveWeb: options.serveWeb,
+    webDistPath: options.webDistPath,
   })
 }
 
