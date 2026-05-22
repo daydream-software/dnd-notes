@@ -59,6 +59,27 @@ jobs:
     # A minimal runner-setup check: `kubectl --context dnd-notes-prod get nodes`.
 
     steps:
+      - name: Refuse non-main dispatch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          # workflow_dispatch checks out whatever ref the operator selected in
+          # the UI (github.ref). Prod must only ever render the overlay from
+          # main, so fail loudly here before any work — an honest error beats a
+          # silent ref: main pin that deploys something the operator didn't pick.
+          #
+          # Threat model: this guards OPERATOR ERROR (dispatching from a stale
+          # feature branch). It does NOT stop a malicious branch that deletes
+          # this step, because workflow_dispatch runs the dispatched ref's own
+          # workflow file — that boundary is held by `environment: production`
+          # required reviewers + branch protection on main, both already in place.
+          if [ "${REF}" != "refs/heads/main" ]; then
+            echo "error: prod deploys must be dispatched from main (got '${REF}')."
+            echo "  Re-run this workflow with 'main' selected as the branch."
+            exit 1
+          fi
+          echo "Dispatch ref OK: ${REF}"
+
       - name: Checkout
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
