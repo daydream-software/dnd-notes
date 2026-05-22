@@ -27,9 +27,12 @@ on:
         type: string
       dry_run:
         description: |
-          When true, runs kubectl apply with --dry-run=server (server-side
-          validation only) and skips rollout-status waits. Useful for
-          previewing the rendered manifest without mutating the cluster.
+          When true, runs kubectl apply with --dry-run=server and skips
+          rollout-status waits. The API server validates the objects
+          (admission + schema) and reports per-resource status only — it does
+          NOT mutate the cluster and does NOT print the rendered manifest.
+          (Actions logs are public on this repo; the workflow never dumps the
+          render — keep it that way.)
         required: false
         type: boolean
         default: false
