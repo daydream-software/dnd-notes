@@ -34,10 +34,14 @@ spec:
           resources:
             requests:
               cpu: 50m
-              memory: 128Mi
+              memory: 256Mi
             limits:
               cpu: 200m
-              memory: 256Mi
+              # 256Mi OOMKilled the activator in prod: it runs a cluster-wide
+              # Deployment + Endpoints Watch (caches across all namespaces) on
+              # top of the Node baseline. 512Mi gives headroom. See the cache
+              # pruning fix tracked separately for the slow-growth component.
+              memory: 512Mi
           env:
             - name: PORT
               value: "8080"
