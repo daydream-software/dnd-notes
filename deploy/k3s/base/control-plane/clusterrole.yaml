@@ -7,10 +7,13 @@ metadata:
     app.kubernetes.io/component: control-plane
     app.kubernetes.io/part-of: dnd-notes
 rules:
-  # Manage tenant namespaces and all resources within them
+  # Manage tenant namespaces and all resources within them.
+  # update/patch are required because tenant provisioning upserts the namespace
+  # (read-then-replace in upsertKubernetesObject), e.g. to refresh tenant labels
+  # on re-provision — without update, re-provisioning an existing tenant 403s.
   - apiGroups: [""]
     resources: ["namespaces"]
-    verbs: ["create", "get", "list", "watch", "delete"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["configmaps", "services"]
     verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
