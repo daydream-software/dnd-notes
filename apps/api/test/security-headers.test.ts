@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
 import test from 'node:test'
+import { fileURLToPath } from 'node:url'
 import request from 'supertest'
 import { defaultCampaignId } from '../src/campaign.js'
 import {
@@ -8,6 +10,12 @@ import {
   withAuth,
   withGuest,
 } from './test-helpers.js'
+
+const testFixtureWebDistPath = join(
+  fileURLToPath(new URL('.', import.meta.url)),
+  'fixtures',
+  'web-dist',
+)
 
 /**
  * Regression tests for CORS and security header hardening.
@@ -41,12 +49,16 @@ async function createTestApp(
     siteAdminEmails?: readonly string[]
     publicWebUrl?: string
     allowedOrigins?: readonly string[]
+    serveWeb?: boolean
+    webDistPath?: string
   } = {},
 ) {
   return createSharedTestApp({
     siteAdminEmails: options.siteAdminEmails,
     publicWebUrl: options.publicWebUrl,
     allowedOrigins: options.allowedOrigins ?? defaultSecurityTestOrigins,
+    serveWeb: options.serveWeb,
+    webDistPath: options.webDistPath,
   })
 }
 
@@ -429,12 +441,12 @@ test('security headers are applied to all responses', async () => {
   try {
     const agent = request(app)
     const { token } = await registerOwner(agent, issueToken!)
-    
+
     const response = await withAuth(agent, token)
       .get('/api/campaigns')
-    
+
     assert.equal(response.status, 200)
-    
+
     // Check for security headers
     assert.equal(response.get('X-Content-Type-Options'), 'nosniff')
     assert.equal(response.get('X-Frame-Options'), 'DENY')
@@ -443,4 +455,132 @@ test('security headers are applied to all responses', async () => {
   } finally {
     await cleanup()
   }
+})
+
+// SPA fallback + share-link frame-ancestors parity tests
+// These cover the dev/prod gap where the framed HTML document is served by the
+// Express SPA fallback rather than Vite dev server, so the per-share-link CSP
+// policy must be applied to the document response, not just the API data routes.
+
+test('SPA fallback for /share/<token> sets frame-ancestors from share link and removes X-Frame-Options', async (t) => {
+  const { app, cleanup, issueToken } = await createTestApp({
+    serveWeb: true,
+    webDistPath: testFixtureWebDistPath,
+  })
+  t.after(cleanup)
+
+  const agent = request(app)
+  const { token } = await registerOwner(agent, issueToken!)
+
+  const createShareLinkResponse = await withAuth(agent, token)
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({ accessLevel: 'viewer', frameAncestors: 'https://www.dndbeyond.com' })
+
+  assert.equal(createShareLinkResponse.status, 201)
+  const shareToken = createShareLinkResponse.body.token
+
+  const docResponse = await agent
+    .get(`/share/${shareToken}`)
+    .set('Accept', 'text/html')
+
+  assert.equal(docResponse.status, 200)
+  assert.match(
+    docResponse.get('Content-Security-Policy') ?? '',
+    /frame-ancestors https:\/\/www\.dndbeyond\.com/,
+  )
+  assert.equal(docResponse.get('X-Frame-Options'), undefined)
+})
+
+test('SPA fallback for /share/<token> with null frameAncestors locks to frame-ancestors none', async (t) => {
+  const { app, cleanup, issueToken } = await createTestApp({
+    serveWeb: true,
+    webDistPath: testFixtureWebDistPath,
+  })
+  t.after(cleanup)
+
+  const agent = request(app)
+  const { token } = await registerOwner(agent, issueToken!)
+
+  const createShareLinkResponse = await withAuth(agent, token)
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({ accessLevel: 'viewer' })
+
+  assert.equal(createShareLinkResponse.status, 201)
+  const shareToken = createShareLinkResponse.body.token
+
+  const docResponse = await agent
+    .get(`/share/${shareToken}`)
+    .set('Accept', 'text/html')
+
+  assert.equal(docResponse.status, 200)
+  assert.match(
+    docResponse.get('Content-Security-Policy') ?? '',
+    /frame-ancestors 'none'/,
+  )
+  assert.equal(docResponse.get('X-Frame-Options'), undefined)
+})
+
+test('SPA fallback for /share/<invalid-token> serves index.html with locked policy, no crash', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    serveWeb: true,
+    webDistPath: testFixtureWebDistPath,
+  })
+  t.after(cleanup)
+
+  const docResponse = await request(app)
+    .get('/share/does-not-exist')
+    .set('Accept', 'text/html')
+
+  assert.equal(docResponse.status, 200)
+  assert.match(docResponse.text, /Fixture dnd-notes app/)
+  assert.match(
+    docResponse.get('Content-Security-Policy') ?? '',
+    /frame-ancestors 'none'/,
+  )
+  assert.equal(docResponse.get('X-Frame-Options'), undefined)
+})
+
+test('SPA fallback for non-share route keeps X-Frame-Options: DENY', async (t) => {
+  const { app, cleanup } = await createTestApp({
+    serveWeb: true,
+    webDistPath: testFixtureWebDistPath,
+  })
+  t.after(cleanup)
+
+  const docResponse = await request(app)
+    .get('/campaigns')
+    .set('Accept', 'text/html')
+
+  assert.equal(docResponse.status, 200)
+  assert.match(docResponse.text, /Fixture dnd-notes app/)
+  assert.equal(docResponse.get('X-Frame-Options'), 'DENY')
+})
+
+test('SPA fallback for /share/<token> applies frame-ancestors on HEAD as well as GET', async (t) => {
+  const { app, cleanup, issueToken } = await createTestApp({
+    serveWeb: true,
+    webDistPath: testFixtureWebDistPath,
+  })
+  t.after(cleanup)
+
+  const agent = request(app)
+  const { token } = await registerOwner(agent, issueToken!)
+
+  const createShareLinkResponse = await withAuth(agent, token)
+    .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+    .send({ accessLevel: 'viewer', frameAncestors: 'https://www.dndbeyond.com' })
+
+  assert.equal(createShareLinkResponse.status, 201)
+  const shareToken = createShareLinkResponse.body.token
+
+  const headResponse = await agent
+    .head(`/share/${shareToken}`)
+    .set('Accept', 'text/html')
+
+  assert.equal(headResponse.status, 200)
+  assert.match(
+    headResponse.get('Content-Security-Policy') ?? '',
+    /frame-ancestors https:\/\/www\.dndbeyond\.com/,
+  )
+  assert.equal(headResponse.get('X-Frame-Options'), undefined)
 })

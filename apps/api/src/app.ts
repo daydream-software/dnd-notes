@@ -16,7 +16,7 @@ import {
 import { registerOwnerCampaignRoutes } from './routes/owner-campaign-routes.js'
 import { registerOwnerNoteRoutes } from './routes/owner-note-routes.js'
 import { registerSharedRoutes } from './routes/shared-routes.js'
-import { normalizePublicWebUrl } from './route-support.js'
+import { applySharedLinkPolicy, normalizePublicWebUrl } from './route-support.js'
 import { createControlState, type ControlState } from './control-state.js'
 import { tenantApiSchemaVersion } from './migrations.js'
 import type { ErrorResponse, HealthResponse } from './types.js'
@@ -247,7 +247,7 @@ export function createApp({
     app.use(express.static(resolvedWebDistPath))
 
     // SPA fallback - serve index.html for browser navigation requests only
-    app.use(spaFallbackReadLimiter, (request: Request, response: Response, next) => {
+    app.use(spaFallbackReadLimiter, async (request: Request, response: Response, next) => {
       const isDocumentRequest = request.method === 'GET' || request.method === 'HEAD'
       const path = request.path
       const acceptsHtml = Boolean(request.accepts('html'))
@@ -266,9 +266,26 @@ export function createApp({
         path === '/readyz'
       ) {
         next()
-      } else {
-        response.sendFile('index.html', { root: resolvedWebDistPath })
+        return
       }
+
+      // For share-link document routes, remove X-Frame-Options and set
+      // frame-ancestors from the share link's configured policy.  All other
+      // SPA routes keep the global X-Frame-Options: DENY set by middleware.
+      const shareMatch = path.match(/^\/share\/([^/]+)\/?$/)
+      if (shareMatch) {
+        const shareToken = shareMatch[1]
+        let frameAncestors: string | null = null
+        try {
+          const shareLink = await noteStore.getCampaignShareLinkByToken(shareToken)
+          frameAncestors = shareLink?.frameAncestors ?? null
+        } catch {
+          // DB hiccup — fall back to locked policy ('none') and still serve the document
+        }
+        applySharedLinkPolicy(response, frameAncestors)
+      }
+
+      response.sendFile('index.html', { root: resolvedWebDistPath })
     })
   }
 
