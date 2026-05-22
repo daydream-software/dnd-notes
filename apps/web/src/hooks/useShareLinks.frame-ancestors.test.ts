@@ -53,6 +53,22 @@ describe('composeFrameAncestors', () => {
       `'self' https://app.roll20.net ${CHROME} ${MOZ} ${SAFARI}`,
     )
   })
+
+  it('strips extension scheme-sources typed into origins when allowExtensions is false (checkbox is authoritative)', () => {
+    const result = composeFrameAncestors(
+      `https://www.dndbeyond.com ${CHROME} ${MOZ}`,
+      false,
+    )
+    expect(result).toBe('https://www.dndbeyond.com')
+  })
+
+  it('does not duplicate scheme-sources typed into origins when allowExtensions is true', () => {
+    const result = composeFrameAncestors(
+      `https://www.dndbeyond.com ${CHROME}`,
+      true,
+    )
+    expect(result).toBe(`https://www.dndbeyond.com ${CHROME} ${MOZ} ${SAFARI}`)
+  })
 })
 
 describe('parseFrameAncestors', () => {

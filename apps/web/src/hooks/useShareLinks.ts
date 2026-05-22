@@ -50,7 +50,13 @@ export function composeFrameAncestors(
   origins: string,
   allowExtensions: boolean,
 ): string | null {
-  const parts: string[] = origins.trim().split(/\s+/).filter(Boolean)
+  // Extension scheme-sources are controlled solely by the checkbox, so strip any
+  // a user typed into the origins field — keeps the checkbox authoritative and
+  // avoids duplicates when it is also checked.
+  const parts: string[] = origins
+    .trim()
+    .split(/\s+/)
+    .filter((part) => part !== '' && !extensionSchemeSet.has(part))
   if (allowExtensions) {
     parts.push(...EXTENSION_SCHEME_SOURCES)
   }
