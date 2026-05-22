@@ -1,0 +1,39 @@
+# Allow Traefik (k3s's bundled ingress controller) to route Ingress backends
+# that are ExternalName Services.
+#
+# Why this is needed
+#   The control-plane provisions an ExternalName "shim" Service in each tenant
+#   namespace (dnd-notes-activator-shim) so the tenant Ingress can forward to
+#   the activator in dnd-notes-platform, enabling scale-to-zero wake-on-request
+#   (apps/control-plane/src/provisioning.ts, "Pattern B"). networking.k8s.io/v1
+#   Ingress backends must live in the same namespace as the Ingress, so the
+#   cross-namespace hop goes through this ExternalName shim.
+#
+#   Traefik refuses ExternalName Service backends by default
+#   (allowExternalNameServices=false) — a guard against an Ingress routing to an
+#   arbitrary internal/external address. nginx (used in the k3d dev overlay)
+#   allows them, so this gap only surfaces on the Traefik-based prod cluster:
+#   Traefik never creates the route ("externalName services not allowed") and
+#   tenant requests 404 even though the tenant pod is healthy.
+#
+# Why it is acceptable here
+#   Only the control-plane creates tenant Ingresses and their shims; tenants
+#   cannot define their own. The set of ExternalName targets is controlled by
+#   the platform, not by untrusted tenant input, so the SSRF surface the default
+#   guards against is not exposed.
+#
+# Applying
+#   k3s's helm-controller reconciles this HelmChartConfig into the bundled
+#   Traefik HelmChart and redeploys Traefik with the value. Apply once at
+#   cluster bootstrap (see docs/deploy/README.md §2). Re-applying an unchanged
+#   config is a no-op (Traefik is not redeployed unless the values change).
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: traefik
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    providers:
+      kubernetesIngress:
+        allowExternalNameServices: true
