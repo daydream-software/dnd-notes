@@ -273,6 +273,36 @@ kubectl --context dnd-notes-prod apply \
 
 The certificate covers `*.daydreamsoftware.ca` and `*.notes.daydreamsoftware.ca` via a single DNS-01 wildcard. It is issued into the `dnd-notes-platform` namespace so all ingress resources can reference it.
 
+### 2g. Allow Traefik to route ExternalName service backends (scale-to-zero)
+
+Scale-to-zero routes each tenant Ingress through an `ExternalName` "shim" Service
+(`dnd-notes-activator-shim`) that forwards cross-namespace to the activator. k3s's
+bundled Traefik **refuses ExternalName service backends by default**, so without this
+step the tenant Ingress route is never created and requests return `404 page not found`
+even while the tenant pod is healthy. (The k3d dev overlay uses nginx, which allows
+ExternalName backends — this gap is Traefik/prod-only.)
+
+```bash
+kubectl --context dnd-notes-prod apply \
+  -f deploy/k3s/base/traefik/helmchartconfig.yaml
+```
+
+k3s's helm-controller redeploys Traefik with the new value. This briefly interrupts
+**all** ingress traffic (portals, auth, every tenant) for the few seconds of the
+Traefik rollout, so apply it during the bootstrap window or a maintenance moment:
+
+```bash
+kubectl --context dnd-notes-prod -n kube-system rollout status deployment/traefik
+```
+
+This is safe here because only the control-plane creates tenant Ingresses and shims —
+tenants cannot define their own, so the ExternalName targets are platform-controlled.
+See the header comment in `deploy/k3s/base/traefik/helmchartconfig.yaml` for the full
+rationale.
+
+> If the cluster is ever rebuilt, this step must be re-run before provisioning tenants —
+> the HelmChartConfig is not part of the routine `kubectl apply -k` app deploy.
+
 ---
 
 ## 3. Secrets setup (before first deploy)
