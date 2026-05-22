@@ -7,6 +7,7 @@ import {
   Checkbox,
   Chip,
   FormControlLabel,
+  FormHelperText,
   MenuItem,
   Stack,
   TextField,
@@ -533,14 +534,33 @@ export default function CampaignAdminPane({
                     </TextField>
                   </Stack>
 
-                  <TextField
-                    label="Allowed frame ancestors"
-                    value={shareLinkDraft.frameAncestors}
-                    onChange={(event) =>
-                      onShareLinkDraftChange('frameAncestors', event.target.value)
-                    }
-                    helperText="Optional. Use 'self', 'none', or space-separated origins such as https://app.roll20.net."
-                  />
+                  <Box>
+                    <TextField
+                      label="Allowed frame ancestors"
+                      fullWidth
+                      value={shareLinkDraft.frameAncestors}
+                      onChange={(event) =>
+                        onShareLinkDraftChange('frameAncestors', event.target.value)
+                      }
+                      helperText="Optional. Use 'self', 'none', or space-separated origins such as https://app.roll20.net. Extension embedding is controlled by the checkbox below."
+                    />
+                    <Box sx={{ mt: 1 }}>
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={shareLinkDraft.allowExtensions}
+                            onChange={(event) =>
+                              onShareLinkDraftChange('allowExtensions', event.target.checked)
+                            }
+                          />
+                        }
+                        label="Allow embedding inside browser extensions (e.g. AboveVTT)"
+                      />
+                      <FormHelperText sx={{ ml: '30px', mt: 0 }}>
+                        Needed for VTT overlays like AboveVTT that embed through a browser-extension frame. Adds chrome-, moz- and safari-web-extension scheme sources.
+                      </FormHelperText>
+                    </Box>
+                  </Box>
 
                   <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
                     <Button

@@ -10,6 +10,7 @@ export interface ShareLinkDraft {
   label: string
   accessLevel: ShareAccessLevel
   frameAncestors: string
+  allowExtensions: boolean
 }
 
 export interface RevealedShareLink {
@@ -17,11 +18,52 @@ export interface RevealedShareLink {
   isVisible: boolean
 }
 
+/** The three extension scheme-sources, in a stable order. */
+export const EXTENSION_SCHEME_SOURCES = [
+  'chrome-extension:',
+  'moz-extension:',
+  'safari-web-extension:',
+] as const
+
+const extensionSchemeSet = new Set<string>(EXTENSION_SCHEME_SOURCES)
+
+/**
+ * Parse a stored `frameAncestors` string into the form's two-part representation:
+ * - `origins`: the portion the user types (everything that is not an extension scheme-source)
+ * - `allowExtensions`: whether any of the three extension scheme-sources were present
+ */
+export function parseFrameAncestors(stored: string): {
+  origins: string
+  allowExtensions: boolean
+} {
+  const parts = stored.trim().split(/\s+/).filter(Boolean)
+  const origins = parts.filter((p) => !extensionSchemeSet.has(p)).join(' ')
+  const allowExtensions = parts.some((p) => extensionSchemeSet.has(p))
+  return { origins, allowExtensions }
+}
+
+/**
+ * Compose the stored `frameAncestors` value from the form's two-part representation.
+ * Returns `null` when the composed value would be empty.
+ */
+export function composeFrameAncestors(
+  origins: string,
+  allowExtensions: boolean,
+): string | null {
+  const parts: string[] = origins.trim().split(/\s+/).filter(Boolean)
+  if (allowExtensions) {
+    parts.push(...EXTENSION_SCHEME_SOURCES)
+  }
+  const composed = parts.join(' ')
+  return composed === '' ? null : composed
+}
+
 export function createShareLinkDraft(): ShareLinkDraft {
   return {
     label: '',
     accessLevel: 'editor',
     frameAncestors: '',
+    allowExtensions: false,
   }
 }
 
@@ -34,7 +76,7 @@ function createShareLinkPayload(draft: ShareLinkDraft): CampaignShareLinkInput {
   return {
     label: trimToNull(draft.label),
     accessLevel: draft.accessLevel,
-    frameAncestors: trimToNull(draft.frameAncestors),
+    frameAncestors: composeFrameAncestors(draft.frameAncestors, draft.allowExtensions),
   }
 }
 
