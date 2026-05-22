@@ -95,6 +95,12 @@ const campaignPayloadSchema = z.object({
   nextSession: nullableTrimmedString('Next session', 120),
 })
 
+const EXTENSION_SCHEME_SOURCES = new Set([
+  'chrome-extension:',
+  'moz-extension:',
+  'safari-web-extension:',
+])
+
 function isValidFrameAncestorsPolicy(value: string) {
   const directives = value
     .trim()
@@ -114,6 +120,10 @@ function isValidFrameAncestorsPolicy(value: string) {
       return true
     }
 
+    if (EXTENSION_SCHEME_SOURCES.has(directive)) {
+      return true
+    }
+
     try {
       const url = new URL(directive)
       return url.origin === directive
@@ -128,7 +138,7 @@ const shareLinkSchema = z.object({
   accessLevel: z.enum(shareAccessLevels),
   frameAncestors: nullableTrimmedString('Frame ancestors', 500).refine(
     (value) => value === null || isValidFrameAncestorsPolicy(value),
-    "Frame ancestors must be null, 'self', 'none', or space-separated origins.",
+    "Frame ancestors must be null, 'self', 'none', space-separated https/http origins, or extension scheme-sources (chrome-extension:, moz-extension:, safari-web-extension:).",
   ),
   expiresAt: z
     .union([z.string().datetime({ offset: true }), z.literal(''), z.null()])

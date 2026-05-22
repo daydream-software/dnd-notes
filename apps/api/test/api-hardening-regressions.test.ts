@@ -203,3 +203,135 @@ test('API Hardening: Guest auth flows work unchanged with new CORS config', asyn
     await cleanup()
   }
 })
+
+test('frame-ancestors validator: accepts chrome-extension: scheme-source alone', async () => {
+  const { app, cleanup, issueToken } = await createTestApp()
+
+  try {
+    const owner = await registerOwner(request(app), issueToken!)
+    const response = await withAuth(request(app), owner.token)
+      .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+      .send({
+        accessLevel: 'viewer',
+        frameAncestors: 'chrome-extension:',
+      })
+
+    assert.equal(response.status, 201)
+    assert.equal(response.body.shareLink.frameAncestors, 'chrome-extension:')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('frame-ancestors validator: accepts moz-extension: scheme-source alone', async () => {
+  const { app, cleanup, issueToken } = await createTestApp()
+
+  try {
+    const owner = await registerOwner(request(app), issueToken!)
+    const response = await withAuth(request(app), owner.token)
+      .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+      .send({
+        accessLevel: 'viewer',
+        frameAncestors: 'moz-extension:',
+      })
+
+    assert.equal(response.status, 201)
+    assert.equal(response.body.shareLink.frameAncestors, 'moz-extension:')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('frame-ancestors validator: accepts safari-web-extension: scheme-source alone', async () => {
+  const { app, cleanup, issueToken } = await createTestApp()
+
+  try {
+    const owner = await registerOwner(request(app), issueToken!)
+    const response = await withAuth(request(app), owner.token)
+      .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+      .send({
+        accessLevel: 'viewer',
+        frameAncestors: 'safari-web-extension:',
+      })
+
+    assert.equal(response.status, 201)
+    assert.equal(response.body.shareLink.frameAncestors, 'safari-web-extension:')
+  } finally {
+    await cleanup()
+  }
+})
+
+test('frame-ancestors validator: accepts all three extension scheme-sources combined with an https origin', async () => {
+  const { app, cleanup, issueToken } = await createTestApp()
+
+  try {
+    const owner = await registerOwner(request(app), issueToken!)
+    const combined =
+      'https://www.dndbeyond.com chrome-extension: moz-extension: safari-web-extension:'
+    const response = await withAuth(request(app), owner.token)
+      .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+      .send({
+        accessLevel: 'viewer',
+        frameAncestors: combined,
+      })
+
+    assert.equal(response.status, 201)
+    assert.equal(response.body.shareLink.frameAncestors, combined)
+  } finally {
+    await cleanup()
+  }
+})
+
+test('frame-ancestors validator: rejects chrome-extension://foo/path (full URL, not a scheme-source)', async () => {
+  const { app, cleanup, issueToken } = await createTestApp()
+
+  try {
+    const owner = await registerOwner(request(app), issueToken!)
+    const response = await withAuth(request(app), owner.token)
+      .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+      .send({
+        accessLevel: 'viewer',
+        frameAncestors: 'chrome-extension://someextensionid/path',
+      })
+
+    assert.equal(response.status, 400)
+  } finally {
+    await cleanup()
+  }
+})
+
+test("frame-ancestors validator: rejects 'none' combined with an extension scheme-source", async () => {
+  const { app, cleanup, issueToken } = await createTestApp()
+
+  try {
+    const owner = await registerOwner(request(app), issueToken!)
+    const response = await withAuth(request(app), owner.token)
+      .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+      .send({
+        accessLevel: 'viewer',
+        frameAncestors: "'none' chrome-extension:",
+      })
+
+    assert.equal(response.status, 400)
+  } finally {
+    await cleanup()
+  }
+})
+
+test('frame-ancestors validator: rejects a random garbage string', async () => {
+  const { app, cleanup, issueToken } = await createTestApp()
+
+  try {
+    const owner = await registerOwner(request(app), issueToken!)
+    const response = await withAuth(request(app), owner.token)
+      .post(`/api/campaigns/${defaultCampaignId}/share-links`)
+      .send({
+        accessLevel: 'viewer',
+        frameAncestors: 'definitely-not-valid!!',
+      })
+
+    assert.equal(response.status, 400)
+  } finally {
+    await cleanup()
+  }
+})
