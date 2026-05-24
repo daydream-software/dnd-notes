@@ -1,0 +1,37 @@
+name: Playtest — confusing or hard to figure out
+description: Something worked, but it was unclear, hard to find, or not what you expected. This is the most valuable feedback.
+title: "[Playtest] "
+labels: ["feedback", "squad"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Nothing broke, but something tripped you up. "I didn't get it" is exactly what we want to hear.
+  - type: textarea
+    id: trying-to-do
+    attributes:
+      label: What were you trying to do?
+      placeholder: "I wanted to share my notes with another player…"
+    validations:
+      required: true
+  - type: textarea
+    id: confusion
+    attributes:
+      label: What confused you, or what did you expect to find?
+      description: Where you got stuck, what you looked for and couldn't find, or what felt off.
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where in the app were you?
+      options:
+        - Signing in
+        - Joining a campaign (invite link)
+        - Campaigns list
+        - Inside a campaign
+        - Writing or editing a note
+        - Sharing a note / shared link
+        - Other or not sure
+    validations:
+      required: false
