@@ -1,0 +1,23 @@
+name: Playtest — idea or wish
+description: Something you wished the app could do, or a "it would be cool if…" thought from the session.
+title: "[Playtest] "
+labels: ["feedback", "type:feature", "squad"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        No idea is too small. Half-formed wishes are welcome.
+  - type: textarea
+    id: wish
+    attributes:
+      label: What would you like to be able to do?
+      placeholder: "It would be cool if I could pin a note to the top of the campaign…"
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why — what would it help with?
+      description: The problem behind the wish, so we understand the real need.
+    validations:
+      required: false

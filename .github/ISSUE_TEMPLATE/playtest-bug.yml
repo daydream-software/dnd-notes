@@ -1,0 +1,63 @@
+name: Playtest — something broke
+description: Report something that did not work, errored out, or behaved wrong during the session.
+title: "[Playtest] "
+labels: ["feedback", "type:bug", "squad"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for testing. The more concrete the better — even a rough note helps.
+  - type: textarea
+    id: what-doing
+    attributes:
+      label: What were you doing?
+      description: The steps you took right before it broke.
+      placeholder: "I was adding a note to my campaign and clicked save…"
+    validations:
+      required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you actually saw — error message, blank screen, wrong result, nothing at all.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect instead?
+      placeholder: "I expected the note to save and show up in the list."
+    validations:
+      required: false
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where in the app were you?
+      options:
+        - Signing in
+        - Joining a campaign (invite link)
+        - Campaigns list
+        - Inside a campaign
+        - Writing or editing a note
+        - Sharing a note / shared link
+        - Other or not sure
+    validations:
+      required: false
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time
+        - Sometimes
+        - Just once so far
+    validations:
+      required: false
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      description: Optional — helps us reproduce.
+      placeholder: "iPhone 15, Safari / Windows laptop, Chrome"
+    validations:
+      required: false
