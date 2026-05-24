@@ -9126,3 +9126,25 @@ Minimize CodeRabbit triggers (hourly limit observed). Get PRs clean locally (Mik
 - Epic #362 status: PRs A (#365) + B (#366) merged, PR C (#377, currently open) completes deploy automation.
 
 ---
+# Decision: SPA fallback must apply per-share-link frame-ancestors policy
+
+**Date:** 2026-05-22
+**Author:** Data (Backend Dev)
+**Branch:** fix/spa-share-link-frame-ancestors
+**PR:** #383
+
+## Decision
+
+The Express SPA fallback in `apps/api/src/app.ts` must apply `applySharedLinkPolicy` before serving `index.html` for `/share/:token` document requests. This mirrors the dev-server behaviour already implemented in `apps/web/vite.config.ts` (`createFrameAncestorsPlugin`).
+
+## Rationale
+
+The framed document is served by the SPA fallback, not the API data routes where `applySharedLinkPolicy` was already called. The global security middleware set `X-Frame-Options: DENY` on every response including that document, overriding the share link's configured `frameAncestors` and blocking embedding even when explicitly allowed.
+
+## Implementation
+
+- SPA fallback handler made `async`, wraps token lookup in try/catch.
+- On DB error or missing token: `applySharedLinkPolicy(response, null)` — defaults to `frame-ancestors 'none'`, document still served.
+- Path matching: `/^\/share\/([^/]+)\/?$/` — same regex as dev plugin.
+- Non-share SPA routes unchanged: `X-Frame-Options: DENY` kept.
+- HEAD handled identically to GET.
