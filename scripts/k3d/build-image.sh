@@ -15,7 +15,7 @@ export DOCKER_BUILDKIT=1
 ROOT="$(git rev-parse --show-toplevel)"
 CLUSTER_NAME="${K3D_CLUSTER_NAME:-dnd-notes}"
 IMAGE_IMPORT_MODE="${K3D_IMAGE_IMPORT_MODE:-direct}"
-IMAGE_IMPORT_FALLBACK_MODE="${K3D_IMAGE_IMPORT_FALLBACK_MODE:-tools}"
+IMAGE_IMPORT_FALLBACK_MODE="${K3D_IMAGE_IMPORT_FALLBACK_MODE:-tools-node}"
 IMAGE_IMPORT_TIMEOUT_SECONDS="${K3D_IMAGE_IMPORT_TIMEOUT_SECONDS:-180}"
 
 # The image import + digest-verification helpers are shared with scripts/k3d/up.sh.
@@ -50,7 +50,7 @@ Build a Docker image from the repo and import it into k3d.
 Environment overrides:
   K3D_CLUSTER_NAME                Cluster name (default: dnd-notes)
   K3D_IMAGE_IMPORT_MODE           k3d image import mode (default: direct)
-  K3D_IMAGE_IMPORT_FALLBACK_MODE  retry mode when the primary import stalls/fails (default: tools)
+  K3D_IMAGE_IMPORT_FALLBACK_MODE  retry mode when the primary import stalls/fails (default: tools-node)
   K3D_IMAGE_IMPORT_TIMEOUT_SECONDS  per-import timeout in seconds (default: 180)
 EOF
 }
