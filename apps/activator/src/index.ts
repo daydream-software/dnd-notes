@@ -40,8 +40,27 @@ const TENANT_PORT = Number(process.env['TENANT_PORT'] ?? '3000')
 const CONTROL_PLANE_DATABASE_URL = process.env['CONTROL_PLANE_DATABASE_URL'] ?? ''
 const COLD_START_TIMEOUT_MS = Number(process.env['COLD_START_TIMEOUT_MS'] ?? '60000')
 const POD_SCHEDULE_BUDGET_MS = Number(process.env['POD_SCHEDULE_BUDGET_MS'] ?? '30000')
-const WAKE_GRACE_HOLD_MS = Number(process.env['WAKE_GRACE_HOLD_MS'] ?? '2500')
-const WARMING_RETRY_AFTER_SECONDS = Number(process.env['WARMING_RETRY_AFTER_SECONDS'] ?? '2')
+
+/**
+ * Read a positive-number env var, falling back to `fallback` when unset.
+ * Exits on an invalid value (NaN, <= 0) rather than silently accepting a
+ * timing of 0 or NaN — consistent with the idle-scaler's threshold guard.
+ */
+function readPositiveNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') {
+    return fallback
+  }
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) {
+    console.error(`[activator] ${name} must be a positive number`)
+    process.exit(1)
+  }
+  return value
+}
+
+const WAKE_GRACE_HOLD_MS = readPositiveNumberEnv('WAKE_GRACE_HOLD_MS', 2500)
+const WARMING_RETRY_AFTER_SECONDS = readPositiveNumberEnv('WARMING_RETRY_AFTER_SECONDS', 2)
 
 if (!BASE_DOMAIN) {
   console.error('[activator] BASE_DOMAIN is required')
