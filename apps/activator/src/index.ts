@@ -118,6 +118,15 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
       wakePromise = (async (): Promise<boolean> => {
         try {
           console.log(`[activator] waking tenant ${subdomain} (namespace: ${namespace})`)
+          // Stamp activity before scaling up (defense-in-depth, not a
+          // synchronization primitive — this is fire-and-forget). The
+          // deterministic #354 guard is hasActivitySince in the idle-scaler;
+          // this early stamp narrows the window where an idle-scaler tick lands
+          // mid-cold-start, sees last_request_at already advanced, and skips the
+          // scale-down instead of clobbering the wake.
+          void activityStore.recordActivity(subdomain).catch((err: unknown) => {
+            console.warn('[activator] activity upsert failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
+          })
           await watcher.patchReplicas(namespace, deploymentName, 1)
           const ready = await watcher.waitForReadyEndpoint(
             namespace,
@@ -128,6 +137,14 @@ async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise
               metrics.podScheduleDeadlineExceeded.inc({ tenant: subdomain })
             },
           )
+          if (ready) {
+            // Make the wake eagerly authoritative: flip current_state
+            // sleeping -> ready now rather than waiting for the idle-scaler
+            // sync-back, so the operator portal reflects the live tenant (#385).
+            void activityStore.markReady(subdomain).catch((err: unknown) => {
+              console.warn('[activator] markReady failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
+            })
+          }
           return ready
         } finally {
           wakeInProgress.delete(namespace)
