@@ -199,6 +199,14 @@ export interface DeploymentWatcher {
   getReplicas(namespace: string, deploymentName: string): Promise<number>
 
   /**
+   * Peek the current ready-address count for a Service (a non-blocking
+   * one-shot, unlike waitForReadyEndpoint which polls until ready/timeout).
+   * Cache hit, else a single direct API GET; returns 0 if the Endpoints object
+   * is missing or has no ready addresses.
+   */
+  getReadyAddresses(namespace: string, serviceName: string): Promise<number>
+
+  /**
    * Patch spec.replicas on a Deployment.
    */
   patchReplicas(namespace: string, deploymentName: string, replicas: number): Promise<void>
@@ -387,6 +395,27 @@ export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}):
       const replicas = resp.spec?.replicas ?? 0
       replicaCache.set(key, replicas)
       return replicas
+    },
+
+    async getReadyAddresses(namespace: string, serviceName: string): Promise<number> {
+      const key = resourceKey(namespace, serviceName)
+      const cached = readyAddressCache.get(key)
+      if (cached !== undefined) {
+        return cached
+      }
+      // Cache miss — one direct API GET. A missing Endpoints object (tenant not
+      // up yet) or any transient error counts as zero ready addresses.
+      try {
+        const ep = await coreApi.readNamespacedEndpoints({ name: serviceName, namespace })
+        let readyCount = 0
+        for (const subset of ep.subsets ?? []) {
+          readyCount += subset.addresses?.length ?? 0
+        }
+        readyAddressCache.set(key, readyCount)
+        return readyCount
+      } catch {
+        return 0
+      }
     },
 
     async patchReplicas(namespace: string, deploymentName: string, replicas: number): Promise<void> {
