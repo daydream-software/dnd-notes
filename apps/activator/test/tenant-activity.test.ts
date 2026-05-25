@@ -198,3 +198,103 @@ describe('TenantActivityStore', () => {
     )
   })
 })
+
+describe('TenantActivityStore.markReady (#385)', () => {
+  it('resolves the subdomain, flips sleeping->ready guarded, and records the transition', async () => {
+    const calls: Array<{ sql: string; params?: unknown[] }> = []
+
+    const db = makeDb((sql, params) => {
+      calls.push({ sql, params })
+      if (sql.includes('SELECT id FROM tenants')) {
+        return { rows: [{ id: 'uuid-woken' }] }
+      }
+      if (sql.includes('UPDATE tenants')) {
+        // Tenant was sleeping — the guarded UPDATE transitions one row.
+        return { rows: [{ id: 'uuid-woken' }] }
+      }
+      return { rows: [] } // state_transitions INSERT
+    })
+
+    const store = createTenantActivityStoreWithClient({ db })
+    await store.markReady('sub-woken')
+
+    assert.ok(calls[0]?.sql.includes('SELECT id FROM tenants'), 'first query resolves subdomain to id')
+
+    const update = calls[1]
+    assert.ok(update?.sql.includes('UPDATE tenants'), 'second query is the state UPDATE')
+    assert.ok(update.sql.includes("current_state = 'ready'"), 'UPDATE sets current_state to ready')
+    assert.ok(update.sql.includes("current_state = 'sleeping'"), 'UPDATE is guarded on the sleeping state')
+    assert.ok(
+      update.sql.includes("desired_state NOT IN ('deprovisioned', 'failed')"),
+      'UPDATE must not resurrect a tenant mid-teardown (desired_state guard)',
+    )
+    assert.ok(update.sql.includes('RETURNING'), 'UPDATE uses RETURNING to detect whether it transitioned')
+    assert.deepEqual(update.params, ['uuid-woken'], 'UPDATE keys on tenants.id, not the subdomain')
+
+    const insert = calls[2]
+    assert.ok(insert?.sql.includes('INSERT INTO state_transitions'), 'third query records the transition')
+    assert.ok(insert.sql.includes("'sleeping', 'ready', 'activator'"), 'transition is sleeping->ready by activator')
+    assert.deepEqual(insert.params, ['uuid-woken'])
+  })
+
+  it('does not record a transition when the tenant was not sleeping (no row updated)', async () => {
+    let transitionInserted = false
+
+    const db = makeDb((sql) => {
+      if (sql.includes('SELECT id FROM tenants')) {
+        return { rows: [{ id: 'uuid-already-ready' }] }
+      }
+      if (sql.includes('UPDATE tenants')) {
+        return { rows: [] } // guard matched nothing — already ready / other state
+      }
+      if (sql.includes('INSERT INTO state_transitions')) {
+        transitionInserted = true
+      }
+      return { rows: [] }
+    })
+
+    const store = createTenantActivityStoreWithClient({ db })
+    await store.markReady('sub-already-ready')
+
+    assert.equal(transitionInserted, false, 'no transition row when the guarded UPDATE changed nothing')
+  })
+
+  it('does not touch the registry when the subdomain has no tenant row', async () => {
+    let mutated = false
+
+    const db = makeDb((sql) => {
+      if (sql.includes('SELECT id FROM tenants')) {
+        return { rows: [] } // no matching tenant
+      }
+      if (sql.includes('UPDATE tenants') || sql.includes('INSERT INTO state_transitions')) {
+        mutated = true
+      }
+      return { rows: [] }
+    })
+
+    const store = createTenantActivityStoreWithClient({ db })
+    await assert.doesNotReject(() => store.markReady('ghost-subdomain'))
+    assert.equal(mutated, false, 'unknown subdomain must not UPDATE or INSERT')
+  })
+
+  it('shares the subdomain->id cache with recordActivity (single SELECT)', async () => {
+    let selectCount = 0
+
+    const db = makeDb((sql) => {
+      if (sql.includes('SELECT id FROM tenants')) {
+        selectCount += 1
+        return { rows: [{ id: 'uuid-shared' }] }
+      }
+      if (sql.includes('UPDATE tenants')) {
+        return { rows: [{ id: 'uuid-shared' }] }
+      }
+      return { rows: [] }
+    })
+
+    const store = createTenantActivityStoreWithClient({ db })
+    await store.recordActivity('sub-shared')
+    await store.markReady('sub-shared')
+
+    assert.equal(selectCount, 1, 'recordActivity and markReady must share one subdomain->id resolution')
+  })
+})

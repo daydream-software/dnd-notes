@@ -25,6 +25,8 @@ export interface IdleTenant {
   tenantId: string
   subdomain: string
   currentState: string
+  /** Snapshot of tenant_activity.last_request_at at SELECT time (race guard, #354). */
+  lastRequestAt: Date
 }
 
 interface ActiveTenant {
@@ -54,7 +56,8 @@ export async function queryIdleEligibleTenants(
   thresholdMinutes: number,
 ): Promise<IdleTenant[]> {
   const result = await db.query(
-    `SELECT t.id AS "tenantId", t.subdomain, t.current_state AS "currentState"
+    `SELECT t.id AS "tenantId", t.subdomain, t.current_state AS "currentState",
+            ta.last_request_at AS "lastRequestAt"
      FROM tenants t
      JOIN tenant_activity ta ON ta.tenant_id::text = t.id::text
      WHERE t.current_state IN ('ready')
@@ -64,6 +67,29 @@ export async function queryIdleEligibleTenants(
     [thresholdMinutes],
   )
   return result.rows as unknown as IdleTenant[]
+}
+
+/**
+ * Close the SELECT->PATCH race (#354). Between queryIdleEligibleTenants (the
+ * idle SELECT) and the scale-to-zero PATCH there is a window — one K8s API
+ * roundtrip plus the loop iteration — in which the activator can wake the
+ * tenant in response to a real request. Re-read last_request_at just before
+ * patching and skip the scale-down if it advanced past the SELECT-time
+ * snapshot. The comparison runs in SQL to avoid JS Date precision/timezone
+ * pitfalls.
+ */
+export async function hasActivitySince(
+  db: IdleScalerDbClient,
+  tenantId: string,
+  since: Date,
+): Promise<boolean> {
+  const result = await db.query(
+    `SELECT 1 FROM tenant_activity
+     WHERE tenant_id = $1::text
+       AND last_request_at > $2`,
+    [tenantId, since],
+  )
+  return result.rows.length > 0
 }
 
 async function main(): Promise<void> {
@@ -102,9 +128,21 @@ async function main(): Promise<void> {
       const deploymentName = 'dnd-notes'
 
       try {
+        // Race guard (#354): the activator may have woken this tenant between
+        // the idle SELECT and now. If last_request_at advanced past the
+        // snapshot, the tenant is active again — skip the scale-down (and the
+        // sleeping mark) so we do not clobber a live request. Run this cheap DB
+        // re-read before the K8s API GET so a woken tenant costs no apiserver
+        // roundtrip.
+        if (await hasActivitySince(pool, row.tenantId, row.lastRequestAt)) {
+          console.log(`[idle-scaler] tenant ${row.subdomain} was woken after the idle scan, skipping scale-down`)
+          continue
+        }
+
         // Verify the Deployment still has replicas before patching
         const deployment = await appsApi.readNamespacedDeployment({ name: deploymentName, namespace })
         const currentReplicas = deployment.spec?.replicas ?? 0
+
         if (currentReplicas === 0) {
           console.log(`[idle-scaler] tenant ${row.subdomain} already at 0 replicas, syncing state`)
         } else {
