@@ -21,7 +21,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { newDb } from 'pg-mem'
-import { queryIdleEligibleTenants, type IdleScalerDbClient } from '../src/idle-scaler.js'
+import { hasActivitySince, queryIdleEligibleTenants, type IdleScalerDbClient } from '../src/idle-scaler.js'
 
 interface FakeTenantActivityRow {
   tenantId: string
@@ -332,6 +332,81 @@ describe('queryIdleEligibleTenants — pg-mem SQL execution', () => {
       // Threshold 60: row at 45 min idle should NOT be returned
       const result60 = await queryIdleEligibleTenants(pool as unknown as IdleScalerDbClient, 60)
       assert.equal(result60.length, 0, 'threshold=60: tenant idle only 45 min must not be returned')
+    } finally {
+      await pool.end()
+    }
+  })
+})
+
+/**
+ * pg-mem suite for the SELECT->PATCH race guard (#354). Proves the re-read
+ * comparison is syntactically valid under pg-mem and returns the right boolean.
+ */
+describe('hasActivitySince — pg-mem SQL execution (#354)', () => {
+  async function buildPgMemPool() {
+    const db = newDb({ autoCreateForeignKeyIndices: true })
+    const { Pool } = db.adapters.createPg()
+    const pool = new Pool()
+    await pool.query(`
+      CREATE TABLE tenants (
+        id          TEXT PRIMARY KEY,
+        subdomain   TEXT,
+        current_state TEXT NOT NULL,
+        desired_state TEXT NOT NULL
+      )
+    `)
+    await pool.query(`
+      CREATE TABLE tenant_activity (
+        tenant_id        TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+        last_request_at  TIMESTAMPTZ NOT NULL,
+        seen_by_activator BOOLEAN NOT NULL DEFAULT FALSE
+      )
+    `)
+    return pool
+  }
+
+  it('returns false when activity has not advanced past the snapshot, true once it does', async () => {
+    const pool = await buildPgMemPool()
+    try {
+      await pool.query(
+        `INSERT INTO tenants (id, subdomain, current_state, desired_state) VALUES ('t-r', 'sub-r', 'ready', 'ready')`,
+      )
+      await pool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ('t-r', NOW() - INTERVAL '40 minutes', TRUE)`,
+      )
+
+      // Snapshot taken at idle-SELECT time.
+      const snapshot = (
+        await pool.query(`SELECT last_request_at FROM tenant_activity WHERE tenant_id = 't-r'`)
+      ).rows[0].last_request_at as Date
+
+      // No wake happened: last_request_at == snapshot, strict > is false.
+      assert.equal(
+        await hasActivitySince(pool as unknown as IdleScalerDbClient, 't-r', snapshot),
+        false,
+        'no activity advance — must not skip scale-down',
+      )
+
+      // Activator wakes the tenant after the SELECT: last_request_at moves forward.
+      await pool.query(`UPDATE tenant_activity SET last_request_at = NOW() WHERE tenant_id = 't-r'`)
+      assert.equal(
+        await hasActivitySince(pool as unknown as IdleScalerDbClient, 't-r', snapshot),
+        true,
+        'activity advanced past the snapshot — must skip scale-down',
+      )
+    } finally {
+      await pool.end()
+    }
+  })
+
+  it('returns false for a tenant with no activity row', async () => {
+    const pool = await buildPgMemPool()
+    try {
+      assert.equal(
+        await hasActivitySince(pool as unknown as IdleScalerDbClient, 't-missing', new Date(0)),
+        false,
+      )
     } finally {
       await pool.end()
     }
