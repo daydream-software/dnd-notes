@@ -346,7 +346,10 @@ describe('DeploymentWatcher reconnect backoff loop (#355)', () => {
         if (path !== DEPLOYMENTS_PATH) return new Promise<unknown>(() => {})
         const outcome = outcomes[Math.min(i, outcomes.length - 1)]
         i += 1
-        if (outcome === 'fail') doneCb(new Error('connect refused'))
+        // The loop reconnects on stream END (the done callback), so every
+        // iteration must signal it: a failure carries an error, a clean stream
+        // end carries null (resets the backoff).
+        doneCb(outcome === 'fail' ? new Error('connect refused') : null)
         return Promise.resolve(undefined)
       },
     }
@@ -412,6 +415,51 @@ describe('DeploymentWatcher.getReadyAddresses (peek)', () => {
     const watcher = createDeploymentWatcher({ appsApi: makeAppsFake(), coreApi })
 
     assert.equal(await watcher.getReadyAddresses('tenant-missing', 'dnd-notes'), 0)
+
+    watcher.stop()
+  })
+})
+
+describe('DeploymentWatcher reconnect on stream end (#389 — no connection churn)', () => {
+  it('does not reconnect until the stream ends, then reconnects exactly once', async () => {
+    const callsByPath = new Map<string, number>()
+    let depDone: ((err: unknown) => void) | undefined
+
+    const fakeWatch: WatchLike = {
+      watch(path, _params, _callback, doneCb) {
+        callsByPath.set(path, (callsByPath.get(path) ?? 0) + 1)
+        if (path === DEPLOYMENTS_PATH) depDone = doneCb
+        // Resolve at CONNECT time like the real lib (Watch.watch resolves the
+        // controller once connected, not at stream end). This is what makes the
+        // test discriminate the regression: pre-#389 the loop awaited this
+        // resolution and would spin/reconnect every sleep tick; post-#389 it
+        // awaits the done callback, so it stays parked on the live stream.
+        return Promise.resolve(new AbortController())
+      },
+    }
+
+    const watcher = createDeploymentWatcher({
+      appsApi: makeAppsFake(),
+      coreApi: makeCoreFake(),
+      watch: fakeWatch,
+      sleep: async () => {}, // reconnect immediately once a stream ends
+    })
+    watcher.start()
+    await flush()
+
+    // Parked on the live stream — exactly one connection, no churn. (Pre-#389
+    // this loop re-opened a connection every reconnect interval regardless.)
+    assert.equal(callsByPath.get(DEPLOYMENTS_PATH), 1)
+    await flush()
+    await flush()
+    assert.equal(callsByPath.get(DEPLOYMENTS_PATH), 1, 'must not reconnect while the stream is live')
+
+    // End the stream cleanly → the loop reconnects exactly once.
+    depDone?.(null)
+    await flush()
+    await flush()
+    await flush()
+    assert.equal(callsByPath.get(DEPLOYMENTS_PATH), 2, 'one reconnect per stream end')
 
     watcher.stop()
   })
