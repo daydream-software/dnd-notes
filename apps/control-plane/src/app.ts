@@ -1411,6 +1411,27 @@ export function createApp({
         return
       }
 
+      // Gate the sleeping transition (#373). On-demand wake is the activator's
+      // job, and it only wakes tenants in its request path (seen_by_activator =
+      // TRUE) — the idle scaler already refuses to sleep any other tenant.
+      // Without the same guard here, an operator could sleep a tenant the
+      // activator never saw, stranding it: nothing would flip it back to ready.
+      // Reject with an actionable error instead of creating a stuck-sleeping
+      // tenant. This read is intentionally outside updateTenantState's write
+      // transaction; if seen_by_activator flips TRUE in the window between the
+      // two, the guard simply rejects and the operator retries — the safe,
+      // conservative direction.
+      if (state === 'sleeping' && !(await tenantRegistry.hasBeenSeenByActivator(tenantId))) {
+        response.status(409).json({
+          error: 'Cannot sleep a tenant the activator has not observed',
+          details:
+            `Tenant ${tenantId} has seen_by_activator = FALSE: the activator is not in its ` +
+            `request path, so it could not be woken on demand and would be stranded in 'sleeping'. ` +
+            `Route the tenant through the activator (so it records activity) before sleeping it.`,
+        })
+        return
+      }
+
       const previousState = tenant.currentState
       const isMaintenanceTransition =
         (previousState === 'ready' && state === 'maintenance') ||

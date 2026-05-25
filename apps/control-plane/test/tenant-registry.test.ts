@@ -197,6 +197,40 @@ describe('TenantRegistry', () => {
     }
   })
 
+  it('hasBeenSeenByActivator reflects the tenant_activity seen flag (#373)', async () => {
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+
+    try {
+      await tenantRegistry.createTenant({
+        id: 'tenant-seen-check',
+        slug: 'seen-check',
+        ownerId: 'owner-1',
+        version: '1.0.0',
+      })
+
+      // No activity row yet — the activator has never observed this tenant.
+      assert.equal(await tenantRegistry.hasBeenSeenByActivator('tenant-seen-check'), false)
+
+      // A row with seen_by_activator = FALSE still counts as never seen.
+      await pool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ('tenant-seen-check', NOW(), FALSE)`,
+      )
+      assert.equal(await tenantRegistry.hasBeenSeenByActivator('tenant-seen-check'), false)
+
+      // Flip to TRUE — now seen.
+      await pool.query(
+        `UPDATE tenant_activity SET seen_by_activator = TRUE WHERE tenant_id = 'tenant-seen-check'`,
+      )
+      assert.equal(await tenantRegistry.hasBeenSeenByActivator('tenant-seen-check'), true)
+
+      // Unknown tenant resolves to false, not an error.
+      assert.equal(await tenantRegistry.hasBeenSeenByActivator('tenant-nonexistent'), false)
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('uses deterministic tie-breakers for latest backup and restore lookups', async () => {
     const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
 
