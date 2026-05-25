@@ -57,6 +57,18 @@ function makeCoreFake(): CoreV1ApiLike {
   }
 }
 
+/** Minimal AppsV1Api fake — the getReadyAddresses tests don't exercise it. */
+function makeAppsFake(): AppsV1ApiLike {
+  return {
+    async readNamespacedDeployment() {
+      return { spec: { replicas: 1 } }
+    },
+    async patchNamespacedDeployment() {
+      return {}
+    },
+  }
+}
+
 describe('DeploymentWatcher.getReplicas', () => {
   it('cache miss calls readNamespacedDeployment once and returns spec.replicas', async () => {
     let callCount = 0
@@ -361,6 +373,45 @@ describe('DeploymentWatcher reconnect backoff loop (#355)', () => {
     assert.deepEqual(delays.slice(0, 4), [1000, 2000, 4000, 1000])
     // The reset delay is strictly below the pre-reset peak.
     assert.ok(delays[3] < delays[2], 'a successful connect must reset the backoff')
+
+    watcher.stop()
+  })
+})
+
+describe('DeploymentWatcher.getReadyAddresses (peek)', () => {
+  it('cache miss: one API GET, returns the ready-address count', async () => {
+    let calls = 0
+    const coreApi: CoreV1ApiLike = {
+      async listNamespacedPod() {
+        return { items: [] }
+      },
+      async readNamespacedEndpoints() {
+        calls += 1
+        return { subsets: [{ addresses: [{}, {}] }] }
+      },
+    }
+    const watcher = createDeploymentWatcher({ appsApi: makeAppsFake(), coreApi })
+
+    assert.equal(await watcher.getReadyAddresses('tenant-r', 'dnd-notes'), 2)
+    // Second call is served from cache — no second API GET.
+    assert.equal(await watcher.getReadyAddresses('tenant-r', 'dnd-notes'), 2)
+    assert.equal(calls, 1, 'ready-address count must be cached after the first GET')
+
+    watcher.stop()
+  })
+
+  it('returns 0 when the Endpoints object is missing (tenant not up yet)', async () => {
+    const coreApi: CoreV1ApiLike = {
+      async listNamespacedPod() {
+        return { items: [] }
+      },
+      async readNamespacedEndpoints() {
+        throw Object.assign(new Error('not found'), { statusCode: 404 })
+      },
+    }
+    const watcher = createDeploymentWatcher({ appsApi: makeAppsFake(), coreApi })
+
+    assert.equal(await watcher.getReadyAddresses('tenant-missing', 'dnd-notes'), 0)
 
     watcher.stop()
   })

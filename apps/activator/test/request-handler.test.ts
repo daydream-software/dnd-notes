@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { describe, it } from 'node:test'
 import { createRequestHandler, type RequestHandlerDeps } from '../src/request-handler.js'
+import { FONT_PATH, WAKE_STATUS_PATH } from '../src/interstitial.js'
 import type { DeploymentWatcher } from '../src/deployment-watch.js'
 import type { ActivatorMetrics } from '../src/metrics.js'
 import type { TenantActivityStore } from '../src/tenant-activity.js'
@@ -80,6 +81,7 @@ function makeMetrics() {
     podScheduleDeadlineExceeded: { inc: () => calls.push('scheduleDeadline') },
     errorTotal: { inc: (labels: { reason: string }) => calls.push(`error:${labels.reason}`) },
     warmingResponsesTotal: { inc: () => calls.push('warming503') },
+    interstitialResponsesTotal: { inc: () => calls.push('interstitial') },
     contentType: 'text/plain',
     metrics: () => 'metrics-text',
   }
@@ -104,6 +106,7 @@ interface WatcherStubOptions {
   replicas: number
   ready?: boolean
   waitFor?: () => Promise<boolean>
+  readyAddresses?: number
 }
 
 function makeWatcher(opts: WatcherStubOptions) {
@@ -112,6 +115,10 @@ function makeWatcher(opts: WatcherStubOptions) {
     start: () => {},
     stop: () => {},
     getReplicas: async () => opts.replicas,
+    getReadyAddresses: async () => {
+      calls.push('getReadyAddresses')
+      return opts.readyAddresses ?? 0
+    },
     patchReplicas: async () => {
       calls.push('patchReplicas')
     },
@@ -182,20 +189,40 @@ describe('createRequestHandler — cold start', () => {
     assert.ok(storeCalls.includes('markReady'), 'a successful wake must mark the tenant ready (#385)')
   })
 
-  it('replicas 0 + never ready: answers 503 cold_start_timeout, no proxy', async () => {
+  it('navigation, wake fails within grace: serves the branded interstitial, no proxy', async () => {
     const { watcher } = makeWatcher({ replicas: 0, ready: false })
     const { store } = makeActivityStore()
     const { metrics, calls: metricCalls } = makeMetrics()
-    const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics })
+    const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics, sleep: neverSleep })
 
     const res = makeRes()
     await handler(navReq(), res)
 
-    assert.equal(res.statusCode, 503)
-    assert.equal(res.headers['Retry-After'], '10')
-    assert.match(res.body, /cold_start_timeout/)
+    assert.equal(res.statusCode, 200)
+    assert.match(res.headers['Content-Type'] ?? '', /text\/html/)
+    assert.equal(res.headers['Cache-Control'], 'no-store')
+    assert.match(res.body, /Waking your workspace/)
+    assert.deepEqual(proxyCalls, [], 'interstitial is served instead of proxying')
+    assert.ok(metricCalls.includes('interstitial'))
+  })
+
+  it('navigation, grace elapses before the wake resolves: serves the interstitial', async () => {
+    // The primary real-world path: the wake is still in flight when the grace
+    // window fires. Immediate sleep makes the grace timer win the race.
+    const { watcher } = makeWatcher({
+      replicas: 0,
+      waitFor: () => new Promise<boolean>(() => {}), // never resolves during the test
+    })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics, sleep: async () => {} })
+
+    const res = makeRes()
+    await handler(navReq(), res)
+
+    assert.equal(res.statusCode, 200)
+    assert.match(res.body, /Waking your workspace/)
     assert.deepEqual(proxyCalls, [])
-    assert.ok(metricCalls.includes('error:cold_start_timeout'))
   })
 
   it('coalesces concurrent cold-start requests into a single wake', async () => {
@@ -293,6 +320,63 @@ describe('createRequestHandler — non-navigation grace + warming 503 (#395)', (
     assert.equal(res.headers['X-Activator-Wake'], 'warming')
     assert.ok(metricCalls.includes('error:wake_error'), 'a wake exception must be counted, not swallowed')
     assert.deepEqual(proxyCalls, [])
+  })
+})
+
+describe('createRequestHandler — interstitial support routes (#396)', () => {
+  it('wake-status: cold tenant → {ready:false} and (re)kicks the wake', async () => {
+    const { watcher, calls: watcherCalls } = makeWatcher({ replicas: 0, readyAddresses: 0 })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    const { handler } = buildHandler({ watcher, activityStore: store, metrics })
+
+    const res = makeRes()
+    await handler(makeReq({ url: WAKE_STATUS_PATH }), res)
+
+    assert.equal(res.statusCode, 200)
+    assert.match(res.headers['Content-Type'] ?? '', /application\/json/)
+    assert.deepEqual(JSON.parse(res.body), { ready: false })
+    assert.ok(watcherCalls.includes('patchReplicas'), 'a not-ready poll must keep the wake alive')
+  })
+
+  it('wake-status: ready tenant → {ready:true} and does not kick a wake', async () => {
+    const { watcher, calls: watcherCalls } = makeWatcher({ replicas: 1, readyAddresses: 2 })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    const { handler } = buildHandler({ watcher, activityStore: store, metrics })
+
+    const res = makeRes()
+    await handler(makeReq({ url: WAKE_STATUS_PATH }), res)
+
+    assert.deepEqual(JSON.parse(res.body), { ready: true })
+    assert.ok(!watcherCalls.includes('patchReplicas'), 'a ready tenant must not be re-woken')
+  })
+
+  it('font route: serves the woff2 when present', async () => {
+    const { watcher } = makeWatcher({ replicas: 1 })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    const fontWoff2 = Buffer.from('fake-woff2-bytes')
+    const { handler } = buildHandler({ watcher, activityStore: store, metrics, fontWoff2 })
+
+    const res = makeRes()
+    await handler(makeReq({ url: FONT_PATH }), res)
+
+    assert.equal(res.statusCode, 200)
+    assert.equal(res.headers['Content-Type'], 'font/woff2')
+    assert.match(res.headers['Cache-Control'] ?? '', /immutable/)
+  })
+
+  it('font route: 404 when the asset is absent', async () => {
+    const { watcher } = makeWatcher({ replicas: 1 })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    const { handler } = buildHandler({ watcher, activityStore: store, metrics })
+
+    const res = makeRes()
+    await handler(makeReq({ url: FONT_PATH }), res)
+
+    assert.equal(res.statusCode, 404)
   })
 })
 
