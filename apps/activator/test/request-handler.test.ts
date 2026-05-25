@@ -28,6 +28,20 @@ function makeReq(overrides: Partial<{ method: string; url: string; headers: Reco
   } as unknown as IncomingMessage
 }
 
+/** A top-level browser navigation (Sec-Fetch-Mode: navigate). */
+function navReq(): IncomingMessage {
+  return makeReq({ headers: { host: 'acme.notes.example.com', 'sec-fetch-mode': 'navigate' } })
+}
+
+/** A non-navigation XHR/API request (Sec-Fetch-Mode: cors). */
+function apiReq(): IncomingMessage {
+  return makeReq({ headers: { host: 'acme.notes.example.com', 'sec-fetch-mode': 'cors' } })
+}
+
+const TEST_CONFIG = { coldStartTimeoutMs: 60_000, graceHoldMs: 2_500, warmingRetryAfterSeconds: 2 }
+/** A sleep that never resolves — lets the wake promise win the grace race. */
+const neverSleep = () => new Promise<void>(() => {})
+
 interface FakeRes {
   statusCode: number
   headers: Record<string, string>
@@ -65,6 +79,7 @@ function makeMetrics() {
     coldStartDuration: { observe: () => calls.push('coldStartDuration') },
     podScheduleDeadlineExceeded: { inc: () => calls.push('scheduleDeadline') },
     errorTotal: { inc: (labels: { reason: string }) => calls.push(`error:${labels.reason}`) },
+    warmingResponsesTotal: { inc: () => calls.push('warming503') },
     contentType: 'text/plain',
     metrics: () => 'metrics-text',
   }
@@ -127,7 +142,7 @@ function buildHandler(deps: Partial<RequestHandlerDeps> & {
 
   const handler = createRequestHandler({
     resolver: { resolve: () => COORDS } as unknown as RequestHandlerDeps['resolver'],
-    config: { coldStartTimeoutMs: 60_000 },
+    config: TEST_CONFIG,
     proxyRequest,
     ...deps,
   })
@@ -158,7 +173,7 @@ describe('createRequestHandler — cold start', () => {
     const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics })
 
     const res = makeRes()
-    await handler(makeReq(), res)
+    await handler(navReq(), res)
     // Let the fire-and-forget markReady microtask settle.
     await Promise.resolve()
 
@@ -174,7 +189,7 @@ describe('createRequestHandler — cold start', () => {
     const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics })
 
     const res = makeRes()
-    await handler(makeReq(), res)
+    await handler(navReq(), res)
 
     assert.equal(res.statusCode, 503)
     assert.equal(res.headers['Retry-After'], '10')
@@ -195,8 +210,8 @@ describe('createRequestHandler — cold start', () => {
 
     const res1 = makeRes()
     const res2 = makeRes()
-    const p1 = handler(makeReq(), res1)
-    const p2 = handler(makeReq(), res2)
+    const p1 = handler(navReq(), res1)
+    const p2 = handler(navReq(), res2)
 
     resolveReady(true)
     await Promise.all([p1, p2])
@@ -204,6 +219,80 @@ describe('createRequestHandler — cold start', () => {
     const patchCount = watcherCalls.filter((c) => c === 'patchReplicas').length
     assert.equal(patchCount, 1, 'concurrent wakes must coalesce to one patchReplicas')
     assert.deepEqual(proxyCalls, [COORDS.upstreamUrl, COORDS.upstreamUrl])
+  })
+})
+
+describe('createRequestHandler — non-navigation grace + warming 503 (#395)', () => {
+  it('ready within the grace window: proxies, no 503', async () => {
+    const { watcher } = makeWatcher({ replicas: 0, ready: true })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    // neverSleep means the grace timer never fires, so the wake wins the race.
+    const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics, sleep: neverSleep })
+
+    const res = makeRes()
+    await handler(apiReq(), res)
+
+    assert.deepEqual(proxyCalls, [COORDS.upstreamUrl])
+    assert.notEqual(res.statusCode, 503)
+  })
+
+  it('grace elapses before ready: returns a warming 503 marker, wake continues, no proxy', async () => {
+    const { watcher, calls: watcherCalls } = makeWatcher({
+      replicas: 0,
+      waitFor: () => new Promise<boolean>(() => {}), // never ready during the test
+    })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    // Immediate sleep makes the grace timer win the race.
+    const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics, sleep: async () => {} })
+
+    const res = makeRes()
+    await handler(apiReq(), res)
+
+    assert.equal(res.statusCode, 503)
+    assert.equal(res.headers['X-Activator-Wake'], 'warming')
+    assert.equal(res.headers['Retry-After'], '2')
+    assert.equal(res.headers['Cache-Control'], 'no-store')
+    const body = JSON.parse(res.body)
+    assert.equal(body.code, 'tenant_waking')
+    assert.equal(body.retryable, true)
+    assert.deepEqual(proxyCalls, [], 'warming 503 is emitted before proxying')
+    assert.equal(watcherCalls.filter((c) => c === 'patchReplicas').length, 1, 'wake kicked exactly once')
+  })
+
+  it('wake fails (not ready) before grace: returns a warming 503, not cold_start_timeout', async () => {
+    const { watcher } = makeWatcher({ replicas: 0, ready: false })
+    const { store } = makeActivityStore()
+    const { metrics } = makeMetrics()
+    const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics, sleep: neverSleep })
+
+    const res = makeRes()
+    await handler(apiReq(), res)
+
+    assert.equal(res.statusCode, 503)
+    assert.equal(res.headers['X-Activator-Wake'], 'warming')
+    assert.match(res.body, /tenant_waking/)
+    assert.doesNotMatch(res.body, /cold_start_timeout/)
+    assert.deepEqual(proxyCalls, [])
+  })
+
+  it('wake error: answers a warming 503 but logs + counts the error (not swallowed)', async () => {
+    const { watcher } = makeWatcher({
+      replicas: 0,
+      waitFor: () => Promise.reject(new Error('rbac denied')),
+    })
+    const { store } = makeActivityStore()
+    const { metrics, calls: metricCalls } = makeMetrics()
+    const { handler, proxyCalls } = buildHandler({ watcher, activityStore: store, metrics, sleep: neverSleep })
+
+    const res = makeRes()
+    await handler(apiReq(), res)
+
+    assert.equal(res.statusCode, 503)
+    assert.equal(res.headers['X-Activator-Wake'], 'warming')
+    assert.ok(metricCalls.includes('error:wake_error'), 'a wake exception must be counted, not swallowed')
+    assert.deepEqual(proxyCalls, [])
   })
 })
 
@@ -217,7 +306,7 @@ describe('createRequestHandler — routing and health', () => {
       watcher,
       activityStore: store,
       metrics,
-      config: { coldStartTimeoutMs: 60_000 },
+      config: TEST_CONFIG,
     })
 
     const res = makeRes()

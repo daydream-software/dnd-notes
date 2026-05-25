@@ -143,6 +143,11 @@ export function createMetrics() {
     'Number of times a tenant pod stayed Pending past the scheduling budget',
   )
 
+  const warmingResponsesTotal = new Counter(
+    'activator_warming_responses_total',
+    'Number of warming 503 responses returned to non-navigation requests during cold start',
+  )
+
   function metrics(): string {
     return [
       wakeTotal.serialize(),
@@ -150,6 +155,7 @@ export function createMetrics() {
       coldStartDuration.serialize(),
       heldConnections.serialize(),
       podScheduleDeadlineExceeded.serialize(),
+      warmingResponsesTotal.serialize(),
     ].join('\n') + '\n'
   }
 
@@ -161,6 +167,7 @@ export function createMetrics() {
     coldStartDuration,
     heldConnections,
     podScheduleDeadlineExceeded,
+    warmingResponsesTotal,
   }
 }
 
