@@ -6,19 +6,22 @@
  * Wake-on-request flow (Pattern B):
  *   - replicas >= 1: upsert activity, proxy directly.
  *   - replicas == 0: coalesce a wake (patch replicas to 1 + wait for a ready
- *     endpoint). How the caller waits depends on the request kind (#395):
- *       * navigation: hold for the full cold-start budget, then proxy or 503.
- *       * non-navigation (XHR/API): hold only a short grace window; if not
- *         ready by then, answer a recognizable "warming" 503 + Retry-After so
- *         the client retries, while the wake continues in the background. The
- *         marker is emitted strictly before proxying, so no mutation occurred
- *         and the client may safely retry POST/PUT/PATCH.
+ *     endpoint). The caller holds only a short grace window; if the wake lands
+ *     within it the request proxies directly, otherwise (the wake continues in
+ *     the background):
+ *       * navigation: serve the branded cold-start interstitial, which polls
+ *         wake-status and reloads the original URL when ready (#396).
+ *       * non-navigation (XHR/API): answer a recognizable "warming" 503 +
+ *         Retry-After so the client retries (#395). The marker is emitted
+ *         strictly before proxying, so no mutation occurred and the client may
+ *         safely retry POST/PUT/PATCH.
  */
 
 import { setTimeout as delay } from 'node:timers/promises'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { DeploymentWatcher } from './deployment-watch.js'
 import type { ActivatorMetrics } from './metrics.js'
+import { FONT_PATH, WAKE_STATUS_PATH, renderColdStartInterstitial } from './interstitial.js'
 import { proxyRequest as defaultProxyRequest } from './proxy.js'
 import { isNavigationRequest } from './request-kind.js'
 import type { TenantActivityStore } from './tenant-activity.js'
@@ -48,6 +51,12 @@ export interface RequestHandlerDeps {
   proxyRequest?: typeof defaultProxyRequest
   /** Injectable abortable sleep for the grace window; defaults to a real timer. */
   sleep?: (ms: number, signal?: AbortSignal) => Promise<void>
+  /**
+   * The Geist woff2 served at FONT_PATH for the interstitial. index.ts reads it
+   * from the bundled asset; when absent the font route 404s and the page falls
+   * back to a system font.
+   */
+  fontWoff2?: Buffer
 }
 
 function defaultSleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -60,6 +69,7 @@ export function createRequestHandler(
   const { resolver, watcher, activityStore, metrics, config } = deps
   const proxyRequest = deps.proxyRequest ?? defaultProxyRequest
   const sleep = deps.sleep ?? defaultSleep
+  const fontWoff2 = deps.fontWoff2
 
   // Wake coalescing: track in-progress wake attempts per tenant namespace to
   // avoid concurrent PATCH replicas: 1 storms.
@@ -148,6 +158,21 @@ export function createRequestHandler(
       return
     }
 
+    // Interstitial font — a static asset, served independently of any tenant.
+    if (req.method === 'GET' && req.url === FONT_PATH) {
+      if (!fontWoff2) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+      res.writeHead(200, {
+        'Content-Type': 'font/woff2',
+        'Cache-Control': 'public, max-age=604800, immutable',
+      })
+      res.end(fontWoff2)
+      return
+    }
+
     // Resolve the tenant from the Host header
     const tenant = resolver.resolve(req.headers['host'])
     if (!tenant) {
@@ -156,7 +181,25 @@ export function createRequestHandler(
       return
     }
 
-    const { namespace, deploymentName, upstreamUrl, subdomain } = tenant
+    const { namespace, deploymentName, serviceName, upstreamUrl, subdomain } = tenant
+
+    // Wake-status poll from the interstitial. Reports ready only when an
+    // endpoint is actually serving (not merely replicas >= 1, which would race
+    // kube-proxy). Keeps the wake alive: if the tenant was re-slept between
+    // polls, re-trigger it (idempotent via coalescing).
+    if (req.url === WAKE_STATUS_PATH) {
+      // getReadyAddresses is a peek that resolves 0 (never throws) when the
+      // Endpoints object is missing or on a transient error.
+      const ready = (await watcher.getReadyAddresses(namespace, serviceName)) > 0
+      if (!ready) {
+        void ensureWake(tenant).catch((err: unknown) => {
+          console.warn('[activator] wake (status poll) failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
+        })
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+      res.end(JSON.stringify({ ready }))
+      return
+    }
 
     let heldConnection = false
 
@@ -180,43 +223,17 @@ export function createRequestHandler(
       const wakeStart = Date.now()
       const wakePromise = ensureWake(tenant)
 
-      if (isNavigationRequest(req)) {
-        // Navigation: hold for the full cold-start budget (an interstitial
-        // replaces this hold in #396), then proxy or answer 503.
-        const ready = await wakePromise
-        const durationSeconds = (Date.now() - wakeStart) / 1000
-        metrics.coldStartDuration.observe({ tenant: subdomain }, durationSeconds)
-        metrics.heldConnections.dec()
-        heldConnection = false
-
-        if (!ready) {
-          metrics.errorTotal.inc({ tenant: subdomain, reason: 'cold_start_timeout' })
-          console.warn(`[activator] cold-start timeout for ${subdomain} after ${durationSeconds.toFixed(1)}s`)
-          res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '10' })
-          res.end(JSON.stringify({
-            error: 'cold_start_timeout',
-            details: 'Workspace is taking longer than expected to start. Try again in a moment.',
-            retryable: true,
-          }))
-          return
-        }
-
-        console.log(`[activator] tenant ${subdomain} cold-start complete in ${durationSeconds.toFixed(1)}s`)
-        void activityStore.recordActivity(subdomain).catch((err: unknown) => {
-          console.warn('[activator] activity upsert failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
-        })
-        await proxyRequest(req, res, { url: upstreamUrl })
-        return
-      }
-
-      // Non-navigation (XHR/API): hold only the grace window; if not ready,
-      // answer a warming 503 (the wake keeps running in the background).
+      // Cold start: hold only the grace window. A fast wake proxies directly;
+      // otherwise the wake keeps running in the background and the client is
+      // told to come back — a navigation gets the branded interstitial (which
+      // polls wake-status and reloads when ready), everything else a warming
+      // 503. Both branches share this race.
       const graceTimer = new AbortController()
       const outcome = await Promise.race<'ready' | 'failed' | 'grace'>([
         // Attaches a handler to wakePromise, so its rejection is observed even
-        // when the grace timer wins the race. A wake error still answers a
-        // (retryable) warming 503, but is logged + counted here — the nav path
-        // gets this via the outer catch; this branch must not swallow it.
+        // when the grace timer wins the race. A wake error still answers the
+        // client (interstitial / retryable 503) but is logged + counted here so
+        // it is never silently swallowed.
         wakePromise.then(
           (ready) => (ready ? 'ready' : 'failed'),
           (err: unknown) => {
@@ -246,7 +263,13 @@ export function createRequestHandler(
         return
       }
 
-      // Grace elapsed, or the wake failed/timed out — tell the client to retry.
+      // Not ready within the grace window.
+      if (isNavigationRequest(req)) {
+        metrics.interstitialResponsesTotal.inc({ tenant: subdomain })
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' })
+        res.end(renderColdStartInterstitial())
+        return
+      }
       sendWarming503(res, subdomain)
     } catch (err) {
       if (heldConnection) {

@@ -27,6 +27,7 @@
  *   WARMING_RETRY_AFTER_SECONDS - Retry-After on the warming 503 (default: 2)
  */
 
+import { readFileSync } from 'node:fs'
 import http from 'node:http'
 import { createDeploymentWatcher } from './deployment-watch.js'
 import { createMetrics } from './metrics.js'
@@ -80,6 +81,16 @@ const activityStore = createTenantActivityStore({ databaseUrl: CONTROL_PLANE_DAT
 watcher.start()
 console.log('[activator] Kubernetes Watch streams started.')
 
+// Load the Geist woff2 served on the cold-start interstitial. Defensive: if the
+// bundled asset is missing, the font route 404s and the page falls back to a
+// system font rather than the activator failing to start.
+let fontWoff2: Buffer | undefined
+try {
+  fontWoff2 = readFileSync(new URL('./assets/Geist-Variable.woff2', import.meta.url))
+} catch (err) {
+  console.warn('[activator] Geist font asset not found; interstitial will use a fallback font:', err instanceof Error ? err.message : String(err))
+}
+
 const handleRequest = createRequestHandler({
   resolver,
   watcher,
@@ -90,6 +101,7 @@ const handleRequest = createRequestHandler({
     graceHoldMs: WAKE_GRACE_HOLD_MS,
     warmingRetryAfterSeconds: WARMING_RETRY_AFTER_SECONDS,
   },
+  fontWoff2,
 })
 
 const server = http.createServer((req, res) => {

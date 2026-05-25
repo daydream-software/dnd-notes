@@ -148,6 +148,11 @@ export function createMetrics() {
     'Number of warming 503 responses returned to non-navigation requests during cold start',
   )
 
+  const interstitialResponsesTotal = new Counter(
+    'activator_interstitial_responses_total',
+    'Number of cold-start interstitial pages served to navigation requests',
+  )
+
   function metrics(): string {
     return [
       wakeTotal.serialize(),
@@ -156,6 +161,7 @@ export function createMetrics() {
       heldConnections.serialize(),
       podScheduleDeadlineExceeded.serialize(),
       warmingResponsesTotal.serialize(),
+      interstitialResponsesTotal.serialize(),
     ].join('\n') + '\n'
   }
 
@@ -168,6 +174,7 @@ export function createMetrics() {
     heldConnections,
     podScheduleDeadlineExceeded,
     warmingResponsesTotal,
+    interstitialResponsesTotal,
   }
 }
 
