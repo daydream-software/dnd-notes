@@ -200,41 +200,42 @@ describe('queryIdleEligibleTenants', () => {
  * LEFT JOIN instead of JOIN, wrong column name) will cause a real SQL error or
  * wrong result set here.
  */
+/**
+ * Build a pg-mem pool with the minimal schema needed for idle-scaler queries.
+ * Inline DDL is used to keep the activator package self-contained (no cross-
+ * package import from control-plane migrations). Shared by all pg-mem suites
+ * in this file.
+ */
+async function buildPgMemPool() {
+  const db = newDb({ autoCreateForeignKeyIndices: true })
+  const { Pool } = db.adapters.createPg()
+  const pool = new Pool()
+
+  // Minimal tenants table — only the columns the idle-scaler SELECT reads.
+  // No CHECK constraints on states so we can INSERT any string without pg-mem
+  // constraint naming friction.
+  await pool.query(`
+    CREATE TABLE tenants (
+      id          TEXT PRIMARY KEY,
+      subdomain   TEXT,
+      current_state TEXT NOT NULL,
+      desired_state TEXT NOT NULL
+    )
+  `)
+
+  // tenant_activity as it exists after migration 0009.
+  await pool.query(`
+    CREATE TABLE tenant_activity (
+      tenant_id        TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+      last_request_at  TIMESTAMPTZ NOT NULL,
+      seen_by_activator BOOLEAN NOT NULL DEFAULT FALSE
+    )
+  `)
+
+  return pool
+}
+
 describe('queryIdleEligibleTenants — pg-mem SQL execution', () => {
-  /**
-   * Build a pg-mem pool with the minimal schema needed for idle-scaler queries.
-   * Inline DDL is used to keep the activator package self-contained (no cross-
-   * package import from control-plane migrations).
-   */
-  async function buildPgMemPool() {
-    const db = newDb({ autoCreateForeignKeyIndices: true })
-    const { Pool } = db.adapters.createPg()
-    const pool = new Pool()
-
-    // Minimal tenants table — only the columns the idle-scaler SELECT reads.
-    // No CHECK constraints on states so we can INSERT any string without pg-mem
-    // constraint naming friction.
-    await pool.query(`
-      CREATE TABLE tenants (
-        id          TEXT PRIMARY KEY,
-        subdomain   TEXT,
-        current_state TEXT NOT NULL,
-        desired_state TEXT NOT NULL
-      )
-    `)
-
-    // tenant_activity as it exists after migration 0009.
-    await pool.query(`
-      CREATE TABLE tenant_activity (
-        tenant_id        TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
-        last_request_at  TIMESTAMPTZ NOT NULL,
-        seen_by_activator BOOLEAN NOT NULL DEFAULT FALSE
-      )
-    `)
-
-    return pool
-  }
-
   it('pg-mem: seen=TRUE idle tenants are returned; backfill FALSE and active tenants are excluded', async () => {
     const pool = await buildPgMemPool()
 
@@ -343,28 +344,6 @@ describe('queryIdleEligibleTenants — pg-mem SQL execution', () => {
  * comparison is syntactically valid under pg-mem and returns the right boolean.
  */
 describe('hasActivitySince — pg-mem SQL execution (#354)', () => {
-  async function buildPgMemPool() {
-    const db = newDb({ autoCreateForeignKeyIndices: true })
-    const { Pool } = db.adapters.createPg()
-    const pool = new Pool()
-    await pool.query(`
-      CREATE TABLE tenants (
-        id          TEXT PRIMARY KEY,
-        subdomain   TEXT,
-        current_state TEXT NOT NULL,
-        desired_state TEXT NOT NULL
-      )
-    `)
-    await pool.query(`
-      CREATE TABLE tenant_activity (
-        tenant_id        TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
-        last_request_at  TIMESTAMPTZ NOT NULL,
-        seen_by_activator BOOLEAN NOT NULL DEFAULT FALSE
-      )
-    `)
-    return pool
-  }
-
   it('returns false when activity has not advanced past the snapshot, true once it does', async () => {
     const pool = await buildPgMemPool()
     try {
