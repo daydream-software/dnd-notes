@@ -48,6 +48,22 @@ export interface AppsV1ApiLike {
   patchNamespacedDeployment(args: { name: string; namespace: string; body: unknown }, options?: unknown): Promise<unknown>
 }
 
+/**
+ * Structural interface for the @kubernetes/client-node Watch subset used here.
+ * `watch()` resolves once the connection is established (not when the stream
+ * ends); a connection failure is surfaced via the `done` callback, which fires
+ * synchronously before the promise resolves. The returned controller is
+ * discarded by the watch loop.
+ */
+export interface WatchLike {
+  watch(
+    path: string,
+    queryParams: Record<string, string | number | boolean | undefined>,
+    callback: (type: string, obj: unknown, watchObj?: unknown) => void,
+    done: (err: unknown) => void,
+  ): Promise<unknown>
+}
+
 /** Structural interface for the CoreV1Api subset used by DeploymentWatcher. */
 export interface CoreV1ApiLike {
   listNamespacedPod(args: { namespace: string }): Promise<{
@@ -64,6 +80,45 @@ export interface CoreV1ApiLike {
 /** Key for caches: "namespace/name" */
 function resourceKey(namespace: string, name: string): string {
   return `${namespace}/${name}`
+}
+
+/**
+ * Label every tenant Service and Deployment carries
+ * (`buildTenantSelectorLabels` in the control-plane). Used as an existence
+ * selector to scope the Watches to tenant resources only, so the caches never
+ * hold kube-system/platform objects the activator never routes to.
+ *
+ * The same selector scopes the Endpoints Watch: Kubernetes' endpoints
+ * controller copies `metadata.labels` from the Service onto its auto-generated
+ * Endpoints object, so the tenant-id label propagates there automatically.
+ */
+const TENANT_LABEL_SELECTOR = 'dnd-notes.dev/tenant-id'
+
+/** Hard ceiling on the reconnect backoff delay. */
+const DEFAULT_RECONNECT_CAP_MS = 30_000
+
+/** Fraction of the delay applied as +/- jitter to desync reconnect waves. */
+const RECONNECT_JITTER_FRACTION = 0.2
+
+/**
+ * Compute the next Watch-reconnect delay with exponential backoff and jitter.
+ *
+ * - `consecutiveFailures === 0` (last connect succeeded) and `=== 1` both yield
+ *   the base delay; each further consecutive failure doubles it (base, base,
+ *   2x, 4x, 8x, ...), capped at `capMs`.
+ * - A +/-20% jitter is always applied so multiple activator replicas do not
+ *   reconnect in lockstep.
+ */
+export function computeReconnectDelay(
+  consecutiveFailures: number,
+  opts: { baseMs: number; capMs: number; random?: () => number },
+): number {
+  const random = opts.random ?? Math.random
+  const exponent = Math.max(0, consecutiveFailures - 1)
+  const raw = opts.baseMs * 2 ** exponent
+  const capped = Math.min(raw, opts.capMs)
+  const jitter = 1 + (random() * 2 - 1) * RECONNECT_JITTER_FRACTION
+  return Math.round(capped * jitter)
 }
 
 export interface DeploymentWatcherOptions {
@@ -86,10 +141,33 @@ export interface DeploymentWatcherOptions {
    */
   readinessPollIntervalMs?: number
   /**
-   * How long to wait after a Watch disconnect before reconnecting.
+   * Base delay before re-establishing a Watch. Used as the floor of the
+   * exponential backoff: each consecutive connection failure doubles the delay
+   * (capped at reconnectCapMs) with +/-20% jitter; a successful connect resets
+   * it to this base.
    * Default: 1000ms
    */
   watchReconnectDelayMs?: number
+  /**
+   * Ceiling on the reconnect backoff delay.
+   * Default: 30000ms (30s)
+   */
+  reconnectCapMs?: number
+  /**
+   * Optional injected Watch client. When provided, overrides the client derived
+   * from kubeConfig. Intended for testing without importing
+   * @kubernetes/client-node.
+   */
+  watch?: WatchLike
+  /**
+   * Optional injected sleep. Intended for testing the reconnect backoff without
+   * real timers. Default: node:timers/promises setTimeout.
+   */
+  sleep?: (ms: number) => Promise<void>
+  /**
+   * Optional injected random source for backoff jitter. Default: Math.random.
+   */
+  random?: () => number
   /**
    * If a Pod for the tenant stays in Pending phase beyond this many
    * milliseconds, emit the pod_schedule_deadline_exceeded metric.
@@ -151,11 +229,14 @@ export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}):
 
   const appsApi: AppsV1ApiLike = options.appsApi ?? kubeConfig.makeApiClient(AppsV1Api)
   const coreApi: CoreV1ApiLike = options.coreApi ?? kubeConfig.makeApiClient(CoreV1Api)
-  const watcher = new Watch(kubeConfig)
+  const watcher: WatchLike = options.watch ?? new Watch(kubeConfig)
 
   const readinessPollIntervalMs = options.readinessPollIntervalMs ?? 500
   const watchReconnectDelayMs = options.watchReconnectDelayMs ?? 1000
+  const reconnectCapMs = options.reconnectCapMs ?? DEFAULT_RECONNECT_CAP_MS
   const podScheduleBudgetMs = options.podScheduleBudgetMs ?? 30_000
+  const sleep = options.sleep ?? delay
+  const random = options.random ?? Math.random
 
   // namespace/deploymentName -> spec.replicas
   const replicaCache = new Map<string, number>()
@@ -179,71 +260,109 @@ export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}):
     }
   }
 
-  // Internal: watch loop for Deployments across all namespaces
+  // Internal: watch loop for tenant Deployments.
+  // Scoped to tenant namespaces via the tenant label selector so the cache
+  // never holds non-tenant Deployments. Reconnect uses exponential backoff
+  // with jitter, escalating only while connects keep failing.
   async function watchDeployments(): Promise<void> {
+    let consecutiveFailures = 0
     while (!stopped) {
+      let connectFailed = false
       try {
         await watcher.watch(
           '/apis/apps/v1/deployments',
-          {},
-          (type: string, obj: V1Deployment) => {
-            const ns = obj.metadata?.namespace
-            const name = obj.metadata?.name
-            const replicas = obj.spec?.replicas ?? 0
-            if (ns && name) {
-              replicaCache.set(resourceKey(ns, name), replicas)
+          { labelSelector: TENANT_LABEL_SELECTOR },
+          (type: string, obj: unknown) => {
+            const dep = obj as V1Deployment
+            const ns = dep.metadata?.namespace
+            const name = dep.metadata?.name
+            if (!ns || !name) return
+            const key = resourceKey(ns, name)
+            if (type === 'DELETED') {
+              // Prune so the cache plateaus under tenant churn (#382).
+              replicaCache.delete(key)
+              return
             }
+            replicaCache.set(key, dep.spec?.replicas ?? 0)
           },
           (err: unknown) => {
-            if (!stopped) {
-              console.warn('[activator] Deployment Watch ended:', err instanceof Error ? err.message : String(err))
+            // A connection failure surfaces here synchronously before watch()
+            // resolves, so it counts toward the backoff for this iteration. A
+            // clean close (err == null) fires later and is not a failure. A
+            // mid-stream error fires after watch() already resolved, into this
+            // (now-stale) iteration's closure, so it is a no-op for backoff —
+            // the next reconnect starts at base. See #389.
+            if (err) {
+              connectFailed = true
+              if (!stopped) {
+                console.warn('[activator] Deployment Watch ended:', err instanceof Error ? err.message : String(err))
+              }
             }
           },
         )
       } catch (err) {
         if (stopped) return
+        connectFailed = true
         console.warn('[activator] Deployment Watch error, reconnecting:', err instanceof Error ? err.message : String(err))
       }
+      consecutiveFailures = connectFailed ? consecutiveFailures + 1 : 0
       if (!stopped) {
-        await delay(watchReconnectDelayMs)
+        await sleep(computeReconnectDelay(consecutiveFailures, { baseMs: watchReconnectDelayMs, capMs: reconnectCapMs, random }))
       }
     }
   }
 
-  // Internal: watch loop for Endpoints across all namespaces
+  // Internal: watch loop for tenant Endpoints.
+  // Endpoints inherit their Service's labels, so the same tenant selector
+  // scopes this Watch. Same backoff strategy as watchDeployments.
   async function watchEndpoints(): Promise<void> {
+    let consecutiveFailures = 0
     while (!stopped) {
+      let connectFailed = false
       try {
         await watcher.watch(
           '/api/v1/endpoints',
-          {},
-          (type: string, obj: V1Endpoints) => {
-            const ns = obj.metadata?.namespace
-            const name = obj.metadata?.name
+          { labelSelector: TENANT_LABEL_SELECTOR },
+          (type: string, obj: unknown) => {
+            const ep = obj as V1Endpoints
+            const ns = ep.metadata?.namespace
+            const name = ep.metadata?.name
             if (!ns || !name) return
+            const key = resourceKey(ns, name)
+            if (type === 'DELETED') {
+              // Prune the cache (#382). Any in-flight waitForReadyEndpoint
+              // listener is left in place: it has its own timeoutMs deadline
+              // and stops polling when it expires, so it cannot leak.
+              readyAddressCache.delete(key)
+              return
+            }
 
             let readyCount = 0
-            for (const subset of obj.subsets ?? []) {
+            for (const subset of ep.subsets ?? []) {
               readyCount += subset.addresses?.length ?? 0
             }
-            const key = resourceKey(ns, name)
             readyAddressCache.set(key, readyCount)
             if (readyCount > 0) {
               notifyEndpointListeners(key)
             }
           },
           (err: unknown) => {
-            if (!stopped) {
-              console.warn('[activator] Endpoint Watch ended:', err instanceof Error ? err.message : String(err))
+            if (err) {
+              connectFailed = true
+              if (!stopped) {
+                console.warn('[activator] Endpoint Watch ended:', err instanceof Error ? err.message : String(err))
+              }
             }
           },
         )
       } catch (err) {
         if (stopped) return
+        connectFailed = true
         console.warn('[activator] Endpoint Watch error, reconnecting:', err instanceof Error ? err.message : String(err))
       }
+      consecutiveFailures = connectFailed ? consecutiveFailures + 1 : 0
       if (!stopped) {
-        await delay(watchReconnectDelayMs)
+        await sleep(computeReconnectDelay(consecutiveFailures, { baseMs: watchReconnectDelayMs, capMs: reconnectCapMs, random }))
       }
     }
   }
