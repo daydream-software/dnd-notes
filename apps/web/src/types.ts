@@ -302,4 +302,8 @@ export interface SharedMembershipClaimResponse {
 export interface ErrorResponse {
   error: string
   details?: string[]
+  /** Machine-readable marker, e.g. 'tenant_in_maintenance' (maintenance write-gate). */
+  code?: string
+  /** Set by wake/maintenance signals to mark the response as safe to retry. */
+  retryable?: boolean
 }
