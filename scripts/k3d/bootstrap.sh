@@ -59,7 +59,16 @@ cluster_exists() {
 check_port_free() {
   local port="$1"
   local label="$2"
-  if bash -c "</dev/tcp/127.0.0.1/${port}" >/dev/null 2>&1; then
+  # Probe with a hard timeout. On WSL2 a connect to 127.0.0.1 can hang
+  # indefinitely (localhost forwarding to the Windows host) instead of being
+  # refused, which would silently freeze bootstrap here — before any output —
+  # forever. A timed-out probe is treated as "free": k3d cluster create fails
+  # loudly later if the port is genuinely held.
+  local probe=(bash -c "</dev/tcp/127.0.0.1/${port}")
+  if command -v timeout >/dev/null 2>&1; then
+    probe=(timeout 2 bash -c "</dev/tcp/127.0.0.1/${port}")
+  fi
+  if "${probe[@]}" >/dev/null 2>&1; then
     echo "ERROR: ${label} port ${port} is already in use on 127.0.0.1." >&2
     echo "  Standard ingress ports are required (the PR enforces 80/443 for" >&2
     echo "  portless origins). Free port ${port} on the host (stop the" >&2
