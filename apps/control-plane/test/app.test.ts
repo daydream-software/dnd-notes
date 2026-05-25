@@ -57,6 +57,7 @@ describe('Control Plane API', () => {
   const tenantsPath = '/internal/tenants'
   const tenantPath = (tenantId: string) => `${tenantsPath}/${tenantId}`
   let tenantRegistry: TenantRegistry
+  let testPool: ReturnType<typeof createTestTenantRegistry>['pool']
   let app: ReturnType<typeof createApp>
   let tenantProvisioningService: TenantProvisioningPort | undefined
   let cleanupTenantRegistry: (() => Promise<void>) | undefined
@@ -75,6 +76,7 @@ describe('Control Plane API', () => {
   beforeEach(() => {
     const registry = createTestTenantRegistry()
     tenantRegistry = registry.tenantRegistry
+    testPool = registry.pool
     cleanupTenantRegistry = registry.cleanup
     tenantProvisioningService = undefined
     const testPortalAuth = createTestPortalKeycloakAuth()
@@ -526,6 +528,85 @@ describe('Control Plane API', () => {
         (await tenantRegistry.listTenantsByOwnerId(ownerAccount.id)).length,
         0,
       )
+    })
+  })
+
+  describe('PATCH /internal/tenants/:tenantId/state — sleeping guard (#373)', () => {
+    const statePath = (tenantId: string) => `${tenantPath(tenantId)}/state`
+
+    async function createReadyTenant(id: string, slug: string): Promise<void> {
+      const owner = await tenantRegistry.createPortalAccount({
+        id: `acct-${slug}`,
+        email: `${slug}@example.com`,
+        displayName: slug,
+      })
+      await tenantRegistry.createTenant({
+        id,
+        slug,
+        ownerId: owner.id,
+        displayName: slug,
+        planTier: 'adventurer',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantDesiredState(id, 'ready')
+      await tenantRegistry.updateTenantState(id, 'ready', 'test-suite')
+    }
+
+    async function seedActivity(tenantId: string, seenByActivator: boolean): Promise<void> {
+      await testPool.query(
+        `INSERT INTO tenant_activity (tenant_id, last_request_at, seen_by_activator)
+         VALUES ($1, NOW(), $2)`,
+        [tenantId, seenByActivator],
+      )
+    }
+
+    it('rejects sleeping a tenant the activator has never seen (no activity row)', async () => {
+      await createReadyTenant('tenant-unseen', 'unseen')
+
+      const response = await authedPatch(statePath('tenant-unseen'))
+        .send({ state: 'sleeping', triggeredBy: 'operator' })
+        .expect(409)
+
+      assert.match(response.body.error, /activator has not observed/i)
+      assert.match(response.body.details, /seen_by_activator = FALSE/)
+
+      // The state must be left untouched — no stuck-sleeping tenant created.
+      const tenant = await tenantRegistry.getTenant('tenant-unseen')
+      assert.equal(tenant?.currentState, 'ready')
+    })
+
+    it('rejects sleeping a tenant whose activity row has seen_by_activator = FALSE', async () => {
+      await createReadyTenant('tenant-false', 'falseseen')
+      await seedActivity('tenant-false', false)
+
+      await authedPatch(statePath('tenant-false'))
+        .send({ state: 'sleeping', triggeredBy: 'operator' })
+        .expect(409)
+
+      const tenant = await tenantRegistry.getTenant('tenant-false')
+      assert.equal(tenant?.currentState, 'ready')
+    })
+
+    it('allows sleeping a tenant the activator has seen (seen_by_activator = TRUE)', async () => {
+      await createReadyTenant('tenant-seen', 'seen')
+      await seedActivity('tenant-seen', true)
+
+      const response = await authedPatch(statePath('tenant-seen'))
+        .send({ state: 'sleeping', triggeredBy: 'operator' })
+        .expect(200)
+
+      assert.equal(response.body.tenant.currentState, 'sleeping')
+    })
+
+    it('does not gate non-sleeping transitions on activator visibility', async () => {
+      await createReadyTenant('tenant-upgrade', 'upgrade')
+      // No activity row at all, but a non-sleeping transition is not gated.
+
+      const response = await authedPatch(statePath('tenant-upgrade'))
+        .send({ state: 'upgrading', triggeredBy: 'operator' })
+        .expect(200)
+
+      assert.equal(response.body.tenant.currentState, 'upgrading')
     })
   })
 

@@ -1157,6 +1157,30 @@ export class TenantRegistry {
     }, executor)
   }
 
+  /**
+   * Whether the activator has ever observed this tenant — i.e. a
+   * tenant_activity row exists with seen_by_activator = TRUE. The activator
+   * stamps this flag on every request it proxies, so it is the registry's
+   * proxy for "the activator is in this tenant's request path".
+   *
+   * Used to gate the operator state API's sleeping transition (#373): only a
+   * tenant the activator can wake on demand may be safely put to sleep.
+   * Tenants with no activity row (never seen) return false.
+   */
+  async hasBeenSeenByActivator(
+    tenantId: string,
+    executor: TenantRegistryQueryable = this.pool,
+  ): Promise<boolean> {
+    const result = await this.run<{ seen_by_activator: boolean }>(
+      `SELECT seen_by_activator
+       FROM tenant_activity
+       WHERE tenant_id = $1`,
+      [tenantId],
+      executor,
+    )
+    return result.rows[0]?.seen_by_activator === true
+  }
+
   async updateTenantDesiredState(
     tenantId: string,
     desiredState: TenantState,
