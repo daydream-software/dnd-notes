@@ -5,8 +5,10 @@
  *   Each tenant IngressRoute points to the activator as its sole backend.
  *   The activator inspects the tenant Deployment's replica count:
  *     - replicas >= 1: upsert last_request_at, proxy directly.
- *     - replicas == 0: patch replicas: 1, hold connection, wait for ready
- *       endpoint, then upsert last_request_at and proxy.
+ *     - replicas == 0: patch replicas: 1 and wait for a ready endpoint. A
+ *       navigation holds for the full cold-start budget; a non-navigation
+ *       request holds only a short grace window, then gets a warming 503 +
+ *       Retry-After so the client retries while the wake continues (#395).
  *
  * Endpoints:
  *   GET  /healthz   - liveness probe
@@ -21,12 +23,14 @@
  *   CONTROL_PLANE_DATABASE_URL  - Postgres connection string for tenant_activity
  *   COLD_START_TIMEOUT_MS       - max cold-start budget (default: 60000)
  *   POD_SCHEDULE_BUDGET_MS      - Pending-past-budget threshold (default: 30000)
+ *   WAKE_GRACE_HOLD_MS          - non-navigation grace hold before warming 503 (default: 2500)
+ *   WARMING_RETRY_AFTER_SECONDS - Retry-After on the warming 503 (default: 2)
  */
 
-import http, { type IncomingMessage, type ServerResponse } from 'node:http'
+import http from 'node:http'
 import { createDeploymentWatcher } from './deployment-watch.js'
 import { createMetrics } from './metrics.js'
-import { proxyRequest } from './proxy.js'
+import { createRequestHandler } from './request-handler.js'
 import { createTenantActivityStore } from './tenant-activity.js'
 import { createTenantResolver } from './tenant-resolver.js'
 
@@ -36,6 +40,27 @@ const TENANT_PORT = Number(process.env['TENANT_PORT'] ?? '3000')
 const CONTROL_PLANE_DATABASE_URL = process.env['CONTROL_PLANE_DATABASE_URL'] ?? ''
 const COLD_START_TIMEOUT_MS = Number(process.env['COLD_START_TIMEOUT_MS'] ?? '60000')
 const POD_SCHEDULE_BUDGET_MS = Number(process.env['POD_SCHEDULE_BUDGET_MS'] ?? '30000')
+
+/**
+ * Read a positive-number env var, falling back to `fallback` when unset.
+ * Exits on an invalid value (NaN, <= 0) rather than silently accepting a
+ * timing of 0 or NaN — consistent with the idle-scaler's threshold guard.
+ */
+function readPositiveNumberEnv(name: string, fallback: number): number {
+  const raw = process.env[name]
+  if (raw === undefined || raw === '') {
+    return fallback
+  }
+  const value = Number(raw)
+  if (!Number.isFinite(value) || value <= 0) {
+    console.error(`[activator] ${name} must be a positive number`)
+    process.exit(1)
+  }
+  return value
+}
+
+const WAKE_GRACE_HOLD_MS = readPositiveNumberEnv('WAKE_GRACE_HOLD_MS', 2500)
+const WARMING_RETRY_AFTER_SECONDS = readPositiveNumberEnv('WARMING_RETRY_AFTER_SECONDS', 2)
 
 if (!BASE_DOMAIN) {
   console.error('[activator] BASE_DOMAIN is required')
@@ -52,147 +77,20 @@ const resolver = createTenantResolver({ baseDomain: BASE_DOMAIN, tenantPort: TEN
 const watcher = createDeploymentWatcher({ podScheduleBudgetMs: POD_SCHEDULE_BUDGET_MS })
 const activityStore = createTenantActivityStore({ databaseUrl: CONTROL_PLANE_DATABASE_URL })
 
-// Wake coalescing: track in-progress wake attempts per tenant namespace to
-// avoid concurrent PATCH replicas: 1 storms.
-const wakeInProgress = new Map<string, Promise<boolean>>()
-
 watcher.start()
 console.log('[activator] Kubernetes Watch streams started.')
 
-/**
- * Handle a single incoming HTTP request.
- */
-async function handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-  // Health and metrics endpoints bypass the proxy
-  if (req.method === 'GET' && req.url === '/healthz') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end('ok')
-    return
-  }
-
-  if (req.method === 'GET' && req.url === '/readyz') {
-    res.writeHead(200, { 'Content-Type': 'text/plain' })
-    res.end('ok')
-    return
-  }
-
-  if (req.method === 'GET' && req.url === '/metrics') {
-    res.writeHead(200, { 'Content-Type': metrics.contentType })
-    res.end(metrics.metrics())
-    return
-  }
-
-  // Resolve the tenant from the Host header
-  const tenant = resolver.resolve(req.headers['host'])
-  if (!tenant) {
-    res.writeHead(400, { 'Content-Type': 'application/json' })
-    res.end(JSON.stringify({ error: 'unroutable_host', details: 'Host header does not match a known tenant pattern' }))
-    return
-  }
-
-  const { namespace, deploymentName, serviceName, upstreamUrl, subdomain } = tenant
-
-  let heldConnection = false
-
-  try {
-    // Get current replica count (cache miss falls back to API GET)
-    const replicas = await watcher.getReplicas(namespace, deploymentName)
-
-    if (replicas >= 1) {
-      // Tenant is warm — upsert activity and proxy directly
-      void activityStore.recordActivity(subdomain).catch((err: unknown) => {
-        console.warn('[activator] activity upsert failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
-      })
-      await proxyRequest(req, res, { url: upstreamUrl })
-      return
-    }
-
-    // Tenant is sleeping — coalesce concurrent wake attempts
-    metrics.wakeTotal.inc({ tenant: subdomain })
-    metrics.heldConnections.inc()
-    heldConnection = true
-    const wakeStart = Date.now()
-
-    let wakePromise = wakeInProgress.get(namespace)
-    if (!wakePromise) {
-      wakePromise = (async (): Promise<boolean> => {
-        try {
-          console.log(`[activator] waking tenant ${subdomain} (namespace: ${namespace})`)
-          // Stamp activity before scaling up (defense-in-depth, not a
-          // synchronization primitive — this is fire-and-forget). The
-          // deterministic #354 guard is hasActivitySince in the idle-scaler;
-          // this early stamp narrows the window where an idle-scaler tick lands
-          // mid-cold-start, sees last_request_at already advanced, and skips the
-          // scale-down instead of clobbering the wake.
-          void activityStore.recordActivity(subdomain).catch((err: unknown) => {
-            console.warn('[activator] activity upsert failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
-          })
-          await watcher.patchReplicas(namespace, deploymentName, 1)
-          const ready = await watcher.waitForReadyEndpoint(
-            namespace,
-            serviceName,
-            deploymentName,
-            COLD_START_TIMEOUT_MS,
-            () => {
-              metrics.podScheduleDeadlineExceeded.inc({ tenant: subdomain })
-            },
-          )
-          if (ready) {
-            // Make the wake eagerly authoritative: flip current_state
-            // sleeping -> ready now rather than waiting for the idle-scaler
-            // sync-back, so the operator portal reflects the live tenant (#385).
-            void activityStore.markReady(subdomain).catch((err: unknown) => {
-              console.warn('[activator] markReady failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
-            })
-          }
-          return ready
-        } finally {
-          wakeInProgress.delete(namespace)
-        }
-      })()
-      wakeInProgress.set(namespace, wakePromise)
-    }
-
-    const ready = await wakePromise
-    const durationSeconds = (Date.now() - wakeStart) / 1000
-    metrics.coldStartDuration.observe({ tenant: subdomain }, durationSeconds)
-    if (heldConnection) {
-      metrics.heldConnections.dec()
-      heldConnection = false
-    }
-
-    if (!ready) {
-      metrics.errorTotal.inc({ tenant: subdomain, reason: 'cold_start_timeout' })
-      console.warn(`[activator] cold-start timeout for ${subdomain} after ${durationSeconds.toFixed(1)}s`)
-      res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '10' })
-      res.end(JSON.stringify({
-        error: 'cold_start_timeout',
-        details: 'Workspace is taking longer than expected to start. Try again in a moment.',
-        retryable: true,
-      }))
-      return
-    }
-
-    console.log(`[activator] tenant ${subdomain} cold-start complete in ${durationSeconds.toFixed(1)}s`)
-
-    void activityStore.recordActivity(subdomain).catch((err: unknown) => {
-      console.warn('[activator] activity upsert failed for %s:', subdomain, err instanceof Error ? err.message : String(err))
-    })
-
-    await proxyRequest(req, res, { url: upstreamUrl })
-  } catch (err) {
-    if (heldConnection) {
-      metrics.heldConnections.dec()
-    }
-    const reason = err instanceof Error && err.message.includes('ECONNREFUSED') ? 'upstream_refused' : 'internal_error'
-    metrics.errorTotal.inc({ tenant: subdomain, reason })
-    console.error('[activator] error handling request for %s:', subdomain, err instanceof Error ? err.message : String(err))
-    if (!res.headersSent) {
-      res.writeHead(502, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify({ error: 'gateway_error', details: 'Activator encountered an error' }))
-    }
-  }
-}
+const handleRequest = createRequestHandler({
+  resolver,
+  watcher,
+  activityStore,
+  metrics,
+  config: {
+    coldStartTimeoutMs: COLD_START_TIMEOUT_MS,
+    graceHoldMs: WAKE_GRACE_HOLD_MS,
+    warmingRetryAfterSeconds: WARMING_RETRY_AFTER_SECONDS,
+  },
+})
 
 const server = http.createServer((req, res) => {
   handleRequest(req, res).catch((err) => {
