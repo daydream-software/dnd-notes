@@ -63,7 +63,10 @@ export function renderColdStartInterstitial(): string {
     align-items: center;
     justify-content: center;
     padding: 24px;
-    font-family: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    /* Canonical theme stack — packages/theme/src/index.ts (fontFamily). Geist is
+       the brand face; the rest only cover the font-display: swap window and the
+       defensive font-route-404 fallback, never a substitute brand typeface. */
+    font-family: 'Geist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     color: #e2e8f0;
     background:
       radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
