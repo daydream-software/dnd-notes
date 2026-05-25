@@ -26,6 +26,7 @@ import type {
   SharedSessionResponse,
 } from './types'
 import { resolveApiBaseUrl } from './api-base-url'
+import { apiFetch } from './api-fetch'
 
 const apiBaseUrl = resolveApiBaseUrl(
   import.meta.env.VITE_API_BASE_URL,
@@ -92,12 +93,12 @@ async function readJson<T>(response: Response) {
 }
 
 export async function fetchAuthConfig() {
-  const response = await fetch(`${apiBaseUrl}/api/auth/config`)
+  const response = await apiFetch(`${apiBaseUrl}/api/auth/config`)
   return readJson<AuthConfigResponse>(response)
 }
 
 export async function fetchOwnerSession(authToken: string, signal?: AbortSignal) {
-  const response = await fetch(`${apiBaseUrl}/api/auth/session`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/auth/session`, {
     headers: createHeaders(authToken),
     signal,
   })
@@ -106,7 +107,7 @@ export async function fetchOwnerSession(authToken: string, signal?: AbortSignal)
 }
 
 export async function fetchCampaigns(authToken: string, signal?: AbortSignal) {
-  const response = await fetch(`${apiBaseUrl}/api/campaigns`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/campaigns`, {
     headers: createHeaders(authToken),
     signal,
   })
@@ -115,7 +116,7 @@ export async function fetchCampaigns(authToken: string, signal?: AbortSignal) {
 }
 
 export async function fetchAdminOverview(authToken: string, signal?: AbortSignal) {
-  const response = await fetch(`${apiBaseUrl}/api/admin/overview`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/overview`, {
     headers: createHeaders(authToken),
     signal,
   })
@@ -125,7 +126,7 @@ export async function fetchAdminOverview(authToken: string, signal?: AbortSignal
 }
 
 export async function fetchAdminAccounts(authToken: string, signal?: AbortSignal) {
-  const response = await fetch(`${apiBaseUrl}/api/admin/accounts`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/admin/accounts`, {
     headers: createHeaders(authToken),
     signal,
   })
@@ -139,7 +140,7 @@ export async function fetchCampaignMemberships(
   campaignId: string,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${apiBaseUrl}/api/campaigns/${campaignId}/memberships`,
     {
       headers: createHeaders(authToken),
@@ -155,7 +156,7 @@ export async function consolidateCampaignMemberships(
   campaignId: string,
   input: MembershipConsolidationInput,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${apiBaseUrl}/api/campaigns/${campaignId}/memberships/consolidations`,
     {
       method: 'POST',
@@ -172,7 +173,7 @@ export async function fetchCampaignShareLinks(
   campaignId: string,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${apiBaseUrl}/api/campaigns/${campaignId}/share-links`,
     {
       headers: createHeaders(authToken),
@@ -188,7 +189,7 @@ export async function createCampaignShareLink(
   campaignId: string,
   input: CampaignShareLinkInput,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${apiBaseUrl}/api/campaigns/${campaignId}/share-links`,
     {
       method: 'POST',
@@ -205,7 +206,7 @@ export async function revealCampaignShareLink(
   campaignId: string,
   shareLinkId: string,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${apiBaseUrl}/api/campaigns/${campaignId}/share-links/${shareLinkId}`,
     {
       headers: createHeaders(authToken),
@@ -220,7 +221,7 @@ export async function revokeCampaignShareLink(
   campaignId: string,
   shareLinkId: string,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     `${apiBaseUrl}/api/campaigns/${campaignId}/share-links/${shareLinkId}`,
     {
       method: 'DELETE',
@@ -234,7 +235,7 @@ export async function revokeCampaignShareLink(
 }
 
 export async function createCampaign(authToken: string, input: CampaignInput) {
-  const response = await fetch(`${apiBaseUrl}/api/campaigns`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/campaigns`, {
     method: 'POST',
     headers: createHeaders(authToken, true),
     body: JSON.stringify(input),
@@ -249,7 +250,7 @@ export async function updateCampaign(
   campaignId: string,
   input: CampaignInput,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/campaigns/${campaignId}`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/campaigns/${campaignId}`, {
     method: 'PUT',
     headers: createHeaders(authToken, true),
     body: JSON.stringify(input),
@@ -264,7 +265,7 @@ export async function fetchOverview(
   campaignId?: string | null,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(createCampaignPath('/api/overview', campaignId), {
+  const response = await apiFetch(createCampaignPath('/api/overview', campaignId), {
     headers: createHeaders(authToken),
     signal,
   })
@@ -277,7 +278,7 @@ export async function fetchNotes(
   campaignId?: string | null,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(createCampaignPath('/api/notes', campaignId), {
+  const response = await apiFetch(createCampaignPath('/api/notes', campaignId), {
     headers: createHeaders(authToken),
     signal,
   })
@@ -309,7 +310,7 @@ export async function fetchNoteActivity(
   }
 
   const search = searchParams.toString()
-  const response = await fetch(
+  const response = await apiFetch(
     `${apiBaseUrl}/api/notes/activity${search ? `?${search}` : ''}`,
     {
       headers: createHeaders(authToken),
@@ -325,7 +326,7 @@ export async function fetchSessions(
   campaignId?: string | null,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     createCampaignPath('/api/notes/sessions', campaignId),
     {
       headers: createHeaders(authToken),
@@ -342,7 +343,7 @@ export async function fetchSessionNotes(
   campaignId?: string | null,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(
+  const response = await apiFetch(
     createCampaignPath(
       `/api/notes/sessions/${encodeURIComponent(sessionName)}`,
       campaignId,
@@ -357,7 +358,7 @@ export async function fetchSessionNotes(
 }
 
 export async function createNote(authToken: string, note: NoteInput) {
-  const response = await fetch(`${apiBaseUrl}/api/notes`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/notes`, {
     method: 'POST',
     headers: createHeaders(authToken, true),
     body: JSON.stringify(note),
@@ -372,7 +373,7 @@ export async function updateNote(
   noteId: string,
   note: NoteInput,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/notes/${noteId}`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/notes/${noteId}`, {
     method: 'PUT',
     headers: createHeaders(authToken, true),
     body: JSON.stringify(note),
@@ -383,7 +384,7 @@ export async function updateNote(
 }
 
 export async function deleteNote(authToken: string, noteId: string) {
-  const response = await fetch(`${apiBaseUrl}/api/notes/${noteId}`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/notes/${noteId}`, {
     method: 'DELETE',
     headers: createHeaders(authToken),
   })
@@ -398,7 +399,7 @@ export async function fetchSharedSession(
   guestToken?: string | null,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/session`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/session`, {
     headers: createGuestHeaders(guestToken ?? undefined),
     signal,
   })
@@ -410,7 +411,7 @@ export async function joinSharedCampaign(
   shareToken: string,
   input: GuestJoinInput,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/join`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/join`, {
     method: 'POST',
     headers: createGuestHeaders(undefined, true),
     body: JSON.stringify(input),
@@ -427,7 +428,7 @@ export async function claimSharedMembership(
   const headers = createGuestHeaders(guestToken)
   headers.set('Authorization', `Bearer ${authToken}`)
 
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/membership/claim`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/membership/claim`, {
     method: 'POST',
     headers,
   })
@@ -440,7 +441,7 @@ export async function fetchSharedOverview(
   guestToken: string,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/overview`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/overview`, {
     headers: createGuestHeaders(guestToken),
     signal,
   })
@@ -453,7 +454,7 @@ export async function fetchSharedNotes(
   guestToken: string,
   signal?: AbortSignal,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/notes`, {
     headers: createGuestHeaders(guestToken),
     signal,
   })
@@ -466,7 +467,7 @@ export async function createSharedNote(
   guestToken: string,
   note: NoteInput,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/notes`, {
     method: 'POST',
     headers: createGuestHeaders(guestToken, true),
     body: JSON.stringify(note),
@@ -482,7 +483,7 @@ export async function updateSharedNote(
   noteId: string,
   note: NoteInput,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes/${noteId}`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/notes/${noteId}`, {
     method: 'PUT',
     headers: createGuestHeaders(guestToken, true),
     body: JSON.stringify(note),
@@ -497,7 +498,7 @@ export async function deleteSharedNote(
   guestToken: string,
   noteId: string,
 ) {
-  const response = await fetch(`${apiBaseUrl}/api/shared/${shareToken}/notes/${noteId}`, {
+  const response = await apiFetch(`${apiBaseUrl}/api/shared/${shareToken}/notes/${noteId}`, {
     method: 'DELETE',
     headers: createGuestHeaders(guestToken),
   })
