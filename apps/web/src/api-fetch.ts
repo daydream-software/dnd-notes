@@ -33,6 +33,15 @@ export const DEFAULT_RETRY_AFTER_MS = 2_000
  */
 export const WAKE_RETRY_BUDGET_MS = 90_000
 
+/**
+ * Hard cap on retry attempts, independent of the time budget. Guards against a
+ * burst of replayed requests when a server returns a very small or zero
+ * Retry-After: the time budget alone does not bound request count when the
+ * delay is ~0. Set above the ~45 attempts the 2s default would reach within the
+ * budget, so it never clips a legitimate slow maintenance retry.
+ */
+export const WAKE_RETRY_MAX_ATTEMPTS = 50
+
 /** Injectable dependencies — overridden in tests for deterministic timing. */
 export interface ApiFetchDeps {
   fetch: typeof fetch
@@ -135,6 +144,7 @@ export async function apiFetch(
   const signal = init.signal ?? undefined
   const deadline = deps.now() + WAKE_RETRY_BUDGET_MS
   let retrying = false
+  let attempts = 0
 
   try {
     for (;;) {
@@ -150,8 +160,10 @@ export async function apiFetch(
         return response
       }
 
-      if (deps.now() + delayMs > deadline) {
-        // Budget exhausted — surface the 503 to the caller rather than hang.
+      // Stop on either bound: the time budget, or the attempt cap (which bounds
+      // request fan-out even when Retry-After is ~0). Surface the 503 so
+      // readJson throws rather than hanging.
+      if (attempts >= WAKE_RETRY_MAX_ATTEMPTS || deps.now() + delayMs > deadline) {
         return response
       }
 
@@ -159,6 +171,7 @@ export async function apiFetch(
         retrying = true
         beginWakeRetry()
       }
+      attempts += 1
       await deps.sleep(delayMs, signal) // rejects with the abort reason if aborted
     }
   } finally {

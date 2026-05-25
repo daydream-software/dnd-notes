@@ -10,6 +10,7 @@ import {
   apiFetch,
   parseRetryAfter,
   DEFAULT_RETRY_AFTER_MS,
+  WAKE_RETRY_MAX_ATTEMPTS,
   type ApiFetchDeps,
 } from './api-fetch'
 import { isWakeRetryActive } from './wake-retry-status'
@@ -153,6 +154,19 @@ describe('apiFetch', () => {
     expect(response.status).toBe(503)
     expect(sleeps).toEqual([60000])
     expect(deps.fetch).toHaveBeenCalledTimes(2)
+    expect(isWakeRetryActive()).toBe(false)
+  })
+
+  it('caps total attempts even when Retry-After is zero (bounds request fan-out)', async () => {
+    // Retry-After: 0 means the virtual clock never advances, so the time budget
+    // alone would never stop the loop — the attempt cap must.
+    const { deps, sleeps } = makeDeps([maintenance503('0')])
+
+    const response = await apiFetch('/api/x', {}, deps)
+
+    expect(response.status).toBe(503)
+    expect(sleeps).toHaveLength(WAKE_RETRY_MAX_ATTEMPTS)
+    expect(deps.fetch).toHaveBeenCalledTimes(WAKE_RETRY_MAX_ATTEMPTS + 1)
     expect(isWakeRetryActive()).toBe(false)
   })
 
