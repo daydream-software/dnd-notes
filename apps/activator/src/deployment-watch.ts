@@ -268,107 +268,110 @@ export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}):
     }
   }
 
-  // Internal: watch loop for tenant Deployments.
-  // Scoped to tenant namespaces via the tenant label selector so the cache
-  // never holds non-tenant Deployments. Reconnect uses exponential backoff
-  // with jitter, escalating only while connects keep failing.
-  async function watchDeployments(): Promise<void> {
-    let consecutiveFailures = 0
-    while (!stopped) {
-      let connectFailed = false
-      try {
-        await watcher.watch(
-          '/apis/apps/v1/deployments',
-          { labelSelector: TENANT_LABEL_SELECTOR },
-          (type: string, obj: unknown) => {
-            const dep = obj as V1Deployment
-            const ns = dep.metadata?.namespace
-            const name = dep.metadata?.name
-            if (!ns || !name) return
-            const key = resourceKey(ns, name)
-            if (type === 'DELETED') {
-              // Prune so the cache plateaus under tenant churn (#382).
-              replicaCache.delete(key)
-              return
-            }
-            replicaCache.set(key, dep.spec?.replicas ?? 0)
-          },
-          (err: unknown) => {
-            // A connection failure surfaces here synchronously before watch()
-            // resolves, so it counts toward the backoff for this iteration. A
-            // clean close (err == null) fires later and is not a failure. A
-            // mid-stream error fires after watch() already resolved, into this
-            // (now-stale) iteration's closure, so it is a no-op for backoff —
-            // the next reconnect starts at base. See #389.
-            if (err) {
-              connectFailed = true
-              if (!stopped) {
-                console.warn('[activator] Deployment Watch ended:', err instanceof Error ? err.message : String(err))
-              }
-            }
-          },
-        )
-      } catch (err) {
-        if (stopped) return
-        connectFailed = true
-        console.warn('[activator] Deployment Watch error, reconnecting:', err instanceof Error ? err.message : String(err))
-      }
-      consecutiveFailures = connectFailed ? consecutiveFailures + 1 : 0
-      if (!stopped) {
-        await sleep(computeReconnectDelay(consecutiveFailures, { baseMs: watchReconnectDelayMs, capMs: reconnectCapMs, random }))
-      }
+  // Live Watch controller per loop label, so stop() can abort an in-flight
+  // stream promptly instead of waiting for the server to close it.
+  const activeControllers = new Map<string, AbortController>()
+
+  function handleDeploymentEvent(type: string, obj: unknown): void {
+    const dep = obj as V1Deployment
+    const ns = dep.metadata?.namespace
+    const name = dep.metadata?.name
+    if (!ns || !name) return
+    const key = resourceKey(ns, name)
+    if (type === 'DELETED') {
+      // Prune so the cache plateaus under tenant churn (#382).
+      replicaCache.delete(key)
+      return
+    }
+    replicaCache.set(key, dep.spec?.replicas ?? 0)
+  }
+
+  function handleEndpointEvent(type: string, obj: unknown): void {
+    const ep = obj as V1Endpoints
+    const ns = ep.metadata?.namespace
+    const name = ep.metadata?.name
+    if (!ns || !name) return
+    const key = resourceKey(ns, name)
+    if (type === 'DELETED') {
+      // Prune the cache (#382). Any in-flight waitForReadyEndpoint listener is
+      // left in place: it has its own timeoutMs deadline and stops polling when
+      // it expires, so it cannot leak.
+      readyAddressCache.delete(key)
+      return
+    }
+
+    let readyCount = 0
+    for (const subset of ep.subsets ?? []) {
+      readyCount += subset.addresses?.length ?? 0
+    }
+    readyAddressCache.set(key, readyCount)
+    if (readyCount > 0) {
+      notifyEndpointListeners(key)
     }
   }
 
-  // Internal: watch loop for tenant Endpoints.
-  // Endpoints inherit their Service's labels, so the same tenant selector
-  // scopes this Watch. Same backoff strategy as watchDeployments.
-  async function watchEndpoints(): Promise<void> {
+  // One Watch loop, scoped to tenant resources via the label selector.
+  //
+  // Reconnects on STREAM END — it awaits the `done` callback, not the
+  // connect-time resolution of watcher.watch(). Watch.watch() resolves as soon
+  // as the connection is established (not when the stream ends), so awaiting it
+  // re-opened a new connection every reconnect interval while the previous
+  // stream was still live, and those connections accumulated until the process
+  // OOMed (#389 — the prod activator OOMKill). Awaiting `done` keeps exactly one
+  // live connection per loop: the client aborts its controller inside `done`,
+  // so the previous stream is fully closed before the next opens.
+  //
+  // Backoff (#355) still applies between reconnects: a failed connect / errored
+  // stream escalates the delay; a clean stream end resets it to the base.
+  async function runWatchLoop(
+    path: string,
+    label: string,
+    onEvent: (type: string, obj: unknown) => void,
+  ): Promise<void> {
     let consecutiveFailures = 0
     while (!stopped) {
-      let connectFailed = false
-      try {
-        await watcher.watch(
-          '/api/v1/endpoints',
-          { labelSelector: TENANT_LABEL_SELECTOR },
-          (type: string, obj: unknown) => {
-            const ep = obj as V1Endpoints
-            const ns = ep.metadata?.namespace
-            const name = ep.metadata?.name
-            if (!ns || !name) return
-            const key = resourceKey(ns, name)
-            if (type === 'DELETED') {
-              // Prune the cache (#382). Any in-flight waitForReadyEndpoint
-              // listener is left in place: it has its own timeoutMs deadline
-              // and stops polling when it expires, so it cannot leak.
-              readyAddressCache.delete(key)
-              return
+      const failed = await new Promise<boolean>((resolve) => {
+        let settled = false
+        const finish = (didFail: boolean) => {
+          if (!settled) {
+            settled = true
+            resolve(didFail)
+          }
+        }
+        void watcher
+          .watch(path, { labelSelector: TENANT_LABEL_SELECTOR }, onEvent, (err: unknown) => {
+            // Fires once, on stream end or connect/stream failure. A non-null
+            // err is a failure (escalates backoff); a clean close resets it.
+            if (err && !stopped) {
+              console.warn(`[activator] ${label} Watch ended:`, err instanceof Error ? err.message : String(err))
             }
-
-            let readyCount = 0
-            for (const subset of ep.subsets ?? []) {
-              readyCount += subset.addresses?.length ?? 0
-            }
-            readyAddressCache.set(key, readyCount)
-            if (readyCount > 0) {
-              notifyEndpointListeners(key)
-            }
-          },
-          (err: unknown) => {
-            if (err) {
-              connectFailed = true
-              if (!stopped) {
-                console.warn('[activator] Endpoint Watch ended:', err instanceof Error ? err.message : String(err))
+            finish(Boolean(err))
+          })
+          .then(
+            (controller) => {
+              const c = controller as AbortController | undefined
+              // On a connect failure the lib calls done() (which aborts its
+              // controller) before resolving here, so this can run after the
+              // loop already moved past `finish` — skip an already-aborted
+              // controller rather than parking a dead one in the map.
+              if (c && !c.signal.aborted) {
+                activeControllers.set(label, c)
+                // stop() may have raced ahead of the connect — honor it.
+                if (stopped) c.abort()
               }
-            }
-          },
-        )
-      } catch (err) {
-        if (stopped) return
-        connectFailed = true
-        console.warn('[activator] Endpoint Watch error, reconnecting:', err instanceof Error ? err.message : String(err))
-      }
-      consecutiveFailures = connectFailed ? consecutiveFailures + 1 : 0
+            },
+            (err: unknown) => {
+              // watch() rejected before connecting (e.g. no active cluster).
+              if (!stopped) {
+                console.warn(`[activator] ${label} Watch error, reconnecting:`, err instanceof Error ? err.message : String(err))
+              }
+              finish(true)
+            },
+          )
+      })
+
+      activeControllers.delete(label)
+      consecutiveFailures = failed ? consecutiveFailures + 1 : 0
       if (!stopped) {
         await sleep(computeReconnectDelay(consecutiveFailures, { baseMs: watchReconnectDelayMs, capMs: reconnectCapMs, random }))
       }
@@ -380,8 +383,8 @@ export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}):
       if (started || stopped) return
       started = true
       // Fire and forget — reconnect loops run in background
-      void watchDeployments()
-      void watchEndpoints()
+      void runWatchLoop('/apis/apps/v1/deployments', 'Deployment', handleDeploymentEvent)
+      void runWatchLoop('/api/v1/endpoints', 'Endpoint', handleEndpointEvent)
     },
 
     async getReplicas(namespace: string, deploymentName: string): Promise<number> {
@@ -491,6 +494,12 @@ export function createDeploymentWatcher(options: DeploymentWatcherOptions = {}):
 
     stop() {
       stopped = true
+      // Abort any in-flight Watch so a loop parked on stream-end exits promptly
+      // instead of waiting for the server to close the connection.
+      for (const controller of activeControllers.values()) {
+        controller.abort()
+      }
+      activeControllers.clear()
     },
   }
 }
