@@ -993,6 +993,69 @@ describe('Control Plane API', () => {
       assert.strictEqual(response.body.summary.tenantsMissingBackup, 1)
       assert.strictEqual(response.body.summary.tenantsNeedingAttention, 1)
     })
+
+    it('omits uptime key on all tenants when ?include is absent (backwards compat)', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-compat',
+        slug: 'tenant-compat',
+        ownerId: 'owner-compat',
+        version: '1.0.0',
+      })
+
+      const response = await authedGet('/internal/fleet/status').expect(200)
+      const tenant = response.body.tenants.find(
+        (entry: { tenant: { id: string } }) => entry.tenant.id === 'tenant-compat',
+      )
+
+      assert.ok(tenant, 'tenant should be present in response')
+      // The contract: no ?include=uptime → no uptime key at all (not just undefined)
+      assert.strictEqual('uptime' in tenant, false, 'uptime key must be absent from response')
+    })
+
+    it('populates uptime block on each tenant when ?include=uptime', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-uptime',
+        slug: 'tenant-uptime',
+        ownerId: 'owner-uptime',
+        version: '1.0.0',
+      })
+      await tenantRegistry.updateTenantState('tenant-uptime', 'ready', 'test-suite')
+
+      const response = await authedGet('/internal/fleet/status?include=uptime').expect(200)
+      const tenant = response.body.tenants.find(
+        (entry: { tenant: { id: string } }) => entry.tenant.id === 'tenant-uptime',
+      )
+
+      assert.ok(tenant, 'tenant should be present in response')
+      assert.ok('uptime' in tenant, 'uptime key must be present')
+      const { uptime } = tenant
+      assert.strictEqual(typeof uptime.uptimePct, 'number')
+      assert.strictEqual(typeof uptime.totalSleepMs, 'number')
+      assert.strictEqual(typeof uptime.wakeCount, 'number')
+      assert.strictEqual(typeof uptime.currentStateSince, 'string')
+      assert.strictEqual(typeof uptime.seenByActivator, 'boolean')
+      // lastSleepMs and lastWakeAt may be null for a tenant that never slept
+      assert.ok(uptime.lastSleepMs === null || typeof uptime.lastSleepMs === 'number')
+      assert.ok(uptime.lastWakeAt === null || typeof uptime.lastWakeAt === 'string')
+    })
+
+    it('returns 400 when windowHours is not an integer', async () => {
+      const response = await authedGet('/internal/fleet/status?include=uptime&windowHours=abc').expect(400)
+      assert.ok(response.body.error.includes('windowHours'))
+    })
+
+    it('clamps windowHours silently when out of range [1, 168]', async () => {
+      await tenantRegistry.createTenant({
+        id: 'tenant-clamp',
+        slug: 'tenant-clamp',
+        ownerId: 'owner-clamp',
+        version: '1.0.0',
+      })
+
+      // Out-of-range values should not return an error — they clamp to default 24
+      await authedGet('/internal/fleet/status?include=uptime&windowHours=0').expect(200)
+      await authedGet('/internal/fleet/status?include=uptime&windowHours=999').expect(200)
+    })
   })
 
   describe('GET /internal/tenants/:tenantId', () => {
