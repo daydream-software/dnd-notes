@@ -377,3 +377,49 @@ export interface RestoreRunListResponse {
 export interface TenantAuditLogResponse {
   entries: AuditLogEntry[]
 }
+
+// ---------------------------------------------------------------------------
+// Fleet rolling-update types (#415)
+// ---------------------------------------------------------------------------
+
+export type FleetRolloutStatus = 'running' | 'completed' | 'aborted' | 'failed'
+
+export type FleetRolloutTenantStatus = 'pending' | 'succeeded' | 'failed' | 'skipped'
+
+export interface FleetRollout {
+  id: string
+  targetVersion: string
+  status: FleetRolloutStatus
+  triggeredBy: string
+  startedAt: string
+  endedAt: string | null
+  abortReason: string | null
+  failedTenant: string | null
+  failedError: string | null
+  total: number
+  completed: number
+  failed: number
+  skipped: number
+  pending: number
+  currentTenant: string | null
+  elapsedSeconds: number
+}
+
+export interface FleetRolloutTenantRecord {
+  rolloutId: string
+  tenantId: string
+  status: FleetRolloutTenantStatus
+  reason: string | null
+  startedAt: string | null
+  endedAt: string | null
+}
+
+export interface StartFleetRolloutResponse {
+  id: string
+  status: FleetRolloutStatus
+  startedAt: string
+}
+
+export interface AbortFleetRolloutResponse {
+  status: 'aborted'
+}
