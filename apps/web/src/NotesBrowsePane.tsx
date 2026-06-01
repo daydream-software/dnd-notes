@@ -1,4 +1,3 @@
-import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import ClearRoundedIcon from '@mui/icons-material/ClearRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import {
@@ -7,7 +6,6 @@ import {
   Card,
   CardContent,
   Chip,
-  Collapse,
   IconButton,
   InputAdornment,
   Stack,
@@ -16,14 +14,6 @@ import {
 } from '@mui/material'
 import type { SxProps, Theme } from '@mui/material/styles'
 import type { ReactNode } from 'react'
-
-interface QuickCaptureProps {
-  isOpen: boolean
-  value: string
-  onValueChange: (value: string) => void
-  onSubmit: () => void
-  isSubmitting: boolean
-}
 
 interface NotesBrowsePaneProps {
   heading: string
@@ -34,7 +24,6 @@ interface NotesBrowsePaneProps {
   onClearSearch: () => void
   selectedTagLabel?: string | null
   onClearTagFilter?: () => void
-  quickCapture?: QuickCaptureProps
   tagFilters: ReactNode
   children: ReactNode
   surfaceRadius: string
@@ -51,7 +40,6 @@ function NotesBrowsePane({
   onClearSearch,
   selectedTagLabel,
   onClearTagFilter,
-  quickCapture,
   tagFilters,
   children,
   surfaceRadius,
@@ -135,38 +123,6 @@ function NotesBrowsePane({
               </Stack>
             ) : null}
           </Stack>
-
-          {quickCapture ? (
-            <Collapse in={quickCapture.isOpen}>
-              <Stack
-                direction={{ xs: 'column', sm: 'row' }}
-                spacing={1}
-                component="form"
-                onSubmit={(event) => {
-                  event.preventDefault()
-                  quickCapture.onSubmit()
-                }}
-              >
-                <TextField
-                  label="Quick capture"
-                  placeholder="Jot down a clue, reminder, or scene…"
-                  size="small"
-                  value={quickCapture.value}
-                  onChange={(event) => quickCapture.onValueChange(event.target.value)}
-                  disabled={quickCapture.isSubmitting}
-                  sx={{ flex: 1 }}
-                />
-                <Button
-                  type="submit"
-                  variant="contained"
-                  startIcon={<BoltRoundedIcon />}
-                  disabled={!quickCapture.value.trim() || quickCapture.isSubmitting}
-                >
-                  {quickCapture.isSubmitting ? 'Capturing…' : 'Capture'}
-                </Button>
-              </Stack>
-            </Collapse>
-          ) : null}
 
           {tagFilters}
           {children}

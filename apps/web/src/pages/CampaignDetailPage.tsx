@@ -127,7 +127,6 @@ export default function CampaignDetailPage({
 
   const handleLogout = async () => {
     setWantsSplitNoteWorkspace(false)
-    notes.setIsQuickCaptureOpen(false)
     setError(null)
     await sess.handleLogout(isSharedMode, guestStorageKey, () => clearSession())
   }
@@ -302,7 +301,6 @@ export default function CampaignDetailPage({
             selectedNoteTemplateId={notes.selectedNoteTemplateId}
             selectedNoteTemplate={selectedNoteTemplate}
             quickCaptureTitle={notes.quickCaptureTitle}
-            isQuickCaptureOpen={notes.isQuickCaptureOpen}
             selectedNote={notes.selectedNote}
             filteredNotes={notes.filteredNotes}
             displayedNotes={notes.displayedNotes}
@@ -331,9 +329,8 @@ export default function CampaignDetailPage({
             onSelectSession={(sessionName) => { setNarrowWorkspacePanel('browse'); setError(null); void notes.handleSelectSession(sessionName, sess.authToken, camp.selectedCampaignId, undefined, (msg) => setError(msg)) }}
             onSelectActivityCollaborator={(id) => { setError(null); void notes.handleSelectActivityCollaborator(id, sess.authToken, camp.selectedCampaignId, (msg) => setError(msg)) }}
             onSelectNote={handleSelectNote}
-            onToggleQuickCapture={() => notes.setIsQuickCaptureOpen((v) => !v)}
             onQuickCaptureValueChange={notes.setQuickCaptureTitle}
-            onQuickCaptureSubmit={() => void handleQuickCapture()}
+            onQuickCaptureSubmit={handleQuickCapture}
             onShowBrowsePanel={() => setNarrowWorkspacePanel('browse')}
             onNewNote={handleStartNote}
             onSelectNoteTemplate={(id) => notes.handleSelectNoteTemplate(id, () => setError(null))}
