@@ -1381,8 +1381,8 @@ export class TenantRegistry {
         // created_at ASC (with id as tiebreaker for same-timestamp transitions).
         // We fetch ALL transitions (not just sleeping) so TypeScript can compute
         // state intervals and uptimePct = % of window in `ready`.
-        this.run<{ tenant_id: string; to_state: string; created_at: string }>(
-          `SELECT tenant_id, to_state, created_at
+        this.run<{ tenant_id: string; from_state: string; to_state: string; created_at: string }>(
+          `SELECT tenant_id, from_state, to_state, created_at
            FROM state_transitions
            WHERE tenant_id IN (${tenantPlaceholders3})
              AND created_at >= $1::timestamptz
@@ -1408,6 +1408,9 @@ export class TenantRegistry {
 
         // Query C: Last transition BEFORE the window per tenant (state-at-window-start).
         // INNER JOIN on MAX(id) with created_at < windowStart — no correlated subquery.
+        // Uses tenantPlaceholders3 ($3+) to keep the same positional layout as Queries
+        // A and D so all four queries bind ($1=windowStart, $2=windowEnd, $3+tenantIds).
+        // $2 (windowEnd) is unused in this query but kept to preserve placeholder alignment.
         this.run<{ tenant_id: string; state_at_window_start: string }>(
           `SELECT st.tenant_id, st.to_state AS state_at_window_start
            FROM state_transitions st
@@ -1463,9 +1466,9 @@ export class TenantRegistry {
     const wakeByTenant = new Map(wakeAndActivityResult.rows.map((r) => [r.tenant_id, r]))
 
     // Group in-window transitions by tenant
-    const inWindowByTenant = new Map<string, Array<{ toState: string; at: Date }>>()
+    const inWindowByTenant = new Map<string, Array<{ fromState: string; toState: string; at: Date }>>()
     for (const row of inWindowResult.rows) {
-      const entry = { toState: row.to_state, at: new Date(row.created_at) }
+      const entry = { fromState: row.from_state, toState: row.to_state, at: new Date(row.created_at) }
       const existing = inWindowByTenant.get(row.tenant_id)
       if (existing) {
         existing.push(entry)
@@ -1481,13 +1484,18 @@ export class TenantRegistry {
       const hasAnyTransitions = latestTransByTenant.has(tenant.id)
       const wakeRow = wakeByTenant.get(tenant.id)
 
-      // State at window start: from pre-window lookback.
-      // If no pre-window transition exists, fall back to tenant.currentState
-      // (simplistic but correct for newly-provisioned tenants).
-      const stateAtWindowStart = preWindowByTenant.get(tenant.id) ?? tenant.currentState
-
       // In-window transitions, already ordered by id (chronological).
       const inWindowTrans = inWindowByTenant.get(tenant.id) ?? []
+
+      // State at window start: prefer the pre-window lookback (Query C).
+      // If no pre-window transition exists and there are in-window transitions,
+      // use the fromState of the earliest in-window transition — that is the
+      // state the tenant was actually in before its first recorded transition.
+      // Final fallback to tenant.currentState for tenants with zero transitions.
+      const stateAtWindowStart =
+        preWindowByTenant.get(tenant.id) ??
+        inWindowTrans[0]?.fromState ??
+        tenant.currentState
 
       // Build state timeline within the window: [windowStart, t1, t2, ..., now]
       // Each interval is [start, end) with a known state.

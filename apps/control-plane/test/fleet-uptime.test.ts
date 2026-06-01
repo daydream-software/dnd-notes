@@ -323,6 +323,16 @@ describe('TenantRegistry.getFleetUptimes', () => {
       // Sleep was 2h out of 24h window
       assert.equal(uptime.totalSleepMs, 2 * 3600000)
       assert.equal(uptime.wakeCount, 1)
+      // The tenant was provisioning from window start until now-6h (18h), then
+      // ready now-6h→now-4h (2h), sleeping, then ready now-2h→now (2h).
+      // uptimePct = 4h ready / 24h window = 16.67%.
+      // The fromState fallback must be used — NOT tenant.currentState='ready' (which
+      // would give a 5× inflated 91.7% by counting the pre-transition interval as ready).
+      const expectedUptimePct = (4 / 24) * 100
+      assert.ok(
+        Math.abs(uptime.uptimePct - expectedUptimePct) < 0.5,
+        `uptimePct should be ~${expectedUptimePct.toFixed(1)}% (4h ready / 24h window), got ${uptime.uptimePct}`,
+      )
     } finally {
       await cleanup()
     }
