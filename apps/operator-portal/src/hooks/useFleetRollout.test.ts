@@ -193,7 +193,7 @@ describe('useFleetRollout', () => {
     expect(result.current.isStarting).toBe(false)
   })
 
-  it('startRollout on 409 refetches without throwing to the caller after swallow', async () => {
+  it('startRollout on 409 rethrows to the caller but still refetches the active rollout', async () => {
     const existingRollout = makeRollout()
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
