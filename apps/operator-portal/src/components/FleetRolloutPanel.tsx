@@ -296,10 +296,9 @@ export default function FleetRolloutPanel({
                   flexWrap: 'wrap',
                   p: 2,
                   borderRadius: surfaceRadius,
-                  border: '1px solid',
-                  borderColor: 'rgba(167, 139, 250, 0.18)',
-                  backdropFilter: 'blur(12px)',
-                  bgcolor: 'rgba(15, 23, 42, 0.5)',
+                  border: '1px solid var(--brand-line-soft)',
+                  backdropFilter: 'var(--card-blur)',
+                  background: 'var(--bg-paper-soft)',
                 }}
               >
                 <Box sx={{ flex: '1 1 240px', minWidth: 180 }}>
