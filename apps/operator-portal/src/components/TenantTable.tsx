@@ -383,7 +383,12 @@ export default function TenantTable({
     }
   }
 
-  const captionCount = tenants.length === 1 ? '1 tenant' : `${tenants.length} tenants`
+  const isFiltered = sorted.length !== tenants.length
+  const captionCount = isFiltered
+    ? `${sorted.length} of ${tenants.length} tenants`
+    : tenants.length === 1
+      ? '1 tenant'
+      : `${tenants.length} tenants`
 
   const TD_HEADERS: React.CSSProperties = {
     padding: '10px 14px',
