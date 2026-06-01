@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Contained button — light/dark A/B (#408)</title>
+<link rel="stylesheet" href="../colors_and_type.css" />
+<script src="mode-toggle.js" defer></script>
+<style>
+  body {
+    margin: 0;
+    padding: 32px 32px 80px;
+    background:
+      radial-gradient(circle at top, var(--halo-color, rgba(124, 58, 237, 0.28)), transparent 35%),
+      linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
+    color: var(--fg-1);
+    font-family: var(--font-sans);
+    min-height: 100vh;
+  }
+  [data-theme="light"] body { background: radial-gradient(circle at top, rgba(124, 58, 237, 0.10), transparent 35%), var(--bg-1); }
+
+  h1 {
+    font-size: 17px;
+    font-weight: 600;
+    margin: 0 0 6px;
+    letter-spacing: -0.01em;
+    color: var(--fg-1);
+  }
+  h1 + p {
+    margin: 0 0 28px;
+    color: var(--fg-3);
+    font-size: 13px;
+    max-width: 760px;
+    line-height: 1.55;
+  }
+  code { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace); font-size: 12px; }
+
+  .grid {
+    display: grid;
+    gap: 20px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    max-width: 1280px;
+  }
+
+  .card {
+    background: var(--bg-paper);
+    border: 1px solid var(--brand-line-soft);
+    border-radius: var(--radius-lg, 18px);
+    padding: 22px 22px 24px;
+    box-shadow: var(--shadow-sm);
+    backdrop-filter: var(--card-blur, blur(12px));
+    -webkit-backdrop-filter: var(--card-blur, blur(12px));
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .card header { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; }
+  .eyebrow {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg-muted);
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .card h2 { font-size: 15px; margin: 0; font-weight: 600; color: var(--fg-1); }
+  .card header p { margin: 0; font-size: 12.5px; color: var(--fg-3); line-height: 1.5; }
+
+  /* Quick-capture-style bar to frame the button */
+  .qc-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 14px;
+    border-radius: var(--radius-lg, 18px);
+    background: var(--bg-paper-soft);
+    border: 1px solid var(--brand-line);
+  }
+  .qc-input { flex: 1; font-size: 13px; color: var(--fg-3); }
+
+  /* Button shared base */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius-pill, 999px);
+    border: 0;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 150ms, transform 100ms;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn:hover { filter: brightness(0.92); }
+
+  /* Chip + link + focus-ring mock to expose Option 2's full-palette shift */
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill, 999px);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .link { font-size: 13px; font-weight: 500; text-decoration: underline; cursor: pointer; }
+  .focus-demo {
+    display: inline-block;
+    padding: 6px 10px;
+    border-radius: 10px;
+    border: 2px solid;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--fg-2);
+  }
+
+  /* ---- Option 1: keep as-is (brand-500 everywhere) ---- */
+  .opt-1 .btn-primary { background: var(--brand-500); color: var(--on-brand); }
+  .opt-1 .chip   { background: var(--brand-tint); color: var(--accent); border: 1px solid var(--brand-line-soft); }
+  .opt-1 .link   { color: var(--accent); }
+  .opt-1 .focus-demo { border-color: var(--brand-500); }
+
+  /* ---- Option 2: shift entire primary palette to brand-700 in light ---- */
+  .opt-2 .btn-primary { background: var(--brand-500); color: var(--on-brand); }
+  .opt-2 .chip   { background: var(--brand-tint); color: var(--accent); border: 1px solid var(--brand-line-soft); }
+  .opt-2 .link   { color: var(--accent); }
+  .opt-2 .focus-demo { border-color: var(--brand-500); }
+  [data-theme="light"] .opt-2 .btn-primary { background: var(--brand-700); color: #ffffff; }
+  [data-theme="light"] .opt-2 .chip { background: rgba(124, 58, 237, 0.12); color: var(--brand-700); border-color: rgba(124, 58, 237, 0.30); }
+  [data-theme="light"] .opt-2 .link { color: var(--brand-700); }
+  [data-theme="light"] .opt-2 .focus-demo { border-color: var(--brand-700); }
+
+  /* ---- Option 3: new token --button-primary-bg, only the button shifts ---- */
+  /* Dark: brand-500 / #1a0f3a (identical to current). Light: brand-700 / white. */
+  .opt-3 {
+    --button-primary-bg: var(--brand-500);
+    --button-primary-fg: var(--on-brand);
+  }
+  [data-theme="light"] .opt-3 {
+    --button-primary-bg: var(--brand-700);
+    --button-primary-fg: #ffffff;
+  }
+  .opt-3 .btn-primary { background: var(--button-primary-bg); color: var(--button-primary-fg); }
+  .opt-3 .chip   { background: var(--brand-tint); color: var(--accent); border: 1px solid var(--brand-line-soft); }
+  .opt-3 .link   { color: var(--accent); }
+  .opt-3 .focus-demo { border-color: var(--brand-500); }
+
+  .verdict {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--brand-line-soft);
+    font-size: 11.5px;
+    color: var(--fg-muted);
+    line-height: 1.5;
+  }
+  .verdict b { color: var(--fg-2); font-weight: 600; }
+
+  .hint {
+    margin-top: 36px;
+    padding: 14px 18px;
+    border-radius: var(--radius-lg, 18px);
+    background: var(--bg-paper-soft);
+    border: 1px solid var(--brand-line-soft);
+    font-size: 12.5px;
+    color: var(--fg-3);
+    line-height: 1.55;
+    max-width: 1280px;
+  }
+  .hint b { color: var(--fg-2); }
+</style>
+</head>
+<body>
+  <h1>Contained primary button — light/dark A/B (#408)</h1>
+  <p>Three options side-by-side. Use the floating mode toggle (top right) to flip between dark and light. The frame around each button — a quick-capture bar, a chip, a link, a focused-input border — surfaces the visual difference between Option 2 (whole purple palette darkens in light) and Option 3 (only the contained button shifts). Dark mode is unchanged in all three options.</p>
+
+  <div class="grid">
+
+    <!-- Option 1 -->
+    <div class="card opt-1">
+      <header>
+        <span class="eyebrow">Option 1</span>
+        <h2>Keep brand-500 everywhere</h2>
+        <p>Current behavior. Palette honesty intact; button reads soft against the light page.</p>
+      </header>
+      <div class="qc-bar">
+        <span class="qc-input">Jot a thought, reminder, or scene…</span>
+        <button class="btn btn-primary">Capture</button>
+      </div>
+      <div class="row">
+        <span class="chip">Ready</span>
+        <a class="link">Reset workspace</a>
+        <span class="focus-demo">Focused input</span>
+      </div>
+      <div class="verdict"><b>Trade:</b> zero code change. Button affordance is mild on light pages.</div>
+    </div>
+
+    <!-- Option 2 -->
+    <div class="card opt-2">
+      <header>
+        <span class="eyebrow">Option 2</span>
+        <h2>Shift whole primary palette to brand-700</h2>
+        <p>In light mode: button + chip border + link + focus ring all darken to brand-700.</p>
+      </header>
+      <div class="qc-bar">
+        <span class="qc-input">Jot a thought, reminder, or scene…</span>
+        <button class="btn btn-primary">Capture</button>
+      </div>
+      <div class="row">
+        <span class="chip">Ready</span>
+        <a class="link">Reset workspace</a>
+        <span class="focus-demo">Focused input</span>
+      </div>
+      <div class="verdict"><b>Trade:</b> high button affordance, but brand pill drifts between modes — every brand-500 surface shifts.</div>
+    </div>
+
+    <!-- Option 3 -->
+    <div class="card opt-3">
+      <header>
+        <span class="eyebrow">Option 3 — adopted (#408)</span>
+        <h2>New token, only the button shifts</h2>
+        <p><code>--button-primary-bg</code> + <code>--button-primary-fg</code>. Chips, links, focus rings stay on brand-500.</p>
+      </header>
+      <div class="qc-bar">
+        <span class="qc-input">Jot a thought, reminder, or scene…</span>
+        <button class="btn btn-primary">Capture</button>
+      </div>
+      <div class="row">
+        <span class="chip">Ready</span>
+        <a class="link">Reset workspace</a>
+        <span class="focus-demo">Focused input</span>
+      </div>
+      <div class="verdict"><b>Trade:</b> high button affordance, palette stays honest. Adds 2 tokens scoped to the contained-button role.</div>
+    </div>
+
+  </div>
+
+  <div class="hint">
+    <b>How to read this:</b> dark mode — all three look identical (the brand pill, the contained button, the focus ring). Light mode — Option 1 keeps a pale pill, Option 2 darkens <i>everything</i> (you'll notice the chip border and focused-input border darken too), Option 3 darkens <i>only the contained button</i> (chip border + focus ring stay on the lighter brand-500).
+  </div>
+</body>
+</html>
