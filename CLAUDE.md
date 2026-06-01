@@ -99,6 +99,8 @@ Agent({
 
 Always pass `TEAM_ROOT` (absolute path from `git rev-parse --show-toplevel`) in every spawn prompt.
 
+**Subagents cannot spawn other subagents.** Only the coordinator (this top-level agent) has the `Agent` tool, so review gates (Mikey, CodeRabbit triage) and the scribe handoff are coordinator-only — a worker agent cannot fire its own scribe.
+
 ### Worktree isolation
 
 Use `isolation: "worktree"` whenever an agent will write code, run a build, or otherwise mutate the filesystem **and** another agent or the coordinator may be active in parallel. The runtime creates a temporary git worktree, the agent works in isolation, and the harness cleans it up automatically if no changes were made (otherwise it returns the worktree path + branch name in the result).
@@ -110,7 +112,11 @@ Reasonable rules of thumb:
 - Single agent + coordinator idle → isolation optional (small overhead win)
 - Two or more agents in parallel that each touch different branches → **always isolate**
 - Coordinator is actively editing/building while an agent runs → **always isolate the agent**
-- Read-only agents (Explore, scribe doing pure logging) → isolation optional
+- Read-only agents (Explore) → isolation optional (scribe is a separate rule, below)
+
+**TEAM_ROOT trap:** in a worktree-isolated prompt, never hardcode the coordinator's repo path as `TEAM_ROOT` — the agent will `cd` back into the main tree and branch-stomp despite the isolation. Compute `TEAM_ROOT` fresh from `git rev-parse --show-toplevel` *inside* the agent's worktree, or pass the worktree path the harness gave you.
+
+**Scribe never isolates.** Spawn `scribe` without `isolation: "worktree"` — it logs against the main tree's `.squad/` and a worktree would orphan its writes.
 
 ### Routing
 
