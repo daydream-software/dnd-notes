@@ -26,9 +26,7 @@ const { useState, useMemo } = React
 type SortKey = 'slug' | 'state' | 'version' | 'lastTransition' | 'uptime'
 type SortDir = 'asc' | 'desc'
 
-// 'sleeping' is a valid filter target (it's a real state the activator adds)
-// even though it's not yet in the base TenantState union.
-type FilterState = 'all' | TenantState | 'sleeping'
+type FilterState = 'all' | TenantState
 
 const STATE_FILTER_OPTIONS: FilterState[] = [
   'all',

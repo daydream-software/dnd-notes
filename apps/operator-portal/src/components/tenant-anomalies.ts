@@ -14,7 +14,7 @@ import type { FleetTenantStatus } from '../types'
  */
 export function isStuckSleeping(status: FleetTenantStatus): boolean {
   return (
-    (status.tenant.currentState as string) === 'sleeping' &&
+    status.tenant.currentState === 'sleeping' &&
     status.uptime?.seenByActivator === false
   )
 }

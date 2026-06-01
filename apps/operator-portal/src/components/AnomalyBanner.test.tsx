@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import AnomalyBanner from './AnomalyBanner'
-import type { FleetTenantStatus, TenantUptime } from '../types'
+import type { FleetTenantStatus, TenantState, TenantUptime } from '../types'
 
 afterEach(() => {
   cleanup()
@@ -23,17 +23,17 @@ function makeUptime(overrides: Partial<TenantUptime> = {}): TenantUptime {
 function makeStatus(
   id: string,
   slug: string,
-  currentState: string,
+  currentState: TenantState,
   uptime?: TenantUptime,
 ): FleetTenantStatus {
-  const status: FleetTenantStatus = {
+  return {
     tenant: {
       id,
       slug,
       subdomain: slug,
       ownerId: 'owner-1',
       desiredState: 'ready',
-      currentState: 'ready',
+      currentState,
       version: '1.0.0',
       storageReference: null,
       backupMetadata: null,
@@ -52,9 +52,6 @@ function makeStatus(
     latestTransition: null,
     uptime,
   }
-  // Bypass strict union to allow 'sleeping' state from activator
-  ;(status.tenant as { currentState: string }).currentState = currentState
-  return status
 }
 
 describe('AnomalyBanner', () => {

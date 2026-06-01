@@ -1,6 +1,7 @@
 export const tenantStates = [
   'provisioning',
   'ready',
+  'sleeping',
   'maintenance',
   'upgrading',
   'restoring',

@@ -498,13 +498,11 @@ describe('TenantTable', () => {
       makeStatus({
         slug: 'alpha-keep',
         id: 'tenant-a',
-        currentState: 'ready', // needed to pass TenantState type
+        currentState: 'sleeping',
         desiredState: 'ready',
         uptime: makeUptime({ seenByActivator: false }),
       }),
     ]
-    // Mutate after construction to bypass the strict union type
-    ;(tenants[0].tenant as { currentState: string }).currentState = 'sleeping'
 
     render(
       <TenantTable
@@ -523,12 +521,11 @@ describe('TenantTable', () => {
       makeStatus({
         slug: 'alpha-keep',
         id: 'tenant-a',
-        currentState: 'ready',
+        currentState: 'sleeping',
         desiredState: 'ready',
         uptime: makeUptime({ seenByActivator: true }),
       }),
     ]
-    ;(tenants[0].tenant as { currentState: string }).currentState = 'sleeping'
 
     render(
       <TenantTable
@@ -569,8 +566,7 @@ describe('TenantTable', () => {
   it('"Anomalies only" filter narrows to stuck-sleeping tenants', async () => {
     const user = userEvent.setup()
 
-    const sleeping = makeStatus({ slug: 'nether-hold', id: 'tenant-s', currentState: 'ready', uptime: makeUptime({ seenByActivator: false }) })
-    ;(sleeping.tenant as { currentState: string }).currentState = 'sleeping'
+    const sleeping = makeStatus({ slug: 'nether-hold', id: 'tenant-s', currentState: 'sleeping', uptime: makeUptime({ seenByActivator: false }) })
 
     const normal = makeStatus({ slug: 'alpha-keep', id: 'tenant-a' })
 
