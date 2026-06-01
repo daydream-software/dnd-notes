@@ -148,7 +148,6 @@ async function runRollout(params: {
   targetVersion: string
   triggeredBy: string
   tenantIds: string[]
-  skipSleeping: boolean
   client: TenantRegistryClientLike
   pool: TenantRegistryPoolLike
   provisioningService: TenantProvisioningPort
@@ -458,7 +457,6 @@ export async function startFleetRollout(params: {
       targetVersion: params.targetVersion,
       triggeredBy: params.triggeredBy,
       tenantIds: eligibleTenantIds,
-      skipSleeping,
       client,
       pool: params.pool,
       provisioningService: params.provisioningService,
