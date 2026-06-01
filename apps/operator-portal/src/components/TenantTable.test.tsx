@@ -8,11 +8,27 @@ afterEach(() => {
   cleanup()
 })
 
+import type { TenantUptime } from '../types'
+
+function makeUptime(overrides: Partial<TenantUptime> = {}): TenantUptime {
+  return {
+    currentStateSince: '2026-04-22T12:00:00.000Z',
+    uptimePct: 99.5,
+    totalSleepMs: 0,
+    lastSleepMs: null,
+    wakeCount: 0,
+    lastWakeAt: null,
+    seenByActivator: true,
+    ...overrides,
+  }
+}
+
 function makeStatus(overrides: Partial<FleetTenantStatus['tenant']> & {
   health?: FleetTenantStatus['health']
   latestTransition?: FleetTenantStatus['latestTransition']
+  uptime?: FleetTenantStatus['uptime']
 } = {}): FleetTenantStatus {
-  const { health = 'healthy', latestTransition = null, ...tenantOverrides } = overrides
+  const { health = 'healthy', latestTransition = null, uptime, ...tenantOverrides } = overrides
   return {
     tenant: {
       id: 'tenant-abc',
@@ -38,6 +54,7 @@ function makeStatus(overrides: Partial<FleetTenantStatus['tenant']> & {
       lastRestoreDrillStatus: null,
     },
     latestTransition,
+    uptime,
   }
 }
 
@@ -419,5 +436,214 @@ describe('TenantTable', () => {
     await user.type(searchInput, 'storm')
 
     expect(screen.getByText('1 of 2 tenants')).toBeTruthy()
+  })
+
+  // ── Uptime column ──────────────────────────────────────────────────────────
+
+  it('renders uptime percentage when uptime is present', () => {
+    const tenants = [
+      makeStatus({ slug: 'alpha-keep', id: 'tenant-a', uptime: makeUptime({ uptimePct: 98.7 }) }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('98.7%')).toBeTruthy()
+  })
+
+  it('renders "last wake —" when lastWakeAt is null', () => {
+    const tenants = [
+      makeStatus({ slug: 'alpha-keep', id: 'tenant-a', uptime: makeUptime({ lastWakeAt: null }) }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('last wake —')).toBeTruthy()
+  })
+
+  it('renders "—" in uptime column when uptime is missing', () => {
+    const tenants = [makeStatus({ slug: 'alpha-keep', id: 'tenant-a' })]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    // One "—" for the uptime cell (may also appear in actions for deprovisioned, but this is ready)
+    const dashes = screen.getAllByText('—')
+    expect(dashes.length).toBeGreaterThanOrEqual(1)
+  })
+
+  // ── Stuck-sleeping badge ──────────────────────────────────────────────────
+
+  it('renders stuck-sleeping badge when currentState is sleeping and seenByActivator is false', () => {
+    const tenants = [
+      makeStatus({
+        slug: 'alpha-keep',
+        id: 'tenant-a',
+        currentState: 'ready', // needed to pass TenantState type
+        desiredState: 'ready',
+        uptime: makeUptime({ seenByActivator: false }),
+      }),
+    ]
+    // Mutate after construction to bypass the strict union type
+    ;(tenants[0].tenant as { currentState: string }).currentState = 'sleeping'
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('Stuck sleeping')).toBeTruthy()
+  })
+
+  it('does not render stuck-sleeping badge when seenByActivator is true', () => {
+    const tenants = [
+      makeStatus({
+        slug: 'alpha-keep',
+        id: 'tenant-a',
+        currentState: 'ready',
+        desiredState: 'ready',
+        uptime: makeUptime({ seenByActivator: true }),
+      }),
+    ]
+    ;(tenants[0].tenant as { currentState: string }).currentState = 'sleeping'
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText('Stuck sleeping')).toBeNull()
+  })
+
+  it('does not render stuck-sleeping badge when tenant is not sleeping', () => {
+    const tenants = [
+      makeStatus({
+        slug: 'alpha-keep',
+        id: 'tenant-a',
+        currentState: 'ready',
+        uptime: makeUptime({ seenByActivator: false }),
+      }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    expect(screen.queryByText('Stuck sleeping')).toBeNull()
+  })
+
+  // ── Anomalies only filter ─────────────────────────────────────────────────
+
+  it('"Anomalies only" filter narrows to stuck-sleeping tenants', async () => {
+    const user = userEvent.setup()
+
+    const sleeping = makeStatus({ slug: 'nether-hold', id: 'tenant-s', currentState: 'ready', uptime: makeUptime({ seenByActivator: false }) })
+    ;(sleeping.tenant as { currentState: string }).currentState = 'sleeping'
+
+    const normal = makeStatus({ slug: 'alpha-keep', id: 'tenant-a' })
+
+    render(
+      <TenantTable
+        tenants={[sleeping, normal]}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('nether-hold')).toBeTruthy()
+    expect(screen.getByText('alpha-keep')).toBeTruthy()
+
+    await user.click(screen.getByRole('button', { name: 'Anomalies only' }))
+
+    expect(screen.getByText('nether-hold')).toBeTruthy()
+    expect(screen.queryByText('alpha-keep')).toBeNull()
+  })
+
+  // ── Sort by uptime ────────────────────────────────────────────────────────
+
+  it('sorts by uptime ascending when Uptime header is clicked', async () => {
+    const user = userEvent.setup()
+    const tenants = [
+      makeStatus({ slug: 'dragon-peak', id: 'tenant-h', uptime: makeUptime({ uptimePct: 99.9 }) }),
+      makeStatus({ slug: 'shadow-keep', id: 'tenant-l', uptime: makeUptime({ uptimePct: 72.3 }) }),
+      makeStatus({ slug: 'storm-reach', id: 'tenant-m', uptime: makeUptime({ uptimePct: 85.1 }) }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    // Click Uptime header to sort ascending (exact text to avoid collision with Roll button aria-labels)
+    await user.click(screen.getByRole('button', { name: 'Uptime' }))
+
+    const rows = screen.getAllByRole('row')
+    expect(rows[1].textContent).toContain('shadow-keep')
+    expect(rows[2].textContent).toContain('storm-reach')
+    expect(rows[3].textContent).toContain('dragon-peak')
+  })
+
+  it('sorts by uptime descending on second Uptime header click', async () => {
+    const user = userEvent.setup()
+    const tenants = [
+      makeStatus({ slug: 'dragon-peak', id: 'tenant-h', uptime: makeUptime({ uptimePct: 99.9 }) }),
+      makeStatus({ slug: 'shadow-keep', id: 'tenant-l', uptime: makeUptime({ uptimePct: 72.3 }) }),
+      makeStatus({ slug: 'storm-reach', id: 'tenant-m', uptime: makeUptime({ uptimePct: 85.1 }) }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    const uptimeBtn = screen.getByRole('button', { name: 'Uptime' })
+    await user.click(uptimeBtn) // asc
+    await user.click(uptimeBtn) // desc
+
+    const rows = screen.getAllByRole('row')
+    expect(rows[1].textContent).toContain('dragon-peak')
+    expect(rows[2].textContent).toContain('storm-reach')
+    expect(rows[3].textContent).toContain('shadow-keep')
   })
 })

@@ -102,7 +102,7 @@ async function postJson<TResponse>(
 }
 
 export async function fetchFleetStatus(authToken: string, signal?: AbortSignal) {
-  const response = await fetch(`${operatorApiBasePath}/internal/fleet/status`, {
+  const response = await fetch(`${operatorApiBasePath}/internal/fleet/status?include=uptime`, {
     headers: createHeaders(authToken),
     signal,
   })

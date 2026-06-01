@@ -10,6 +10,7 @@ import {
 import { useDeprovision } from '../hooks/useDeprovision'
 import { useFleetRollout } from '../hooks/useFleetRollout'
 import { useUpgrade } from '../hooks/useUpgrade'
+import AnomalyBanner from '../components/AnomalyBanner'
 import FleetRolloutPanel from '../components/FleetRolloutPanel'
 import ProvisionTenantPanel from '../components/ProvisionTenantPanel'
 import TenantDeprovisionDialog from '../components/TenantDeprovisionDialog'
@@ -170,6 +171,8 @@ export default function FleetStatusPage({
                 the latest state transition and timestamp.
               </Typography>
             </Stack>
+
+            <AnomalyBanner tenants={fleetStatus.tenants} />
 
             <TenantTable
               tenants={fleetStatus.tenants}

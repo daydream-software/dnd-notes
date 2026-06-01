@@ -4,6 +4,7 @@ import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
 import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded'
 import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded'
+import WarningAmberRoundedIcon from '@mui/icons-material/WarningAmberRounded'
 import {
   Box,
   Chip,
@@ -16,12 +17,13 @@ import {
 } from '@mui/material'
 import * as React from 'react'
 import type { FleetTenantStatus, TenantState } from '../types'
+import { isStuckSleeping } from './tenant-anomalies'
 
 const { useState, useMemo } = React
 
 // ── Type helpers ──────────────────────────────────────────────────────────────
 
-type SortKey = 'slug' | 'state' | 'version' | 'lastTransition'
+type SortKey = 'slug' | 'state' | 'version' | 'lastTransition' | 'uptime'
 type SortDir = 'asc' | 'desc'
 
 // 'sleeping' is a valid filter target (it's a real state the activator adds)
@@ -64,6 +66,27 @@ function getStateChipColor(state: TenantState) {
 
 function formatTimestamp(value: string | null): string {
   return value ? new Date(value).toLocaleString() : '—'
+}
+
+/**
+ * Returns a human-readable relative time string (e.g. "3h ago", "6d ago").
+ * Uses Intl.RelativeTimeFormat for correctness, picking the largest unit >= 1.
+ */
+function formatRelativeTime(isoString: string | null): string {
+  if (!isoString) return '—'
+
+  const diffMs = Date.now() - new Date(isoString).getTime()
+  const diffSecs = Math.floor(diffMs / 1000)
+
+  const rtf = new Intl.RelativeTimeFormat('en', { numeric: 'always' })
+
+  if (diffSecs < 60) return rtf.format(-diffSecs, 'second')
+  const diffMins = Math.floor(diffSecs / 60)
+  if (diffMins < 60) return rtf.format(-diffMins, 'minute')
+  const diffHours = Math.floor(diffMins / 60)
+  if (diffHours < 24) return rtf.format(-diffHours, 'hour')
+  const diffDays = Math.floor(diffHours / 24)
+  return rtf.format(-diffDays, 'day')
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -165,6 +188,7 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
   const isDeprovisioned = t.currentState === 'deprovisioned'
   const canRoll = t.currentState === 'ready'
   const stateChanged = t.desiredState !== t.currentState
+  const stuckSleeping = isStuckSleeping(status)
 
   const TD: React.CSSProperties = {
     padding: '12px 14px',
@@ -185,8 +209,10 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
     >
       {/* Tenant */}
       <td style={{ ...TD, minWidth: 200 }}>
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <HealthDot healthy={status.health === 'healthy'} />
+        <Box sx={{ display: 'flex', alignItems: stuckSleeping ? 'flex-start' : 'center', gap: 1 }}>
+          <Box sx={{ pt: stuckSleeping ? '3px' : 0, flexShrink: 0 }}>
+            <HealthDot healthy={status.health === 'healthy'} />
+          </Box>
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.25, minWidth: 0 }}>
             <Typography
               component="span"
@@ -205,6 +231,30 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
             >
               {t.id}
             </Typography>
+            {stuckSleeping ? (
+              <Box
+                component="span"
+                title="Current state sleeping and not seen by activator. Idle-scaler may have desynced."
+                sx={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  mt: 0.75,
+                  px: '8px',
+                  py: '2px',
+                  borderRadius: '999px',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  background: 'rgba(245,158,11,0.14)',
+                  color: 'var(--warn)',
+                  border: '1px solid rgba(245,158,11,0.32)',
+                  width: 'fit-content',
+                }}
+              >
+                <WarningAmberRoundedIcon sx={{ fontSize: 12 }} aria-hidden />
+                Stuck sleeping
+              </Box>
+            ) : null}
           </Box>
         </Box>
       </td>
@@ -280,6 +330,39 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
         )}
       </td>
 
+      {/* Uptime */}
+      <td style={{ ...TD, textAlign: 'right', minWidth: 120 }}>
+        {status.uptime ? (
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 0.25 }}>
+            <Typography
+              component="span"
+              sx={{
+                fontFamily: 'var(--font-mono)',
+                fontSize: 13,
+                fontWeight: 600,
+                color: 'var(--fg-1)',
+                lineHeight: 1.3,
+              }}
+            >
+              {status.uptime.uptimePct.toFixed(1)}%
+            </Typography>
+            <Typography
+              component="span"
+              sx={{ fontSize: 11, color: 'var(--fg-muted)', lineHeight: 1.3 }}
+            >
+              last wake {formatRelativeTime(status.uptime.lastWakeAt)}
+            </Typography>
+          </Box>
+        ) : (
+          <Typography
+            component="span"
+            sx={{ fontSize: 13, color: 'var(--fg-muted)', fontFamily: 'var(--font-mono)' }}
+          >
+            —
+          </Typography>
+        )}
+      </td>
+
       {/* Actions */}
       <td style={{ ...TD, textAlign: 'right', whiteSpace: 'nowrap' }}>
         {!isDeprovisioned && !mutationDisabled ? (
@@ -335,6 +418,7 @@ export default function TenantTable({
   onDeprovision,
 }: TenantTableProps) {
   const [stateFilter, setStateFilter] = useState<FilterState>('all')
+  const [anomaliesOnly, setAnomaliesOnly] = useState(false)
   const [query, setQuery] = useState('')
   const [sortBy, setSortBy] = useState<SortKey>('slug')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -342,6 +426,7 @@ export default function TenantTable({
   const filtered = useMemo(() => {
     return tenants.filter((s) => {
       if (stateFilter !== 'all' && s.tenant.currentState !== stateFilter) return false
+      if (anomaliesOnly && !isStuckSleeping(s)) return false
       if (!query) return true
       const q = query.toLowerCase()
       return (
@@ -350,12 +435,18 @@ export default function TenantTable({
         s.tenant.ownerId.toLowerCase().includes(q)
       )
     })
-  }, [tenants, stateFilter, query])
+  }, [tenants, stateFilter, anomaliesOnly, query])
 
   const sorted = useMemo(() => {
     const list = [...filtered]
     const dir = sortDir === 'asc' ? 1 : -1
     list.sort((a, b) => {
+      if (sortBy === 'uptime') {
+        const au = a.uptime?.uptimePct ?? -Infinity
+        const bu = b.uptime?.uptimePct ?? -Infinity
+        return (au - bu) * dir
+      }
+
       let va: string
       let vb: string
       if (sortBy === 'slug') {
@@ -409,7 +500,7 @@ export default function TenantTable({
 
   return (
     <Stack spacing={2}>
-      {/* Toolbar: state filter chips + search */}
+      {/* Toolbar: state filter chips + anomalies-only chip + search */}
       <Stack
         direction={{ xs: 'column', sm: 'row' }}
         spacing={1.5}
@@ -427,6 +518,13 @@ export default function TenantTable({
               variant={stateFilter === s ? 'filled' : 'outlined'}
             />
           ))}
+          <Chip
+            label="Anomalies only"
+            size="small"
+            onClick={() => setAnomaliesOnly((v) => !v)}
+            color={anomaliesOnly ? 'warning' : 'default'}
+            variant={anomaliesOnly ? 'filled' : 'outlined'}
+          />
         </Stack>
 
         <TextField
@@ -498,6 +596,14 @@ export default function TenantTable({
                 sortDir={sortDir}
                 onSort={toggleSort}
               />
+              <SortHeader
+                label="Uptime"
+                sortKey="uptime"
+                activeSortKey={sortBy}
+                sortDir={sortDir}
+                onSort={toggleSort}
+                align="right"
+              />
               <th
                 style={{
                   ...TD_HEADERS,
@@ -513,7 +619,7 @@ export default function TenantTable({
             {sorted.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   style={{
                     padding: 24,
                     textAlign: 'center',
