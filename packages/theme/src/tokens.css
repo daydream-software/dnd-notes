@@ -56,11 +56,22 @@
      unchanged across modes so palettes stay honest.
 
      --on-brand is the text color sitting on top of a brand-500 surface
-     (e.g. contained button). Stays #1a0f3a in both modes — the contained
-     button's bg/text pair is mode-invariant. */
+     (e.g. outlined-button hover, hero stat pills). Stays #1a0f3a in both
+     modes — wherever brand-500 itself appears as a surface, this text pair
+     reads cleanly.
+
+     --button-primary-* targets the MUI contained-primary button slot only.
+     The role is mode-aware so the button keeps strong affordance on a
+     tinted-white light page (#fbfaff) without dragging the rest of the
+     brand-500 palette (chips, focus rings, links) into a deeper purple.
+     Dark mode is unchanged (brand-500 on slate looks great). #408. */
   --accent:       var(--brand-500);
   --accent-hover: var(--brand-400);
   --on-brand:     #1a0f3a;
+
+  --button-primary-bg:       var(--brand-500);
+  --button-primary-bg-hover: var(--brand-400);
+  --button-primary-fg:       var(--on-brand);
 
   /* ----- Semantic accents ----- */
   --warn:    #f59e0b;
@@ -147,6 +158,15 @@
   /* Semantic accent shifts darker for AA on light bg */
   --accent:       var(--brand-700);
   --accent-hover: var(--brand-600);
+
+  /* Contained-primary button shifts to brand-700 in light so it stays a
+     visible affordance against the #fbfaff page (the brand-500 pill reads
+     soft on a tinted-white surface). White text on brand-700 passes AA
+     comfortably. Only this role flips — chips, focus rings, links keep
+     brand-500 via --accent above. #408. */
+  --button-primary-bg:       var(--brand-700);
+  --button-primary-bg-hover: var(--brand-600);
+  --button-primary-fg:       #ffffff;
 
   /* Semantic colors shift one step darker — the dark-mode 400-family
      values all fail AA on white when used as text/icon fill. */

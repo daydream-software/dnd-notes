@@ -85,7 +85,23 @@ function buildTheme(mode: 'dark' | 'light'): Theme {
     components: {
       MuiButton: {
         styleOverrides: {
-          root: { textTransform: 'none' },
+          // Contained-primary uses mode-aware CSS vars so the button's
+          // affordance against the page stays strong in light mode
+          // (brand-500 reads soft on #fbfaff). Only this role flips —
+          // chips / focus rings / links continue to derive from
+          // palette.primary.main = brand-500 in both modes. #408.
+          root: ({ ownerState }) => ({
+            textTransform: 'none',
+            ...(ownerState.variant === 'contained' && ownerState.color === 'primary'
+              ? {
+                  backgroundColor: 'var(--button-primary-bg)',
+                  color: 'var(--button-primary-fg)',
+                  '&:hover': {
+                    backgroundColor: 'var(--button-primary-bg-hover)',
+                  },
+                }
+              : {}),
+          }),
         },
       },
       MuiTypography: {
