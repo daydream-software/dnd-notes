@@ -8,7 +8,9 @@ import {
   Typography,
 } from '@mui/material'
 import { useDeprovision } from '../hooks/useDeprovision'
+import { useFleetRollout } from '../hooks/useFleetRollout'
 import { useUpgrade } from '../hooks/useUpgrade'
+import FleetRolloutPanel from '../components/FleetRolloutPanel'
 import ProvisionTenantPanel from '../components/ProvisionTenantPanel'
 import TenantDeprovisionDialog from '../components/TenantDeprovisionDialog'
 import TenantTable from '../components/TenantTable'
@@ -70,6 +72,7 @@ export default function FleetStatusPage({
 }: FleetStatusPageProps) {
   const { deprovisionTarget, openDeprovision, closeDeprovision } = useDeprovision()
   const { upgradeTarget, openUpgrade, closeUpgrade } = useUpgrade()
+  const rolloutHook = useFleetRollout(authToken)
 
   return (
     <>
@@ -112,6 +115,15 @@ export default function FleetStatusPage({
         onRefresh={onRefresh}
         suggestedVersion={suggestedProvisionVersion}
         surfaceRadius={surfaceRadius}
+      />
+
+      <FleetRolloutPanel
+        actor={actor}
+        disabledReason={mutationDisabledReason}
+        hook={rolloutHook}
+        surfaceRadius={surfaceRadius}
+        tenants={fleetStatus.tenants}
+        onError={onError}
       />
 
       <Card sx={{ borderRadius: surfaceRadius }}>

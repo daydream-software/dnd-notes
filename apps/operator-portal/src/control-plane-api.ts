@@ -1,10 +1,13 @@
 import { operatorApiBasePath } from './config'
 import type {
+  AbortFleetRolloutResponse,
   CreateTenantRequest,
   DeprovisionTenantRequest,
   ErrorResponse,
+  FleetRollout,
   FleetStatusResponse,
   ProvisionTenantRequest,
+  StartFleetRolloutResponse,
   TenantDeprovisionResponse,
   TenantDetailResponse,
   TenantProvisioningResponse,
@@ -157,4 +160,68 @@ export async function searchKeycloakUsers(
   )
 
   return readJson<KeycloakUserSummary[]>(response)
+}
+
+// ── Fleet rollout ─────────────────────────────────────────────────────────────
+
+/**
+ * Fetches the most recent fleet rollout row (or null when none exists).
+ * Endpoint: GET /internal/fleet/rollout
+ */
+export async function fetchFleetRollout(
+  authToken: string,
+  signal?: AbortSignal,
+): Promise<FleetRollout | null> {
+  const response = await fetch(`${operatorApiBasePath}/internal/fleet/rollout`, {
+    headers: createHeaders(authToken),
+    signal,
+  })
+
+  if (response.status === 404) {
+    return null
+  }
+
+  return readJson<FleetRollout>(response)
+}
+
+export interface StartFleetRolloutRequest {
+  version: string
+  triggeredBy: string
+  skipSleeping?: boolean
+}
+
+/**
+ * Triggers a new fleet rollout.
+ * Endpoint: POST /internal/fleet/rollout
+ * Returns 409 when a rollout is already running.
+ */
+export function startFleetRollout(
+  authToken: string,
+  request: StartFleetRolloutRequest,
+  signal?: AbortSignal,
+) {
+  return postJson<StartFleetRolloutResponse>('/internal/fleet/rollout', authToken, request, signal)
+}
+
+export interface AbortFleetRolloutRequest {
+  reason?: string
+}
+
+/**
+ * Aborts the in-flight rollout.
+ * Endpoint: POST /internal/fleet/rollout/:id/abort
+ * Returns 404 when no rollout exists, 409 when it is not running.
+ */
+export function abortFleetRollout(
+  authToken: string,
+  rolloutId: string,
+  request: AbortFleetRolloutRequest,
+  signal?: AbortSignal,
+) {
+  return postJson<AbortFleetRolloutResponse>(
+    `/internal/fleet/rollout/${rolloutId}/abort`,
+    authToken,
+    request,
+    signal,
+  )
 }
