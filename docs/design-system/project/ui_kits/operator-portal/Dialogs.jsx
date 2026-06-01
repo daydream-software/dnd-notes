@@ -27,11 +27,11 @@ function Modal({ open, onClose, children, width = 520 }) {
         style={{
           width: '100%',
           maxWidth: width,
-          background: 'rgba(15,23,42,0.96)',
-          border: '1px solid rgba(167,139,250,0.24)',
+          background: 'var(--bg-paper)',
+          border: '1px solid var(--brand-line-soft)',
           borderRadius: 22,
           padding: 28,
-          boxShadow: '0 32px 80px rgba(0,0,0,0.5)',
+          boxShadow: 'var(--shadow-xl)',
           display: 'flex',
           flexDirection: 'column',
           gap: 18,
@@ -60,7 +60,7 @@ function DeprovisionDialog({ open, onClose, tenant, onConfirm, isSubmitting }) {
         <div style={{
           width: 44, height: 44, borderRadius: 12,
           background: 'rgba(248,113,113,0.14)', border: '1px solid rgba(248,113,113,0.32)',
-          display: 'grid', placeItems: 'center', color: '#f87171',
+          display: 'grid', placeItems: 'center', color: 'var(--error)',
         }}>
           <span className="material-symbols-rounded" style={{ fontSize: 24 }}>delete_forever</span>
         </div>
@@ -75,7 +75,7 @@ function DeprovisionDialog({ open, onClose, tenant, onConfirm, isSubmitting }) {
         borderRadius: 12,
         background: 'rgba(248,113,113,0.08)',
         border: '1px solid rgba(248,113,113,0.24)',
-        color: '#fca5a5',
+        color: 'var(--error)',
         fontSize: 12.5,
         lineHeight: 1.55,
         display: 'flex',
@@ -90,7 +90,7 @@ function DeprovisionDialog({ open, onClose, tenant, onConfirm, isSubmitting }) {
 
       <div style={{
         padding: 14, borderRadius: 12,
-        background: 'rgba(2,6,23,0.5)', border: '1px solid rgba(167,139,250,0.14)',
+        background: 'var(--bg-paper-soft)', border: '1px solid var(--brand-line-faint)',
         display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, fontSize: 12.5,
       }}>
         <MetaRow icon="badge" label="Slug" value={t.slug} mono />
@@ -132,8 +132,8 @@ function UpgradeDialog({ open, onClose, tenant, suggestedVersion, onConfirm, isS
       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
         <div style={{
           width: 44, height: 44, borderRadius: 12,
-          background: 'rgba(167,139,250,0.16)', border: '1px solid rgba(167,139,250,0.32)',
-          display: 'grid', placeItems: 'center', color: '#c4b1ff',
+          background: 'var(--brand-tint)', border: '1px solid var(--brand-line)',
+          display: 'grid', placeItems: 'center', color: 'var(--accent)',
         }}>
           <span className="material-symbols-rounded" style={{ fontSize: 24 }}>refresh</span>
         </div>
@@ -145,7 +145,7 @@ function UpgradeDialog({ open, onClose, tenant, suggestedVersion, onConfirm, isS
 
       <div style={{
         padding: 14, borderRadius: 12,
-        background: 'rgba(2,6,23,0.5)', border: '1px solid rgba(167,139,250,0.14)',
+        background: 'var(--bg-paper-soft)', border: '1px solid var(--brand-line-faint)',
         display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12, fontSize: 12.5,
       }}>
         <MetaRow icon="badge" label="Slug" value={t.slug} mono />
@@ -162,7 +162,7 @@ function UpgradeDialog({ open, onClose, tenant, suggestedVersion, onConfirm, isS
       </Field>
 
       {sameVersion ? (
-        <div style={{ padding: '10px 14px', borderRadius: 12, background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.24)', color: '#fbbf24', fontSize: 12.5 }}>
+        <div style={{ padding: '10px 14px', borderRadius: 12, background: 'rgba(245,158,11,0.10)', border: '1px solid rgba(245,158,11,0.24)', color: 'var(--warn)', fontSize: 12.5 }}>
           Target version matches the current version. Pick a different version to roll.
         </div>
       ) : null}

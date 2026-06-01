@@ -13,8 +13,8 @@ function NoteListItem({ note, selected, onClick }) {
         textAlign: 'left',
         padding: '14px 16px',
         borderRadius: 14,
-        border: `1px solid ${selected ? 'rgba(167,139,250,0.5)' : 'rgba(167,139,250,0.12)'}`,
-        background: selected ? 'rgba(167,139,250,0.12)' : hover ? 'rgba(15,23,42,0.7)' : 'rgba(15,23,42,0.5)',
+        border: `1px solid ${selected ? 'var(--brand-line-strong)' : 'var(--brand-line-faint)'}`,
+        background: selected ? 'var(--brand-tint)' : hover ? 'var(--bg-paper-soft)' : 'var(--bg-paper-faint)',
         color: 'var(--fg-1)',
         cursor: 'pointer',
         transition: 'background 200ms, border-color 200ms',
@@ -39,14 +39,13 @@ function NoteListItem({ note, selected, onClick }) {
   );
 }
 
-function NotesBrowsePane({ notes, selectedId, onSelect, search, onSearch, allTags, selectedTag, onTagSelect, quickValue, onQuickChange, onQuickSubmit }) {
+function NotesBrowsePane({ notes, selectedId, onSelect, search, onSearch, allTags, selectedTag, onTagSelect }) {
   return (
-    <div style={{
+    <div className="dndn-glass" style={{
       borderRadius: 18,
-      background: 'rgba(15,23,42,0.9)',
-      border: '1px solid rgba(167,139,250,0.18)',
-      backdropFilter: 'blur(16px)',
-      boxShadow: '0 16px 40px rgba(2,6,23,0.26)',
+      background: 'var(--bg-paper)',
+      border: '1px solid var(--brand-line-soft)',
+      boxShadow: 'var(--shadow-md)',
       padding: 20,
       display: 'flex',
       flexDirection: 'column',
@@ -57,7 +56,7 @@ function NotesBrowsePane({ notes, selectedId, onSelect, search, onSearch, allTag
         <div style={{ minWidth: 0 }}>
           <div style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg-1)' }}>Browse</div>
           <div style={{ color: 'var(--fg-muted)', fontSize: 13, marginTop: 4 }}>
-            Search, filter by tag, or quick-capture a clue.
+            Search by title, body, tags, or session.
           </div>
         </div>
       </div>
@@ -69,11 +68,6 @@ function NotesBrowsePane({ notes, selectedId, onSelect, search, onSearch, allTag
         onChange={onSearch}
         onClear={() => onSearch('')}
       />
-
-      <form onSubmit={(e) => { e.preventDefault(); onQuickSubmit(); }} style={{ display: 'flex', gap: 8 }}>
-        <Input icon="bolt" placeholder="Jot down a clue, reminder, or scene…" value={quickValue} onChange={onQuickChange} style={{ flex: 1 }} />
-        <Button icon="add" disabled={!quickValue.trim()}>Capture</Button>
-      </form>
 
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
         <Chip variant={selectedTag === null ? 'brand-solid' : 'muted'} onClick={() => onTagSelect(null)}>All</Chip>

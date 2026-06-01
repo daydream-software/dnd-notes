@@ -9,8 +9,10 @@
 <style>
   body { margin: 0; }
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: rgba(167,139,250,0.24); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb { background: var(--brand-line-soft); border-radius: 999px; }
   select { appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'><path fill='%23a78bfa' d='M6 8 0 0h12z'/></svg>"); background-repeat: no-repeat; background-position: right 12px center; padding-right: 32px; }
+  .dndn-glass { backdrop-filter: var(--blur-md); -webkit-backdrop-filter: var(--blur-md); }
+  [data-theme="light"] .dndn-glass { backdrop-filter: none; -webkit-backdrop-filter: none; }
 </style>
 <style>
 @font-face {
@@ -29,6 +31,7 @@
 </head>
 <body>
   <div id="root"></div>
+  <script src="../../preview/mode-toggle.js" defer></script>
   <script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
   <script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>

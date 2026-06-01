@@ -1,21 +1,21 @@
 /* eslint-disable */
-const { useState: useState_chrome } = React;
+const { useState: useState_chrome, useRef: useRef_chrome } = React;
 
 function BrandPill() {
   return (
     <div
       aria-label="Application brand"
+      className="dndn-glass"
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         gap: 8,
         padding: '8px 14px',
         borderRadius: 999,
-        border: '1px solid rgba(167,139,250,0.2)',
-        background: 'rgba(15,23,42,0.72)',
-        color: 'rgba(255,255,255,0.78)',
-        backdropFilter: 'blur(12px)',
-        boxShadow: '0 12px 30px rgba(2,6,23,0.24)',
+        border: '1px solid var(--brand-line)',
+        background: 'var(--bg-paper-soft)',
+        color: 'var(--fg-2)',
+        boxShadow: 'var(--shadow-sm)',
         fontSize: 12,
         letterSpacing: '0.08em',
         textTransform: 'uppercase',
@@ -35,6 +35,7 @@ function WorkspaceHeader({ campaignName, subtitle, campaigns, selectedId, onSele
     <div
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      className="dndn-glass"
       style={{
         position: 'sticky',
         top: 12,
@@ -43,10 +44,9 @@ function WorkspaceHeader({ campaignName, subtitle, campaigns, selectedId, onSele
         width: 560,
         maxWidth: '100%',
         borderRadius: 24,
-        border: `1px solid ${hover ? 'rgba(167,139,250,0.22)' : 'rgba(167,139,250,0.14)'}`,
-        background: hover ? 'rgba(15,23,42,0.88)' : 'rgba(15,23,42,0.44)',
-        backdropFilter: 'blur(12px)',
-        boxShadow: hover ? '0 18px 44px rgba(2,6,23,0.28)' : '0 16px 40px rgba(2,6,23,0.18)',
+        border: `1px solid ${hover ? 'var(--brand-line-strong)' : 'var(--brand-line-faint)'}`,
+        background: hover ? 'var(--bg-paper-strong)' : 'var(--bg-paper-faint)',
+        boxShadow: hover ? 'var(--shadow-lg)' : 'var(--shadow-md)',
         padding: '12px 14px',
         transition: 'background 200ms, border-color 200ms, box-shadow 200ms',
       }}
@@ -66,7 +66,7 @@ function WorkspaceHeader({ campaignName, subtitle, campaigns, selectedId, onSele
           >
             {campaignName}
           </div>
-          <div style={{ color: 'rgba(255,255,255,0.72)', fontSize: 12, marginTop: 2 }}>
+          <div style={{ color: 'var(--fg-3)', fontSize: 12, marginTop: 2 }}>
             {subtitle}
           </div>
         </div>
@@ -80,7 +80,7 @@ function WorkspaceHeader({ campaignName, subtitle, campaigns, selectedId, onSele
             }}
           >
             {campaigns.map((c) => (
-              <option key={c.id} value={c.id} style={{ background: '#0f172a' }}>{c.name}</option>
+              <option key={c.id} value={c.id} style={{ background: 'var(--bg-1)' }}>{c.name}</option>
             ))}
           </select>
           <div style={{ display: 'grid', gridTemplateColumns: `repeat(${actions.length}, 1fr)`, gap: 4 }}>
@@ -97,8 +97,8 @@ function WorkspaceHeader({ campaignName, subtitle, campaigns, selectedId, onSele
 const inputStyleHeader = {
   padding: '8px 12px',
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.18)',
-  background: 'rgba(15,23,42,0.6)',
+  border: '1px solid var(--brand-line-soft)',
+  background: 'var(--bg-paper-soft)',
   color: 'var(--fg-1)',
   font: 'inherit',
   outline: 'none',
@@ -127,9 +127,9 @@ function StatPills({ stats }) {
             gap: 12,
             padding: '14px 18px',
             borderRadius: 18,
-            background: 'rgba(15,23,42,0.88)',
-            border: '1px solid rgba(167,139,250,0.18)',
-            boxShadow: '0 20px 40px rgba(15,23,42,0.24)',
+            background: 'var(--bg-paper-strong)',
+            border: '1px solid var(--brand-line-soft)',
+            boxShadow: 'var(--shadow-lg)',
           }}
         >
           <div
@@ -137,11 +137,11 @@ function StatPills({ stats }) {
               width: 40,
               height: 40,
               borderRadius: '50%',
-              background: 'rgba(167,139,250,0.16)',
+              background: 'var(--brand-tint)',
               display: 'grid',
               placeItems: 'center',
               flexShrink: 0,
-              color: '#c4b1ff',
+              color: 'var(--accent)',
             }}
           >
             <Icon name={s.icon} size={20} />
@@ -158,4 +158,80 @@ function StatPills({ stats }) {
   );
 }
 
-Object.assign(window, { BrandPill, WorkspaceHeader, StatPills });
+function QuickCaptureBar({ value, onChange, onSubmit, justCaptured }) {
+  const inputRef = useRef_chrome(null);
+  const [focused, setFocused] = useState_chrome(false);
+  const canSubmit = value.trim().length > 0;
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!canSubmit) return;
+    onSubmit();
+    inputRef.current?.focus();
+  };
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="dndn-glass"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '12px 16px',
+        borderRadius: 18,
+        background: 'var(--bg-paper-soft)',
+        border: `1px solid ${focused ? 'var(--accent)' : 'var(--brand-line)'}`,
+        boxShadow: focused ? `0 0 0 3px var(--brand-line), var(--shadow-sm)` : 'var(--shadow-sm)',
+        transition: 'border-color 200ms, box-shadow 200ms',
+      }}
+    >
+      <span
+        className="material-symbols-rounded"
+        aria-hidden="true"
+        style={{ fontSize: 20, color: 'var(--accent)', flexShrink: 0 }}
+      >
+        bolt
+      </span>
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder="Jot a thought, reminder, or scene — Enter saves to the campaign."
+        aria-label="Quick capture a note"
+        style={{
+          flex: 1,
+          minWidth: 0,
+          background: 'transparent',
+          border: 0,
+          outline: 'none',
+          color: 'var(--fg-1)',
+          font: 'inherit',
+          fontSize: 14.5,
+          lineHeight: 1.5,
+          padding: '4px 0',
+        }}
+      />
+      {justCaptured ? (
+        <span
+          role="status"
+          style={{
+            color: 'var(--success)',
+            fontSize: 12.5,
+            fontWeight: 500,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          <span className="material-symbols-rounded" style={{ fontSize: 14 }}>check_circle</span>
+          Captured
+        </span>
+      ) : null}
+      <Button icon="add" disabled={!canSubmit} type="submit">Capture</Button>
+    </form>
+  );
+}
+
+Object.assign(window, { BrandPill, WorkspaceHeader, StatPills, QuickCaptureBar });

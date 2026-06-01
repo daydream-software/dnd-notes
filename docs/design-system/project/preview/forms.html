@@ -10,8 +10,8 @@
   .grid { display: grid; gap: 14px; max-width: 640px; align-items: start; }
   .field { display: flex; flex-direction: column; gap: 6px; }
   .label { color: var(--fg-3); font-size: 12px; letter-spacing: 0.02em; }
-  .input { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--radius-lg); border: 1px solid rgba(255,255,255,0.18); background: rgba(15,23,42,0.6); color: var(--fg-1); font: inherit; font-size: 14px; }
-  .input:focus-within { border-color: var(--brand-500); box-shadow: 0 0 0 2px rgba(167,139,250,0.2); }
+  .input { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: var(--radius-lg); border: 1px solid var(--brand-line-soft); background: var(--bg-paper-soft); color: var(--fg-1); font: inherit; font-size: 14px; }
+  .input:focus-within { border-color: var(--accent); box-shadow: 0 0 0 2px var(--brand-line); }
   .input input { background: transparent; border: 0; outline: none; color: inherit; flex: 1; font: inherit; }
   svg { width: 18px; height: 18px; fill: var(--fg-muted); }
   .help { color: var(--fg-muted); font-size: 12px; }
@@ -50,5 +50,6 @@
     <span class="help">New notes are saved straight to the selected campaign.</span>
   </div>
   </div>
+<script src="mode-toggle.js" defer></script>
 </body>
 </html>

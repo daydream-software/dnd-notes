@@ -9,7 +9,7 @@
   body { margin: 0; padding: 24px; background: var(--bg-1); }
   .grid { display: grid; gap: 16px; grid-template-columns: repeat(5, 1fr); align-items: end; }
   .demo { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-  .box { width: 76px; height: 76px; background: rgba(15,23,42,0.88); border: 1px solid var(--brand-line); }
+  .box { width: 76px; height: 76px; background: var(--bg-paper-strong); border: 1px solid var(--brand-line); box-shadow: var(--shadow-sm); }
   .name { color: var(--fg-1); font-size: 12px; font-weight: 500; }
   .meta { color: var(--fg-muted); font-family: var(--font-mono); font-size: 11px; }
 </style>
@@ -36,5 +36,6 @@
   <div class="demo"><div class="box" style="border-radius:24px"></div><span class="name">xl</span><span class="meta">24px</span></div>
   <div class="demo"><div class="box" style="border-radius:999px"></div><span class="name">pill</span><span class="meta">999px</span></div>
   </div>
+<script src="mode-toggle.js" defer></script>
 </body>
 </html>

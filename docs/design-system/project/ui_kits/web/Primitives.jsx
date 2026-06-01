@@ -29,13 +29,13 @@ function Button({ variant = 'contained', icon, danger, children, onClick, disabl
     opacity: disabled ? 0.5 : 1,
   };
   const variants = {
-    contained: { background: 'var(--brand-500)', color: '#1a0f3a' },
-    outlined: { background: 'transparent', color: 'var(--brand-500)', borderColor: 'rgba(167,139,250,0.5)' },
-    text: { background: 'transparent', color: 'var(--brand-500)', padding: '8px 12px' },
+    contained: { background: 'var(--brand-500)', color: 'var(--on-brand)' },
+    outlined: { background: 'transparent', color: 'var(--accent)', borderColor: 'var(--brand-line-strong)' },
+    text: { background: 'transparent', color: 'var(--accent)', padding: '8px 12px' },
   };
   const dangerStyle = danger ? {
     background: 'transparent',
-    color: '#f87171',
+    color: 'var(--error)',
     border: '1px solid rgba(248,113,113,0.5)',
   } : null;
   return (
@@ -56,15 +56,15 @@ function IconButton({ name, label, onClick, active, style }) {
         height: 36,
         borderRadius: 12,
         border: '1px solid transparent',
-        background: active ? 'rgba(167,139,250,0.16)' : 'transparent',
-        color: active ? '#c4b1ff' : 'var(--fg-1)',
+        background: active ? 'var(--brand-tint)' : 'transparent',
+        color: active ? 'var(--accent)' : 'var(--fg-1)',
         display: 'grid',
         placeItems: 'center',
         cursor: 'pointer',
         transition: 'background-color 200ms',
         ...style,
       }}
-      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--action-hover)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
       <Icon name={name} size={20} />
@@ -88,8 +88,8 @@ const inputStyle = {
   gap: 8,
   padding: '10px 14px',
   borderRadius: 18,
-  border: '1px solid rgba(255,255,255,0.18)',
-  background: 'rgba(15,23,42,0.6)',
+  border: '1px solid var(--brand-line-soft)',
+  background: 'var(--bg-paper-soft)',
   color: 'var(--fg-1)',
   font: 'inherit',
   fontSize: 14,
@@ -102,8 +102,8 @@ function Input({ icon, value, onChange, placeholder, onClear, style }) {
     <div
       style={{
         ...inputStyle,
-        borderColor: focused ? 'var(--brand-500)' : 'rgba(255,255,255,0.18)',
-        boxShadow: focused ? '0 0 0 2px rgba(167,139,250,0.2)' : 'none',
+        borderColor: focused ? 'var(--accent)' : 'var(--brand-line-soft)',
+        boxShadow: focused ? '0 0 0 2px var(--brand-line)' : 'none',
         ...style,
       }}
     >
@@ -140,12 +140,12 @@ function Chip({ children, variant = 'neutral', onRemove, onClick, active }) {
     transition: 'background-color 200ms, border-color 200ms',
   };
   const variants = {
-    neutral: { background: 'rgba(255,255,255,0.08)', color: 'var(--fg-1)' },
-    brand: { background: 'rgba(167,139,250,0.16)', color: '#c4b1ff', borderColor: 'rgba(167,139,250,0.32)' },
-    'brand-solid': { background: 'var(--brand-500)', color: '#1a0f3a' },
-    success: { background: 'rgba(74,222,128,0.16)', color: '#4ade80' },
-    warn: { background: 'rgba(245,158,11,0.16)', color: '#f59e0b' },
-    muted: { background: 'rgba(255,255,255,0.06)', color: 'var(--fg-muted)' },
+    neutral: { background: 'var(--action-hover)', color: 'var(--fg-1)' },
+    brand: { background: 'var(--brand-tint)', color: 'var(--accent)', borderColor: 'var(--brand-line)' },
+    'brand-solid': { background: 'var(--brand-500)', color: 'var(--on-brand)' },
+    success: { background: 'rgba(74,222,128,0.16)', color: 'var(--success)' },
+    warn: { background: 'rgba(245,158,11,0.16)', color: 'var(--warn)' },
+    muted: { background: 'var(--action-hover)', color: 'var(--fg-muted)' },
   };
   const v = active ? variants['brand-solid'] : variants[variant];
   return (

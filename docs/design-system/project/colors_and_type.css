@@ -66,6 +66,20 @@
   --status-published: var(--success);
   --status-archived: var(--warn);
 
+  /* ----- Semantic accent tokens (mode-aware) -----
+     Use --accent (not --brand-500) for foreground roles: links, outlined-
+     button labels, brand-tinted text. On dark bg, --accent is brand-500
+     (#a78bfa). On light bg it shifts to brand-700 (#7c3aed) so text passes
+     AA. The literal brand-* ramp is unchanged so palette swatches stay
+     honest.
+
+     --on-brand is the text color sitting on top of a brand-500 surface
+     (e.g. contained button). It stays #1a0f3a in both modes — the
+     contained button's bg/text pair is mode-invariant. */
+  --accent: var(--brand-500);
+  --accent-hover: var(--brand-400);
+  --on-brand: #1a0f3a;
+
   /* ----- Surfaces, dividers, action states (MUI dark conventions) ----- */
   --divider: rgba(255, 255, 255, 0.12);
   --action-hover: rgba(255, 255, 255, 0.08);
@@ -134,6 +148,97 @@
 }
 
 /* =========================================================================
+   Light mode — sister-language, not mirror
+
+   Activated by `data-theme="light"` on <html>. The mode-toggle.js script
+   in preview/ sets this from localStorage with `prefers-color-scheme` as
+   the default. Apps wiring this up later should use the same attribute.
+
+   Design intent: light mode shares the brand DNA (purple, amber, Geist,
+   radii 18, calm voice) but drops the glass-on-gradient aesthetic that
+   defines dark mode. On a light surface, backdrop-blur reads as haze
+   rather than depth, so cards become solid. The radial purple halo is
+   preserved at much lower intensity — it's the most recognizable brand
+   cue.
+
+   Brand ramp untouched on purpose: --brand-500 stays #a78bfa so the
+   palette previews remain accurate in both modes. Text/icon roles that
+   need AA contrast use --accent, which shifts to brand-700 in light.
+   ========================================================================= */
+
+[data-theme="light"] {
+  /* Translucent brand washes — heavier opacity so 1px borders remain
+     visible against off-white surfaces */
+  --brand-line-strong: rgba(167, 139, 250, 0.45);
+  --brand-line: rgba(167, 139, 250, 0.35);
+  --brand-line-soft: rgba(167, 139, 250, 0.28);
+  --brand-line-faint: rgba(167, 139, 250, 0.20);
+  --brand-tint: rgba(167, 139, 250, 0.22);
+
+  /* Slate foundation → violet-tinted off-white. Surfaces become solid
+     (no translucency) — the glass aesthetic is dark-mode-only. */
+  --bg-0: #ffffff;
+  --bg-1: #fbfaff;
+  --bg-2: #f5f3ff;
+  --bg-paper: #ffffff;
+  --bg-paper-strong: #ffffff;
+  --bg-paper-soft: #faf9fc;
+  --bg-paper-faint: rgba(255, 255, 255, 0.6);
+
+  /* Foreground / text — flipped to slate-900 family */
+  --fg-1: #0f172a;
+  --fg-2: rgba(15, 23, 42, 0.78);
+  --fg-3: rgba(15, 23, 42, 0.65);
+  --fg-muted: rgba(15, 23, 42, 0.6);
+  --fg-disabled: rgba(15, 23, 42, 0.38);
+
+  /* Semantic accent shifts darker for AA on light bg */
+  --accent: var(--brand-700);
+  --accent-hover: var(--brand-600);
+
+  /* Semantic colors shift one step darker — the dark-mode 400-family values
+     all fail AA on white when used as text/icon fill. The amber --warn stays
+     unchanged because it's the brand secondary and used primarily as a wash
+     background, not text. */
+  --error: #dc2626;
+  --success: #16a34a;
+  --info: #2563eb;
+
+  /* Dividers & action states. action-hover is a neutral grey wash in both
+     modes (rgba(255,255,255,0.08) in dark, the inverse here) — keeping it
+     mode-symmetric means muted/neutral states like the Draft pill flip
+     cleanly without needing a separate token. */
+  --divider: rgba(15, 23, 42, 0.10);
+  --action-hover: rgba(15, 23, 42, 0.06);
+  --action-selected: rgba(167, 139, 250, 0.12);
+  --action-disabled-bg: rgba(15, 23, 42, 0.08);
+
+  /* Page background — preserve the radial purple halo at much lower
+     intensity (0.10 vs 0.28). It's the most recognizable brand cue. */
+  --page-bg: radial-gradient(circle at top, rgba(167, 139, 250, 0.10), transparent 35%),
+             linear-gradient(180deg, #fbfaff 0%, #f5f3ff 100%);
+
+  /* Elevation — slate-tinted but much lighter on light surface.
+     Heavier shadows in dark mode communicate the glass-floating-above-
+     gradient feel; in light mode subtle elevation reads as clean depth. */
+  --shadow-sm: 0 8px 20px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 12px 30px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 16px 36px rgba(15, 23, 42, 0.10);
+  --shadow-xl: 0 24px 48px rgba(15, 23, 42, 0.12);
+
+  /* Blur — keep tokens defined but components should opt out (set
+     `backdrop-filter: none`) when targeting light mode. The glass treatment
+     produces visual haze on solid light surfaces. */
+}
+
+/* Smooth the mode transition. Body bg-color and color are the only two
+   that need to interpolate; gradients can't be interpolated cheaply so
+   --page-bg swaps instantly under the radial halo (acceptable). */
+html, body {
+  transition: background-color 200ms ease, color 200ms ease;
+}
+
+/* =========================================================================
    Semantic element styles — opt in by importing this CSS
    ========================================================================= */
 
@@ -160,8 +265,8 @@ h4 { font-size: var(--fs-h4); line-height: var(--lh-snug); margin: var(--space-4
 
 p  { font-size: var(--fs-body); line-height: var(--lh-loose); margin: var(--space-3) 0; color: var(--fg-1); }
 
-a  { color: var(--brand-500); text-decoration: none; }
-a:hover { color: var(--brand-400); text-decoration: underline; }
+a  { color: var(--accent); text-decoration: none; }
+a:hover { color: var(--accent-hover); text-decoration: underline; }
 
 small, .caption { font-size: var(--fs-caption); color: var(--fg-3); }
 
