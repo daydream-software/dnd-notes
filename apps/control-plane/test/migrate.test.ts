@@ -23,6 +23,7 @@ const expectedControlPlaneMigrations = [
   '0007_backup_catalog_location_deleted.sql',
   '0008_scale_to_zero.sql',
   '0009_seen_by_activator.sql',
+  '0010_fleet_rollouts.sql',
 ]
 
 test('control-plane migrations seed schema metadata and use a namespaced ledger', async () => {

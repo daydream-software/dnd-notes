@@ -1,5 +1,6 @@
 import dotenv from 'dotenv'
 import type { Server } from 'node:http'
+import { Pool } from 'pg'
 import { createApp } from './app.js'
 import { createControlPlaneAdminAuth, createPortalKeycloakAuth } from './keycloak-auth.js'
 import { KeycloakAdminClient } from './keycloak-admin-client.js'
@@ -8,6 +9,7 @@ import {
   defaultTenantReadyTimeoutMs,
   type TenantProvisioningPort,
 } from './provisioning.js'
+import { markOrphanRunningRolloutsFailed } from './fleet-rollout-orchestrator.js'
 import { startRoleSyncRetryLoop } from './role-sync-retry.js'
 import { createShutdownController } from './shutdown.js'
 import {
@@ -232,6 +234,15 @@ if (!CONTROL_PLANE_DATABASE_URL) {
 }
 
 const tenantRegistry = new TenantRegistry(CONTROL_PLANE_DATABASE_URL)
+
+// Fleet rollout pool: a separate small pool from the same DB for the advisory
+// lock + orchestrator. This pool is independent from the registry pool so that
+// the fleet orchestrator's long-lived locked connection does not starve other
+// registry operations.
+const fleetRolloutPool = new Pool({
+  connectionString: CONTROL_PLANE_DATABASE_URL,
+  max: 3,
+})
 let tenantProvisioningService: TenantProvisioningPort | undefined
 let tenantControlClient: TenantControlClient | undefined
 
@@ -422,6 +433,9 @@ const app = createApp({
   // existing local owner is auto-linked to a Keycloak identity, assign the
   // per-tenant member role for every tenant they already own.
   keycloakAdminClient: keycloakAdminClient ?? undefined,
+  // Fleet rolling-update pool (#415). Separate pool so the orchestrator's
+  // dedicated advisory-lock connection does not starve the registry pool.
+  fleetRolloutPool: tenantProvisioningService ? fleetRolloutPool : undefined,
 })
 const SHUTDOWN_TIMEOUT_MS = 5_000
 const serverRef: { current?: Server } = {}
@@ -448,6 +462,7 @@ const shutdownController = createShutdownController({
     }
 
     await tenantRegistry.close()
+    await fleetRolloutPool.end()
   },
   exit: (exitCode) => {
     console.log('Control plane stopped')
@@ -464,6 +479,18 @@ try {
 } catch (error) {
   console.error('Control-plane migrations failed; refusing to start:', error)
   process.exit(1)
+}
+
+// Process-restart safety (#415): mark any rollout rows that were stuck in
+// 'running' when the previous process died as 'failed'. The advisory lock
+// dies with the session, so a follow-up rollout can start immediately.
+// V1 trade-off: no resume logic — operators must start a new rollout.
+try {
+  await markOrphanRunningRolloutsFailed(fleetRolloutPool)
+} catch (error) {
+  // Non-fatal: log and continue. The rollout table may not exist yet if
+  // migration 0010 is being applied for the first time on this boot.
+  console.warn('Failed to mark orphaned running rollouts as failed:', error)
 }
 
 // Ensure static portal Keycloak clients exist in the realm. This is a soft

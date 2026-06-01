@@ -42,11 +42,23 @@ import {
   ThrowingTenantBackupDispatcher,
   type TenantBackupDispatcher,
 } from './tenant-backup-dispatcher.js'
+import {
+  FleetRolloutAlreadyRunningError,
+  FleetRolloutAlreadyEndedError,
+  FleetRolloutNotFoundError,
+  startFleetRollout,
+  getCurrentFleetRollout,
+  getFleetRollout,
+  abortFleetRollout,
+} from './fleet-rollout-orchestrator.js'
+import type { TenantRegistryPoolLike } from './tenant-registry.js'
 import { tenantStates } from './types.js'
 import type {
+  AbortFleetRolloutResponse,
   BackupRun,
   BackupRunListResponse,
   BackupRunResponse,
+  FleetRollout,
   FleetStatusResponse,
   FleetTenantBackupStatus,
   PortalAccount,
@@ -55,6 +67,7 @@ import type {
   PortalTenantSummary,
   RestoreRunListResponse,
   RestoreRunResponse,
+  StartFleetRolloutResponse,
   TenantAuditLogResponse,
   TenantBackupSummary,
   TenantDeprovisionResponse,
@@ -291,6 +304,13 @@ interface CreateAppOptions {
    * fakes minimal and type-safe.
    */
   keycloakAdminClient?: AppKeycloakAdminClient
+  /**
+   * Pool for fleet-rollout operations. Must be the same underlying Postgres
+   * database as the tenant registry. When absent, fleet-rollout endpoints
+   * return 501. The fleet orchestrator holds a dedicated connection from this
+   * pool for the entire rollout lifetime (advisory-lock session reuse).
+   */
+  fleetRolloutPool?: TenantRegistryPoolLike
 }
 
 const require = createRequire(import.meta.url)
@@ -601,6 +621,7 @@ export function createApp({
   tenantPublicScheme = 'https',
   tenantControlClient,
   keycloakAdminClient,
+  fleetRolloutPool,
 }: CreateAppOptions): Express {
   const app = express()
   app.set('trust proxy', trustProxy)
@@ -2104,6 +2125,214 @@ export function createApp({
         logUnexpectedError('Failed to deprovision tenant resources', error)
         response.status(500).json({
           error: 'Failed to deprovision tenant resources',
+          details: getErrorMessage(error),
+        })
+      }
+    },
+  )
+
+  // ---------------------------------------------------------------------------
+  // Fleet rolling-update endpoints (#415)
+  // ---------------------------------------------------------------------------
+
+  const startFleetRolloutSchema = z.object({
+    version: z.string().min(1),
+    triggeredBy: z.string().min(1),
+    skipSleeping: z.boolean().optional(),
+  })
+
+  const abortFleetRolloutSchema = z.object({
+    reason: z.string().min(1).optional(),
+  })
+
+  /**
+   * POST /internal/fleet/rollout
+   * Start a new fleet rolling update. Returns 201 immediately after lock
+   * acquisition and row insert; orchestration runs in the background.
+   * Returns 409 if a rollout is already running.
+   * Returns 501 if the fleet rollout pool is not configured.
+   */
+  app.post(
+    '/internal/fleet/rollout',
+    async (
+      request: Request,
+      response: Response<StartFleetRolloutResponse | ErrorResponse>,
+    ) => {
+      if (!fleetRolloutPool || !tenantProvisioningService) {
+        response.status(501).json({
+          error: 'Fleet rolling update is not configured',
+          details: fleetRolloutPool
+            ? 'Tenant provisioning service is not configured.'
+            : 'Fleet rollout pool is not configured.',
+        })
+        return
+      }
+
+      const parseResult = startFleetRolloutSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      const { version, triggeredBy, skipSleeping } = parseResult.data
+
+      try {
+        const result = await startFleetRollout({
+          pool: fleetRolloutPool,
+          provisioningService: tenantProvisioningService,
+          targetVersion: version,
+          triggeredBy,
+          skipSleeping,
+        })
+
+        response.status(201).json({
+          id: result.id,
+          status: result.status,
+          startedAt: result.startedAt,
+        })
+      } catch (error) {
+        if (error instanceof FleetRolloutAlreadyRunningError) {
+          response.status(409).json({
+            error: 'Fleet rollout conflict',
+            details: error.message,
+          })
+          return
+        }
+
+        logUnexpectedError('Failed to start fleet rollout', error)
+        response.status(500).json({
+          error: 'Failed to start fleet rollout',
+          details: getErrorMessage(error),
+        })
+      }
+    },
+  )
+
+  /**
+   * GET /internal/fleet/rollout
+   * Returns the currently running rollout with full progress, or null if none.
+   */
+  app.get(
+    '/internal/fleet/rollout',
+    async (
+      _request: Request,
+      response: Response<FleetRollout | null | ErrorResponse>,
+    ) => {
+      if (!fleetRolloutPool) {
+        response.status(501).json({
+          error: 'Fleet rolling update is not configured',
+        })
+        return
+      }
+
+      try {
+        const rollout = await getCurrentFleetRollout(fleetRolloutPool)
+        response.json(rollout)
+      } catch (error) {
+        logUnexpectedError('Failed to get current fleet rollout', error)
+        response.status(500).json({
+          error: 'Failed to get current fleet rollout',
+          details: getErrorMessage(error),
+        })
+      }
+    },
+  )
+
+  /**
+   * GET /internal/fleet/rollout/:id
+   * Returns a historical rollout snapshot by ID.
+   */
+  app.get(
+    '/internal/fleet/rollout/:rolloutId',
+    async (
+      request: Request<{ rolloutId: string }>,
+      response: Response<FleetRollout | ErrorResponse>,
+    ) => {
+      if (!fleetRolloutPool) {
+        response.status(501).json({
+          error: 'Fleet rolling update is not configured',
+        })
+        return
+      }
+
+      const { rolloutId } = request.params
+
+      try {
+        const rollout = await getFleetRollout(fleetRolloutPool, rolloutId)
+
+        if (!rollout) {
+          response.status(404).json({ error: 'Fleet rollout not found' })
+          return
+        }
+
+        response.json(rollout)
+      } catch (error) {
+        logUnexpectedError('Failed to get fleet rollout', error)
+        response.status(500).json({
+          error: 'Failed to get fleet rollout',
+          details: getErrorMessage(error),
+        })
+      }
+    },
+  )
+
+  /**
+   * POST /internal/fleet/rollout/:id/abort
+   * Request abort of an active rollout. The orchestrator checks the flag
+   * between tenants and finalizes the rollout as 'aborted'.
+   * Returns 409 if the rollout has already ended.
+   * Returns 404 if the rollout does not exist.
+   */
+  app.post(
+    '/internal/fleet/rollout/:rolloutId/abort',
+    async (
+      request: Request<{ rolloutId: string }>,
+      response: Response<AbortFleetRolloutResponse | ErrorResponse>,
+    ) => {
+      if (!fleetRolloutPool) {
+        response.status(501).json({
+          error: 'Fleet rolling update is not configured',
+        })
+        return
+      }
+
+      const { rolloutId } = request.params
+      const parseResult = abortFleetRolloutSchema.safeParse(request.body)
+
+      if (!parseResult.success) {
+        response.status(400).json({
+          error: 'Invalid request body',
+          details: parseResult.error.message,
+        })
+        return
+      }
+
+      const reason = parseResult.data.reason ?? null
+
+      try {
+        await abortFleetRollout(fleetRolloutPool, rolloutId, reason)
+        response.json({ status: 'aborted' })
+      } catch (error) {
+        if (error instanceof FleetRolloutNotFoundError) {
+          response.status(404).json({ error: error.message })
+          return
+        }
+
+        if (error instanceof FleetRolloutAlreadyEndedError) {
+          response.status(409).json({
+            error: 'Fleet rollout conflict',
+            details: error.message,
+          })
+          return
+        }
+
+        logUnexpectedError('Failed to abort fleet rollout', error)
+        response.status(500).json({
+          error: 'Failed to abort fleet rollout',
           details: getErrorMessage(error),
         })
       }
