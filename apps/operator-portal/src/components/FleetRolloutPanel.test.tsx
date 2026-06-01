@@ -115,6 +115,11 @@ describe('deriveSuggestedRolloutVersion', () => {
     const tenants = [makeTenant('1.2.0'), makeTenant('1.3.0')]
     expect(deriveSuggestedRolloutVersion(tenants)).toBe('1.3.0')
   })
+
+  it('breaks ties by numeric segment comparison — 1.10.0 beats 1.9.0', () => {
+    const tenants = [makeTenant('1.10.0'), makeTenant('1.9.0')]
+    expect(deriveSuggestedRolloutVersion(tenants)).toBe('1.10.0')
+  })
 })
 
 // ── Component ─────────────────────────────────────────────────────────────────
