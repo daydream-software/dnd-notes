@@ -146,10 +146,10 @@ export default function CampaignWorkspaceHeader({
           : surfaceRadius,
         border: '1px solid',
         borderColor: theme.shape.cardBorder,
-        bgcolor: 'rgba(15, 23, 42, 0.88)',
-        backdropFilter: 'blur(16px)',
+        bgcolor: 'var(--bg-paper-strong)',
+        backdropFilter: 'var(--card-blur)',
         overflow: 'hidden',
-        boxShadow: '0 16px 40px rgba(2, 6, 23, 0.26)',
+        boxShadow: 'var(--shadow-md)',
         transition: theme.transitions.create(
           ['border-radius', 'max-width', 'padding'],
           { duration: theme.transitions.duration.shorter },

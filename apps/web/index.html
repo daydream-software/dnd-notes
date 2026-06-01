@@ -2,6 +2,23 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <script>
+      // Resolve theme BEFORE first paint to prevent FOUC. ThemeRoot also
+      // applies this attribute on mount, but useEffect runs AFTER first
+      // paint — so without this inline script a light-mode user would
+      // briefly see dark on every cold load. Same localStorage key as
+      // the activator interstitial, the design-system preview, and the
+      // ThemeToggle in the Footer.
+      (function () {
+        try {
+          var stored = localStorage.getItem('dndnotes-theme-mode')
+          var mode = (stored === 'light' || stored === 'dark')
+            ? stored
+            : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark')
+          document.documentElement.setAttribute('data-theme', mode)
+        } catch (_) { /* localStorage may be unavailable — default to dark via CSS :root */ }
+      })()
+    </script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>dnd-notes</title>
