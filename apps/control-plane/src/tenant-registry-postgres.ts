@@ -1374,6 +1374,8 @@ export class TenantRegistry {
     // $1 = windowStart, $2 = windowEnd, $3...$N+2 = tenantIds.
     const tenantPlaceholders1 = tenantIds.map((_, i) => `$${i + 1}`).join(', ')
     const tenantPlaceholders3 = tenantIds.map((_, i) => `$${i + 3}`).join(', ')
+    // Query D base VALUES clause: one typed row per tenant ID at $3+ positions.
+    const tenantValuesD = tenantIds.map((_, i) => `($${i + 3}::text)`).join(', ')
 
     const [inWindowResult, latestTransResult, preWindowResult, wakeAndActivityResult] =
       await Promise.all([
@@ -1426,8 +1428,12 @@ export class TenantRegistry {
         ),
 
         // Query D: sleeping→ready wake counts + seenByActivator.
-        // Uses a base-set-of-tenants-with-transitions derived from DISTINCT, then
-        // LEFT JOINs for wake events and activator flag.
+        // Base set is built from the input tenant IDs directly via VALUES (not
+        // from DISTINCT state_transitions) so tenants with zero transitions still
+        // appear and the LEFT JOIN with tenant_activity can fire for them.
+        // A tenant that the activator HAS seen but has never transitioned would
+        // otherwise be absent from base, causing seenByActivator to collapse to
+        // false even when tenant_activity.seen_by_activator = true.
         this.run<{
           tenant_id: string
           wake_count: string
@@ -1440,9 +1446,8 @@ export class TenantRegistry {
              MAX(wk.created_at)  AS last_wake_at,
              ta.seen_by_activator
            FROM (
-             SELECT DISTINCT tenant_id FROM state_transitions
-             WHERE tenant_id IN (${tenantPlaceholders3})
-           ) base
+             VALUES ${tenantValuesD}
+           ) AS base(tenant_id)
            LEFT JOIN state_transitions wk
              ON wk.tenant_id = base.tenant_id
             AND wk.from_state = 'sleeping'

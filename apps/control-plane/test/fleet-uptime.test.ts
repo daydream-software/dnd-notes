@@ -389,6 +389,33 @@ describe('TenantRegistry.getFleetUptimes', () => {
     }
   })
 
+  it('seenByActivator survives zero-transition tenant with seen_by_activator=true (#418 CR)', async () => {
+    // Regression: base set was derived from DISTINCT state_transitions, so a
+    // tenant with no transitions was absent from base and the LEFT JOIN with
+    // tenant_activity never fired — seenByActivator collapsed to false even
+    // when tenant_activity.seen_by_activator = true.
+    const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
+    try {
+      await tenantRegistry.checkHealth()
+      await insertTenantDirect(pool, 'zero-trans-seen', 'ready')
+      // No state_transitions rows inserted for this tenant.
+      await insertTenantActivity(pool, 'zero-trans-seen', true)
+
+      const result = await tenantRegistry.getFleetUptimes(
+        [{ id: 'zero-trans-seen', currentState: 'ready', createdAt: new Date().toISOString() }],
+        24,
+      )
+
+      const uptime = result.get('zero-trans-seen')
+      assert.ok(uptime, 'uptime block should be present')
+      assert.equal(uptime.seenByActivator, true, 'seenByActivator must round-trip even with zero transitions')
+      assert.equal(uptime.wakeCount, 0)
+      assert.equal(uptime.lastWakeAt, null)
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('seen_by_activator = false when tenant_activity.seen_by_activator = false', async () => {
     const { tenantRegistry, pool, cleanup } = createTestTenantRegistry()
     try {
