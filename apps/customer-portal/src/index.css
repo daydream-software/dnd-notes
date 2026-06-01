@@ -23,7 +23,6 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
-    linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
+  background: var(--page-bg);
+  color: var(--fg-1);
 }

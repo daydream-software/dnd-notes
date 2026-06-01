@@ -375,10 +375,10 @@ export default function FleetStatusPage({
                         {tenantStatus.resources ? (
                           <Box
                             sx={{
-                              border: '1px solid rgba(167, 139, 250, 0.18)',
+                              border: '1px solid var(--brand-line-soft)',
                               borderRadius: surfaceRadius,
                               p: 1.5,
-                              backdropFilter: 'blur(12px)',
+                              backdropFilter: 'var(--card-blur)',
                             }}
                           >
                             <Typography

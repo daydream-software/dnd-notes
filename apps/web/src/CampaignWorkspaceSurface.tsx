@@ -80,11 +80,11 @@ function CampaignWorkspaceSurface({
               py: 0.75,
               borderRadius: '999px',
               border: '1px solid',
-              borderColor: 'rgba(167, 139, 250, 0.2)',
-              bgcolor: 'rgba(15, 23, 42, 0.72)',
-              color: 'rgba(255, 255, 255, 0.78)',
-              backdropFilter: 'blur(12px)',
-              boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
+              borderColor: 'var(--brand-line)',
+              bgcolor: 'var(--bg-paper-soft)',
+              color: 'var(--fg-2)',
+              backdropFilter: 'var(--card-blur)',
+              boxShadow: 'var(--shadow-sm)',
               maxWidth: '100%',
             }}
           >
@@ -133,10 +133,10 @@ function CampaignWorkspaceSurface({
                       borderRadius: statPillRadius,
                       px: { xs: 1.75, sm: 2.25 },
                       py: { xs: 1.25, sm: 1.5 },
-                      bgcolor: 'rgba(15, 23, 42, 0.88)',
+                      bgcolor: 'var(--bg-paper-strong)',
                       border: '1px solid',
-                      borderColor: 'rgba(167, 139, 250, 0.18)',
-                      boxShadow: '0 20px 40px rgba(15, 23, 42, 0.24)',
+                      borderColor: 'var(--brand-line-soft)',
+                      boxShadow: 'var(--shadow-lg)',
                     }}
                   >
                     {card.icon ? (
@@ -148,7 +148,7 @@ function CampaignWorkspaceSurface({
                           height: 40,
                           flexShrink: 0,
                           borderRadius: '50%',
-                          bgcolor: 'rgba(167, 139, 250, 0.16)',
+                          bgcolor: 'var(--brand-tint)',
                         }}
                       >
                         {card.icon}

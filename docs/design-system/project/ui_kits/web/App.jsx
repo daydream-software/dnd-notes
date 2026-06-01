@@ -29,13 +29,12 @@ function LoginScreen({ onLogin }) {
   const [email, setEmail] = useStateApp('mikha@daydream.software');
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 24 }}>
-      <div style={{
+      <div className="dndn-glass" style={{
         width: 'min(100%, 420px)',
-        background: 'rgba(15,23,42,0.9)',
-        border: '1px solid rgba(167,139,250,0.2)',
+        background: 'var(--bg-paper)',
+        border: '1px solid var(--brand-line)',
         borderRadius: 24,
-        backdropFilter: 'blur(16px)',
-        boxShadow: '0 24px 56px rgba(2,6,23,0.32)',
+        boxShadow: 'var(--shadow-xl)',
         padding: 28,
         display: 'flex',
         flexDirection: 'column',
@@ -72,6 +71,7 @@ function App() {
   const [pane, setPane] = useStateApp('both'); // 'browse' | 'editor' | 'both'
   const [draftNote, setDraftNote] = useStateApp(null);
   const [savingFlash, setSavingFlash] = useStateApp(false);
+  const [quickJustCaptured, setQuickJustCaptured] = useStateApp(false);
 
   const notes = notesByCampaign[selectedCampaignId] || [];
   const allTags = useMemoApp(() => Array.from(new Set(notes.flatMap((n) => n.tags))).sort(), [notes]);
@@ -144,9 +144,10 @@ function App() {
       ...prev,
       [selectedCampaignId]: [newNote, ...prev[selectedCampaignId]],
     }));
-    setSelectedNoteId(newNote.id);
     setQuickValue('');
     setDraftNote(null);
+    setQuickJustCaptured(true);
+    setTimeout(() => setQuickJustCaptured(false), 1500);
   };
 
   const newNote = () => {
@@ -182,6 +183,13 @@ function App() {
           ]}
         />
 
+        <QuickCaptureBar
+          value={quickValue}
+          onChange={setQuickValue}
+          onSubmit={captureQuick}
+          justCaptured={quickJustCaptured}
+        />
+
         <StatPills stats={stats} />
 
         <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -189,7 +197,7 @@ function App() {
           <Chip variant={pane === 'both' ? 'brand-solid' : 'muted'} onClick={() => { setPane('both'); setSplitMode(true); }}>Split</Chip>
           <Chip variant={pane === 'browse' ? 'brand-solid' : 'muted'} onClick={() => setPane('browse')}>Browse only</Chip>
           <Chip variant={pane === 'editor' ? 'brand-solid' : 'muted'} onClick={() => setPane('editor')}>Editor only</Chip>
-          {savingFlash ? <span style={{ color: '#4ade80', fontSize: 12, marginLeft: 'auto' }}>Saved.</span> : null}
+          {savingFlash ? <span style={{ color: 'var(--success)', fontSize: 12, marginLeft: 'auto' }}>Saved.</span> : null}
         </div>
 
         <div style={{
@@ -208,9 +216,6 @@ function App() {
               allTags={allTags}
               selectedTag={selectedTag}
               onTagSelect={setSelectedTag}
-              quickValue={quickValue}
-              onQuickChange={setQuickValue}
-              onQuickSubmit={captureQuick}
             />
           ) : null}
           {showEditor ? (

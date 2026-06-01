@@ -57,13 +57,13 @@ function PortalApp() {
   const headline = tenants.length === 0 ? 'No instances yet' : tenants.length === 1 ? '1 active customer instance' : `${tenants.length} customer instances`;
 
   return (
-    <div style={{ minHeight: '100vh', background: 'linear-gradient(180deg, #020617 0%, #111827 100%)' }}>
+    <div style={{ minHeight: '100vh', background: 'var(--page-bg)' }}>
       <PortalAppBar signedIn={signedIn} onSignOut={handleSignOut} provisioningEnabled={true} />
       <div style={{ maxWidth: 1200, margin: '0 auto', padding: '32px 28px 64px', display: 'flex', flexDirection: 'column', gap: 24 }}>
         <Hero instanceHeadline={headline} defaultVersion="1.4.2" signedInEmail={account?.email} />
 
         {notice ? (
-          <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(74,222,128,0.10)', border: '1px solid rgba(74,222,128,0.32)', color: '#a7f3c4', fontSize: 13.5 }}>
+          <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(74,222,128,0.10)', border: '1px solid rgba(74,222,128,0.32)', color: 'var(--success)', fontSize: 13.5 }}>
             {notice}
           </div>
         ) : null}
@@ -83,7 +83,7 @@ function PortalApp() {
                 <AccountCard account={account} />
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {tenants.length === 0 ? (
-                    <div style={{ padding: 14, borderRadius: 12, background: 'rgba(167,139,250,0.10)', color: '#c4b1ff', fontSize: 13.5 }}>
+                    <div style={{ padding: 14, borderRadius: 12, background: 'var(--brand-tint)', color: 'var(--accent)', fontSize: 13.5 }}>
                       No tenant requests yet. Use the form on the right to create one.
                     </div>
                   ) : null}
@@ -105,7 +105,7 @@ function PortalApp() {
             ) : (
               <LoginForm onSubmit={handleLogin} />
             )}
-            <div style={{ height: 1, background: 'rgba(167,139,250,0.12)' }} />
+            <div style={{ height: 1, background: 'var(--brand-line-faint)' }} />
             <RoadmapList />
           </PortalCard>
         </div>

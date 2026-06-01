@@ -12,7 +12,7 @@ function useSkeletonSurfaceSx() {
     borderColor: theme.shape.cardBorder,
     borderRadius: `${theme.shape.borderRadius}px`,
     bgcolor: theme.palette.background.paper,
-    backdropFilter: 'blur(12px)',
+    backdropFilter: 'var(--card-blur)',
     boxShadow: theme.shape.cardShadow,
     overflow: 'hidden',
   } as const

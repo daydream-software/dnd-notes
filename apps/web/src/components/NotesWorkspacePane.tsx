@@ -299,10 +299,10 @@ export default function NotesWorkspacePane({
                 borderRadius: statPillRadius,
                 px: { xs: 1.75, sm: 2.25 },
                 py: { xs: 1.25, sm: 1.5 },
-                bgcolor: 'rgba(15, 23, 42, 0.88)',
+                bgcolor: 'var(--bg-paper-strong)',
                 border: '1px solid',
-                borderColor: 'rgba(167, 139, 250, 0.18)',
-                boxShadow: '0 20px 40px rgba(15, 23, 42, 0.24)',
+                borderColor: 'var(--brand-line-soft)',
+                boxShadow: 'var(--shadow-lg)',
               }}
             >
               <Box
@@ -313,7 +313,7 @@ export default function NotesWorkspacePane({
                   height: 40,
                   flexShrink: 0,
                   borderRadius: '50%',
-                  bgcolor: 'rgba(167, 139, 250, 0.16)',
+                  bgcolor: 'var(--brand-tint)',
                 }}
               >
                 {card.icon}

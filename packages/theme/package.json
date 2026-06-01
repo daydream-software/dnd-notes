@@ -7,13 +7,15 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
-    }
+    },
+    "./tokens.css": "./src/tokens.css"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "prepare": "npm run build"
   },
   "peerDependencies": {
+    "@mui/icons-material": "^9.0.0",
     "@mui/material": "^9.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

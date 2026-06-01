@@ -42,6 +42,21 @@ export function renderColdStartInterstitial(): string {
   return `<!doctype html>
 <html lang="en">
 <head>
+<script>
+  // Resolve theme BEFORE first paint to prevent FOUC.
+  // The interstitial is served at the tenant origin, so localStorage is
+  // the same one the app writes when the user toggles the theme in the
+  // Footer. Falls back to prefers-color-scheme on cold first visit.
+  (function () {
+    try {
+      var stored = localStorage.getItem('dndnotes-theme-mode');
+      var mode = (stored === 'light' || stored === 'dark')
+        ? stored
+        : (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+      document.documentElement.setAttribute('data-theme', mode);
+    } catch (_) { /* localStorage may be unavailable (private mode etc.) — default to dark via CSS :root */ }
+  })();
+</script>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
@@ -54,7 +69,36 @@ export function renderColdStartInterstitial(): string {
     font-weight: 100 900;
     font-display: swap;
   }
-  :root { color-scheme: dark; }
+  /* Tokens duplicated from packages/theme/src/tokens.css. The interstitial
+     is served before the app loads its CSS so we cannot import the shared
+     stylesheet; keep these aligned by hand. */
+  :root {
+    color-scheme: dark;
+    --page-bg:
+      radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
+      linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
+    --bg-paper: rgba(15, 23, 42, 0.9);
+    --brand-line-strong: rgba(167, 139, 250, 0.22);
+    --shadow-xl: 0 24px 48px rgba(2, 6, 23, 0.26);
+    --card-blur: blur(14px);
+    --fg-1: #f8fafc;
+    --fg-muted: rgba(248, 250, 252, 0.6);
+    --brand-500: #a78bfa;
+    --brand-400: #b39dfb;
+    --on-brand: #1a0f3a;
+  }
+  [data-theme="light"] {
+    color-scheme: light;
+    --page-bg:
+      radial-gradient(circle at top, rgba(167, 139, 250, 0.10), transparent 35%),
+      linear-gradient(180deg, #fbfaff 0%, #f5f3ff 100%);
+    --bg-paper: #ffffff;
+    --brand-line-strong: rgba(167, 139, 250, 0.45);
+    --shadow-xl: 0 24px 48px rgba(15, 23, 42, 0.12);
+    --card-blur: none;
+    --fg-1: #0f172a;
+    --fg-muted: rgba(15, 23, 42, 0.6);
+  }
   * { box-sizing: border-box; }
   body {
     margin: 0;
@@ -67,10 +111,8 @@ export function renderColdStartInterstitial(): string {
        the brand face; the rest only cover the font-display: swap window and the
        defensive font-route-404 fallback, never a substitute brand typeface. */
     font-family: 'Geist', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    color: #e2e8f0;
-    background:
-      radial-gradient(circle at top, rgba(124, 58, 237, 0.28), transparent 35%),
-      linear-gradient(180deg, #020617 0%, #0f172a 48%, #111827 100%);
+    color: var(--fg-1);
+    background: var(--page-bg);
     background-attachment: fixed;
   }
   .card {
@@ -82,36 +124,37 @@ export function renderColdStartInterstitial(): string {
     text-align: center;
     padding: 40px 32px;
     border-radius: 18px;
-    background: rgba(15, 23, 42, 0.9);
-    border: 1px solid rgba(167, 139, 250, 0.22);
-    box-shadow: 0 24px 48px rgba(2, 6, 23, 0.26);
-    backdrop-filter: blur(14px);
+    background: var(--bg-paper);
+    border: 1px solid var(--brand-line-strong);
+    box-shadow: var(--shadow-xl);
+    backdrop-filter: var(--card-blur);
+    -webkit-backdrop-filter: var(--card-blur);
   }
   .spinner {
     width: 36px;
     height: 36px;
     border-radius: 50%;
-    border: 3px solid rgba(167, 139, 250, 0.22);
-    border-top-color: #a78bfa;
+    border: 3px solid var(--brand-line-strong);
+    border-top-color: var(--brand-500);
     animation: spin 0.9s linear infinite;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2.4s; } }
   h1 { margin: 0; font-size: 1.25rem; font-weight: 600; letter-spacing: -0.01em; }
-  p { margin: 0; color: #94a3b8; font-size: 0.95rem; line-height: 1.5; }
+  p { margin: 0; color: var(--fg-muted); font-size: 0.95rem; line-height: 1.5; }
   .error { display: none; }
   .error button {
     margin-top: 4px;
     font: inherit;
     font-weight: 600;
-    color: #0f172a;
-    background: #a78bfa;
+    color: var(--on-brand);
+    background: var(--brand-500);
     border: none;
     border-radius: 18px;
     padding: 10px 20px;
     cursor: pointer;
   }
-  .error button:hover { background: #b9a4fb; }
+  .error button:hover { background: var(--brand-400); }
   body.timed-out .live { display: none; }
   body.timed-out .error { display: flex; flex-direction: column; align-items: center; gap: 16px; }
 </style>

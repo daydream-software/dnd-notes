@@ -8,10 +8,10 @@ function PortalAppBar({ signedIn, onSignOut, provisioningEnabled }) {
       justifyContent: 'space-between',
       alignItems: 'center',
       padding: '20px 28px',
-      borderBottom: '1px solid rgba(167,139,250,0.12)',
+      borderBottom: '1px solid var(--brand-line-faint)',
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        <span className="material-symbols-rounded" style={{ fontSize: 22, color: '#c4b1ff' }}>sticky_note_2</span>
+        <span className="material-symbols-rounded" style={{ fontSize: 22, color: 'var(--accent)' }}>sticky_note_2</span>
         <span style={{ fontSize: 16, fontWeight: 700, color: 'var(--fg-1)' }}>dnd-notes customer portal</span>
       </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
@@ -28,15 +28,14 @@ function PortalAppBar({ signedIn, onSignOut, provisioningEnabled }) {
 
 function Hero({ instanceHeadline, defaultVersion, signedInEmail }) {
   return (
-    <div style={{
+    <div className="dndn-glass" style={{
       borderRadius: 24,
-      background: 'rgba(15,23,42,0.72)',
-      border: '1px solid rgba(167,139,250,0.18)',
+      background: 'var(--bg-paper-soft)',
+      border: '1px solid var(--brand-line-soft)',
       padding: '40px 36px',
-      backdropFilter: 'blur(24px)',
-      boxShadow: '0 24px 56px rgba(2,6,23,0.32)',
+      boxShadow: 'var(--shadow-xl)',
     }}>
-      <div style={{ color: '#c4b1ff', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>
+      <div style={{ color: 'var(--accent)', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 12 }}>
         Public landing + self-serve signup
       </div>
       <h1 style={{ margin: 0, fontSize: 44, lineHeight: 1.1, fontWeight: 800, color: 'var(--fg-1)', maxWidth: 880, letterSpacing: '-0.02em' }}>
@@ -58,8 +57,8 @@ function PlanCard({ plan, accent }) {
   return (
     <div style={{
       borderRadius: 18,
-      background: 'rgba(15,23,42,0.7)',
-      border: '1px solid rgba(167,139,250,0.18)',
+      background: 'var(--bg-paper-soft)',
+      border: '1px solid var(--brand-line-soft)',
       padding: 22,
       display: 'flex',
       flexDirection: 'column',
@@ -73,7 +72,7 @@ function PlanCard({ plan, accent }) {
       <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 8 }}>
         {plan.features.map((f) => (
           <li key={f} style={{ display: 'flex', gap: 10, color: 'var(--fg-1)', fontSize: 13.5 }}>
-            <span className="material-symbols-rounded" style={{ fontSize: 18, color: '#c4b1ff' }}>check</span>
+            <span className="material-symbols-rounded" style={{ fontSize: 18, color: 'var(--accent)' }}>check</span>
             <span>{f}</span>
           </li>
         ))}
@@ -84,13 +83,12 @@ function PlanCard({ plan, accent }) {
 
 function PortalCard({ children, padding = 28 }) {
   return (
-    <div style={{
+    <div className="dndn-glass" style={{
       borderRadius: 24,
-      background: 'rgba(15,23,42,0.78)',
-      border: '1px solid rgba(167,139,250,0.18)',
+      background: 'var(--bg-paper-soft)',
+      border: '1px solid var(--brand-line-soft)',
       padding,
-      backdropFilter: 'blur(20px)',
-      boxShadow: '0 16px 40px rgba(2,6,23,0.26)',
+      boxShadow: 'var(--shadow-md)',
       display: 'flex',
       flexDirection: 'column',
       gap: 18,
@@ -124,8 +122,8 @@ function Select({ value, onChange, options }) {
       style={{
         padding: '10px 14px',
         borderRadius: 18,
-        border: '1px solid rgba(255,255,255,0.18)',
-        background: 'rgba(15,23,42,0.6)',
+        border: '1px solid var(--brand-line-soft)',
+        background: 'var(--bg-paper-soft)',
         color: 'var(--fg-1)',
         font: 'inherit',
         fontSize: 14,
@@ -133,7 +131,7 @@ function Select({ value, onChange, options }) {
       }}
     >
       {options.map((o) => (
-        <option key={o.value} value={o.value} style={{ background: '#0f172a' }}>{o.label}</option>
+        <option key={o.value} value={o.value} style={{ background: 'var(--bg-1)' }}>{o.label}</option>
       ))}
     </select>
   );

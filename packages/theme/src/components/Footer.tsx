@@ -1,6 +1,7 @@
 import { Box, Link, Stack, Typography } from '@mui/material'
 import type { ReactNode } from 'react'
 import { DaydreamMark, DndNotesMark, GitHubMark } from './Marks.js'
+import { ThemeToggle } from './ThemeToggle.js'
 
 const sectionLabelSx = {
   color: 'primary.main',
@@ -13,7 +14,7 @@ const sectionLabelSx = {
 } as const
 
 const linkSx = {
-  color: 'rgba(255, 255, 255, 0.78)',
+  color: 'var(--fg-2)',
   fontSize: 13,
   textDecoration: 'none',
   display: 'inline-flex',
@@ -24,21 +25,21 @@ const linkSx = {
 } as const
 
 const sigSurfaceSx = {
-  bgcolor: 'rgba(15, 23, 42, 0.72)',
-  border: '1px solid rgba(167, 139, 250, 0.18)',
+  bgcolor: 'var(--bg-paper-soft)',
+  border: '1px solid var(--brand-line-soft)',
   borderRadius: '999px',
-  backdropFilter: 'blur(12px)',
-  WebkitBackdropFilter: 'blur(12px)',
-  boxShadow: '0 12px 30px rgba(2, 6, 23, 0.24)',
+  backdropFilter: 'var(--card-blur)',
+  WebkitBackdropFilter: 'var(--card-blur)',
+  boxShadow: 'var(--shadow-sm)',
 } as const
 
 const richSurfaceSx = {
-  bgcolor: 'rgba(15, 23, 42, 0.88)',
-  border: '1px solid rgba(167, 139, 250, 0.2)',
+  bgcolor: 'var(--bg-paper-strong)',
+  border: '1px solid var(--brand-line)',
   borderRadius: '24px',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  boxShadow: '0 16px 40px rgba(2, 6, 23, 0.26)',
+  backdropFilter: 'var(--card-blur)',
+  WebkitBackdropFilter: 'var(--card-blur)',
+  boxShadow: 'var(--shadow-md)',
 } as const
 
 export interface FooterProps {
@@ -61,7 +62,7 @@ const COPYRIGHT_YEAR = new Date().getFullYear()
 
 function Separator() {
   return (
-    <Box component="span" sx={{ color: 'rgba(248, 250, 252, 0.38)', userSelect: 'none' }} aria-hidden="true">
+    <Box component="span" sx={{ color: 'var(--fg-disabled)', userSelect: 'none' }} aria-hidden="true">
       ·
     </Box>
   )
@@ -74,7 +75,7 @@ function BrandLockup({ icon, label, productTone = false }: { icon: ReactNode; la
       spacing={1}
       sx={{
         alignItems: 'center',
-        color: productTone ? 'rgba(255, 255, 255, 0.78)' : 'primary.main',
+        color: productTone ? 'var(--fg-2)' : 'primary.main',
         fontSize: 12,
         fontWeight: 500,
         letterSpacing: '0.08em',
@@ -107,7 +108,7 @@ function SignatureFooter({ version, githubUrl, privacyHref, termsHref }: Require
         alignItems: 'center',
         justifyContent: 'center',
         fontSize: 12,
-        color: 'rgba(255, 255, 255, 0.78)',
+        color: 'var(--fg-2)',
         ...sigSurfaceSx,
       }}
     >
@@ -126,14 +127,17 @@ function SignatureFooter({ version, githubUrl, privacyHref, termsHref }: Require
       {version ? (
         <>
           <Separator />
-          <Box component="span" sx={{ fontFamily: "'Geist Mono', ui-monospace, monospace", color: 'rgba(248, 250, 252, 0.6)', fontSize: 11 }}>
+          <Box component="span" sx={{ fontFamily: "'Geist Mono', ui-monospace, monospace", color: 'var(--fg-muted)', fontSize: 11 }}>
             {version}
           </Box>
         </>
       ) : null}
       <Separator />
-      <Box component="span" sx={{ color: 'rgba(248, 250, 252, 0.6)', fontSize: 11 }}>
+      <Box component="span" sx={{ color: 'var(--fg-muted)', fontSize: 11 }}>
         © {COPYRIGHT_YEAR} Daydream Software
+      </Box>
+      <Box sx={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center' }}>
+        <ThemeToggle />
       </Box>
     </Box>
   )
@@ -170,16 +174,16 @@ function RichFooter({
           <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', color: 'primary.main' }}>
             <DaydreamMark width={36} height={36} />
             <Stack spacing={0}>
-              <Typography sx={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.005em', color: 'rgba(255, 255, 255, 0.92)' }}>
+              <Typography sx={{ fontSize: 16, fontWeight: 600, letterSpacing: '-0.005em', color: 'var(--fg-1)' }}>
                 Daydream Software
               </Typography>
-              <Typography sx={{ fontSize: 11.5, color: 'rgba(248, 250, 252, 0.6)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+              <Typography sx={{ fontSize: 11.5, color: 'var(--fg-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
                 Makers of D&amp;D Notes
               </Typography>
             </Stack>
           </Stack>
           {tagline ? (
-            <Typography sx={{ fontSize: 13, color: 'rgba(255, 255, 255, 0.78)', maxWidth: 320, lineHeight: 1.55 }}>
+            <Typography sx={{ fontSize: 13, color: 'var(--fg-2)', maxWidth: 320, lineHeight: 1.55 }}>
               {tagline}
             </Typography>
           ) : null}
@@ -210,7 +214,7 @@ function RichFooter({
 
       <Box
         sx={{
-          borderTop: '1px solid rgba(167, 139, 250, 0.18)',
+          borderTop: '1px solid var(--brand-line-soft)',
           px: { xs: 3, md: 4 },
           py: 2,
           display: 'flex',
@@ -218,16 +222,19 @@ function RichFooter({
           gap: 1.5,
           alignItems: 'center',
           justifyContent: 'space-between',
-          color: 'rgba(248, 250, 252, 0.6)',
+          color: 'var(--fg-muted)',
           fontSize: 11.5,
         }}
       >
         <Box component="span">© {COPYRIGHT_YEAR} Daydream Software. All rights reserved.</Box>
-        {version ? (
-          <Box component="span" sx={{ fontFamily: "'Geist Mono', ui-monospace, monospace" }}>
-            D&amp;D Notes {version}
-          </Box>
-        ) : null}
+        <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1.5 }}>
+          {version ? (
+            <Box component="span" sx={{ fontFamily: "'Geist Mono', ui-monospace, monospace" }}>
+              D&amp;D Notes {version}
+            </Box>
+          ) : null}
+          <ThemeToggle />
+        </Box>
       </Box>
     </Box>
   )

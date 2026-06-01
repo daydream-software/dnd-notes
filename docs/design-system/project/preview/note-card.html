@@ -7,14 +7,15 @@
 <link rel="stylesheet" href="../colors_and_type.css" />
 <style>
   body { margin: 0; padding: 24px; background: var(--page-bg); font-family: var(--font-sans); }
-  .card { background: rgba(15,23,42,0.88); border: 1px solid rgba(167,139,250,0.18); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: 0 16px 40px rgba(2,6,23,0.26); backdrop-filter: blur(16px); max-width: 620px; }
+  .card { background: var(--bg-paper-strong); border: 1px solid var(--brand-line-soft); border-radius: var(--radius-lg); padding: 18px 20px; box-shadow: var(--shadow-md); backdrop-filter: var(--blur-md); -webkit-backdrop-filter: var(--blur-md); max-width: 620px; }
+  [data-theme="light"] .card { backdrop-filter: none; -webkit-backdrop-filter: none; }
   .head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
   h3 { margin: 0; font-size: 18px; color: var(--fg-1); font-weight: 600; }
   time { color: var(--fg-muted); font-size: 12px; }
-  .excerpt { color: rgba(255,255,255,0.72); font-size: 14px; line-height: 1.55; margin: 8px 0 12px; }
+  .excerpt { color: var(--fg-3); font-size: 14px; line-height: 1.55; margin: 8px 0 12px; }
   .tags { display: flex; gap: 6px; flex-wrap: wrap; }
-  .chip { padding: 4px 10px; border-radius: var(--radius-pill); font-size: 11.5px; background: rgba(167,139,250,0.16); color: #c4b1ff; border: 1px solid rgba(167,139,250,0.28); }
-  .status { padding: 4px 10px; border-radius: var(--radius-pill); font-size: 11.5px; background: rgba(74,222,128,0.16); color: #4ade80; }
+  .chip { padding: 4px 10px; border-radius: var(--radius-pill); font-size: 11.5px; background: var(--brand-tint); color: var(--accent); border: 1px solid var(--brand-line); }
+  .status { padding: 4px 10px; border-radius: var(--radius-pill); font-size: 11.5px; background: rgba(74,222,128,0.16); color: var(--success); }
 </style>
 <style>
 @font-face {
@@ -45,5 +46,6 @@
     </div>
     <time style="display:block;margin-top:12px">Last updated 5 minutes ago · Session 7</time>
   </article>
+<script src="mode-toggle.js" defer></script>
 </body>
 </html>

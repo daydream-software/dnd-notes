@@ -8,14 +8,14 @@
 <style>
   body { margin: 0; padding: 28px; background: var(--bg-1); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; font-family: var(--font-sans); }
   button { font-family: inherit; font-size: 14px; font-weight: 500; cursor: pointer; border-radius: var(--radius-pill); padding: 8px 18px; border: 1px solid transparent; display: inline-flex; align-items: center; gap: 8px; transition: background-color 200ms, border-color 200ms; }
-  .contained { background: var(--brand-500); color: #1a0f3a; }
+  .contained { background: var(--brand-500); color: var(--on-brand); }
   .contained:hover { background: var(--brand-400); }
-  .outlined { background: transparent; color: var(--brand-500); border-color: rgba(167,139,250,0.5); }
-  .outlined:hover { background: var(--action-selected); border-color: var(--brand-500); }
-  .text { background: transparent; color: var(--brand-500); padding: 8px 12px; }
+  .outlined { background: transparent; color: var(--accent); border-color: var(--brand-line-strong); }
+  .outlined:hover { background: var(--action-selected); border-color: var(--accent); }
+  .text { background: transparent; color: var(--accent); padding: 8px 12px; }
   .text:hover { background: var(--action-selected); }
-  .danger { background: transparent; color: #f87171; border: 1px solid rgba(248,113,113,0.5); border-radius: var(--radius-pill); padding: 8px 18px; }
-  .danger:hover { background: rgba(248,113,113,0.12); border-color: #f87171; }
+  .danger { background: transparent; color: var(--error); border: 1px solid rgba(248,113,113,0.5); border-radius: var(--radius-pill); padding: 8px 18px; }
+  .danger:hover { background: rgba(248,113,113,0.12); border-color: var(--error); }
   svg { width: 16px; height: 16px; fill: currentColor; }
 </style>
 <style>
@@ -38,5 +38,6 @@
   <button class="outlined">Cancel</button>
   <button class="text">Clear filter</button>
   <button class="danger">Delete note</button>
+<script src="mode-toggle.js" defer></script>
 </body>
 </html>

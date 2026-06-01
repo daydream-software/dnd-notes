@@ -5,7 +5,7 @@ const TOOLBAR_BTN = {
   fontFamily: 'inherit',
   background: 'transparent',
   color: 'var(--fg-1)',
-  border: '1px solid rgba(167,139,250,0.22)',
+  border: '1px solid var(--brand-line-strong)',
   borderRadius: 999,
   padding: '4px 10px',
   fontSize: 12,
@@ -40,8 +40,8 @@ function NoteEditor({ note, onChange, onSave, onDelete, isSaving, isDeleting, ca
     return (
       <div style={{
         borderRadius: 18,
-        background: 'rgba(15,23,42,0.6)',
-        border: '1px dashed rgba(167,139,250,0.24)',
+        background: 'var(--bg-paper-soft)',
+        border: '1px dashed var(--brand-line-soft)',
         padding: '60px 24px',
         textAlign: 'center',
         color: 'var(--fg-muted)',
@@ -66,12 +66,11 @@ function NoteEditor({ note, onChange, onSave, onDelete, isSaving, isDeleting, ca
   const removeTag = (t) => onChange({ ...note, tags: note.tags.filter((x) => x !== t) });
 
   return (
-    <div style={{
+    <div className="dndn-glass" style={{
       borderRadius: 18,
-      background: 'rgba(15,23,42,0.9)',
-      border: '1px solid rgba(167,139,250,0.18)',
-      backdropFilter: 'blur(16px)',
-      boxShadow: '0 16px 40px rgba(2,6,23,0.26)',
+      background: 'var(--bg-paper)',
+      border: '1px solid var(--brand-line-soft)',
+      boxShadow: 'var(--shadow-md)',
       padding: 20,
       display: 'flex',
       flexDirection: 'column',
@@ -104,7 +103,7 @@ function NoteEditor({ note, onChange, onSave, onDelete, isSaving, isDeleting, ca
           <span style={{ color: 'var(--fg-1)', fontSize: 14, fontWeight: 600 }}>Body</span>
           <span style={{ color: 'var(--fg-muted)', fontSize: 12 }}>Markdown supported</span>
         </div>
-        <div style={{ border: '1px solid rgba(255,255,255,0.18)', borderRadius: 18, padding: 12, background: 'rgba(15,23,42,0.6)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ border: '1px solid var(--brand-line-soft)', borderRadius: 18, padding: 12, background: 'var(--bg-paper-soft)', display: 'flex', flexDirection: 'column', gap: 10 }}>
           <Toolbar onInsert={insertAtEnd} />
           <textarea
             value={note.body}

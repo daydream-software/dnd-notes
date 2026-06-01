@@ -11,14 +11,14 @@ const SEED_FLEET = {
   summary: {
     totalTenants: 6,
     tenantsByCurrentState: {
-      ready: 4, provisioning: 1, upgrading: 0, restoring: 0,
+      ready: 2, sleeping: 2, provisioning: 1, upgrading: 0, restoring: 0,
       maintenance: 0, failed: 1, deprovisioned: 0,
     },
     tenantsByDesiredState: { ready: 5, provisioning: 0, upgrading: 0, restoring: 0, maintenance: 0, failed: 0, deprovisioned: 1 },
     tenantsByVersion: { '1.4.2': 4, '1.4.1': 2 },
     tenantsWithBackupMetadata: 5,
     tenantsMissingBackupMetadata: 1,
-    tenantsNeedingAttention: 2,
+    tenantsNeedingAttention: 3,
   },
   tenants: [
     {
@@ -34,7 +34,7 @@ const SEED_FLEET = {
       latestTransition: { id: 58, tenantId: 't_3PzN02', fromState: 'provisioning', toState: 'provisioning', triggeredBy: 'mikha@daydream.software', reason: 'Initial provisioning request submitted', createdAt: '2025-04-12 14:18 UTC' },
     },
     {
-      tenant: { id: 't_4RxK77', slug: 'iron-vault', subdomain: 'iron-vault', ownerId: 'usr_5GhTn1', initialAdminEmail: 'gm@iron-vault.example', desiredState: 'ready', currentState: 'ready', version: '1.4.1', storageReference: 'pvc-iron-vault', backupMetadata: 'recorded', createdAt: '2025-01-22', updatedAt: '2025-04-09' },
+      tenant: { id: 't_4RxK77', slug: 'iron-vault', subdomain: 'iron-vault', ownerId: 'usr_5GhTn1', initialAdminEmail: 'gm@iron-vault.example', desiredState: 'ready', currentState: 'sleeping', version: '1.4.1', storageReference: 'pvc-iron-vault', backupMetadata: 'recorded', createdAt: '2025-01-22', updatedAt: '2025-04-09' },
       health: 'healthy',
       backup: { rawMetadata: 'recorded', location: 's3://dnd-notes-backups/iron-vault', lastBackupAt: '47 minutes ago', lastBackupStatus: 'completed', lastRestoreDrillAt: '12 days ago', lastRestoreDrillStatus: 'passed' },
       latestTransition: { id: 33, tenantId: 't_4RxK77', fromState: 'maintenance', toState: 'ready', triggeredBy: 'rollout-bot@operator-portal', reason: null, createdAt: '2025-04-09 11:02 UTC' },
@@ -52,7 +52,7 @@ const SEED_FLEET = {
       latestTransition: { id: 22, tenantId: 't_6TmL45', fromState: 'upgrading', toState: 'ready', triggeredBy: 'rollout-bot@operator-portal', reason: null, createdAt: '2025-04-08 16:21 UTC' },
     },
     {
-      tenant: { id: 't_7UmP12', slug: 'twilight-keep', subdomain: 'twilight-keep', ownerId: 'usr_3FcPq7', initialAdminEmail: 'host@twilight-keep.example', desiredState: 'ready', currentState: 'ready', version: '1.4.2', storageReference: 'pvc-twilight-keep', backupMetadata: 'recorded', createdAt: '2025-03-29', updatedAt: '2025-04-12' },
+      tenant: { id: 't_7UmP12', slug: 'twilight-keep', subdomain: 'twilight-keep', ownerId: 'usr_3FcPq7', initialAdminEmail: 'host@twilight-keep.example', desiredState: 'ready', currentState: 'sleeping', version: '1.4.2', storageReference: 'pvc-twilight-keep', backupMetadata: 'recorded', createdAt: '2025-03-29', updatedAt: '2025-04-12' },
       health: 'healthy',
       backup: { rawMetadata: 'recorded', location: 's3://dnd-notes-backups/twilight-keep', lastBackupAt: '1 hour ago', lastBackupStatus: 'completed', lastRestoreDrillAt: '4 days ago', lastRestoreDrillStatus: 'passed' },
       latestTransition: { id: 49, tenantId: 't_7UmP12', fromState: 'provisioning', toState: 'ready', triggeredBy: 'mikha@daydream.software', reason: 'Initial provisioning completed', createdAt: '2025-03-29 10:08 UTC' },
@@ -77,6 +77,11 @@ function OperatorPortalApp() {
   const [deprovisionTarget, setDeprovisionTarget] = useStateOp(null);
   const [upgradeTarget, setUpgradeTarget] = useStateOp(null);
   const [submitting, setSubmitting] = useStateOp(false);
+  // Fleet rolling-update demo state (#404). For the mock, switchable between
+  // idle / running / completed / failed / aborted via a chip row inside
+  // FleetRolloutPanel — no real orchestration. The shape mirrors the
+  // proposed rollout record so the wiring direction is visible from the JSX.
+  const [rollout, setRollout] = useStateOp(null);
 
   const provisioningHealthy = fleet.dependencies.tenantProvisioning.status === 'healthy';
   const mutationDisabledReason = !provisioningHealthy ? (fleet.dependencies.tenantProvisioning.details || 'Provisioning lane unhealthy.') : null;
@@ -168,7 +173,7 @@ function OperatorPortalApp() {
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'radial-gradient(circle at 20% -10%, rgba(167,139,250,0.18), transparent 50%), radial-gradient(circle at 90% 0%, rgba(96,165,250,0.10), transparent 50%), linear-gradient(180deg, #020617 0%, #111827 100%)',
+      background: 'var(--page-bg)',
     }}>
       <OperatorAppBar
         provisioningHealthy={provisioningHealthy}
@@ -186,7 +191,7 @@ function OperatorPortalApp() {
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: 16, flexWrap: 'wrap' }}>
               <div>
-                <div style={{ color: '#c4b1ff', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>
+                <div style={{ color: 'var(--accent)', fontSize: 11, letterSpacing: '0.12em', textTransform: 'uppercase', fontWeight: 600, marginBottom: 8 }}>
                   Operator control plane
                 </div>
                 <h1 style={{ margin: 0, fontSize: 36, fontWeight: 800, color: 'var(--fg-1)', letterSpacing: '-0.02em', lineHeight: 1.05 }}>
@@ -201,23 +206,33 @@ function OperatorPortalApp() {
             <OperatorBanner />
 
             {notice ? (
-              <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(74,222,128,0.10)', border: '1px solid rgba(74,222,128,0.32)', color: '#a7f3c4', fontSize: 13.5, display: 'flex', gap: 10, alignItems: 'center' }}>
+              <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(74,222,128,0.10)', border: '1px solid rgba(74,222,128,0.32)', color: 'var(--success)', fontSize: 13.5, display: 'flex', gap: 10, alignItems: 'center' }}>
                 <span className="material-symbols-rounded" style={{ fontSize: 18 }}>check_circle</span>
                 <span style={{ flex: 1 }}>{notice}</span>
-                <button onClick={() => setNotice(null)} style={{ background: 'transparent', border: 0, color: '#a7f3c4', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
+                <button onClick={() => setNotice(null)} style={{ background: 'transparent', border: 0, color: 'var(--success)', cursor: 'pointer', display: 'grid', placeItems: 'center' }}>
                   <span className="material-symbols-rounded" style={{ fontSize: 16 }}>close</span>
                 </button>
               </div>
             ) : null}
             {err ? (
-              <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(248,113,113,0.10)', border: '1px solid rgba(248,113,113,0.32)', color: '#fca5a5', fontSize: 13.5 }}>
+              <div style={{ padding: '12px 16px', borderRadius: 14, background: 'rgba(248,113,113,0.10)', border: '1px solid rgba(248,113,113,0.32)', color: 'var(--error)', fontSize: 13.5 }}>
                 {err}
               </div>
             ) : null}
 
+            <AnomalyBanner tenants={fleet.tenants} />
+
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 14 }}>
               {summaryCards.map((c) => <StatCard key={c.label} {...c} />)}
             </div>
+
+            <FleetRolloutPanel
+              rollout={rollout}
+              setRollout={setRollout}
+              suggestedVersion={suggestedVersion}
+              totalTenants={fleet.summary.totalTenants}
+              mutationDisabled={mutationDisabledReason}
+            />
 
             <ProvisionPanel
               suggestedVersion={suggestedVersion}
@@ -228,7 +243,7 @@ function OperatorPortalApp() {
 
             <ControlPlaneStatus fleet={fleet} />
 
-            <TenantList
+            <TenantTable
               tenants={fleet.tenants}
               mutationDisabled={Boolean(mutationDisabledReason)}
               onUpgrade={setUpgradeTarget}

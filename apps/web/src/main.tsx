@@ -1,17 +1,18 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import { CssBaseline, ThemeProvider } from '@mui/material'
-import { theme } from '@dnd-notes/theme'
+import { CssBaseline } from '@mui/material'
+import { ThemeRoot } from '@dnd-notes/theme'
+import '@dnd-notes/theme/tokens.css'
 import './index.css'
 import App from './App'
 import { WakeReconnectingBanner } from './WakeReconnectingBanner'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <ThemeProvider theme={theme}>
+    <ThemeRoot>
       <CssBaseline />
       <App />
       <WakeReconnectingBanner />
-    </ThemeProvider>
+    </ThemeRoot>
   </StrictMode>,
 )

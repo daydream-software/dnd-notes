@@ -96,8 +96,8 @@ function TenantCard({ summary }) {
   return (
     <div style={{
       borderRadius: 18,
-      background: 'rgba(15,23,42,0.6)',
-      border: '1px solid rgba(167,139,250,0.16)',
+      background: 'var(--bg-paper-soft)',
+      border: '1px solid var(--brand-line-soft)',
       padding: 20,
       display: 'flex',
       flexDirection: 'column',
@@ -120,7 +120,7 @@ function TenantCard({ summary }) {
         <Button icon="open_in_new" disabled={!summary.appUrl}>{summary.appUrl ? 'Open tenant app' : 'App URL available after provisioning'}</Button>
         <Button variant="outlined" disabled>Settings placeholder ({summary.settingsPath})</Button>
       </div>
-      <div style={{ height: 1, background: 'rgba(167,139,250,0.12)' }} />
+      <div style={{ height: 1, background: 'var(--brand-line-faint)' }} />
       <div style={{ color: 'var(--fg-1)', fontSize: 13 }}>
         Latest transition: {summary.latestTransition ? `${formatStateLabel(summary.latestTransition.fromState)} → ${formatStateLabel(summary.latestTransition.toState)}` : 'No transition recorded yet'}
       </div>
@@ -135,8 +135,8 @@ function AccountCard({ account }) {
   return (
     <div style={{
       borderRadius: 18,
-      background: 'rgba(15,23,42,0.6)',
-      border: '1px solid rgba(167,139,250,0.16)',
+      background: 'var(--bg-paper-soft)',
+      border: '1px solid var(--brand-line-soft)',
       padding: 18,
     }}>
       <div style={{ fontSize: 17, fontWeight: 600, color: 'var(--fg-1)' }}>{account.displayName}</div>

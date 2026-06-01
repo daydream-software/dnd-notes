@@ -560,7 +560,7 @@ export default function App({
 
       <Container maxWidth="xl" sx={{ py: 6 }}>
         <Stack spacing={2.5}>
-          <Paper sx={{ p: { xs: 3, md: 5 }, backdropFilter: 'blur(16px)' }}>
+          <Paper sx={{ p: { xs: 3, md: 5 }, backdropFilter: 'var(--card-blur)' }}>
             <Stack spacing={2}>
               <Typography
                 variant="h2"

@@ -29,9 +29,9 @@ export function WakeReconnectingBanner() {
           borderRadius: 1,
           bgcolor: 'background.paper',
           border: '1px solid',
-          borderColor: 'rgba(167, 139, 250, 0.22)',
-          backdropFilter: 'blur(14px)',
-          boxShadow: '0 8px 24px rgba(2, 6, 23, 0.26)',
+          borderColor: 'var(--brand-line-strong)',
+          backdropFilter: 'var(--card-blur)',
+          boxShadow: 'var(--shadow-sm)',
         }}
       >
         <CircularProgress size={18} color="primary" />

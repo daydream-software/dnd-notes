@@ -44,7 +44,35 @@ Voice is **calm, declarative, and player-friendly**. Copy reads like a thoughtfu
 - **Note-template microcopy** uses single-line scaffold prompts terminated with a colon: `"Role in the story:"`, `"What they want:"`, `"Hooks:"` — never full sentences, never trailing periods.
 - **Vibe:** quiet competence. Nothing shouts. The product trusts the DM to fill in the imagination.
 
-## Visual foundations
+## Color modes — dark + light (proposed)
+
+The system supports two color modes. Dark is the historical default and the only one the production apps ship today. Light is **proposed and previewable** in `colors_and_type.css` + the `preview/` HTML pages — not yet wired into `packages/theme` or the apps.
+
+**Activation:** `data-theme="light"` on `<html>` flips the token block in `colors_and_type.css`. The preview pages load `preview/mode-toggle.js`, which reads `localStorage['dndnotes-preview-theme']` with `prefers-color-scheme` as the fallback and renders a small floating toggle button (top-right).
+
+**Philosophy — sister-language, not mirror.** Dark mode is built around glass-on-gradient (translucent slate cards floating above a purple radial halo). Inverting those tokens naïvely in light mode produces washed-out haze. Light mode instead shares the brand DNA — purple `#a78bfa`, amber `#f59e0b`, Geist, radii 18, calm voice — but adopts its own surface logic: **solid cards, no backdrop-blur, the radial halo preserved at much lower intensity** (`0.10` vs `0.28` opacity). Dark = night of play. Light = day of prep.
+
+**What stays constant across modes:**
+- Brand purple ramp `--brand-50 → --brand-900` is **never overridden** — palette swatches stay honest. Use `--accent` (not `--brand-500`) for foreground roles that need AA contrast; it points at `--brand-500` on dark and shifts to `--brand-700` on light.
+- Amber secondary `--warn: #f59e0b` is unchanged (it's the brand secondary, primarily used as a wash background).
+- The contained primary button (`bg: --brand-500`, `color: --on-brand`) is mode-invariant — same light-purple pill with deep-navy text in both modes. The pair has good contrast against itself; the page around it changes.
+- Radii (18px / 999px / 8px), spacing scale, type scale, Geist family.
+
+**What changes in light mode:**
+- `--bg-*`, `--fg-*` flip to violet-tinted off-white + slate-900 foreground.
+- `--bg-paper*` lose translucency (solid `#ffffff`-family) — the glass aesthetic is dark-mode-only.
+- `--brand-line-*` opacities lift (`0.20 → 0.35` family) so 1px purple borders remain visible on light surfaces.
+- Semantic colors `--error / --success / --info` shift one step darker for AA on white.
+- Shadows become lighter (slate-tinted but less opaque).
+- Components should opt out of `backdrop-filter` in light mode (`[data-theme="light"] .card { backdrop-filter: none }`). Blur on solid light surfaces reads as visual haze, not depth.
+
+**Mode-aware surfaces.** Two layers participate in the bimode:
+- *Component previews* in `preview/*.html` — most flip cleanly via tokens. Palette-demo pages (`colors-brand.html`, `colors-slate.html`) intentionally keep their hardcoded swatch colors. `brand-pill.html` and `chips.html` still hardcode dark slate inline (followup).
+- *App recreations* in `ui_kits/{web,customer-portal,operator-portal}/` — all three JSX recreations are mode-aware. Their `index.html` defines a `.dndn-glass` class (with `backdrop-filter` opted out in light mode) which the JSX components opt into via `className="dndn-glass"`. React inline styles use the same tokens (`var(--bg-paper)`, `var(--accent)`, `var(--brand-line-soft)`, etc.) as the component previews. The modal scrim in the operator-portal `Dialogs.jsx` keeps a literal dark RGBA — a scrim is a uniform dim overlay that works in both modes.
+
+**Open question for review.** The contained primary button keeps `--brand-500` (`#a78bfa`) as its fill in both modes. On a light page, this means the button is a light-purple pill on a tinted-white surface — readable (the button's own bg/text pair passes AA) but visually low-contrast against the page. Three options to resolve: (1) keep as-is, accept softer button affordance in light, (2) shift contained-button bg to `--brand-700` in light (loses brand-pill consistency between modes), (3) introduce a separate `--button-primary-bg` token. Decision pending.
+
+## Visual foundations (dark mode — historical default)
 
 The visual identity is a **dark, glassy, purple-washed slate** — late-night campaign vibes without going gothic.
 
