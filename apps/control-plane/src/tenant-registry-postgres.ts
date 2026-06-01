@@ -26,6 +26,7 @@ import {
   type TenantStorageMode,
   type TenantStorageSnapshot,
   type TenantState,
+  type TenantUptime,
 } from './types.js'
 
 const tenantLockNamespaceKey = 101
@@ -1335,6 +1336,245 @@ export class TenantRegistry {
         return [transition.tenantId, transition] as const
       }),
     )
+  }
+
+  /**
+   * Compute per-tenant uptime metrics for all given tenants derived from
+   * state_transitions and tenant_activity.
+   *
+   * The window is [now - windowHours * 1h, now]. Tenants with no
+   * state_transitions rows get sensible defaults (uptimePct 100 if ready,
+   * 0 otherwise).
+   *
+   * Runs four bulk SQL queries in parallel (no N+1) and combines in TypeScript.
+   * Duration arithmetic is done in TypeScript because pg-mem does not support
+   * TIMESTAMPTZ - TIMESTAMPTZ subtraction or EXTRACT(EPOCH FROM interval).
+   * Window functions (OVER/LAG) and correlated subqueries are avoided to stay
+   * within pg-mem's supported SQL subset.
+   *
+   * uptimePct is % of window spent in `ready` state (not just "not sleeping").
+   * A provisioning-only tenant has uptimePct = 0 even with no sleep spans.
+   */
+  async getFleetUptimes(
+    tenants: ReadonlyArray<{ id: string; currentState: TenantState; createdAt: string }>,
+    windowHours: number,
+  ): Promise<Map<string, TenantUptime>> {
+    if (tenants.length === 0) {
+      return new Map()
+    }
+
+    const tenantIds = tenants.map((t) => t.id)
+    const windowMs = windowHours * 3600 * 1000
+    const now = new Date()
+    const windowStart = new Date(now.getTime() - windowMs)
+    const windowStartIso = windowStart.toISOString()
+    const windowEndIso = now.toISOString()
+
+    // Tenant-id placeholders. Each query uses $1...$N = tenantIds, or
+    // $1 = windowStart, $2 = windowEnd, $3...$N+2 = tenantIds.
+    const tenantPlaceholders1 = tenantIds.map((_, i) => `$${i + 1}`).join(', ')
+    const tenantPlaceholders3 = tenantIds.map((_, i) => `$${i + 3}`).join(', ')
+    // Query D base VALUES clause: one typed row per tenant ID at $3+ positions.
+    const tenantValuesD = tenantIds.map((_, i) => `($${i + 3}::text)`).join(', ')
+
+    const [inWindowResult, latestTransResult, preWindowResult, wakeAndActivityResult] =
+      await Promise.all([
+        // Query A: All transitions WITHIN the window for all tenants, ordered by
+        // created_at ASC (with id as tiebreaker for same-timestamp transitions).
+        // We fetch ALL transitions (not just sleeping) so TypeScript can compute
+        // state intervals and uptimePct = % of window in `ready`.
+        this.run<{ tenant_id: string; from_state: string; to_state: string; created_at: string }>(
+          `SELECT tenant_id, from_state, to_state, created_at
+           FROM state_transitions
+           WHERE tenant_id IN (${tenantPlaceholders3})
+             AND created_at >= $1::timestamptz
+             AND created_at < $2::timestamptz
+           ORDER BY tenant_id, created_at, id`,
+          [windowStartIso, windowEndIso, ...tenantIds],
+        ),
+
+        // Query B: Latest transition per tenant (for currentStateSince).
+        // INNER JOIN on MAX(id) — same pattern as getLatestStateTransitions.
+        this.run<{ tenant_id: string; current_state_since: string }>(
+          `SELECT st.tenant_id, st.created_at AS current_state_since
+           FROM state_transitions st
+           INNER JOIN (
+             SELECT tenant_id, MAX(id) AS latest_id
+             FROM state_transitions
+             WHERE tenant_id IN (${tenantPlaceholders1})
+             GROUP BY tenant_id
+           ) latest ON latest.tenant_id = st.tenant_id
+                   AND latest.latest_id = st.id`,
+          tenantIds,
+        ),
+
+        // Query C: Last transition BEFORE the window per tenant (state-at-window-start).
+        // INNER JOIN on MAX(id) with created_at < windowStart — no correlated subquery.
+        // Uses tenantPlaceholders3 ($3+) to keep the same positional layout as Queries
+        // A and D so all four queries bind ($1=windowStart, $2=windowEnd, $3+tenantIds).
+        // $2 (windowEnd) is unused in this query but kept to preserve placeholder alignment.
+        this.run<{ tenant_id: string; state_at_window_start: string }>(
+          `SELECT st.tenant_id, st.to_state AS state_at_window_start
+           FROM state_transitions st
+           INNER JOIN (
+             SELECT tenant_id, MAX(id) AS latest_id
+             FROM state_transitions
+             WHERE tenant_id IN (${tenantPlaceholders3})
+               AND created_at < $1::timestamptz
+             GROUP BY tenant_id
+           ) pre ON pre.tenant_id = st.tenant_id
+               AND pre.latest_id = st.id`,
+          [windowStartIso, windowEndIso, ...tenantIds],
+        ),
+
+        // Query D: sleeping→ready wake counts + seenByActivator.
+        // Base set is built from the input tenant IDs directly via VALUES (not
+        // from DISTINCT state_transitions) so tenants with zero transitions still
+        // appear and the LEFT JOIN with tenant_activity can fire for them.
+        // A tenant that the activator HAS seen but has never transitioned would
+        // otherwise be absent from base, causing seenByActivator to collapse to
+        // false even when tenant_activity.seen_by_activator = true.
+        this.run<{
+          tenant_id: string
+          wake_count: string
+          last_wake_at: string | null
+          seen_by_activator: boolean | null
+        }>(
+          `SELECT
+             base.tenant_id,
+             COUNT(wk.id)        AS wake_count,
+             MAX(wk.created_at)  AS last_wake_at,
+             ta.seen_by_activator
+           FROM (
+             VALUES ${tenantValuesD}
+           ) AS base(tenant_id)
+           LEFT JOIN state_transitions wk
+             ON wk.tenant_id = base.tenant_id
+            AND wk.from_state = 'sleeping'
+            AND wk.to_state = 'ready'
+            AND wk.created_at >= $1::timestamptz
+            AND wk.created_at < $2::timestamptz
+           LEFT JOIN tenant_activity ta
+             ON ta.tenant_id = base.tenant_id
+           GROUP BY base.tenant_id, ta.seen_by_activator`,
+          [windowStartIso, windowEndIso, ...tenantIds],
+        ),
+      ])
+
+    // Index results by tenant_id
+    const latestTransByTenant = new Map(
+      latestTransResult.rows.map((r) => [r.tenant_id, r.current_state_since]),
+    )
+    const preWindowByTenant = new Map(
+      preWindowResult.rows.map((r) => [r.tenant_id, r.state_at_window_start]),
+    )
+    const wakeByTenant = new Map(wakeAndActivityResult.rows.map((r) => [r.tenant_id, r]))
+
+    // Group in-window transitions by tenant
+    const inWindowByTenant = new Map<string, Array<{ fromState: string; toState: string; at: Date }>>()
+    for (const row of inWindowResult.rows) {
+      const entry = { fromState: row.from_state, toState: row.to_state, at: new Date(row.created_at) }
+      const existing = inWindowByTenant.get(row.tenant_id)
+      if (existing) {
+        existing.push(entry)
+      } else {
+        inWindowByTenant.set(row.tenant_id, [entry])
+      }
+    }
+
+    const result = new Map<string, TenantUptime>()
+
+    for (const tenant of tenants) {
+      const currentStateSince = latestTransByTenant.get(tenant.id) ?? tenant.createdAt
+      const hasAnyTransitions = latestTransByTenant.has(tenant.id)
+      const wakeRow = wakeByTenant.get(tenant.id)
+
+      // In-window transitions, already ordered by id (chronological).
+      const inWindowTrans = inWindowByTenant.get(tenant.id) ?? []
+
+      // State at window start: prefer the pre-window lookback (Query C).
+      // If no pre-window transition exists and there are in-window transitions,
+      // use the fromState of the earliest in-window transition — that is the
+      // state the tenant was actually in before its first recorded transition.
+      // Final fallback to tenant.currentState for tenants with zero transitions.
+      const stateAtWindowStart =
+        preWindowByTenant.get(tenant.id) ??
+        inWindowTrans[0]?.fromState ??
+        tenant.currentState
+
+      // Build state timeline within the window: [windowStart, t1, t2, ..., now]
+      // Each interval is [start, end) with a known state.
+      let totalReadyMs = 0
+      let totalSleepMs = 0
+      let lastSleepMs: number | null = null
+      let lastCompletedSleepEnd: Date | null = null
+
+      // Walk intervals: currentIntervalState tracks what state we're in
+      let currentIntervalState = stateAtWindowStart
+      let currentIntervalStart = windowStart.getTime()
+
+      for (const trans of inWindowTrans) {
+        const intervalEnd = trans.at.getTime()
+        const durationMs = Math.max(0, intervalEnd - currentIntervalStart)
+
+        if (currentIntervalState === 'ready') {
+          totalReadyMs += durationMs
+        } else if (currentIntervalState === 'sleeping') {
+          totalSleepMs += durationMs
+        }
+
+        // Closing a sleeping interval that just ended (trans into next state)
+        if (currentIntervalState === 'sleeping') {
+          const sleepEnd = trans.at
+          if (
+            lastCompletedSleepEnd === null ||
+            sleepEnd.getTime() > lastCompletedSleepEnd.getTime()
+          ) {
+            lastCompletedSleepEnd = sleepEnd
+            lastSleepMs = durationMs
+          }
+        }
+
+        currentIntervalState = trans.toState
+        currentIntervalStart = intervalEnd
+      }
+
+      // Last interval: from last transition to now
+      {
+        const durationMs = Math.max(0, now.getTime() - currentIntervalStart)
+        if (currentIntervalState === 'ready') {
+          totalReadyMs += durationMs
+        } else if (currentIntervalState === 'sleeping') {
+          totalSleepMs += durationMs
+          // Ongoing sleep — does NOT count as lastSleepMs (not a completed span)
+        }
+      }
+
+      // uptimePct: % of window spent in ready.
+      // For tenants with no transitions at all, apply spec defaults.
+      let uptimePct: number
+      if (!hasAnyTransitions) {
+        uptimePct = tenant.currentState === 'ready' ? 100 : 0
+      } else {
+        uptimePct = Math.max(0, Math.min(100, (totalReadyMs / windowMs) * 100))
+      }
+
+      const wakeCount = wakeRow ? Number(wakeRow.wake_count) : 0
+      const lastWakeAt = wakeRow?.last_wake_at ?? null
+      const seenByActivator = wakeRow?.seen_by_activator === true
+
+      result.set(tenant.id, {
+        currentStateSince,
+        uptimePct,
+        totalSleepMs,
+        lastSleepMs,
+        wakeCount,
+        lastWakeAt,
+        seenByActivator,
+      })
+    }
+
+    return result
   }
 
   async createBackupRun(params: {
