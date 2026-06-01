@@ -69,6 +69,7 @@ import type {
   TenantStorageSnapshot,
   TenantStorageStatus,
   TenantStorageStatusResponse,
+  TenantUptime,
 } from './types.js'
 import { portalBillingProviders } from './types.js'
 
@@ -615,7 +616,10 @@ export function createApp({
     uptime: process.uptime(),
     version: appVersion,
   })
-  const buildFleetStatusResponse = async (): Promise<FleetStatusResponse> => {
+  const buildFleetStatusResponse = async (options?: {
+    includeUptime?: boolean
+    windowHours?: number
+  }): Promise<FleetStatusResponse> => {
     const [latestTransitionsByTenant, backupSummaries, restoreSummaries, allTenants] =
       await Promise.all([
         tenantRegistry.getLatestStateTransitions(),
@@ -623,6 +627,11 @@ export function createApp({
         tenantRegistry.getLatestRestoreSummaries(),
         tenantRegistry.listTenants(),
       ])
+
+    const uptimesByTenant: Map<string, TenantUptime> = options?.includeUptime
+      ? await tenantRegistry.getFleetUptimes(allTenants, options.windowHours ?? 24)
+      : new Map()
+
     const tenantsByCurrentState = createTenantStateCounts()
     const tenantsByDesiredState = createTenantStateCounts()
     const tenantsByVersion: Record<string, number> = {}
@@ -662,12 +671,15 @@ export function createApp({
           ? tenantProvisioningService.getTenantResources(tenant)
           : undefined
 
+      const uptime = uptimesByTenant.get(tenant.id)
+
       return {
         tenant,
         health,
         backup,
         latestTransition: latestTransitionsByTenant.get(tenant.id) ?? null,
         resources,
+        ...(uptime !== undefined ? { uptime } : {}),
       }
     })
 
@@ -1259,13 +1271,49 @@ export function createApp({
   app.get(
     '/internal/fleet/status',
     async (
-      _request: Request,
+      request: Request,
       response: Response<FleetStatusResponse | ErrorResponse>,
     ) => {
+      // Parse ?include= as a comma-separated set of include tokens.
+      // Only 'uptime' is recognised; unrecognised tokens are ignored.
+      const rawInclude = request.query.include
+      const includeSet = new Set(
+        (Array.isArray(rawInclude) ? rawInclude : [rawInclude])
+          .flatMap((v) => (typeof v === 'string' ? v.split(',') : []))
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+      const includeUptime = includeSet.has('uptime')
+
+      // Parse ?windowHours= (integer).
+      // Missing or out-of-range → default 24. Non-integer → 400.
+      let windowHours = 24
+      const rawWindow = request.query.windowHours
+      if (rawWindow !== undefined) {
+        const parsed = Number(rawWindow)
+        if (!Number.isInteger(parsed)) {
+          response.status(400).json({ error: 'windowHours must be an integer' })
+          return
+        }
+        // Clamp to [1, 168]; out-of-range silently falls back to default 24.
+        windowHours = parsed >= 1 && parsed <= 168 ? parsed : 24
+      }
+
       try {
         await tenantRegistry.checkHealth()
-        response.json(await buildFleetStatusResponse())
-      } catch {
+        response.json(
+          await buildFleetStatusResponse(
+            includeUptime ? { includeUptime: true, windowHours } : undefined,
+          ),
+        )
+      } catch (error) {
+        if (includeUptime) {
+          // Surface uptime query failures distinctly from health check failures.
+          response.status(500).json({
+            error: `Fleet uptime query failed: ${formatUnknownError(error)}`,
+          })
+          return
+        }
         response.status(503).json({
           error: 'Tenant registry unavailable',
         })

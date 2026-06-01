@@ -114,12 +114,30 @@ export interface FleetTenantBackupStatus {
   lastRestoreStatus: BackupRunStatus | null
 }
 
+export interface TenantUptime {
+  /** ISO timestamp of the last transition into the tenant's current state. Falls back to tenant.createdAt if no transitions exist. */
+  currentStateSince: string
+  /** Percentage of the window spent in `ready` state, 0–100. */
+  uptimePct: number
+  /** Total milliseconds spent in `sleeping` state within the window. */
+  totalSleepMs: number
+  /** Duration in milliseconds of the most recent completed sleep within the window, or null if none. */
+  lastSleepMs: number | null
+  /** Number of `sleeping → ready` transitions within the window. */
+  wakeCount: number
+  /** ISO timestamp of the most recent `sleeping → ready` transition within the window, or null if none. */
+  lastWakeAt: string | null
+  /** Whether the activator has ever observed this tenant (mirrors tenant_activity.seen_by_activator). */
+  seenByActivator: boolean
+}
+
 export interface FleetTenantStatus {
   tenant: Tenant
   health: 'healthy' | 'attention'
   backup: FleetTenantBackupStatus
   latestTransition: StateTransition | null
   resources?: TenantProvisioningResources
+  uptime?: TenantUptime
 }
 
 export interface FleetStatusSummary {
