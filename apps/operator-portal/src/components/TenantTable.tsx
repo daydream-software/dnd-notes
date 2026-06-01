@@ -1,3 +1,4 @@
+import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded'
 import DeleteForeverRoundedIcon from '@mui/icons-material/DeleteForeverRounded'
 import RefreshRoundedIcon from '@mui/icons-material/RefreshRounded'
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded'
@@ -107,26 +108,32 @@ function SortHeader({ label, sortKey, activeSortKey, sortDir, onSort, align = 'l
         fontSize: 11.5,
         fontWeight: 600,
         color: isActive ? 'var(--accent)' : 'var(--fg-muted)',
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
         background: 'var(--bg-paper-soft)',
         borderBottom: '1px solid var(--brand-line-soft)',
         position: 'sticky',
         top: 0,
         whiteSpace: 'nowrap',
         textAlign: align,
-        cursor: 'pointer',
-        userSelect: 'none',
       }}
-      onClick={() => onSort(sortKey)}
       aria-sort={isActive ? (sortDir === 'asc' ? 'ascending' : 'descending') : 'none'}
     >
-      <Box
-        component="span"
-        sx={{
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        style={{
+          background: 'transparent',
+          border: 'none',
+          color: 'inherit',
+          font: 'inherit',
+          fontSize: 'inherit',
+          fontWeight: 'inherit',
+          padding: 0,
+          margin: 0,
+          cursor: 'pointer',
+          userSelect: 'none',
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 0.5,
+          gap: 4,
           flexDirection: align === 'right' ? 'row-reverse' : 'row',
         }}
       >
@@ -138,7 +145,7 @@ function SortHeader({ label, sortKey, activeSortKey, sortDir, onSort, align = 'l
             <ArrowDownwardRoundedIcon sx={{ fontSize: 12 }} />
           )
         ) : null}
-      </Box>
+      </button>
     </th>
   )
 }
@@ -241,13 +248,11 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
                 size="small"
                 variant="outlined"
               />
-              <Typography
-                component="span"
-                sx={{ fontSize: 12, color: 'var(--fg-muted)' }}
+              <ArrowForwardRoundedIcon
+                fontSize="inherit"
+                sx={{ color: 'var(--fg-muted)' }}
                 aria-hidden
-              >
-                →
-              </Typography>
+              />
               <Chip
                 label={formatStateLabel(status.latestTransition.toState)}
                 color={getStateChipColor(status.latestTransition.toState)}
@@ -360,8 +365,9 @@ export default function TenantTable({
         va = a.tenant.currentState
         vb = b.tenant.currentState
       } else if (sortBy === 'version') {
-        va = a.tenant.version
-        vb = b.tenant.version
+        const vaV = a.tenant.version
+        const vbV = b.tenant.version
+        return vaV.localeCompare(vbV, undefined, { numeric: true, sensitivity: 'base' }) * dir
       } else {
         // lastTransition — sort by createdAt timestamp, nulls last
         va = a.latestTransition?.createdAt ?? ''
@@ -394,8 +400,6 @@ export default function TenantTable({
     padding: '10px 14px',
     fontSize: 11.5,
     fontWeight: 600,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase',
     background: 'var(--bg-paper-soft)',
     borderBottom: '1px solid var(--brand-line-soft)',
     position: 'sticky',
@@ -452,7 +456,7 @@ export default function TenantTable({
       <Box
         sx={{
           overflowX: 'auto',
-          borderRadius: '14px',
+          borderRadius: 18,
           border: '1px solid var(--brand-line-soft)',
         }}
       >

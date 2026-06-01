@@ -112,8 +112,8 @@ describe('TenantTable', () => {
     expect(rows[2].textContent).toContain('moonshae-ledger')
     expect(rows[3].textContent).toContain('zephyr-vault')
 
-    // Click Tenant header to flip to descending
-    await user.click(screen.getByRole('columnheader', { name: /Tenant/i }))
+    // Click Tenant header button to flip to descending
+    await user.click(screen.getByRole('button', { name: /Tenant/i }))
 
     const rowsDesc = screen.getAllByRole('row')
     expect(rowsDesc[1].textContent).toContain('zephyr-vault')
@@ -349,5 +349,75 @@ describe('TenantTable', () => {
     )
 
     expect(screen.getByText('None recorded')).toBeTruthy()
+  })
+
+  it('caption shows total count when no filter is active', () => {
+    const tenants = [
+      makeStatus({ slug: 'alpha-keep', id: 'tenant-a' }),
+      makeStatus({ slug: 'beta-watch', id: 'tenant-b' }),
+      makeStatus({ slug: 'gamma-fort', id: 'tenant-c' }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    expect(screen.getByText('3 tenants')).toBeTruthy()
+  })
+
+  it('caption shows "M of N tenants" when state filter narrows results', async () => {
+    const user = userEvent.setup()
+    const tenants = [
+      makeStatus({ slug: 'ready-one', id: 'tenant-r1', currentState: 'ready' }),
+      makeStatus({ slug: 'ready-two', id: 'tenant-r2', currentState: 'ready' }),
+      makeStatus({ slug: 'failed-one', id: 'tenant-f1', currentState: 'failed', desiredState: 'ready' }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    // Before filtering: all 3 visible
+    expect(screen.getByText('3 tenants')).toBeTruthy()
+
+    // Apply state filter for 'Failed' → only 1 matches
+    await user.click(screen.getByRole('button', { name: 'Failed' }))
+
+    expect(screen.getByText('1 of 3 tenants')).toBeTruthy()
+  })
+
+  it('caption shows "M of N tenants" when search narrows results', async () => {
+    const user = userEvent.setup()
+    const tenants = [
+      makeStatus({ slug: 'moonshae-ledger', id: 'tenant-moon' }),
+      makeStatus({ slug: 'stormwatch', id: 'tenant-storm' }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    // Before filtering: both visible
+    expect(screen.getByText('2 tenants')).toBeTruthy()
+
+    const searchInput = screen.getByPlaceholderText(/Filter by slug, id, owner/i)
+    await user.type(searchInput, 'storm')
+
+    expect(screen.getByText('1 of 2 tenants')).toBeTruthy()
   })
 })

@@ -155,7 +155,7 @@ export default function FleetStatusPage({
               <Typography color="text.secondary">
                 Current and desired lifecycle state comes straight from the
                 existing <code>/internal/fleet/status</code> contract, including
-                the latest transition actor and reason.
+                the latest state transition and timestamp.
               </Typography>
             </Stack>
 
