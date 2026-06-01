@@ -488,6 +488,21 @@ describe('abort semantics (integration)', () => {
 
       // No tenant should have been provisioned after the abort.
       assert.equal(callCount, 1, 'only one provision call should have been made')
+
+      // The remaining tenant must be marked 'skipped' (not 'pending') with reason 'aborted'.
+      const remainingTenantId = Object.keys(byId).find((id) => byId[id] !== 'succeeded')
+      assert.ok(remainingTenantId, 'There should be a remaining tenant')
+      assert.equal(byId[remainingTenantId], 'skipped', 'Remaining tenant should be skipped')
+
+      const reasonResult = await pool.query<{ reason: string | null }>(
+        `SELECT reason FROM fleet_rollout_tenants WHERE rollout_id = $1 AND status = 'skipped'`,
+        [rolloutId],
+      )
+      assert.equal(
+        reasonResult.rows[0]?.reason,
+        'aborted',
+        'Skipped tenant should have reason "aborted"',
+      )
     } finally {
       await cleanup()
     }
