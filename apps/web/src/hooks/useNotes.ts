@@ -324,7 +324,6 @@ export interface UseNotesResult {
   isDeleting: boolean
   selectedNoteTemplateId: string
   quickCaptureTitle: string
-  isQuickCaptureOpen: boolean
   // Derived state
   selectedNote: Note | null
   filteredNotes: Note[]
@@ -379,7 +378,6 @@ export interface UseNotesResult {
   setIsDeleting: React.Dispatch<React.SetStateAction<boolean>>
   setSelectedNoteTemplateId: React.Dispatch<React.SetStateAction<string>>
   setQuickCaptureTitle: React.Dispatch<React.SetStateAction<string>>
-  setIsQuickCaptureOpen: React.Dispatch<React.SetStateAction<boolean>>
   // Callbacks
   resetNotes: () => void
   resetSessionBrowserState: () => void
@@ -492,7 +490,6 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
   const [isDeleting, setIsDeleting] = useState(false)
   const [selectedNoteTemplateId, setSelectedNoteTemplateId] = useState(blankNoteTemplateId)
   const [quickCaptureTitle, setQuickCaptureTitle] = useState('')
-  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false)
 
   const noteBrowseModeRef = useRef<NoteBrowseMode>('notes')
   const selectedNoteIdRef = useRef<string | null>(null)
@@ -1347,7 +1344,6 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
         })
 
         setQuickCaptureTitle('')
-        setIsQuickCaptureOpen(false)
         setNoteBrowseMode('notes')
         resetSessionBrowserState()
         const refreshOk = await loadWorkspace(authToken, selectedCampaignId, createdNote.id, false, undefined, undefined, onError)
@@ -1383,7 +1379,6 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     setSelectedNoteId(null)
     setDraft(createEmptyDraft())
     setSelectedNoteTemplateId(blankNoteTemplateId)
-    setIsQuickCaptureOpen(false)
   }, [resetActivityState, resetSessionBrowserState])
 
   const handleSelectSession = useCallback(
@@ -1585,7 +1580,6 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     isDeleting,
     selectedNoteTemplateId,
     quickCaptureTitle,
-    isQuickCaptureOpen,
     selectedNote,
     filteredNotes,
     displayedNotes,
@@ -1636,7 +1630,6 @@ export function useNotes(isSharedMode: boolean): UseNotesResult {
     setIsDeleting,
     setSelectedNoteTemplateId,
     setQuickCaptureTitle,
-    setIsQuickCaptureOpen,
     resetNotes,
     resetSessionBrowserState,
     resetActivityState,

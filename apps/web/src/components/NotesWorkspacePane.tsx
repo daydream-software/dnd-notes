@@ -1,5 +1,4 @@
 import AddRoundedIcon from '@mui/icons-material/AddRounded'
-import BoltRoundedIcon from '@mui/icons-material/BoltRounded'
 import EditNoteRoundedIcon from '@mui/icons-material/EditNoteRounded'
 import EventRoundedIcon from '@mui/icons-material/EventRounded'
 import PlaylistAddCheckCircleRoundedIcon from '@mui/icons-material/PlaylistAddCheckCircleRounded'
@@ -22,6 +21,7 @@ import { formatTimestamp } from '../formatTimestamp'
 import { markdownToPlainText } from '../note-excerpts'
 import NotesBrowsePane from '../NotesBrowsePane'
 import WorkspacePane from '../WorkspacePane'
+import QuickCaptureBar from './QuickCaptureBar'
 import NoteEditPage from '../pages/NoteEditPage'
 import type { NoteBrowseMode, NoteDraft, NoteLinkPanelItem, TagFacet } from '../hooks/useNotes'
 import type {
@@ -94,7 +94,6 @@ export interface NotesWorkspacePaneProps {
   selectedNoteTemplateId: string
   selectedNoteTemplate: NoteStarterTemplate
   quickCaptureTitle: string
-  isQuickCaptureOpen: boolean
   selectedNote: Note | null
   filteredNotes: Note[]
   displayedNotes: Note[]
@@ -127,9 +126,8 @@ export interface NotesWorkspacePaneProps {
   onSelectSession: (sessionName: string) => void
   onSelectActivityCollaborator: (membershipId: string | null) => void
   onSelectNote: (note: Note) => void
-  onToggleQuickCapture: () => void
   onQuickCaptureValueChange: (value: string) => void
-  onQuickCaptureSubmit: () => void
+  onQuickCaptureSubmit: () => Promise<void>
   onShowBrowsePanel: () => void
   onNewNote: () => void
 
@@ -169,7 +167,6 @@ export default function NotesWorkspacePane({
   selectedNoteTemplateId,
   selectedNoteTemplate,
   quickCaptureTitle,
-  isQuickCaptureOpen,
   selectedNote,
   filteredNotes,
   displayedNotes,
@@ -198,7 +195,6 @@ export default function NotesWorkspacePane({
   onSelectSession,
   onSelectActivityCollaborator,
   onSelectNote,
-  onToggleQuickCapture,
   onQuickCaptureValueChange,
   onQuickCaptureSubmit,
   onShowBrowsePanel,
@@ -342,6 +338,15 @@ export default function NotesWorkspacePane({
         ))}
       </Box>
 
+      {canEditWorkspace ? (
+        <QuickCaptureBar
+          value={quickCaptureTitle}
+          onValueChange={onQuickCaptureValueChange}
+          onSubmit={onQuickCaptureSubmit}
+          isSubmitting={isQuickCapturing}
+        />
+      ) : null}
+
       <Box
         sx={{
           display: 'grid',
@@ -397,15 +402,6 @@ export default function NotesWorkspacePane({
                 </Button>
                 <Button
                   size="small"
-                  variant={isQuickCaptureOpen ? 'contained' : 'outlined'}
-                  startIcon={<BoltRoundedIcon />}
-                  onClick={onToggleQuickCapture}
-                  disabled={!canEditWorkspace}
-                >
-                  Quick capture
-                </Button>
-                <Button
-                  size="small"
                   variant="outlined"
                   startIcon={<AddRoundedIcon />}
                   onClick={onNewNote}
@@ -424,13 +420,6 @@ export default function NotesWorkspacePane({
                 : null
             }
             onClearTagFilter={onClearTagFilter}
-            quickCapture={{
-              isOpen: isQuickCaptureOpen,
-              value: quickCaptureTitle,
-              onValueChange: onQuickCaptureValueChange,
-              onSubmit: onQuickCaptureSubmit,
-              isSubmitting: isQuickCapturing || !canEditWorkspace,
-            }}
             tagFilters={
               tagFacets.length === 0 ? (
                 <Alert severity="info" sx={{ borderRadius: surfaceRadius }}>
