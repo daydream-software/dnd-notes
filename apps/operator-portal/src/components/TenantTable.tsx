@@ -442,9 +442,13 @@ export default function TenantTable({
     const dir = sortDir === 'asc' ? 1 : -1
     list.sort((a, b) => {
       if (sortBy === 'uptime') {
-        const au = a.uptime?.uptimePct ?? -Infinity
-        const bu = b.uptime?.uptimePct ?? -Infinity
-        return (au - bu) * dir
+        // Tenants without uptime data always sort to the bottom regardless of direction.
+        const aHas = a.uptime !== undefined
+        const bHas = b.uptime !== undefined
+        if (!aHas && !bHas) return 0
+        if (!aHas) return 1  // a has no data → after b
+        if (!bHas) return -1 // b has no data → after a
+        return (a.uptime!.uptimePct - b.uptime!.uptimePct) * dir
       }
 
       let va: string

@@ -620,6 +620,40 @@ describe('TenantTable', () => {
     expect(rows[3].textContent).toContain('dragon-peak')
   })
 
+  it('sorts tenants without uptime data to the bottom regardless of sort direction', async () => {
+    const user = userEvent.setup()
+    const tenants = [
+      makeStatus({ slug: 'no-uptime-tenant', id: 'tenant-x' }),
+      makeStatus({ slug: 'dragon-peak', id: 'tenant-h', uptime: makeUptime({ uptimePct: 99.9 }) }),
+      makeStatus({ slug: 'shadow-keep', id: 'tenant-l', uptime: makeUptime({ uptimePct: 72.3 }) }),
+    ]
+
+    render(
+      <TenantTable
+        tenants={tenants}
+        mutationDisabled={false}
+        onUpgrade={vi.fn()}
+        onDeprovision={vi.fn()}
+      />,
+    )
+
+    const uptimeBtn = screen.getByRole('button', { name: 'Uptime' })
+
+    // Ascending: lower uptime first, no-uptime always last
+    await user.click(uptimeBtn)
+    let rows = screen.getAllByRole('row')
+    expect(rows[1].textContent).toContain('shadow-keep')
+    expect(rows[2].textContent).toContain('dragon-peak')
+    expect(rows[3].textContent).toContain('no-uptime-tenant')
+
+    // Descending: higher uptime first, no-uptime still last
+    await user.click(uptimeBtn)
+    rows = screen.getAllByRole('row')
+    expect(rows[1].textContent).toContain('dragon-peak')
+    expect(rows[2].textContent).toContain('shadow-keep')
+    expect(rows[3].textContent).toContain('no-uptime-tenant')
+  })
+
   it('sorts by uptime descending on second Uptime header click', async () => {
     const user = userEvent.setup()
     const tenants = [
