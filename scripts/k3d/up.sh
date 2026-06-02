@@ -540,7 +540,7 @@ activator_image_ref="${ACTIVATOR_IMAGE_REPOSITORY}:${ACTIVATOR_IMAGE_TAG}"
 op_image_ref="${OPERATOR_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-operator-portal}:${OPERATOR_PORTAL_IMAGE_TAG:-k3d}"
 cust_image_ref="${CUSTOMER_PORTAL_IMAGE_REPOSITORY:-ghcr.io/daydream-software/dnd-notes-customer-portal}:${CUSTOMER_PORTAL_IMAGE_TAG:-k3d}"
 
-log "Building 5 images in parallel..."
+log "Preparing 5 images in parallel (build skipped if --no-rebuild + image present; output streamed to ${WORK_DIR}/build-*.log)..."
 ensure_image_ready "Tenant" "${tenant_image_ref}" \
   bash "${ROOT}/scripts/k3d/build-image.sh" \
     --name Tenant \
