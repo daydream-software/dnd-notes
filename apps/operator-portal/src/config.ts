@@ -8,6 +8,8 @@ interface OperatorPortalViteEnv {
   VITE_OPERATOR_KEYCLOAK_CLIENT_ID?: string
   VITE_OPERATOR_KEYCLOAK_REQUIRED_ROLES?: string
   VITE_OPERATOR_CUSTOMER_PORTAL_URL?: string
+  VITE_OPERATOR_TENANT_BASE_DOMAIN?: string
+  VITE_OPERATOR_TENANT_PUBLIC_SCHEME?: string
 }
 
 function normalizeUrl(value: string | undefined, fallback: string) {
@@ -29,6 +31,8 @@ interface OperatorRuntimeEnv {
   KEYCLOAK_CLIENT_ID?: string
   KEYCLOAK_REQUIRED_ROLES?: string
   CUSTOMER_PORTAL_URL?: string
+  TENANT_BASE_DOMAIN?: string
+  TENANT_PUBLIC_SCHEME?: string
 }
 
 const defaultRequiredRoles = ['control-plane-admin', 'control-plane-workforce']
@@ -76,6 +80,14 @@ export function resolveOperatorPortalConfig(viteEnv: OperatorPortalViteEnv = {})
       runtimeEnv.CUSTOMER_PORTAL_URL ?? viteEnv.VITE_OPERATOR_CUSTOMER_PORTAL_URL,
       'https://portal.127.0.0.1.nip.io',
     ),
+    tenantBaseDomain: normalizeString(
+      runtimeEnv.TENANT_BASE_DOMAIN ?? viteEnv.VITE_OPERATOR_TENANT_BASE_DOMAIN,
+      '127.0.0.1.nip.io',
+    ),
+    tenantPublicScheme: normalizeString(
+      runtimeEnv.TENANT_PUBLIC_SCHEME ?? viteEnv.VITE_OPERATOR_TENANT_PUBLIC_SCHEME,
+      'https',
+    ),
   }
 }
 
@@ -83,8 +95,18 @@ const { env: viteEnv = {} } = import.meta as ImportMeta & {
   env?: OperatorPortalViteEnv
 }
 
-export const { operatorApiBasePath, operatorKeycloakConfig, requiredRoles, customerPortalUrl } =
-  resolveOperatorPortalConfig(viteEnv)
+export const {
+  operatorApiBasePath,
+  operatorKeycloakConfig,
+  requiredRoles,
+  customerPortalUrl,
+  tenantBaseDomain,
+  tenantPublicScheme,
+} = resolveOperatorPortalConfig(viteEnv)
+
+export function buildTenantUrl(subdomain: string): string {
+  return `${tenantPublicScheme}://${subdomain}.${tenantBaseDomain}/`
+}
 
 export function buildOperatorRedirectUri() {
   return new URL(

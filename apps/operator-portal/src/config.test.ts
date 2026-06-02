@@ -13,6 +13,8 @@ describe('resolveOperatorPortalConfig', () => {
       },
       requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
       customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
+      tenantBaseDomain: '127.0.0.1.nip.io',
+      tenantPublicScheme: 'https',
     })
   })
 
@@ -33,6 +35,8 @@ describe('resolveOperatorPortalConfig', () => {
       },
       requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
       customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
+      tenantBaseDomain: '127.0.0.1.nip.io',
+      tenantPublicScheme: 'https',
     })
   })
 
@@ -51,6 +55,8 @@ describe('resolveOperatorPortalConfig', () => {
       },
       requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
       customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
+      tenantBaseDomain: '127.0.0.1.nip.io',
+      tenantPublicScheme: 'https',
     })
   })
 
@@ -68,6 +74,8 @@ describe('resolveOperatorPortalConfig', () => {
       },
       requiredRoles: ['control-plane-admin', 'control-plane-workforce'],
       customerPortalUrl: 'https://portal.127.0.0.1.nip.io',
+      tenantBaseDomain: '127.0.0.1.nip.io',
+      tenantPublicScheme: 'https',
     })
   })
 

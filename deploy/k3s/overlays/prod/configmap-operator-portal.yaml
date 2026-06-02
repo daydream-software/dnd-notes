@@ -11,3 +11,5 @@ data:
   KEYCLOAK_CLIENT_ID: "dnd-notes-control-plane"
   KEYCLOAK_REQUIRED_ROLES: "control-plane-admin,control-plane-workforce"
   CUSTOMER_PORTAL_URL: "https://notes.daydreamsoftware.ca"
+  TENANT_BASE_DOMAIN: "notes.daydreamsoftware.ca"
+  TENANT_PUBLIC_SCHEME: "https"

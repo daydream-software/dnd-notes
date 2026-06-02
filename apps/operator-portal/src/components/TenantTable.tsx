@@ -16,6 +16,7 @@ import {
   Typography,
 } from '@mui/material'
 import * as React from 'react'
+import { buildTenantUrl } from '../config'
 import type { FleetTenantStatus, TenantState } from '../types'
 import { isStuckSleeping } from './tenant-anomalies'
 
@@ -221,7 +222,7 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
             {t.subdomain ? (
               <Typography
                 component="a"
-                href={`https://${t.subdomain}/`}
+                href={buildTenantUrl(t.subdomain)}
                 target="_blank"
                 rel="noopener noreferrer"
                 sx={{
@@ -231,9 +232,10 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
                   lineHeight: 1.3,
                   textDecoration: 'none',
                   '&:hover': { textDecoration: 'underline' },
+                  wordBreak: 'break-all',
                 }}
               >
-                {t.subdomain}
+                {new URL(buildTenantUrl(t.subdomain)).host}
               </Typography>
             ) : null}
             <Typography
