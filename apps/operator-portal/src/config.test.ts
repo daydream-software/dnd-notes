@@ -113,4 +113,28 @@ describe('resolveOperatorPortalConfig', () => {
     })
     expect(result.customerPortalUrl).toBe('https://portal.127.0.0.1.nip.io')
   })
+
+  it('normalizes TENANT_PUBLIC_SCHEME (strips ://, lowercases)', () => {
+    expect(
+      resolveOperatorPortalConfig({ VITE_OPERATOR_TENANT_PUBLIC_SCHEME: 'HTTPS://' })
+        .tenantPublicScheme,
+    ).toBe('https')
+    expect(
+      resolveOperatorPortalConfig({ VITE_OPERATOR_TENANT_PUBLIC_SCHEME: 'http:' })
+        .tenantPublicScheme,
+    ).toBe('http')
+  })
+
+  it('normalizes TENANT_BASE_DOMAIN (strips scheme prefix, slashes, dots)', () => {
+    expect(
+      resolveOperatorPortalConfig({
+        VITE_OPERATOR_TENANT_BASE_DOMAIN: 'https://tenants.example.test/',
+      }).tenantBaseDomain,
+    ).toBe('tenants.example.test')
+    expect(
+      resolveOperatorPortalConfig({
+        VITE_OPERATOR_TENANT_BASE_DOMAIN: '.tenants.example.test.',
+      }).tenantBaseDomain,
+    ).toBe('tenants.example.test')
+  })
 })

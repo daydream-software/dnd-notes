@@ -514,10 +514,11 @@ export class TenantProvisioningService implements TenantProvisioningPort {
             if (!this.keycloakAdminClient) {
               console.warn(
                 `[provisioning] Skipping per-tenant Keycloak client creation for ${refreshedTenant.id}: ` +
-                  'keycloakAdminClient is not configured. Set KEYCLOAK_ADMIN_CLIENT_ID and ' +
-                  'KEYCLOAK_ADMIN_CLIENT_SECRET on the control-plane to enable per-tenant ' +
-                  'OIDC client provisioning. Without it, the tenant SPA will fail with ' +
-                  'client_not_found at first login.',
+                  'keycloakAdminClient is not configured. Set all four of ' +
+                  'KEYCLOAK_ADMIN_BASE_URL, KEYCLOAK_ADMIN_REALM, KEYCLOAK_ADMIN_CLIENT_ID, ' +
+                  'and KEYCLOAK_ADMIN_CLIENT_SECRET on the control-plane to enable ' +
+                  'per-tenant OIDC client provisioning. Without it, the tenant SPA will ' +
+                  'fail with client_not_found at first login.',
               )
             }
             if (this.keycloakAdminClient) {

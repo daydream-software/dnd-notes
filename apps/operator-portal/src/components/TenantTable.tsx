@@ -577,6 +577,13 @@ export default function TenantTable({
         sx={{
           overflowX: 'auto',
           overflowY: 'hidden',
+          // Inner-table radius is intentionally smaller than the global 18px
+          // shape.borderRadius. The table sits inside a Card whose corners
+          // already use 18px; nesting the same radius (especially with sticky
+          // headers + horizontal scroll) visibly clips the first/last column's
+          // header background. 12px is the empirically-validated inner-surface
+          // radius for this slot — confirmed by visual review against the live
+          // k3d operator portal (#421).
           borderRadius: '12px',
           border: '1px solid var(--brand-line-soft)',
         }}
