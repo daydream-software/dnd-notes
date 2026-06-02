@@ -30,7 +30,7 @@ function makeStatus(
     tenant: {
       id,
       slug,
-      subdomain: slug,
+      subdomain: `t-${slug}`,
       ownerId: 'owner-1',
       desiredState: 'ready',
       currentState,

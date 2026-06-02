@@ -218,6 +218,24 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
             >
               {t.slug}
             </Typography>
+            {t.subdomain ? (
+              <Typography
+                component="a"
+                href={`https://${t.subdomain}/`}
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  color: 'var(--accent)',
+                  lineHeight: 1.3,
+                  textDecoration: 'none',
+                  '&:hover': { textDecoration: 'underline' },
+                }}
+              >
+                {t.subdomain}
+              </Typography>
+            ) : null}
             <Typography
               component="span"
               sx={{
@@ -227,7 +245,7 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
                 lineHeight: 1.3,
               }}
             >
-              {t.id}
+              {t.id} · {t.ownerId}
             </Typography>
             {stuckSleeping ? (
               <Box
@@ -556,7 +574,8 @@ export default function TenantTable({
       <Box
         sx={{
           overflowX: 'auto',
-          borderRadius: 18,
+          overflowY: 'hidden',
+          borderRadius: '12px',
           border: '1px solid var(--brand-line-soft)',
         }}
       >
