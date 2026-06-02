@@ -251,17 +251,35 @@ apply_control_plane() {
   pairs+=("TENANT_DATABASE_ADMIN_URL=${admin_url}")
   pairs+=("TENANT_DATABASE_RUNTIME_URL=${runtime_url}")
 
-  # KEYCLOAK_ADMIN_CLIENT_ID / _SECRET are optional in BOTH modes. The control-
-  # plane instantiates its Keycloak admin client only when BOTH are present
-  # (apps/control-plane/src/index.ts). k3d intentionally omits them today
-  # (per-tenant client creation runs via the realm-seeded service account), so
-  # they stay omitted unless an operator sets them — keeping k3d behavior
-  # unchanged. In prod they are set after the first deploy (see the runbook).
-  if [ -n "${KEYCLOAK_ADMIN_CLIENT_ID:-}" ]; then
-    pairs+=("KEYCLOAK_ADMIN_CLIENT_ID=${KEYCLOAK_ADMIN_CLIENT_ID}")
+  # KEYCLOAK_ADMIN_CLIENT_ID / _SECRET wire the control-plane's Keycloak admin
+  # client. provisioning.ts uses it to create the per-tenant Keycloak client
+  # (`dnd-notes-tenant-{id}`) on every tenant provision. Without both vars the
+  # control-plane instantiates `keycloakAdminClient = null` and the per-tenant
+  # client step is silently skipped — tenants then 500 with `client_not_found`
+  # on first login.
+  #
+  # k3d defaults: the realm-dev seed (apply_realm_dev) already creates the
+  # `dnd-notes-keycloak-admin` confidential client with the well-known secret
+  # `dev-admin-client-secret`. Mirror those values into the control-plane
+  # secret here so a fresh `k3d:up` ships a working provisioning pipeline by
+  # default. Operators can override via env if they're testing a different
+  # admin client.
+  #
+  # Prod: leave unset by default; the secret is wired post-deploy after the
+  # realm import auto-generates the admin client secret (see runbook).
+  local default_admin_client_id=""
+  local default_admin_client_secret=""
+  if [ "${MODE}" = "k3d" ]; then
+    default_admin_client_id="dnd-notes-keycloak-admin"
+    default_admin_client_secret="${REALM_DEV_ADMIN_CLIENT_SECRET:-dev-admin-client-secret}"
   fi
-  if [ -n "${KEYCLOAK_ADMIN_CLIENT_SECRET:-}" ]; then
-    pairs+=("KEYCLOAK_ADMIN_CLIENT_SECRET=${KEYCLOAK_ADMIN_CLIENT_SECRET}")
+  local resolved_admin_client_id="${KEYCLOAK_ADMIN_CLIENT_ID:-${default_admin_client_id}}"
+  local resolved_admin_client_secret="${KEYCLOAK_ADMIN_CLIENT_SECRET:-${default_admin_client_secret}}"
+  if [ -n "${resolved_admin_client_id}" ]; then
+    pairs+=("KEYCLOAK_ADMIN_CLIENT_ID=${resolved_admin_client_id}")
+  fi
+  if [ -n "${resolved_admin_client_secret}" ]; then
+    pairs+=("KEYCLOAK_ADMIN_CLIENT_SECRET=${resolved_admin_client_secret}")
   fi
 
   apply_secret dnd-notes-control-plane-secrets "${pairs[@]}"
