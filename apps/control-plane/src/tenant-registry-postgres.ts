@@ -1373,6 +1373,9 @@ export class TenantRegistry {
     // Tenant-id placeholders. Each query uses $1...$N = tenantIds, or
     // $1 = windowStart, $2 = windowEnd, $3...$N+2 = tenantIds.
     const tenantPlaceholders1 = tenantIds.map((_, i) => `$${i + 1}`).join(', ')
+    // Query C binds ($1=windowStart, $2+tenantIds) — windowEnd is unused.
+    const tenantPlaceholders2 = tenantIds.map((_, i) => `$${i + 2}`).join(', ')
+    // Queries A + D bind ($1=windowStart, $2=windowEnd, $3+tenantIds).
     const tenantPlaceholders3 = tenantIds.map((_, i) => `$${i + 3}`).join(', ')
     // Query D base VALUES clause: one typed row per tenant ID at $3+ positions.
     const tenantValuesD = tenantIds.map((_, i) => `($${i + 3}::text)`).join(', ')
@@ -1410,21 +1413,22 @@ export class TenantRegistry {
 
         // Query C: Last transition BEFORE the window per tenant (state-at-window-start).
         // INNER JOIN on MAX(id) with created_at < windowStart — no correlated subquery.
-        // Uses tenantPlaceholders3 ($3+) to keep the same positional layout as Queries
-        // A and D so all four queries bind ($1=windowStart, $2=windowEnd, $3+tenantIds).
-        // $2 (windowEnd) is unused in this query but kept to preserve placeholder alignment.
+        // Binds ($1=windowStart, $2+tenantIds). Does NOT include windowEnd because
+        // a bound-but-unused parameter triggers Postgres' "could not determine data
+        // type of parameter $2" error (pg-mem is permissive about unused params; real
+        // Postgres is not).
         this.run<{ tenant_id: string; state_at_window_start: string }>(
           `SELECT st.tenant_id, st.to_state AS state_at_window_start
            FROM state_transitions st
            INNER JOIN (
              SELECT tenant_id, MAX(id) AS latest_id
              FROM state_transitions
-             WHERE tenant_id IN (${tenantPlaceholders3})
+             WHERE tenant_id IN (${tenantPlaceholders2})
                AND created_at < $1::timestamptz
              GROUP BY tenant_id
            ) pre ON pre.tenant_id = st.tenant_id
                AND pre.latest_id = st.id`,
-          [windowStartIso, windowEndIso, ...tenantIds],
+          [windowStartIso, ...tenantIds],
         ),
 
         // Query D: sleeping→ready wake counts + seenByActivator.

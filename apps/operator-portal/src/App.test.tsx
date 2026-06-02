@@ -94,7 +94,7 @@ const fleetStatus = {
       tenant: {
         id: 'tenant-ready',
         slug: 'moonshae-ledger',
-        subdomain: 'moonshae-ledger',
+        subdomain: 't-moonshae-ledger',
         ownerId: 'owner-1',
         desiredState: 'ready',
         currentState: 'ready',

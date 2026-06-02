@@ -78,7 +78,7 @@ function createFleetStatus() {
         tenant: {
           id: 'tenant-ready',
           slug: 'moonshae-ledger',
-          subdomain: 'moonshae-ledger',
+          subdomain: 't-moonshae-ledger',
           ownerId: 'owner-1',
           desiredState: 'ready' as const,
           currentState: 'ready' as const,

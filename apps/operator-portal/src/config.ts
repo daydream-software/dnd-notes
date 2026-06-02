@@ -8,6 +8,8 @@ interface OperatorPortalViteEnv {
   VITE_OPERATOR_KEYCLOAK_CLIENT_ID?: string
   VITE_OPERATOR_KEYCLOAK_REQUIRED_ROLES?: string
   VITE_OPERATOR_CUSTOMER_PORTAL_URL?: string
+  VITE_OPERATOR_TENANT_BASE_DOMAIN?: string
+  VITE_OPERATOR_TENANT_PUBLIC_SCHEME?: string
 }
 
 function normalizeUrl(value: string | undefined, fallback: string) {
@@ -22,6 +24,27 @@ function normalizeString(value: string | undefined, fallback: string) {
   return trimmedValue && trimmedValue.length > 0 ? trimmedValue : fallback
 }
 
+// TENANT_PUBLIC_SCHEME tolerates inputs like "https://", "https:", "HTTPS" by
+// stripping the `://` / trailing colon and lowercasing. buildTenantUrl assumes
+// a bare scheme (e.g. "https").
+function normalizeTenantScheme(value: string | undefined, fallback: string) {
+  return normalizeString(value, fallback)
+    .replace(/:\/\/$/, '')
+    .replace(/:$/, '')
+    .toLowerCase()
+}
+
+// TENANT_BASE_DOMAIN tolerates inputs like "https://tenants.example.test/",
+// "tenants.example.test/", or ".tenants.example.test" by stripping the
+// scheme prefix, trailing slashes, and leading/trailing dots. buildTenantUrl
+// assumes a bare hostname suffix (e.g. "127.0.0.1.nip.io").
+function normalizeTenantBaseDomain(value: string | undefined, fallback: string) {
+  return normalizeString(value, fallback)
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .replace(/^\.+|\.+$/g, '')
+}
+
 interface OperatorRuntimeEnv {
   API_BASE_PATH?: string
   KEYCLOAK_URL?: string
@@ -29,6 +52,8 @@ interface OperatorRuntimeEnv {
   KEYCLOAK_CLIENT_ID?: string
   KEYCLOAK_REQUIRED_ROLES?: string
   CUSTOMER_PORTAL_URL?: string
+  TENANT_BASE_DOMAIN?: string
+  TENANT_PUBLIC_SCHEME?: string
 }
 
 const defaultRequiredRoles = ['control-plane-admin', 'control-plane-workforce']
@@ -76,6 +101,14 @@ export function resolveOperatorPortalConfig(viteEnv: OperatorPortalViteEnv = {})
       runtimeEnv.CUSTOMER_PORTAL_URL ?? viteEnv.VITE_OPERATOR_CUSTOMER_PORTAL_URL,
       'https://portal.127.0.0.1.nip.io',
     ),
+    tenantBaseDomain: normalizeTenantBaseDomain(
+      runtimeEnv.TENANT_BASE_DOMAIN ?? viteEnv.VITE_OPERATOR_TENANT_BASE_DOMAIN,
+      '127.0.0.1.nip.io',
+    ),
+    tenantPublicScheme: normalizeTenantScheme(
+      runtimeEnv.TENANT_PUBLIC_SCHEME ?? viteEnv.VITE_OPERATOR_TENANT_PUBLIC_SCHEME,
+      'https',
+    ),
   }
 }
 
@@ -83,8 +116,18 @@ const { env: viteEnv = {} } = import.meta as ImportMeta & {
   env?: OperatorPortalViteEnv
 }
 
-export const { operatorApiBasePath, operatorKeycloakConfig, requiredRoles, customerPortalUrl } =
-  resolveOperatorPortalConfig(viteEnv)
+export const {
+  operatorApiBasePath,
+  operatorKeycloakConfig,
+  requiredRoles,
+  customerPortalUrl,
+  tenantBaseDomain,
+  tenantPublicScheme,
+} = resolveOperatorPortalConfig(viteEnv)
+
+export function buildTenantUrl(subdomain: string): string {
+  return `${tenantPublicScheme}://${subdomain}.${tenantBaseDomain}/`
+}
 
 export function buildOperatorRedirectUri() {
   return new URL(

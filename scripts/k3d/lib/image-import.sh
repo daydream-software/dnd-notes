@@ -113,8 +113,18 @@ import_and_verify_into_cluster() {
 
 # Import with the primary mode; on failure (or unverified landing) retry with
 # the configured fallback mode. Returns non-zero only if both modes fail.
+#
+# Fast-path: if the image (by host-side digest) is already present on every
+# cluster node, skip the import entirely — `k3d image import` is idempotent
+# but takes 12–18s per image. The fast-path turns a repeat `k3d:up --no-rebuild`
+# from ~1 min (5 silent re-imports) into ~1 s of node inspections.
 ensure_image_imported_into_cluster() {
   local image_ref="$1"
+
+  if image_present_in_cluster "${image_ref}"; then
+    log "${image_ref} already imported into cluster — skipping import."
+    return 0
+  fi
 
   if ! import_and_verify_into_cluster "${image_ref}" "${IMAGE_IMPORT_MODE}"; then
     if [ "${IMAGE_IMPORT_FALLBACK_MODE}" = "${IMAGE_IMPORT_MODE}" ]; then

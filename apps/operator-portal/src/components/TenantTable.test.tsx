@@ -33,7 +33,7 @@ function makeStatus(overrides: Partial<FleetTenantStatus['tenant']> & {
     tenant: {
       id: 'tenant-abc',
       slug: 'alpha-keep',
-      subdomain: 'alpha-keep',
+      subdomain: 't-alpha-keep',
       ownerId: 'owner-1',
       desiredState: 'ready',
       currentState: 'ready',

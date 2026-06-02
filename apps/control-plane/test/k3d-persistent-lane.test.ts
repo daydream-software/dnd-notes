@@ -669,36 +669,51 @@ localize_postgres_url \
 })
 
 describe('k3d up ensure_image_ready', () => {
-  it('re-imports cached local images into the active cluster when --no-rebuild skips docker builds', () => {
+  function runEnsureImageReady(opts: {
+    imagePresentInClusterRc: 0 | 1
+    noRebuild: boolean
+  }): { invocations: string; status: number; stderr: string } {
     const tmpDir = mkdtempSync(join(tmpdir(), 'k3d-image-ready-test-'))
     const fakeBinDir = join(tmpDir, 'bin')
     const logFile = join(tmpDir, 'invocations.log')
 
-    mkdirSync(fakeBinDir, { recursive: true })
-    writeFileSync(
-      join(fakeBinDir, 'timeout'),
-      `#!/usr/bin/env bash
+    try {
+      mkdirSync(fakeBinDir, { recursive: true })
+      // Always create the log file so the fast-path case (which writes nothing)
+      // doesn't make readFileSync fail with ENOENT.
+      writeFileSync(logFile, '')
+      writeFileSync(
+        join(fakeBinDir, 'timeout'),
+        `#!/usr/bin/env bash
 printf 'timeout:%s\n' "$*" >> "$LOG_FILE"
 seconds="$1"
 shift
 "$@"
 `,
-    )
-    chmodSync(join(fakeBinDir, 'timeout'), 0o755)
-    writeFileSync(
-      join(fakeBinDir, 'k3d'),
-      `#!/usr/bin/env bash
+      )
+      chmodSync(join(fakeBinDir, 'timeout'), 0o755)
+      writeFileSync(
+        join(fakeBinDir, 'k3d'),
+        `#!/usr/bin/env bash
 printf 'k3d:%s\n' "$*" >> "$LOG_FILE"
 `,
-    )
-    chmodSync(join(fakeBinDir, 'k3d'), 0o755)
+      )
+      chmodSync(join(fakeBinDir, 'k3d'), 0o755)
 
-    let result: ReturnType<typeof runBash>
-    let invocations: string
-    try {
-      result = runBash(
+      // image_present_in_cluster is called twice in the slow path:
+      //   1. fast-path check at the top of ensure_image_imported_into_cluster
+      //   2. post-import verify inside import_and_verify_into_cluster
+      // Model that: first call returns the configured rc, every subsequent call
+      // returns 0 (image now landed thanks to import). Counter lives in $LOG_FILE.dir
+      // so the test doesn't have to plumb additional env.
+      const result = runBash(
         `${runK3dImageImportFnMatch[0]}
-image_present_in_cluster() { return 0; }
+__present_call_count=0
+image_present_in_cluster() {
+  __present_call_count=$((__present_call_count + 1))
+  if [ "$__present_call_count" -eq 1 ]; then return ${opts.imagePresentInClusterRc}; fi
+  return 0
+}
 ${importAndVerifyFnMatch[0]}
 ${ensureImageImportedFnMatch[0]}
 ${ensureImageReadyFnMatch[0]}
@@ -709,19 +724,44 @@ CLUSTER_NAME="dnd-notes"
 IMAGE_IMPORT_MODE="direct"
 IMAGE_IMPORT_FALLBACK_MODE="tools"
 IMAGE_IMPORT_TIMEOUT_SECONDS="180"
-NO_REBUILD=true
+NO_REBUILD=${opts.noRebuild}
 ensure_image_ready "Tenant" "ghcr.io/daydream-software/dnd-notes:k3d" "/fake/build.sh"`,
         {
           LOG_FILE: logFile,
           PATH: `${fakeBinDir}:${process.env.PATH ?? ''}`,
         },
       )
-      invocations = readFileSync(logFile, 'utf8')
+      const invocations = readFileSync(logFile, 'utf8')
+      return { invocations, status: result.status ?? 0, stderr: result.stderr }
     } finally {
       rmSync(tmpDir, { recursive: true, force: true })
     }
+  }
 
-    assert.strictEqual(result.status, 0, result.stderr)
+  it('skips both build and import when --no-rebuild and the image is already present in the cluster', () => {
+    // Fast-path: with --no-rebuild + image already on cluster nodes, the import
+    // (~12-18s per image) is a wasted round-trip. ensure_image_imported_into_cluster
+    // checks image_present_in_cluster first and short-circuits.
+    const { invocations, status, stderr } = runEnsureImageReady({
+      imagePresentInClusterRc: 0,
+      noRebuild: true,
+    })
+
+    assert.strictEqual(status, 0, stderr)
+    assert.doesNotMatch(invocations, /^build:/m)
+    assert.doesNotMatch(invocations, /k3d:image import/)
+  })
+
+  it('imports cached local images into the active cluster when --no-rebuild skips docker builds and the image is absent from the cluster', () => {
+    // Slow-path: with --no-rebuild but the image NOT on cluster nodes (e.g. a
+    // fresh k3d cluster, or a node lost during recreation), the cached docker
+    // image still needs to land on the cluster nodes.
+    const { invocations, status, stderr } = runEnsureImageReady({
+      imagePresentInClusterRc: 1,
+      noRebuild: true,
+    })
+
+    assert.strictEqual(status, 0, stderr)
     assert.doesNotMatch(invocations, /^build:/m)
     assert.match(
       invocations,

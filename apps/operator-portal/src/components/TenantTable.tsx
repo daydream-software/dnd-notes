@@ -16,6 +16,7 @@ import {
   Typography,
 } from '@mui/material'
 import * as React from 'react'
+import { buildTenantUrl } from '../config'
 import type { FleetTenantStatus, TenantState } from '../types'
 import { isStuckSleeping } from './tenant-anomalies'
 
@@ -218,6 +219,25 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
             >
               {t.slug}
             </Typography>
+            {t.subdomain ? (
+              <Typography
+                component="a"
+                href={buildTenantUrl(t.subdomain)}
+                target="_blank"
+                rel="noopener noreferrer"
+                sx={{
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                  color: 'var(--accent)',
+                  lineHeight: 1.3,
+                  textDecoration: 'none',
+                  '&:hover': { textDecoration: 'underline' },
+                  wordBreak: 'break-all',
+                }}
+              >
+                {new URL(buildTenantUrl(t.subdomain)).host}
+              </Typography>
+            ) : null}
             <Typography
               component="span"
               sx={{
@@ -227,7 +247,7 @@ function TenantTableRow({ status, mutationDisabled, onUpgrade, onDeprovision }: 
                 lineHeight: 1.3,
               }}
             >
-              {t.id}
+              {t.id} · {t.ownerId}
             </Typography>
             {stuckSleeping ? (
               <Box
@@ -556,7 +576,15 @@ export default function TenantTable({
       <Box
         sx={{
           overflowX: 'auto',
-          borderRadius: 18,
+          overflowY: 'hidden',
+          // Inner-table radius is intentionally smaller than the global 18px
+          // shape.borderRadius. The table sits inside a Card whose corners
+          // already use 18px; nesting the same radius (especially with sticky
+          // headers + horizontal scroll) visibly clips the first/last column's
+          // header background. 12px is the empirically-validated inner-surface
+          // radius for this slot — confirmed by visual review against the live
+          // k3d operator portal (#421).
+          borderRadius: '12px',
           border: '1px solid var(--brand-line-soft)',
         }}
       >
