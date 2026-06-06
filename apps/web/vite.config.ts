@@ -1,6 +1,6 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv, type Plugin } from 'vite'
+import { defineConfig, loadEnv, type Plugin, type PluginOption } from 'vite'
 
 interface SharedSessionPayload {
   shareLink?: {
@@ -75,7 +75,10 @@ export default defineConfig(({ mode }) => {
     env.VITE_API_BASE_URL?.replace(/\/$/, '') ?? 'http://localhost:3001'
 
   return {
-    plugins: [react(), createFrameAncestorsPlugin(apiBaseUrl)],
+    // PluginOption[] cast: vite 8.0.16's Plugin types overflow tsc's
+    // instantiation depth when compared against the vitest/config-augmented
+    // UserConfig (TS2321 "excessive stack depth"). The cast short-circuits it.
+    plugins: [react(), createFrameAncestorsPlugin(apiBaseUrl)] as PluginOption[],
     test: {
       environment: 'jsdom',
       pool: 'threads',

@@ -1,6 +1,6 @@
 /// <reference types="vitest/config" />
 import react from '@vitejs/plugin-react'
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type PluginOption } from 'vite'
 import { normalizeBasePath } from '@dnd-notes/portal-utils'
 
 function escapeForRegExp(value: string) {
@@ -17,7 +17,10 @@ export default defineConfig(({ mode }) => {
     env.VITE_OPERATOR_DEV_PROXY_TARGET?.trim() ?? 'http://localhost:3001'
 
   return {
-    plugins: [react()],
+    // PluginOption[] cast: vite 8.0.16's Plugin types overflow tsc's
+    // instantiation depth when compared against the vitest/config-augmented
+    // UserConfig (TS2321 "excessive stack depth"). The cast short-circuits it.
+    plugins: [react()] as PluginOption[],
     server: {
       proxy: {
         [apiBasePath]: {
