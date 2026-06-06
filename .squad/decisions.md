@@ -9148,3 +9148,37 @@ The framed document is served by the SPA fallback, not the API data routes where
 - Path matching: `/^\/share\/([^/]+)\/?$/` — same regex as dev plugin.
 - Non-share SPA routes unchanged: `X-Frame-Options: DENY` kept.
 - HEAD handled identically to GET.
+
+---
+
+### 2026-06-06: vite type stack-depth in minor/patch bumps
+
+**Date:** 2026-06-06  
+**Author:** Coordinator (Dependabot PR batch triage)  
+**Branch:** (session: #422–#427)  
+**PR:** #427 (vite type fix)
+
+## Decision
+
+When vite undergoes minor/patch bumps, type widening in the `Plugin` union can cause `tsc -b` to hit `TS2321 "Excessive stack depth comparing types"` in all `vite.config.ts` files. The fix is to cast the `plugins` array as `PluginOption[]`.
+
+Fixes to dependabot-managed branches must land in a separate PR off main, NOT on the dependabot branch itself—pushing to a dependabot branch breaks dependabot's rebasing.
+
+## Rationale
+
+vite 8.0.16 widened its `Plugin` type union, causing TypeScript's instantiation depth to overflow when comparing the `defineConfig` return object against the `vitest/config`-augmented `UserConfigFnObject` (microsoft/TypeScript#49180). This is build-time only—runtime is unaffected.
+
+The `PluginOption[]` cast short-circuits the recursive type comparison without runtime change and is compatible with both old and new vite versions.
+
+## Implementation
+
+- Apply `as PluginOption[]` cast to the `plugins` array in all three frontend `vite.config.ts` files (web, operator-portal, customer-portal).
+- Add a one-line comment referencing TS2321 for future maintainers.
+- Land the fix in a separate PR off main, then rebase the dependabot PR onto the fixed main.
+- Do NOT apply the fix directly to the dependabot branch—this breaks dependabot's management of that PR.
+
+## Reference
+
+- PR #427: Merged, landed vite type fix off main
+- PR #426: Rebased onto #427, went green, merged (vite 8.0.13 → 8.0.16)
+- TypeScript issue: microsoft/TypeScript#49180
