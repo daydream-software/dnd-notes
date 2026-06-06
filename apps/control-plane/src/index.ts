@@ -519,24 +519,14 @@ if (keycloakAdminClient) {
         'http://localhost:5174',
       ],
     },
-    {
-      clientId: 'dnd-notes-customer-portal',
-      enabled: true,
-      publicClient: true,
-      standardFlowEnabled: true,
-      implicitFlowEnabled: false,
-      directAccessGrantsEnabled: false,
-      redirectUris: [
-        'https://portal.127.0.0.1.nip.io/*',
-        'http://portal.127.0.0.1.nip.io/*',
-        'http://localhost:5175/*',
-      ],
-      webOrigins: [
-        'https://portal.127.0.0.1.nip.io',
-        'http://portal.127.0.0.1.nip.io',
-        'http://localhost:5175',
-      ],
-    },
+    // NOTE: dnd-notes-customer-portal is intentionally NOT managed here. That
+    // client is owned by the Keycloak realm import (deploy/k3s/base/keycloak/
+    // realm-config.yaml), which sets its redirectUris/webOrigins per environment
+    // (prod domain in base, nip.io in the k3d overlay). ensureClient does a
+    // full-replace PUT, so seeding it here with hard-coded dev URIs clobbered the
+    // prod redirect URI on every control-plane boot — breaking customer-portal
+    // login with "invalid parameter: redirect_uri". The realm import is the
+    // single source of truth for this static client; do not re-add it here.
   ]
 
   for (const clientSpec of staticPortalClients) {
