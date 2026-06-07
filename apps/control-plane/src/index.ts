@@ -493,54 +493,18 @@ try {
   console.warn('Failed to mark orphaned running rollouts as failed:', error)
 }
 
-// Ensure static portal Keycloak clients exist in the realm. This is a soft
-// failure: if Keycloak is temporarily unreachable the control-plane still
-// starts so that local-auth fallback and non-Keycloak routes remain available.
-// The upsert will succeed on the next control-plane restart.
-if (keycloakAdminClient) {
-  const staticPortalClients = [
-    {
-      clientId: 'dnd-notes-control-plane',
-      enabled: true,
-      publicClient: true,
-      standardFlowEnabled: true,
-      implicitFlowEnabled: false,
-      directAccessGrantsEnabled: true,
-      redirectUris: [
-        'https://operator.127.0.0.1.nip.io/*',
-        'http://operator.127.0.0.1.nip.io/*',
-        'http://localhost:5173/*',
-        'http://localhost:5174/*',
-      ],
-      webOrigins: [
-        'https://operator.127.0.0.1.nip.io',
-        'http://operator.127.0.0.1.nip.io',
-        'http://localhost:5173',
-        'http://localhost:5174',
-      ],
-    },
-    // NOTE: dnd-notes-customer-portal is intentionally NOT managed here. That
-    // client is owned by the Keycloak realm import (deploy/k3s/base/keycloak/
-    // realm-config.yaml), which sets its redirectUris/webOrigins per environment
-    // (prod domain in base, nip.io in the k3d overlay). ensureClient does a
-    // full-replace PUT, so seeding it here with hard-coded dev URIs clobbered the
-    // prod redirect URI on every control-plane boot — breaking customer-portal
-    // login with "invalid parameter: redirect_uri". The realm import is the
-    // single source of truth for this static client; do not re-add it here.
-  ]
-
-  for (const clientSpec of staticPortalClients) {
-    try {
-      await keycloakAdminClient.ensureClient(clientSpec)
-      console.log(`Keycloak client "${clientSpec.clientId}" is in sync.`)
-    } catch (error) {
-      console.error(
-        `Keycloak startup upsert failed for "${clientSpec.clientId}" — continuing without it:`,
-        error,
-      )
-    }
-  }
-}
+// The control-plane does NOT seed static portal Keycloak clients. Both static
+// clients are owned by the Keycloak realm import, which sets their
+// redirectUris/webOrigins per environment (prod domains in base, nip.io in the
+// k3d overlay):
+//   - dnd-notes-customer-portal  → realm "dnd-notes"           (realm-config.yaml)
+//   - dnd-notes-control-plane    → realm "dnd-notes-workforce" (realm-config.yaml)
+// The control-plane admin client is scoped to the "dnd-notes" realm only, so it
+// can never manage the workforce client; seeding it here only created a stray
+// orphan dnd-notes-control-plane client in the wrong realm. And seeding
+// customer-portal here clobbered its prod redirect URI on every boot (full-replace
+// PUT), breaking login with "invalid parameter: redirect_uri". keycloakAdminClient
+// is used only for dynamic per-tenant clients (see provisioning) and role sync.
 
 serverRef.current = app.listen(PORT, () => {
   console.log(`Control plane listening on port ${PORT}`)
