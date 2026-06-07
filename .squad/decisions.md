@@ -9182,3 +9182,46 @@ The `PluginOption[]` cast short-circuits the recursive type comparison without r
 - PR #427: Merged, landed vite type fix off main
 - PR #426: Rebased onto #427, went green, merged (vite 8.0.13 → 8.0.16)
 - TypeScript issue: microsoft/TypeScript#49180
+
+---
+
+### 2026-06-06: Keycloak static client config — realm import single source of truth
+**Decided by:** User (Architecture)  
+**Date:** 2026-06-06  
+**Type:** Architecture — Keycloak client management, deployment split  
+**Incident:** notes.daydreamsoftware.ca login failed (invalid redirect_uri)  
+**Status:** Implemented, PRs #428 + #429 merged; one-time manual prod cleanup pending
+
+**Incident Summary**
+Production customer portal login failed with "invalid parameter: redirect_uri" from Keycloak. Root cause: two competing sources of truth for the `dnd-notes-customer-portal` client.
+
+**Two Sources of Truth (Conflicting)**
+1. **Realm import (primary, per-env):** `deploy/k3s/base/keycloak/realm-config.yaml` parameterized per environment via k3d overlay. Sets prod URI: `https://notes.daydreamsoftware.ca/*`
+2. **Control-plane seed (clobbering):** `apps/control-plane/src/index.ts` `staticPortalClients` block with hard-coded dev-only URIs (nip.io, localhost)
+
+Every control-plane boot executed a full-replace PUT on the `dnd-notes-customer-portal` client, wiping the realm-import values. Trigger: nightly VM auto-deallocate (deploy runbook §7) → control-plane restart → seed overwrites prod client.
+
+**Architectural Constraints Discovered**
+- Control-plane admin client scoped to `dnd-notes` realm only (`KEYCLOAK_ADMIN_REALM=dnd-notes`); does NOT touch `dnd-notes-workforce` realm
+- Operator-portal client (`dnd-notes-control-plane` in workforce) was unaffected — this bug is customer-portal-only
+- Seed's stray `dnd-notes-control-plane` entry targeted wrong realm (dnd-notes vs workforce), created orphan each boot
+- Keycloak `--import-realm` only applies on realm creation; does NOT re-apply to existing realm
+
+**Decision: Realm Import as Single Source**
+Realm import is the single source of truth for static clients. Control-plane stops managing them. (User initially floated centralizing all platform clients in control-plane, but after weighing bootstrap complexity and blast-radius chose realm import as the simpler, lower-risk design.)
+
+**Changes Shipped**
+- PR #428 (merged): Removed `dnd-notes-customer-portal` from control-plane `staticPortalClients`
+- PR #429 (merged): Removed orphan-creating `dnd-notes-control-plane` seed entry; dropped entire static-client seeding block. (`keycloakAdminClient` retained for dynamic per-tenant clients and role sync)
+- Verification:
+  - `tsc -b apps/control-plane` green
+  - `keycloak-admin-client` tests 26/26 pass
+  - Prod kustomize render confirms realm import owns customer-portal client with prod URI
+
+**Pending (Operator-side, user deprioritized — NOT urgent)**
+One-time manual correction still required on prod Keycloak:
+- Set `https://notes.daydreamsoftware.ca/*` + web origin on `dnd-notes-customer-portal` client in the `dnd-notes` realm
+- Delete stray orphan `dnd-notes-control-plane` client in `dnd-notes` realm (now safe; won't respawn)
+
+**Reusable Lesson**
+Do not duplicate static Keycloak client configuration across realm import and control-plane seed. Control-plane full-replace PUT will clobber per-environment values on every boot. Realm import should be the canonical source for static clients; control-plane should only manage dynamic per-tenant clients (provisioned at tenant creation).
