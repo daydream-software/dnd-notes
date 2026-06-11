@@ -15,7 +15,7 @@
     "prepare": "npm run build"
   },
   "peerDependencies": {
-    "@mui/icons-material": "^9.0.0",
+    "@mui/icons-material": "^9.1.0",
     "@mui/material": "^9.0.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7"
